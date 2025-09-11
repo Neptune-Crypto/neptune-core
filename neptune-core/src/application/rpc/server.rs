@@ -2703,9 +2703,7 @@ impl RPC for NeptuneRPCServer {
         let gs = self.state.lock_guard().await;
         let wallet_status = gs.get_wallet_status_for_tip().await;
 
-        let confirmed_available = gs
-            .wallet_state
-            .confirmed_available_balance(&wallet_status, Timestamp::now());
+        let confirmed_available = wallet_status.available_confirmed(Timestamp::now());
 
         // test inequality
         Ok(amount <= confirmed_available)
@@ -2723,9 +2721,7 @@ impl RPC for NeptuneRPCServer {
         let gs = self.state.lock_guard().await;
         let wallet_status = gs.get_wallet_status_for_tip().await;
 
-        let confirmed_available = gs
-            .wallet_state
-            .confirmed_available_balance(&wallet_status, Timestamp::now());
+        let confirmed_available = wallet_status.available_confirmed(Timestamp::now());
 
         Ok(confirmed_available)
     }
@@ -2973,11 +2969,11 @@ impl RPC for NeptuneRPCServer {
 
         let confirmed_available_balance = {
             log_slow_scope!(fn_name!() + "::confirmed_available_balance()");
-            wallet_state.confirmed_available_balance(&wallet_status, now)
+            wallet_status.available_confirmed(now)
         };
         let confirmed_total_balance = {
             log_slow_scope!(fn_name!() + "::confirmed_total_balance()");
-            wallet_state.confirmed_total_balance(&wallet_status)
+            wallet_status.total_confirmed()
         };
 
         let unconfirmed_available_balance = {
@@ -5977,9 +5973,7 @@ mod tests {
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
                     let wallet_status = state_lock.get_wallet_status_for_tip().await;
-                    let original_balance = state_lock
-                        .wallet_state
-                        .confirmed_available_balance(&wallet_status, timestamp);
+                    let original_balance = wallet_status.available_confirmed(timestamp);
                     assert!(original_balance.is_zero(), "Original balance assumed zero");
                 };
 
@@ -5992,9 +5986,7 @@ mod tests {
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
                     let wallet_status = state_lock.get_wallet_status_for_tip().await;
-                    let new_balance = state_lock
-                        .wallet_state
-                        .confirmed_available_balance(&wallet_status, timestamp);
+                    let new_balance = wallet_status.available_confirmed(timestamp);
                     let mut expected_balance = Block::block_subsidy(block_1.header().height);
                     expected_balance.div_two();
                     assert_eq!(

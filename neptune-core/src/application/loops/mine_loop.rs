@@ -1273,7 +1273,7 @@ pub(crate) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(now)
+                .available_confirmed(now)
                 .is_zero(),
             "Assumed to be premine-recipient"
         );

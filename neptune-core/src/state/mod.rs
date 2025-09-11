@@ -2871,9 +2871,7 @@ mod tests {
         let wallet_status_1 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_1 = current_block.header().timestamp;
         assert_eq!(
-            alice_gsl
-                .wallet_state
-                .confirmed_available_balance(&wallet_status_1, timestamp_1),
+            wallet_status_1.available_confirmed(timestamp_1),
             LIQUID_BLOCK_SUBSIDY.scalar_mul(3)
         );
 
@@ -2894,9 +2892,7 @@ mod tests {
         current_block = a_blocks.last().unwrap().clone();
         let wallet_status_2 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_2 = current_block.header().timestamp;
-        let alice_balance_2 = alice_gsl
-            .wallet_state
-            .confirmed_available_balance(&wallet_status_2, timestamp_2);
+        let alice_balance_2 = wallet_status_2.available_confirmed(timestamp_2);
         let expected_balance_2 = LIQUID_BLOCK_SUBSIDY.scalar_mul(3);
         assert_eq!(
             expected_balance_2, alice_balance_2,
@@ -2921,9 +2917,7 @@ mod tests {
 
         let wallet_status_3 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_3 = current_block.header().timestamp;
-        let wallet_balance_3 = alice_gsl
-            .wallet_state
-            .confirmed_available_balance(&wallet_status_3, timestamp_3);
+        let wallet_balance_3 = wallet_status_3.available_confirmed(timestamp_3);
         let expected_branch_a_liquid_balance = (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
             .checked_sub(&NativeCurrencyAmount::coins(10))
             .unwrap();
@@ -2951,9 +2945,7 @@ mod tests {
         let timestamp_4 = current_block.header().timestamp;
         assert_eq!(
             expected_branch_a_liquid_balance,
-            alice_gsl
-                .wallet_state
-                .confirmed_available_balance(&wallet_status_4, timestamp_4),
+            wallet_status_4.available_confirmed(timestamp_4)
         );
 
         // resolve fork: apply all of branch b
@@ -2970,9 +2962,7 @@ mod tests {
             WalletStatusExportFormat::Table.export(&wallet_status_5)
         );
         let timestamp_5 = current_block.header().timestamp;
-        let wallet_balance_5 = alice_gsl
-            .wallet_state
-            .confirmed_available_balance(&wallet_status_5, timestamp_5);
+        let wallet_balance_5 = wallet_status_5.available_confirmed(timestamp_5);
         assert_eq!(
             wallet_balance_5,
             LIQUID_BLOCK_SUBSIDY.scalar_mul(3),
@@ -2997,9 +2987,7 @@ mod tests {
         let wallet_status_6 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_6 = current_block.header().timestamp;
         assert_eq!(
-            alice_gsl
-                .wallet_state
-                .confirmed_available_balance(&wallet_status_6, timestamp_6),
+            wallet_status_6.available_confirmed(timestamp_6),
             (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
                 .checked_sub(&NativeCurrencyAmount::coins(5))
                 .unwrap()
@@ -3018,9 +3006,7 @@ mod tests {
         let timestamp_7 = current_block.header().timestamp;
         assert_eq!(
             expected_branch_a_liquid_balance,
-            alice_gsl
-                .wallet_state
-                .confirmed_available_balance(&wallet_status_7, timestamp_7),
+            wallet_status_7.available_confirmed(timestamp_7),
         );
 
         // Can set tip to genesis
@@ -3031,16 +3017,8 @@ mod tests {
             .unwrap();
         let wallet_status_8 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_8 = genesis.header().timestamp;
-        assert!(alice_gsl
-            .wallet_state
-            .confirmed_available_balance(&wallet_status_8, timestamp_8)
-            .is_zero(),);
-        assert_eq!(
-            premine_amount,
-            alice_gsl
-                .wallet_state
-                .confirmed_total_balance(&wallet_status_8),
-        );
+        assert!(wallet_status_8.available_confirmed(timestamp_8).is_zero(),);
+        assert_eq!(premine_amount, wallet_status_8.total_confirmed());
         assert_eq!(alice_gsl.chain.light_state().hash(), genesis.hash());
 
         // State updates work when tip is genesis
@@ -3058,9 +3036,7 @@ mod tests {
         let timestamp_9 = current_block.header().timestamp;
         assert_eq!(
             expected_branch_a_liquid_balance,
-            alice_gsl
-                .wallet_state
-                .confirmed_available_balance(&wallet_status_9, timestamp_9),
+            wallet_status_9.available_confirmed(timestamp_9)
         );
 
         let expected_branch_a_total_balance = (LIQUID_BLOCK_SUBSIDY.scalar_mul(6))
@@ -3069,9 +3045,7 @@ mod tests {
             + premine_amount;
         assert_eq!(
             expected_branch_a_total_balance,
-            alice_gsl
-                .wallet_state
-                .confirmed_total_balance(&wallet_status_9),
+            wallet_status_9.total_confirmed()
         );
 
         // Set tip to genesis again, then to target some place on the a-chain.
@@ -3088,15 +3062,11 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 expected_branch_a_total_balance,
-                alice_gsl
-                    .wallet_state
-                    .confirmed_total_balance(&wallet_status_9),
+                wallet_status_9.total_confirmed()
             );
             assert_eq!(
                 expected_branch_a_liquid_balance,
-                alice_gsl
-                    .wallet_state
-                    .confirmed_available_balance(&wallet_status_9, timestamp_9),
+                wallet_status_9.available_confirmed(timestamp_9)
             );
         }
     }
@@ -3458,7 +3428,7 @@ mod tests {
                 assert!(!alice
                     .get_wallet_status_for_tip()
                     .await
-                    .synced_unspent_available_amount(launch + seven_months)
+                    .available_confirmed(launch + seven_months)
                     .is_zero());
                 assert!(!alice.get_balance_history().await.is_empty());
 
@@ -4090,7 +4060,7 @@ mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .available_confirmed(in_seven_months)
         );
         assert_eq!(
             NativeCurrencyAmount::coins(7),
@@ -4098,7 +4068,7 @@ mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .available_confirmed(in_seven_months)
         );
         // TODO: No idea why this isn't working. It's off by 1 NAU?
         // {
@@ -5292,7 +5262,7 @@ mod tests {
                     .await
                     .get_wallet_status_for_tip()
                     .await
-                    .synced_unspent_available_amount(seven_months_post_launch);
+                    .available_confirmed(seven_months_post_launch);
                 assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
 
                 // create change key for alice. change_key_type is a test param.
@@ -5416,7 +5386,7 @@ mod tests {
                         .await
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_available_amount(seven_months_post_launch)
+                        .available_confirmed(seven_months_post_launch)
                 );
 
                 block_1
@@ -5435,7 +5405,7 @@ mod tests {
                     bob_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_available_amount(seven_months_post_launch)
+                        .available_confirmed(seven_months_post_launch)
                 );
             }
 
@@ -5471,7 +5441,7 @@ mod tests {
                 let alice_initial_balance = alice_state_mut
                     .get_wallet_status_for_tip()
                     .await
-                    .synced_unspent_available_amount(seven_months_post_launch);
+                    .available_confirmed(seven_months_post_launch);
 
                 // lucky alice's wallet begins with 20 balance from premine.
                 assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
@@ -5502,7 +5472,7 @@ mod tests {
                     alice_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_available_amount(seven_months_post_launch)
+                        .available_confirmed(seven_months_post_launch)
                 );
             }
         }

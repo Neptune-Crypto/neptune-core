@@ -498,8 +498,7 @@ mod tests {
                     &next_block.mutator_set_accumulator_after().unwrap(),
                 )
                 .await;
-            ags.wallet_state
-                .confirmed_available_balance(&wallet_status, next_block.header().timestamp)
+            wallet_status.available_confirmed(next_block.header().timestamp)
         };
         assert!(
             alice_balance
@@ -564,7 +563,7 @@ mod tests {
             .await
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(in_seven_months);
+            .available_confirmed(in_seven_months);
         assert!(
             !bobs_original_balance.is_zero(),
             "Premine must have non-zero synced balance"
@@ -636,7 +635,7 @@ mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months),
+                .available_confirmed(in_seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
@@ -1330,8 +1329,7 @@ mod tests {
 
                 assert_eq!(
                     NativeCurrencyAmount::coins(1),
-                    gs.wallet_state
-                        .confirmed_available_balance(&wallet_status, seven_months_after_launch)
+                    wallet_status.available_confirmed(seven_months_after_launch)
                 );
             }
         }

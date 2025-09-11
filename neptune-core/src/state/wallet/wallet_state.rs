@@ -594,20 +594,6 @@ impl WalletState {
         (incoming, outgoing)
     }
 
-    /// returns confirmed, total balance (includes timelocked utxos)
-    pub fn confirmed_total_balance(&self, wallet_status: &WalletStatus) -> NativeCurrencyAmount {
-        wallet_status.synced_unspent_total_amount()
-    }
-
-    /// returns confirmed, available balance (excludes timelocked utxos)
-    pub fn confirmed_available_balance(
-        &self,
-        wallet_status: &WalletStatus,
-        timestamp: Timestamp,
-    ) -> NativeCurrencyAmount {
-        wallet_status.synced_unspent_available_amount(timestamp)
-    }
-
     /// returns unconfirmed, available balance (excludes timelocked utxos)
     pub fn unconfirmed_available_balance(
         &self,
@@ -623,7 +609,8 @@ impl WalletState {
             .filter(|utxo| utxo.can_spend_at(timestamp))
             .map(|u| u.get_native_currency_amount())
             .sum();
-        self.confirmed_available_balance(wallet_status, timestamp)
+        wallet_status
+            .available_confirmed(timestamp)
             .checked_add(&amount_received_from_mempool_transactions)
             .expect("balance must never overflow")
             .checked_sub(&amount_spent_by_mempool_transactions)
@@ -633,7 +620,7 @@ impl WalletState {
     /// returns unconfirmed, total balance (includes timelocked utxos)
     pub fn unconfirmed_total_balance(&self, wallet_status: &WalletStatus) -> NativeCurrencyAmount {
         wallet_status
-            .synced_unspent_total_amount()
+            .total_confirmed()
             .checked_sub(
                 &self
                     .mempool_spent_utxos_iter()
@@ -2006,8 +1993,8 @@ impl WalletState {
             .await;
 
         // First check that we have enough. Otherwise, return an error.
-        let confirmed_available_amount_without_mempool_spends = self
-            .confirmed_available_balance(&wallet_status, timestamp)
+        let confirmed_available_amount_without_mempool_spends = wallet_status
+            .available_confirmed(timestamp)
             .checked_sub(
                 &self
                     .mempool_spent_utxos_iter()
@@ -2253,10 +2240,10 @@ pub(crate) mod tests {
         // there, as it is timelocked.
         let one_coin = NativeCurrencyAmount::coins(1);
         assert!(alice_ws_genesis
-            .synced_unspent_available_amount(launch_timestamp)
+            .available_confirmed(launch_timestamp)
             .is_zero());
         assert!(!alice_ws_genesis
-            .synced_unspent_available_amount(released_timestamp)
+            .available_confirmed(released_timestamp)
             .is_zero());
         assert!(
             alice
@@ -2435,8 +2422,7 @@ pub(crate) mod tests {
                 .await;
             assert_eq!(
                 NativeCurrencyAmount::coins(14),
-                ags.wallet_state
-                    .confirmed_available_balance(&wallet_status, tx_block2.kernel.timestamp),
+                wallet_status.available_confirmed(tx_block2.kernel.timestamp),
                 "Both UTXOs must be registered by wallet and contribute to balance"
             );
         }
@@ -2478,8 +2464,7 @@ pub(crate) mod tests {
                 .await;
             assert_eq!(
                 NativeCurrencyAmount::coins(28),
-                ags.wallet_state
-                    .confirmed_available_balance(&wallet_status, tx_block2.kernel.timestamp),
+                wallet_status.available_confirmed(tx_block2.kernel.timestamp),
                 "All four UTXOs must be registered by wallet and contribute to balance"
             );
         }
@@ -2567,8 +2552,8 @@ pub(crate) mod tests {
                 .await;
 
             assert!(
-                ags.wallet_state
-                    .confirmed_available_balance(&wallet_status, tx_block2.kernel.timestamp)
+                wallet_status
+                    .available_confirmed(tx_block2.kernel.timestamp)
                     .is_zero(),
                 "UTXO with bad typescript state may not count towards balance"
             );
@@ -2670,8 +2655,8 @@ pub(crate) mod tests {
                 .await;
 
             assert!(
-                ags.wallet_state
-                    .confirmed_available_balance(&wallet_status, tx_block2.kernel.timestamp)
+                wallet_status
+                    .available_confirmed(tx_block2.kernel.timestamp)
                     .is_zero(),
                 "UTXO with unknown typescript may not count towards balance"
             );
@@ -3214,8 +3199,8 @@ pub(crate) mod tests {
                     .await;
 
                 assert!(
-                    !bgs.wallet_state
-                        .confirmed_available_balance(&wallet_status, block1_timestamp)
+                    !wallet_status
+                        .available_confirmed(block1_timestamp)
                         .is_positive(),
                     "Must show zero-balance before adding block to state"
                 );
@@ -3235,8 +3220,8 @@ pub(crate) mod tests {
                     .await;
 
                 assert!(
-                    bgs.wallet_state
-                        .confirmed_available_balance(&wallet_status, block1_timestamp)
+                    wallet_status
+                        .available_confirmed(block1_timestamp)
                         .is_positive(),
                     "Must show positive balance after successful PoW-guess"
                 );
@@ -3388,8 +3373,8 @@ pub(crate) mod tests {
                     .await;
 
                 assert!(
-                    !bgs.wallet_state
-                        .confirmed_available_balance(&wallet_status, block2_timestamp)
+                    !wallet_status
+                        .available_confirmed(block2_timestamp)
                         .is_positive(),
                     "Must show zero liquid balance after spending liquid guesser UTXO"
                 );
@@ -3496,8 +3481,7 @@ pub(crate) mod tests {
                 let wallet_status = gs.wallet_state.get_wallet_status(tip_digest, &msa).await;
 
                 assert_eq!(
-                    gs.wallet_state
-                        .confirmed_available_balance(&wallet_status, timestamp),
+                    wallet_status.available_confirmed(timestamp),
                     half_coinbase_amt
                 );
                 assert_eq!(
@@ -3559,8 +3543,7 @@ pub(crate) mod tests {
                 let wallet_status = gs.wallet_state.get_wallet_status(tip_digest, &msa).await;
 
                 assert_eq!(
-                    gs.wallet_state
-                        .confirmed_available_balance(&wallet_status, timestamp),
+                    wallet_status.available_confirmed(timestamp),
                     half_coinbase_amt
                 );
                 assert_eq!(
@@ -4116,7 +4099,7 @@ pub(crate) mod tests {
                         &genesis.mutator_set_accumulator_after().unwrap()
                     )
                     .await
-                    .synced_unspent_total_amount(),
+                    .total_confirmed(),
                 "Alice assumed to be premine recipient"
             );
 
@@ -4152,7 +4135,7 @@ pub(crate) mod tests {
                     &block_1a.mutator_set_accumulator_after().unwrap(),
                 )
                 .await;
-            assert!(wallet_status_1a.synced_unspent_total_amount().is_zero());
+            assert!(wallet_status_1a.total_confirmed().is_zero());
 
             // Simulate reorganization.
             alice_global_lock
@@ -4178,7 +4161,7 @@ pub(crate) mod tests {
                 .await;
             assert_eq!(
                 init_balance,
-                wallet_status_2b.synced_unspent_total_amount(),
+                wallet_status_2b.total_confirmed(),
                 "Initial balance must be restored when spending-tx was reorganized away."
             );
 
@@ -4210,7 +4193,7 @@ pub(crate) mod tests {
                     &block_2a.mutator_set_accumulator_after().unwrap()
                 )
                 .await
-                .synced_unspent_total_amount()
+                .total_confirmed()
                 .is_zero());
         }
 
@@ -4264,7 +4247,7 @@ pub(crate) mod tests {
                 .await;
             assert_eq!(
                 Block::block_subsidy(1u64.into()),
-                wallet_status_1a.synced_unspent_total_amount(),
+                wallet_status_1a.total_confirmed(),
             );
 
             assert!(wallet_status_1a.unsynced.is_empty());
@@ -4287,7 +4270,7 @@ pub(crate) mod tests {
                     &block_1b.mutator_set_accumulator_after().unwrap(),
                 )
                 .await;
-            assert!(wallet_status_1b.synced_unspent_total_amount().is_zero());
+            assert!(wallet_status_1b.total_confirmed().is_zero());
             assert!(!wallet_status_1b.unsynced.is_empty());
         }
     }
@@ -4411,7 +4394,7 @@ pub(crate) mod tests {
                         &block_1.mutator_set_accumulator_after().unwrap(),
                     )
                     .await;
-                let balance_ = alice_wallet_state.confirmed_available_balance(&wallet_status_, now);
+                let balance_ = wallet_status_.available_confirmed(now);
                 assert_eq!(NativeCurrencyAmount::coins(0), balance_);
 
                 let maintain_mps = true;
@@ -4430,7 +4413,7 @@ pub(crate) mod tests {
                         &block_1.mutator_set_accumulator_after().unwrap(),
                     )
                     .await;
-                let balance = alice_wallet_state.confirmed_available_balance(&wallet_status, now);
+                let balance = wallet_status.available_confirmed(now);
                 if should_catch_utxo {
                     assert_eq!(NativeCurrencyAmount::coins(1), balance);
                     assert_eq!(
