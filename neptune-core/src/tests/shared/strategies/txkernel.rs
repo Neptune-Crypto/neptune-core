@@ -1,13 +1,14 @@
+use proptest::collection;
 use proptest::prelude::*;
+use proptest::prop_compose;
 use proptest::sample::SizeRange;
-use proptest::{collection, prop_compose};
 use proptest_arbitrary_interop::arb;
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::{NativeCurrencyAmount, Timestamp};
-use crate::protocol::consensus::transaction::transaction_kernel::{
-    TransactionKernel, TransactionKernelProxy,
-};
+use crate::api::export::NativeCurrencyAmount;
+use crate::api::export::Timestamp;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 pub fn default(fee_nonegative: bool) -> impl Strategy<Value = TransactionKernel> {

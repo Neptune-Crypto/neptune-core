@@ -19,7 +19,6 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
-
 use super::ms_membership_proof::MsMembershipProof;
 use super::removal_record::absolute_index_set::AbsoluteIndexSet;
 use super::removal_record::chunk::Chunk;
@@ -28,7 +27,6 @@ use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::shared::WINDOW_SIZE;
-
 use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]

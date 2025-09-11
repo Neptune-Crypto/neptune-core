@@ -48,7 +48,6 @@ mod tests {
     use tasm_lib::prelude::Tip5;
 
     use super::*;
-
     use crate::util_types::mutator_set::commit;
 
     #[test]

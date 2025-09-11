@@ -253,16 +253,19 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::{TxInputList, TxOutputList};
+    use crate::api::export::TxInputList;
+    use crate::api::export::TxOutputList;
     use crate::api::tx_initiation::error::CreateProofError;
     use crate::application::config::network::Network;
-    use crate::application::triton_vm_job_queue::{vm_job_queue, TritonVmJobPriority};
+    use crate::application::triton_vm_job_queue::vm_job_queue;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::tasm::prover_job::{ProverJobError, VmProcessError};
+    use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
+    use crate::protocol::proof_abstractions::tasm::prover_job::VmProcessError;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;

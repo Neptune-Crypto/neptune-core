@@ -2179,9 +2179,8 @@ mod tests {
     mod blocks {
         use itertools::Itertools;
 
-        use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
-
         use super::*;
+        use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -2546,7 +2545,7 @@ mod tests {
                     network,
                 )
                 .await;
-            let blocks = vec![
+            let blocks = [
                 genesis_block,
                 block_1,
                 block_2,
@@ -3614,6 +3613,7 @@ mod tests {
     }
 
     mod transactions {
+        use super::*;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
         use crate::application::triton_vm_job_queue::vm_job_queue;
@@ -3621,8 +3621,6 @@ mod tests {
         use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::tests::shared::blocks::fake_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
-
-        use super::*;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

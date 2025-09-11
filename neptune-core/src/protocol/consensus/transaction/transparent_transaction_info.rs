@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use rand::distr::{Distribution, StandardUniform};
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
 use rand::Rng;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
@@ -101,9 +102,8 @@ pub(crate) mod tests {
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
-    use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-
     use super::*;
+    use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 
     impl From<&PrimitiveWitness> for TransparentTransactionInfo {
         fn from(primitive_witness: &PrimitiveWitness) -> Self {

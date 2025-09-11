@@ -54,6 +54,7 @@ use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::application::config::network::Network;
+use crate::application::loops::channel::Cancelable;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::block_header::BlockHeaderField;
 use crate::protocol::consensus::block::block_header::BlockPow;
@@ -65,8 +66,6 @@ use crate::protocol::consensus::block::pow::GuesserBuffer;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-
-use crate::application::loops::channel::Cancelable;
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
@@ -138,7 +137,7 @@ pub enum BlockProof {
 ///
 /// // this line fails to compile because we try to
 /// // mutate an internal field.
-/// block.kernel.header.nonce = nonce;
+/// block.kernel.header.pow.nonce = nonce;
 /// ```
 // ## About the private `digest` field:
 //
@@ -2039,9 +2038,8 @@ pub(crate) mod tests {
     /// have a test here.
     mod digest_encapsulation {
 
-        use crate::api::export::NeptuneProof;
-
         use super::*;
+        use crate::api::export::NeptuneProof;
 
         // test: verify clone + modify does not change original.
         //

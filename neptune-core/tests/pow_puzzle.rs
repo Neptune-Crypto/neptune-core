@@ -12,7 +12,8 @@ use neptune_cash::protocol::consensus::block::block_header::BlockPow;
 use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::common::fetch_files::{test_helper_data_dir, try_fetch_file_from_server};
+use crate::common::fetch_files::test_helper_data_dir;
+use crate::common::fetch_files::try_fetch_file_from_server;
 
 /// test: Generate a local block proposal and find a valid PoW solution for it.
 #[tokio::test(flavor = "multi_thread")]

@@ -98,7 +98,6 @@ impl From<RemovalRecordListUnpackError> for BlockValidationError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use proptest::prelude::Just;
     use proptest::prop_assert_eq;
     use proptest::prop_assume;
@@ -109,23 +108,27 @@ mod tests {
     use tasm_lib::twenty_first::bfe;
     use test_strategy::proptest;
 
+    use super::*;
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::NeptuneProof;
     use crate::api::export::Network;
     use crate::api::export::Timestamp;
-    use crate::protocol::consensus::block::block_appendix::{BlockAppendix, MAX_NUM_CLAIMS};
+    use crate::protocol::consensus::block::block_appendix::BlockAppendix;
+    use crate::protocol::consensus::block::block_appendix::MAX_NUM_CLAIMS;
     use crate::protocol::consensus::block::difficulty_control;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::protocol::consensus::block::tests::DIFFICULTY_LIMIT_FOR_TESTS;
     use crate::protocol::consensus::block::validity::block_program::BlockProgram;
-    use crate::protocol::consensus::block::{Block, BlockProof};
+    use crate::protocol::consensus::block::Block;
+    use crate::protocol::consensus::block::BlockProof;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::proof_abstractions::verifier::cache_true_claim;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
-    use crate::tests::shared::{strategies::block_with_arbkernel, Randomness};
+    use crate::tests::shared::strategies::block_with_arbkernel;
+    use crate::tests::shared::Randomness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
     proptest::prop_compose! {

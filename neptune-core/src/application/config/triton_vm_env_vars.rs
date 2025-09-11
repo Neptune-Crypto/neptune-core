@@ -109,8 +109,9 @@ impl FromStr for TritonVmEnvVars {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::str::FromStr;
+
+    use super::*;
 
     #[test]
     fn parses_no_entries() {

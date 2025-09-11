@@ -14,7 +14,6 @@ use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_inde
 
 use crate::application::database::storage::storage_vec::traits::*;
 use crate::application::database::NeptuneLevelDb;
-
 use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;

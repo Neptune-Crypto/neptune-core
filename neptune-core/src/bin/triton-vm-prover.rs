@@ -132,7 +132,8 @@ fn main() {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use tasm_lib::triton_vm::{self, isa::triton_asm};
+    use tasm_lib::triton_vm;
+    use tasm_lib::triton_vm::isa::triton_asm;
 
     use super::*;
 

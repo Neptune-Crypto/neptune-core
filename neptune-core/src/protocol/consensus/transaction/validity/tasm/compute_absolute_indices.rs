@@ -335,10 +335,10 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use super::*;
-
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+
+    use super::*;
 
     #[test]
     fn benchmark() {

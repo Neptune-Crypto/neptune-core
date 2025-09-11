@@ -505,11 +505,10 @@ pub(crate) mod tests {
     use rand::rng;
     use tasm_lib::twenty_first::bfe;
 
+    use super::*;
     use crate::api::export::Network;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::tests::shared::blocks::invalid_empty_block;
-
-    use super::*;
 
     impl MTree {
         fn num_leafs(&self) -> usize {
@@ -615,9 +614,8 @@ pub(crate) mod tests {
         use futures::channel::oneshot;
         use macro_rules_attr::apply;
 
-        use crate::tests::shared_tokio_runtime;
-
         use super::*;
+        use crate::tests::shared_tokio_runtime;
 
         #[apply(shared_tokio_runtime)]
         async fn can_cancel_preprocess_within_one_second() {
@@ -701,10 +699,11 @@ pub(crate) mod tests {
     }
 
     mod merkle_tree_tests {
-        use super::*;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
         use tasm_lib::twenty_first::prelude::MerkleTree;
+
+        use super::*;
 
         #[test]
         fn roots_agree() {

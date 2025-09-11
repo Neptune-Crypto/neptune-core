@@ -1060,7 +1060,6 @@ mod tests {
     use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
-
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
 

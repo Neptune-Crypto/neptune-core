@@ -2719,9 +2719,8 @@ mod tests {
     }
 
     mod merge_input_cache {
-        use crate::tests::shared::blocks::invalid_block_with_kernel_and_mutator_set;
-
         use super::*;
+        use crate::tests::shared::blocks::invalid_block_with_kernel_and_mutator_set;
 
         #[apply(shared_tokio_runtime)]
         async fn a_b_merged_b_mined() {

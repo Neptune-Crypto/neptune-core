@@ -10,13 +10,12 @@ use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::isa::triton_instr;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 
+use super::test_time_lock_and_maybe_mark::TestTimeLockAndMaybeMark;
+use super::total_amount_main_loop::DigestSource;
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::type_scripts::amount::read_and_add_amount::ReadAndAddAmount;
 use crate::protocol::consensus::type_scripts::amount::TOO_BIG_COIN_FIELD_SIZE_ERROR;
 use crate::BFieldElement;
-
-use super::test_time_lock_and_maybe_mark::TestTimeLockAndMaybeMark;
-use super::total_amount_main_loop::DigestSource;
 
 /// Body for inner loop, running over all coins within one UTXO.
 #[derive(Debug, Clone, Copy)]

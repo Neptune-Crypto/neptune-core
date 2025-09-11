@@ -177,11 +177,10 @@ mod tests {
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
 
+    use super::*;
     use crate::api::export::NativeCurrencyAmount;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
-
-    use super::*;
 
     impl BlockBody {
         pub(crate) fn arbitrary_with_mutator_set_accumulator(

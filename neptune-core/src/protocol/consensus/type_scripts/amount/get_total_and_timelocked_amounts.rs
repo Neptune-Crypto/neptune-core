@@ -112,14 +112,13 @@ mod test {
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::vm::NonDeterminism;
 
+    use super::GetTotalAndTimeLockedAmounts;
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::Timestamp;
     use crate::protocol::consensus::transaction::utxo::Coin;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::time_lock::TimeLock;
     use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
-
-    use super::GetTotalAndTimeLockedAmounts;
 
     impl Algorithm for GetTotalAndTimeLockedAmounts {
         fn rust_shadow(

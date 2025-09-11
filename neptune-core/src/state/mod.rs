@@ -2383,11 +2383,10 @@ mod tests {
 
         use futures::future;
 
+        use super::*;
         use crate::api::export::TransactionProof;
         use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
         use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
-
-        use super::*;
 
         /// Create 3 branches and return them in an array.
         ///
@@ -4295,9 +4294,8 @@ mod tests {
     }
 
     mod block_proposals {
-        use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
-
         use super::*;
+        use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
 
         #[apply(shared_tokio_runtime)]
         async fn dont_guess_when_block_proposal_not_known() {

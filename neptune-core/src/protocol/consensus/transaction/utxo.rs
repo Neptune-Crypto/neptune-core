@@ -289,13 +289,13 @@ pub mod neptune_arbitrary {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::protocol::consensus::transaction::lock_script::LockScript;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::triton_vm::prelude::*;
 
     impl Utxo {

@@ -67,6 +67,7 @@ pub(crate) mod tests {
     use rand::SeedableRng;
     use tracing_test::traced_test;
 
+    use super::*;
     use crate::api::export::GlobalStateLock;
     use crate::api::export::InputSelectionPolicy;
     use crate::api::export::KeyType;
@@ -94,8 +95,6 @@ pub(crate) mod tests {
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
     use crate::tests::tokio_runtime;
-
-    use super::*;
 
     async fn tx_with_n_outputs(
         mut state: GlobalStateLock,

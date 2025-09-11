@@ -2204,11 +2204,10 @@ mod tests {
     }
 
     mod update_mempool_txs {
+        use super::*;
         use crate::api::export::NativeCurrencyAmount;
         use crate::tests::shared::blocks::fake_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
-
-        use super::*;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

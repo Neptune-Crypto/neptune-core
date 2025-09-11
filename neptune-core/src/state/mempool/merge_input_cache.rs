@@ -1,11 +1,13 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::VecDeque;
+
+use get_size2::GetSize;
+
 use crate::api::export::TransactionKernelId;
 use crate::state::NeptuneProof;
 use crate::state::TransactionKernel;
 use crate::state::UpgradePriority;
-use get_size2::GetSize;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::VecDeque;
 
 /// A transaction that was input to a merge of two transactions. In other words:
 /// either a or b in the operation merge(a, b) -> c, where a, b, and c are all

@@ -52,8 +52,13 @@ impl Ord for UpgradeIncentive {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Implemented such that balance affecting transactions are always
         // prioritized over the chance to gobble fees.
-        use std::cmp::Ordering::{Equal, Greater, Less};
-        use UpgradeIncentive::{BalanceAffecting, Critical, Gobble};
+        use std::cmp::Ordering::Equal;
+        use std::cmp::Ordering::Greater;
+        use std::cmp::Ordering::Less;
+
+        use UpgradeIncentive::BalanceAffecting;
+        use UpgradeIncentive::Critical;
+        use UpgradeIncentive::Gobble;
         match (self, other) {
             (Gobble(self_amt), Gobble(other_amt)) => self_amt.cmp(other_amt),
             (Gobble(_), _) => Less,

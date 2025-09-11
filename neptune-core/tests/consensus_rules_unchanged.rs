@@ -3,15 +3,14 @@ mod common;
 use std::fs::File;
 use std::io::Write;
 
+use common::logging;
 use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::protocol::consensus::block::Block;
-use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-
-use common::logging;
 use tasm_lib::twenty_first::bfe;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use crate::common::fetch_files::test_helper_data_dir;
 use crate::common::fetch_files::try_fetch_file_from_server;

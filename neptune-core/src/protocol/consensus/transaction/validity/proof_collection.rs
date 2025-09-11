@@ -17,7 +17,6 @@ use super::removal_records_integrity::RemovalRecordsIntegrity;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::application::config::network::Network;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::validity::collect_lock_scripts::CollectLockScripts;

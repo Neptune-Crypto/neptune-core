@@ -2529,7 +2529,7 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(vec![bad_txo.clone()].iter(), UtxoNotifier::Cli);
+            .extract_expected_utxos([bad_txo.clone()].iter(), UtxoNotifier::Cli);
         alice
             .lock_guard_mut()
             .await
@@ -2634,7 +2634,7 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(vec![bad_txo.clone()].iter(), UtxoNotifier::Cli);
+            .extract_expected_utxos([bad_txo.clone()].iter(), UtxoNotifier::Cli);
         alice
             .lock_guard_mut()
             .await

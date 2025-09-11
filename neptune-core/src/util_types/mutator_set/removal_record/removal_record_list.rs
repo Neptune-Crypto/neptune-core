@@ -906,13 +906,14 @@ impl BFieldCodec for RemovalRecordList {
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
-use proptest::collection::vec;
-#[cfg(any(test, feature = "arbitrary-impls"))]
-use proptest::prelude::*;
-#[cfg(any(test, feature = "arbitrary-impls"))]
 use std::hash::BuildHasherDefault;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use std::hash::Hasher;
+
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use proptest::collection::vec;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use proptest::prelude::*;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;

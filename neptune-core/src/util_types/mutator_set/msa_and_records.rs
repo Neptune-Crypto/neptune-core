@@ -1,11 +1,10 @@
 use itertools::Itertools;
 use tasm_lib::prelude::Digest;
 
-use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
-
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::RemovalRecord;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
 /// A [`MutatorSetAccumulator`] with matching [`RemovalRecord`]s.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -327,11 +326,10 @@ pub mod neptune_arbitrary {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::tests::shared::strategies;
-    use crate::util_types::mutator_set::commit;
     use itertools::Itertools;
     use proptest::collection::vec;
-    use proptest::prelude::{Arbitrary, Strategy};
+    use proptest::prelude::Arbitrary;
+    use proptest::prelude::Strategy;
     use proptest::prop_assert;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestCaseError;
@@ -344,6 +342,8 @@ mod tests {
     use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::MsaAndRecords;
+    use crate::tests::shared::strategies;
+    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;

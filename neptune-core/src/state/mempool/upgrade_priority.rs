@@ -43,8 +43,13 @@ impl PartialOrd for UpgradePriority {
 
 impl Ord for UpgradePriority {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use std::cmp::Ordering::{Equal, Greater, Less};
-        use UpgradePriority::{Critical, Interested, Irrelevant};
+        use std::cmp::Ordering::Equal;
+        use std::cmp::Ordering::Greater;
+        use std::cmp::Ordering::Less;
+
+        use UpgradePriority::Critical;
+        use UpgradePriority::Interested;
+        use UpgradePriority::Irrelevant;
         match (self, other) {
             (Irrelevant, Irrelevant) => Equal,
             (Irrelevant, _) => Less,
@@ -69,7 +74,9 @@ impl UpgradePriority {
         &self,
         gobbling_potential: NativeCurrencyAmount,
     ) -> UpgradeIncentive {
-        use UpgradePriority::{Critical, Interested, Irrelevant};
+        use UpgradePriority::Critical;
+        use UpgradePriority::Interested;
+        use UpgradePriority::Irrelevant;
         match self {
             Irrelevant => UpgradeIncentive::Gobble(gobbling_potential),
             Interested(native_currency_amount) => {
@@ -84,7 +91,9 @@ impl Add for UpgradePriority {
     type Output = Self;
 
     fn add(self, other: Self) -> Self::Output {
-        use UpgradePriority::{Critical, Interested, Irrelevant};
+        use UpgradePriority::Critical;
+        use UpgradePriority::Interested;
+        use UpgradePriority::Irrelevant;
         match (self, other) {
             (Irrelevant, _) => other,
             (_, Irrelevant) => self,

@@ -1,6 +1,3 @@
-use crate::application::rpc::server::NativeCurrencyAmount;
-use crate::protocol::consensus::block::block_header::BlockPow;
-use crate::BFieldElement;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -9,7 +6,10 @@ use tasm_lib::twenty_first::bfe_array;
 use tracing::info;
 
 use crate::application::rpc::server::BlockHeader;
+use crate::application::rpc::server::NativeCurrencyAmount;
+use crate::protocol::consensus::block::block_header::BlockPow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
+use crate::BFieldElement;
 use crate::Block;
 
 /// Data required to attempt to solve the proof-of-work puzzle that allows the

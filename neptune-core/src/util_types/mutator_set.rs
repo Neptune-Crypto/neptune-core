@@ -1,10 +1,10 @@
 use std::error::Error;
 use std::fmt;
 
-use tasm_lib::prelude::{Digest, Tip5};
+use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Tip5;
 
 use self::addition_record::AdditionRecord;
-
 use crate::util_types::mutator_set::shared::BATCH_SIZE;
 
 pub mod active_window;
@@ -84,7 +84,9 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::shared::{BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE};
+    use crate::util_types::mutator_set::shared::BATCH_SIZE;
+    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
     use crate::util_types::test_shared::mutator_set::*;
 
     #[test]

@@ -54,7 +54,6 @@ mod tests {
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;

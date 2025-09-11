@@ -38,7 +38,6 @@ use super::common::deterministically_derive_seed_and_nonce;
 use super::common::network_hrp_char;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::application::config::network::Network;
-
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;

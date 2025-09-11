@@ -58,6 +58,8 @@ impl FromStr for HexDigest {
 
 #[cfg(test)]
 mod tests {
+    use std::primitive::char;
+
     use itertools::Itertools;
     use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
     use proptest::collection::vec;
@@ -66,7 +68,6 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
-    use std::primitive::char;
     use test_strategy::proptest;
 
     use super::*;

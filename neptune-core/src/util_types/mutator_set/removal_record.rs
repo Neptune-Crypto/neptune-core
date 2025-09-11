@@ -33,7 +33,6 @@ use super::shared::indices_to_hash_map;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::MutatorSetError;
-
 use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]

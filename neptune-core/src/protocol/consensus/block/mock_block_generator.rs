@@ -4,6 +4,7 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 
+use super::block_transaction::BlockOrRegularTransaction;
 use crate::api::export::ReceivingAddress;
 use crate::application::config::network::Network;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
@@ -25,8 +26,6 @@ use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::transaction_output::TxOutputList;
-
-use super::block_transaction::BlockOrRegularTransaction;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MockBlockGenerator;

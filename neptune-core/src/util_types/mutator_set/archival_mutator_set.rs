@@ -17,7 +17,6 @@ use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use crate::application::database::storage::storage_vec::traits::*;
-
 use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::MutatorSetError;
