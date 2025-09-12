@@ -135,6 +135,24 @@ impl Utxo {
         }
     }
 
+    /// Add to the amount of the UTXO with a delta.
+    pub(crate) fn add_to_amount(mut self, delta: NativeCurrencyAmount) -> Self {
+        let current_amount = self.get_native_currency_amount();
+        let new_amount = current_amount + delta;
+        let new_amount = Coin::new_native_currency(new_amount);
+        let remove = self
+            .coins
+            .iter()
+            .find_position(|coin| coin.type_script_hash == NativeCurrency.hash());
+        if let Some((idx, _)) = remove {
+            self.coins[idx] = new_amount;
+        } else {
+            self.coins.push(new_amount);
+        };
+
+        self
+    }
+
     pub fn has_native_currency(&self) -> bool {
         self.coins
             .iter()
@@ -238,7 +256,6 @@ impl Utxo {
 
     /// Determine whether there is a time-lock, with any release date, on the
     /// UTXO.
-    #[cfg(test)]
     pub(crate) fn is_timelocked(&self) -> bool {
         self.coins
             .iter()

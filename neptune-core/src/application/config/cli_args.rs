@@ -22,6 +22,7 @@ use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 
@@ -59,6 +60,18 @@ pub struct Args {
     /// Set this to disable block validation for a faster block-import.
     #[clap(long)]
     pub disable_validation_in_block_import: bool,
+
+    /// Execute command when the best block changes (%s in cmd is replaced by
+    /// block hash).
+    ///
+    /// The node waits until the command has finished.
+    ///
+    /// If external command cannot be started, or if it does not return exit
+    /// code 0, entire node is stopped.
+    ///
+    /// Anything after the 1st space is interpreted as an argument. So the file
+    /// used here may not contain spaces.
+    pub(crate) block_notify: Option<String>,
 
     /// Ban connections to this node from IP address.
     ///
@@ -219,6 +232,10 @@ pub struct Args {
     #[clap(long = "whitelisted-composer")]
     pub(crate) whitelisted_composers: Vec<IpAddr>,
 
+    /// If set, all composition from peers will be ignored.
+    #[clap(long)]
+    pub(crate) ignore_foreign_compositions: bool,
+
     /// Regulates the fraction of the block subsidy that a composer sends to the
     /// guesser.
     /// Value must be between 0 and 1.
@@ -226,7 +243,7 @@ pub struct Args {
     /// The remainder goes to the composer. This flag is ignored if the
     /// `compose` flag is not set.
     #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
-    pub(crate) guesser_fraction: f64,
+    pub guesser_fraction: f64,
 
     /// The minimum fraction that a guesser will require from the composer
     /// before they start guessing. Block proposals with a guesser fraction
@@ -615,7 +632,14 @@ impl Args {
     }
 
     /// Check if block proposal should be accepted from this IP address.
-    pub(crate) fn accept_block_proposal_from(&self, ip_address: IpAddr) -> bool {
+    pub(crate) fn accept_block_proposal_from(
+        &self,
+        ip_address: IpAddr,
+    ) -> Result<(), BlockProposalRejectError> {
+        if self.ignore_foreign_compositions {
+            return Err(BlockProposalRejectError::IgnoreAllForeign);
+        }
+
         let ip_address = match ip_address {
             IpAddr::V4(_) => ip_address,
             IpAddr::V6(v6) => match v6.to_ipv4() {
@@ -623,7 +647,13 @@ impl Args {
                 None => ip_address,
             },
         };
-        self.whitelisted_composers.is_empty() || self.whitelisted_composers.contains(&ip_address)
+        if !self.whitelisted_composers.is_empty()
+            && !self.whitelisted_composers.contains(&ip_address)
+        {
+            return Err(BlockProposalRejectError::NotWhiteListed);
+        }
+
+        Ok(())
     }
 
     fn estimate_proving_capability() -> TxProvingCapability {

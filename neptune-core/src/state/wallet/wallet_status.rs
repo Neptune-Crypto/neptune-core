@@ -78,7 +78,7 @@ pub struct WalletStatus {
 
 impl WalletStatus {
     /// synced, total balance (includes timelocked utxos)
-    pub fn synced_unspent_total_amount(&self) -> NativeCurrencyAmount {
+    pub fn total_confirmed(&self) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
             .map(|(wse, _msmp)| &wse.utxo)
@@ -86,8 +86,8 @@ impl WalletStatus {
             .sum::<NativeCurrencyAmount>()
     }
 
-    /// synced, available balance (excludes timelocked utxos)
-    pub fn synced_unspent_available_amount(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
+    /// synced, available balance (excludes timelocked utxos with active timelocks)
+    pub fn available_confirmed(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
             .map(|(wse, _msmp)| &wse.utxo)

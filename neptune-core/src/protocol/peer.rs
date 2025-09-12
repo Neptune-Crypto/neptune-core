@@ -94,6 +94,7 @@ pub enum NegativePeerSanction {
     BlockProposalNotFound,
     InvalidBlockProposal,
     NonFavorableBlockProposal,
+    BlockProposalFromBlockedPeer,
 
     UnwantedMessage,
 
@@ -147,6 +148,9 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::InvalidBlockProposal => "Invalid block proposal",
             NegativePeerSanction::UnwantedMessage => "unwanted message",
             NegativePeerSanction::NonFavorableBlockProposal => "non-favorable block proposal",
+            NegativePeerSanction::BlockProposalFromBlockedPeer => {
+                "got block proposal from non-whitelisted peer"
+            }
             NegativePeerSanction::BatchBlocksRequestEmpty => "batch block request empty",
             NegativePeerSanction::InvalidSyncChallenge => "invalid sync challenge",
             NegativePeerSanction::InvalidSyncChallengeResponse => "invalid sync challenge response",
@@ -229,6 +233,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::InvalidBlockProposal => -10,
             NegativePeerSanction::UnwantedMessage => -1,
             NegativePeerSanction::NonFavorableBlockProposal => -1,
+            NegativePeerSanction::BlockProposalFromBlockedPeer => -10,
             NegativePeerSanction::BatchBlocksRequestEmpty => -10,
             NegativePeerSanction::InvalidSyncChallenge => -50,
             NegativePeerSanction::InvalidSyncChallengeResponse => -500,

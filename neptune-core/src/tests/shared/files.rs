@@ -9,6 +9,8 @@ use anyhow::Result;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use rand::seq::SliceRandom;
+use tokio::time::sleep;
+use tokio::time::timeout;
 use tracing::debug;
 use tracing::Span;
 
@@ -29,6 +31,27 @@ pub(crate) fn unit_test_data_directory(
         .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
 
     DataDirectory::get(Some(tmp_root), network)
+}
+
+/// Waits until the file at `path` exists, or returns `Err` after 30 seconds.
+pub(crate) async fn wait_for_file_to_exist(path: impl AsRef<Path>) -> Result<(), &'static str> {
+    let path = path.as_ref().to_path_buf();
+
+    // Wrap in timeout: returns error if 30s pass without success
+    let res = timeout(Duration::from_secs(30), async {
+        loop {
+            if path.exists() {
+                return Ok(());
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+
+    match res {
+        Ok(inner) => inner,
+        Err(_) => Err("Timed out"), // timeout triggered
+    }
 }
 
 /// Return path for the directory containing test data, like proofs and block
