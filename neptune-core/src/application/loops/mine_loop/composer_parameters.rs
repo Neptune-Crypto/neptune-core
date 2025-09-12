@@ -48,24 +48,23 @@ impl ComposerParameters {
         }
     }
 
-    /// Produce outputs spending a given portion of the coinbase amount. Returns
-    /// two outputs unless this composition awards the entire coinbase amount to
-    /// the guesser, in which case zero outputs are returned.
+    /// Produce outputs spending a given portion of the coinbase amount,
+    /// according to the specified coinbase distribution.
     ///
     /// The coinbase amount is usually set to the block subsidy for this block
     /// height.
     ///
-    /// There are two equal-value outputs because one is liquid immediately, and the
-    /// other is locked for 3 years. The portion of the entire block subsidy that
-    /// goes to the composer is determined by the `guesser_fee_fraction` field of
-    /// the composer parameters.
+    /// Will always produce outputs where at least half the amount is timelocked
+    /// for 3 years, since this is dictated by the consensus rules. The portion
+    /// of the entire block subsidy that goes to the composer is determined by
+    /// the `guesser_fee_fraction` field of the composer parameters.
     ///
     /// The sum of the value of the outputs is guaranteed to not exceed the
     /// coinbase amount, since the guesser fee fraction is guaranteed to be in the
     /// range \[0;1\].
     ///
-    /// Returns: Either the empty list, or two outputs, one immediately liquid, the
-    /// other timelocked for three years, as required by the consensus rules.
+    /// Returns: Either the empty list, or n outputs according to the specified
+    /// coinbase distribution.
     ///
     /// # Panics
     ///
