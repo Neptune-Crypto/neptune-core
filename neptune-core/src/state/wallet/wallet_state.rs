@@ -173,7 +173,8 @@ impl WalletState {
     /// Generate [`ComposerParameters`] for composing the next block. If a
     /// coinbase distribution is specified, that will be used. If no coinbase
     /// distribution is specified, the entire coinbase reward goes to an address
-    /// of the wallet.
+    /// of the wallet. If the coinbase distribution *is* set, it is assumed that
+    /// the composer reward does not go to the wallet of this node.
     ///
     ///  # Panics
     ///
@@ -186,18 +187,26 @@ impl WalletState {
         coinbase_distribution: Option<CoinbaseDistribution>,
     ) -> ComposerParameters {
         let reward_address = self.wallet_entropy.prover_fee_address();
-        let receiver_preimage = self.wallet_entropy.composer_fee_key().receiver_preimage();
         let sender_randomness_for_composer = self
             .wallet_entropy
             .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
 
+        // If coinbase distribution is not set, we assume this wallet does not
+        // have the receiver preimage.
+        let receiver_preimage = if coinbase_distribution.is_some() {
+            None
+        } else {
+            Some(self.wallet_entropy.composer_fee_key().receiver_preimage())
+        };
+
+        // If no coinbase distribution is set, reward this node's wallet.
         let coinbase_distribution =
             coinbase_distribution.unwrap_or(CoinbaseDistribution::solo(reward_address));
 
         ComposerParameters::new(
             coinbase_distribution,
             sender_randomness_for_composer,
-            Some(receiver_preimage),
+            receiver_preimage,
             guesser_fraction,
             fee_notification,
         )
@@ -3841,8 +3850,49 @@ pub(crate) mod tests {
 
     mod expected_utxos {
         use super::*;
+        use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
         use crate::protocol::consensus::transaction::lock_script::LockScript;
         use crate::tests::shared::mock_tx::make_mock_transaction;
+
+        #[apply(shared_tokio_runtime)]
+        async fn no_expected_utxos_on_custom_coinbase_distribution_and_offchain_notifications() {
+            let network = Network::Main;
+            let wallet = WalletEntropy::devnet_wallet();
+            let mut cli_args = cli_args::Args::default_with_network(network);
+            cli_args.fee_notification = FeeNotificationPolicy::OffChain;
+
+            let wallet_state = mock_genesis_wallet_state(wallet, &cli_args).await;
+            let an_address = GenerationReceivingAddress::derive_from_seed(Default::default());
+            let coinbase_distribution = vec![
+                CoinbaseOutput::liquid(an_address.into(), 400),
+                CoinbaseOutput::timelocked(an_address.into(), 550),
+                CoinbaseOutput::liquid(an_address.into(), 50),
+            ];
+            let coinbase_distribution =
+                CoinbaseDistribution::try_new(coinbase_distribution).unwrap();
+
+            for cb_distribution in [None, Some(coinbase_distribution)] {
+                let composer_parameters = wallet_state.composer_parameters(
+                    1u64.into(),
+                    cli_args.guesser_fraction,
+                    cli_args.fee_notification,
+                    cb_distribution.clone(),
+                );
+
+                let coinbase = NativeCurrencyAmount::coins(40);
+                let composer_outputs = composer_parameters.tx_outputs(coinbase, Timestamp::now());
+                let expected_num_outputs = if cb_distribution.is_some() { 3 } else { 2 };
+                assert_eq!(expected_num_outputs, composer_outputs.len(),);
+
+                let expected_num_own_outputs = if cb_distribution.is_some() { 0 } else { 2 };
+                assert_eq!(
+                    expected_num_own_outputs,
+                    composer_parameters
+                        .extract_expected_utxos(composer_outputs)
+                        .len(),
+                );
+            }
+        }
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
