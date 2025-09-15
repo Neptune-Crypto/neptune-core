@@ -2238,7 +2238,7 @@ pub(super) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .available_confirmed(in_seven_months)
         );
         assert_eq!(
             NativeCurrencyAmount::coins(5),
@@ -2246,7 +2246,7 @@ pub(super) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .available_confirmed(in_seven_months)
         );
 
         let block_subsidy = Block::block_subsidy(block_1.header().height);
@@ -2263,7 +2263,7 @@ pub(super) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .available_confirmed(in_seven_months)
         );
 
         let after_cb_timelock_expiration = block_1.header().timestamp + Timestamp::months(37);
@@ -2274,7 +2274,7 @@ pub(super) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(after_cb_timelock_expiration)
+                .available_confirmed(after_cb_timelock_expiration)
         );
 
         println!("Transactions were received in good order.");
@@ -2461,14 +2461,14 @@ pub(super) mod tests {
             .await
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(in_seven_months)
+            .available_confirmed(in_seven_months)
             .is_zero());
         assert!(bob
             .lock_guard()
             .await
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(in_seven_months)
+            .available_confirmed(in_seven_months)
             .is_zero());
 
         // Verify that all ingoing UTXOs are recorded in wallet of receiver of genesis UTXO

@@ -75,6 +75,8 @@ use crate::application::config::network::Network;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
+use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
 use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::macros::fn_name;
@@ -1400,6 +1402,81 @@ pub trait RPC {
         guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<(Block, ProofOfWorkPuzzle)>>;
 
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::spendable_inputs()]
+    async fn spendable_inputs(token: auth::Token) -> RpcResult<TxInputList>;
+
+    /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
+    ///
+    /// see [InputSelectionPolicy]
+    ///
+    /// pub enum InputSelectionPolicy {
+    ///     Random,
+    ///     ByNativeCoinAmount(SortOrder),
+    ///     ByUtxoSize(SortOrder),
+    /// }
+    ///
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::select_spendable_inputs()]
+    async fn select_spendable_inputs(
+        token: auth::Token,
+        policy: InputSelectionPolicy,
+        spend_amount: NativeCurrencyAmount,
+    ) -> RpcResult<TxInputList>;
+
+    /// generate tx outputs from list of OutputFormat.
+    ///
+    /// OutputFormat can be address:amount, address:amount:medium, address:utxo,
+    /// address:utxo:medium, tx_output, etc.
+    ///
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_outputs()]
+    async fn generate_tx_outputs(
+        token: auth::Token,
+        outputs: Vec<OutputFormat>,
+    ) -> RpcResult<TxOutputList>;
+
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_witness_proof()]
+    async fn generate_witness_proof(
+        token: auth::Token,
+        tx_details: TransactionDetails,
+    ) -> RpcResult<TransactionProof>;
+
+    /// assemble a transaction from TransactionDetails and a TransactionProof.
+    ///
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction()]
+    async fn assemble_transaction(
+        token: auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<Transaction>;
+
+    /// assemble transaction artifacts from TransactionDetails and a TransactionProof.
+    ///
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction_artifacts()]
+    async fn assemble_transaction_artifacts(
+        token: auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<TxCreationArtifacts>;
+
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::proof_type()]
+    async fn proof_type(
+        token: auth::Token,
+        txid: TransactionKernelId,
+    ) -> RpcResult<TransactionProofType>;
+
     /******** BLOCKCHAIN STATISTICS ********/
     // Place all endpoints that relate to statistics of the blockchain here
 
@@ -1540,73 +1617,6 @@ pub trait RPC {
     /// ```
     async fn clear_standing_by_ip(token: auth::Token, ip: IpAddr) -> RpcResult<()>;
 
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::spendable_inputs()]
-    async fn spendable_inputs(token: auth::Token) -> RpcResult<TxInputList>;
-
-    /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
-    ///
-    /// see [InputSelectionPolicy]
-    ///
-    /// pub enum InputSelectionPolicy {
-    ///     Random,
-    ///     ByNativeCoinAmount(SortOrder),
-    ///     ByUtxoSize(SortOrder),
-    /// }
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::select_spendable_inputs()]
-    async fn select_spendable_inputs(
-        token: auth::Token,
-        policy: InputSelectionPolicy,
-        spend_amount: NativeCurrencyAmount,
-    ) -> RpcResult<TxInputList>;
-
-    /// generate tx outputs from list of OutputFormat.
-    ///
-    /// OutputFormat can be address:amount, address:amount:medium, address:utxo,
-    /// address:utxo:medium, tx_output, etc.
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_outputs()]
-    async fn generate_tx_outputs(
-        token: auth::Token,
-        outputs: Vec<OutputFormat>,
-    ) -> RpcResult<TxOutputList>;
-
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_witness_proof()]
-    async fn generate_witness_proof(
-        token: auth::Token,
-        tx_details: TransactionDetails,
-    ) -> RpcResult<TransactionProof>;
-
-    /// assemble a transaction from TransactionDetails and a TransactionProof.
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction()]
-    async fn assemble_transaction(
-        token: auth::Token,
-        transaction_details: TransactionDetails,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<Transaction>;
-
-    /// assemble transaction artifacts from TransactionDetails and a TransactionProof.
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction_artifacts()]
-    async fn assemble_transaction_artifacts(
-        token: auth::Token,
-        transaction_details: TransactionDetails,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<TxCreationArtifacts>;
-
     /// record transaction and initiate broadcast to peers
     ///
     /// todo: docs.
@@ -1717,14 +1727,6 @@ pub trait RPC {
     /// Returns Ok(false) if no transaction for upgrading was found
     /// Returns an error if something else failed.
     async fn upgrade(token: auth::Token, tx_kernel_id: TransactionKernelId) -> RpcResult<bool>;
-
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::proof_type()]
-    async fn proof_type(
-        token: auth::Token,
-        txid: TransactionKernelId,
-    ) -> RpcResult<TransactionProofType>;
 
     /// claim a utxo
     ///
@@ -1864,6 +1866,30 @@ pub trait RPC {
     /// # }
     /// ```
     async fn restart_miner(token: auth::Token) -> RpcResult<()>;
+
+    /// Set coinbase distribution for this node's block proposals. This
+    /// distribution will be in effect until it is overwritted or manually
+    /// unset. The value set through this command stays in effect regardless of
+    /// whether the block's proposals are mined or not. Only by overwriting this
+    /// value by calling this function again, or by unsetting this value through
+    /// [`RPC::unset_coinbase_distribution()`] can this effect be overturned.
+    ///
+    /// To guarantee that the set coinbase distribution is applied to the *next*
+    /// locally produced block proposal, this function call can be followed up
+    /// by a call to first [`RPC::pause_miner()`] and then
+    /// [`RPC::restart_miner()`]. If this is not done, the node may continue
+    /// working on an already started block proposal with another distribution.
+    async fn set_coinbase_distribution(
+        token: auth::Token,
+        coinbase_distribution: Vec<CoinbaseOutput>,
+    ) -> RpcResult<()>;
+
+    /// Remove a coinbase distribution from state, thus defaulting back to
+    /// rewarding the node's own wallet with the composer's coinbase outputs.
+    ///
+    /// Can be used to delete coinbase distributions set through
+    /// [`RPC::set_coinbase_distribution()`].
+    async fn unset_coinbase_distribution(token: auth::Token) -> RpcResult<()>;
 
     /// mine a series of blocks to the node's wallet.
     ///
@@ -2677,9 +2703,7 @@ impl RPC for NeptuneRPCServer {
         let gs = self.state.lock_guard().await;
         let wallet_status = gs.get_wallet_status_for_tip().await;
 
-        let confirmed_available = gs
-            .wallet_state
-            .confirmed_available_balance(&wallet_status, Timestamp::now());
+        let confirmed_available = wallet_status.available_confirmed(Timestamp::now());
 
         // test inequality
         Ok(amount <= confirmed_available)
@@ -2697,9 +2721,7 @@ impl RPC for NeptuneRPCServer {
         let gs = self.state.lock_guard().await;
         let wallet_status = gs.get_wallet_status_for_tip().await;
 
-        let confirmed_available = gs
-            .wallet_state
-            .confirmed_available_balance(&wallet_status, Timestamp::now());
+        let confirmed_available = wallet_status.available_confirmed(Timestamp::now());
 
         Ok(confirmed_available)
     }
@@ -2947,11 +2969,11 @@ impl RPC for NeptuneRPCServer {
 
         let confirmed_available_balance = {
             log_slow_scope!(fn_name!() + "::confirmed_available_balance()");
-            wallet_state.confirmed_available_balance(&wallet_status, now)
+            wallet_status.available_confirmed(now)
         };
         let confirmed_total_balance = {
             log_slow_scope!(fn_name!() + "::confirmed_total_balance()");
-            wallet_state.confirmed_total_balance(&wallet_status)
+            wallet_status.total_confirmed()
         };
 
         let unconfirmed_available_balance = {
@@ -3039,114 +3061,6 @@ impl RPC for NeptuneRPCServer {
         global_state_mut.net.clear_ip_standing_in_database(ip).await;
 
         Ok(global_state_mut.flush_databases().await?)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn spendable_inputs(
-        self,
-        _: context::Context,
-        token: auth::Token,
-    ) -> RpcResult<TxInputList> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .spendable_inputs(Timestamp::now())
-            .await)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn select_spendable_inputs(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        policy: InputSelectionPolicy,
-        spend_amount: NativeCurrencyAmount,
-    ) -> RpcResult<TxInputList> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .select_spendable_inputs(policy, spend_amount, Timestamp::now())
-            .await
-            .into())
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn generate_tx_outputs(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        outputs: Vec<OutputFormat>,
-    ) -> RpcResult<TxOutputList> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .generate_tx_outputs(outputs)
-            .await)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn generate_witness_proof(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        tx_details: TransactionDetails,
-    ) -> RpcResult<TransactionProof> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .generate_witness_proof(Arc::new(tx_details)))
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn assemble_transaction(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        transaction_details: TransactionDetails,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<Transaction> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .assemble_transaction(&transaction_details, transaction_proof)?)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn assemble_transaction_artifacts(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        transaction_details: TransactionDetails,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<TxCreationArtifacts> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .assemble_transaction_artifacts(transaction_details, transaction_proof)?)
     }
 
     // documented in trait. do not add doc-comment.
@@ -3292,19 +3206,6 @@ impl RPC for NeptuneRPCServer {
         Ok(true)
     }
 
-    // documented in trait. do not add doc-comment.
-    async fn proof_type(
-        self,
-        _ctx: context::Context,
-        token: auth::Token,
-        txid: TransactionKernelId,
-    ) -> RpcResult<TransactionProofType> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self.state.api().tx_initiator().proof_type(txid).await?)
-    }
-
     // // documented in trait. do not add doc-comment.
     async fn claim_utxo(
         mut self,
@@ -3440,6 +3341,52 @@ impl RPC for NeptuneRPCServer {
         } else {
             info!("Cannot restart miner since it was never started");
         }
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn set_coinbase_distribution(
+        mut self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        coinbase_distribution: Vec<CoinbaseOutput>,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let coinbase_distribution = match CoinbaseDistribution::try_new(coinbase_distribution) {
+            Ok(cd) => cd,
+            Err(err) => return Err(RpcError::InvalidCoinbaseDistribution(err.to_string())),
+        };
+
+        if self.state.cli().mine() {
+            let mut state = self.state.lock_guard_mut().await;
+            state
+                .mining_state
+                .set_coinbase_distribution(coinbase_distribution);
+        } else {
+            warn!("Cannot set coinbase distribution as node is not mining");
+        }
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn unset_coinbase_distribution(
+        mut self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if self.state.cli().mine() {
+            let mut state = self.state.lock_guard_mut().await;
+            state.mining_state.unset_coinbase_distribution();
+        } else {
+            warn!("Cannot unset coinbase distribution as node is not mining");
+        }
+
         Ok(())
     }
 
@@ -3691,6 +3638,127 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn spendable_inputs(
+        self,
+        _: context::Context,
+        token: auth::Token,
+    ) -> RpcResult<TxInputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .spendable_inputs(Timestamp::now())
+            .await)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn select_spendable_inputs(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        policy: InputSelectionPolicy,
+        spend_amount: NativeCurrencyAmount,
+    ) -> RpcResult<TxInputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .select_spendable_inputs(policy, spend_amount, Timestamp::now())
+            .await
+            .into())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn generate_tx_outputs(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        outputs: Vec<OutputFormat>,
+    ) -> RpcResult<TxOutputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .generate_tx_outputs(outputs)
+            .await)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn generate_witness_proof(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        tx_details: TransactionDetails,
+    ) -> RpcResult<TransactionProof> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .generate_witness_proof(Arc::new(tx_details)))
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn assemble_transaction(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<Transaction> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .assemble_transaction(&transaction_details, transaction_proof)?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn assemble_transaction_artifacts(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<TxCreationArtifacts> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .assemble_transaction_artifacts(transaction_details, transaction_proof)?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn proof_type(
+        self,
+        _ctx: context::Context,
+        token: auth::Token,
+        txid: TransactionKernelId,
+    ) -> RpcResult<TransactionProofType> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self.state.api().tx_initiator().proof_type(txid).await?)
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn block_intervals(
         self,
         _context: tarpc::context::Context,
@@ -3939,6 +4007,9 @@ pub mod error {
 
         #[error("Cannot pause state updates while client is syncing")]
         CannotPauseWhileSyncing,
+
+        #[error("Invalid coinbase distribution: {0}")]
+        InvalidCoinbaseDistribution(String),
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
@@ -4997,7 +5068,7 @@ mod tests {
         use crate::state::mining::block_proposal::BlockProposal;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::state::wallet::address::KeyType;
-        use crate::tests::shared::blocks::fake_deterministic_successor;
+        use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::blocks::invalid_empty_block;
 
         #[test]
@@ -5060,7 +5131,7 @@ mod tests {
             .await;
 
             let genesis = Block::genesis(network);
-            let block1 = fake_deterministic_successor(&genesis, network).await;
+            let block1 = fake_valid_deterministic_successor(&genesis, network).await;
             bob.state
                 .lock_mut(|x| {
                     x.mining_state.block_proposal =
@@ -5902,9 +5973,7 @@ mod tests {
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
                     let wallet_status = state_lock.get_wallet_status_for_tip().await;
-                    let original_balance = state_lock
-                        .wallet_state
-                        .confirmed_available_balance(&wallet_status, timestamp);
+                    let original_balance = wallet_status.available_confirmed(timestamp);
                     assert!(original_balance.is_zero(), "Original balance assumed zero");
                 };
 
@@ -5917,9 +5986,7 @@ mod tests {
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
                     let wallet_status = state_lock.get_wallet_status_for_tip().await;
-                    let new_balance = state_lock
-                        .wallet_state
-                        .confirmed_available_balance(&wallet_status, timestamp);
+                    let new_balance = wallet_status.available_confirmed(timestamp);
                     let mut expected_balance = Block::block_subsidy(block_1.header().height);
                     expected_balance.div_two();
                     assert_eq!(

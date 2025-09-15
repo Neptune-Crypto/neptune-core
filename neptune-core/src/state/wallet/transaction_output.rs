@@ -334,6 +334,18 @@ impl TxOutput {
         self.owned
     }
 
+    /// Determine whether there is a time-lock, with any release date, on the
+    /// UTXO.
+    pub(crate) fn is_timelocked(&self) -> bool {
+        self.utxo.is_timelocked()
+    }
+
+    /// Add to the amount with a delta.
+    pub(crate) fn add_to_amount(mut self, delta: NativeCurrencyAmount) -> Self {
+        self.utxo = self.utxo.add_to_amount(delta);
+        self
+    }
+
     pub fn is_offchain(&self) -> bool {
         matches!(
             self.notification_method,

@@ -15,6 +15,7 @@ use crate::api::export::Network;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
@@ -161,8 +162,9 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         None => previous_block.kernel.header.timestamp + network.target_block_interval(),
     };
 
+    let coinbase_distribution = CoinbaseDistribution::solo(composer_key.to_address().into());
     let composer_parameters = ComposerParameters::new(
-        composer_key.to_address().into(),
+        coinbase_distribution,
         coinbase_sender_randomness,
         Some(composer_key.receiver_preimage()),
         guesser_fraction,
@@ -470,7 +472,10 @@ async fn fake_block_successor(
 
 /// Return a fake, deterministic, empty block for testing purposes, with a
 /// specified successsor and specified network. Does not have valid PoW.
-pub(crate) async fn fake_deterministic_successor(predecessor: &Block, network: Network) -> Block {
+pub(crate) async fn fake_valid_deterministic_successor(
+    predecessor: &Block,
+    network: Network,
+) -> Block {
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
     fake_valid_block_proposal_successor_for_test(
         predecessor,
@@ -490,8 +495,12 @@ pub async fn fake_block_successor_with_merged_tx(
     network: Network,
 ) -> Block {
     let (mut seed_bytes, mut seed_digests) = (rness.bytes_arr.to_vec(), rness.digests.to_vec());
+
+    let coinbase_reward_address =
+        GenerationReceivingAddress::derive_from_seed(seed_digests.pop().unwrap());
+    let coinbase_distribution = CoinbaseDistribution::solo(coinbase_reward_address.into());
     let composer_parameters = ComposerParameters::new(
-        GenerationReceivingAddress::derive_from_seed(seed_digests.pop().unwrap()).into(),
+        coinbase_distribution,
         seed_digests.pop().unwrap(),
         None,
         0.5f64,
@@ -615,11 +624,11 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
-    async fn fake_deterministic_successor_is_deterministic() {
+    async fn fake_valid_deterministic_successor_is_deterministic() {
         let network = Network::Main;
         let block = Block::genesis(network);
-        let ret0 = fake_deterministic_successor(&block, network).await;
-        let ret1 = fake_deterministic_successor(&block, network).await;
+        let ret0 = fake_valid_deterministic_successor(&block, network).await;
+        let ret1 = fake_valid_deterministic_successor(&block, network).await;
         assert_eq!(ret0, ret1);
     }
 }
