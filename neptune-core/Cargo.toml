@@ -33,6 +33,8 @@ log-slow-read-lock = ["track-lock-location", "track-lock-time"]
 # alternative: run tokio-console
 log-lock_events = ["track-lock-location"]
 
+rest = ["dep:axum", "dep:axum-extra", "dep:tower-http"]
+
 # locks::sync::tokio support for tracking location of lock acquisition
 # requires nightly.  not generally useful by itself.
 track-lock-location = []
@@ -113,6 +115,11 @@ sysinfo = "0.31.4"
 thread-priority = "1.2.0"
 rayon = "1.10"
 humantime = "2.1.0"
+
+# "rest" feature dependencies
+axum = { version = "0.8.1", optional = true }
+axum-extra = { version = "0.10.0", features = ["erased-json", "typed-header"], optional = true }
+tower-http = { version = "0.6.2", features = ["cors", "trace"], optional = true }
 
 [dev-dependencies]
 
