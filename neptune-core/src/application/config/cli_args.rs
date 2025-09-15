@@ -351,6 +351,10 @@ pub struct Args {
     #[clap(long, default_value = "9799", value_name = "PORT")]
     pub rpc_port: u16,
 
+    /// Port on which to listen for REST connections.
+    #[clap(long, default_value = "9800", value_name = "PORT")]
+    pub(crate) rest_port: Option<u16>,
+
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
     pub peer_listen_addr: IpAddr,

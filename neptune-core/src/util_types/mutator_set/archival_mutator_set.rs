@@ -5,6 +5,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Tip5;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -21,7 +22,6 @@ use super::shared::CHUNK_SIZE;
 use crate::application::database::storage::storage_vec::traits::*;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::util_types::archival_mmr::ArchivalMmr;
-use crate::util_types::mutator_set::archival_mutator_set::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::MutatorSetError;
 
@@ -623,6 +623,24 @@ where
 
         new_target_chunks.indices_and_chunks().into_iter().collect()
     }
+}
+
+/// Data structure for requesting components of a mutator set membership proof
+/// from an archival state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg(feature = "rest")]
+pub struct RequestMsMembershipProofEx {
+    pub swbf_indices: Vec<u128>,
+    pub aocl_leaf_index: u64,
+}
+
+/// Data structure for returning components of a mutator set membership proof
+/// from an archival state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg(feature = "rest")]
+pub struct MsMembershipProofEx {
+    pub auth_path_aocl: MmrMembershipProof,
+    pub target_chunks: ChunkDictionary,
 }
 
 #[cfg(test)]

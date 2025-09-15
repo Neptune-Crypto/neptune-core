@@ -6,3 +6,6 @@ pub mod locks;
 pub mod loops;
 pub mod rpc;
 pub mod triton_vm_job_queue;
+
+#[cfg(feature = "rest")]
+pub mod rest_server;

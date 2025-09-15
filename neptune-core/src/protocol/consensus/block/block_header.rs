@@ -273,7 +273,7 @@ impl BlockHeaderWithBlockHashWitness {
     }
 }
 
-#[cfg(any(test, feature = "arbitrary-impls"))]
+#[cfg(test)]
 impl BlockHeader {
     pub(crate) fn arbitrary_with_height_and_difficulty(
         height: BlockHeight,
