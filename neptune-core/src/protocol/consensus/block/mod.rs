@@ -219,6 +219,10 @@ impl PartialEq for Block {
 impl Eq for Block {}
 
 impl Block {
+    pub(crate) fn into_kernel_and_proof(self) -> (BlockKernel, BlockProof) {
+        (self.kernel, self.proof)
+    }
+
     pub(crate) async fn block_template_from_block_primitive_witness(
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
