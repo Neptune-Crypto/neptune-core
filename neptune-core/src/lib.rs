@@ -201,19 +201,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
             main_to_peer_broadcast_tx.subscribe();
         let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = peer_task_to_main_tx.clone();
-        let peer_join_handle = tokio::task::Builder::new()
-            .name("call_peer_wrapper_3")
-            .spawn(async move {
-                call_peer(
-                    peer_address,
-                    peer_state_var.clone(),
-                    main_to_peer_broadcast_rx_clone,
-                    peer_task_to_main_tx_clone,
-                    own_handshake_data,
-                    1, // All outgoing connections have distance 1
-                )
-                .await;
-            })?;
+        let peer_join_handle = tokio::task::spawn(async move {
+            call_peer(
+                peer_address,
+                peer_state_var.clone(),
+                main_to_peer_broadcast_rx_clone,
+                peer_task_to_main_tx_clone,
+                own_handshake_data,
+                1, // All outgoing connections have distance 1
+            )
+            .await;
+        });
         task_join_handles.push(peer_join_handle);
     }
     debug!("Made outgoing connections to peers");
@@ -223,17 +221,15 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     let (main_to_miner_tx, main_to_miner_rx) = mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
     let miner_state_lock = global_state_lock.clone(); // bump arc refcount.
     if global_state_lock.cli().mine() {
-        let miner_join_handle = tokio::task::Builder::new()
-            .name("miner")
-            .spawn(async move {
-                application::loops::mine_loop::mine(
-                    main_to_miner_rx,
-                    miner_to_main_tx,
-                    miner_state_lock,
-                )
-                .await
-                .expect("Error in mining task");
-            })?;
+        let miner_join_handle = tokio::task::spawn(async move {
+            application::loops::mine_loop::mine(
+                main_to_miner_rx,
+                miner_to_main_tx,
+                miner_state_lock,
+            )
+            .await
+            .expect("Error in mining task");
+        });
         task_join_handles.push(miner_join_handle);
         info!("Started mining task");
     }

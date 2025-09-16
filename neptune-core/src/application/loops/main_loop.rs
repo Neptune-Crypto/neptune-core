@@ -1229,19 +1229,17 @@ impl MainLoopHandler {
             let global_state_lock = self.global_state_lock.clone();
             let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
             let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
-            let outgoing_connection_task = tokio::task::Builder::new()
-                .name("call_peer_wrapper_1")
-                .spawn(async move {
-                    call_peer(
-                        peer_with_lost_connection,
-                        global_state_lock,
-                        main_to_peer_broadcast_rx,
-                        peer_task_to_main_tx,
-                        own_handshake_data,
-                        1, // All CLI-specified peers have distance 1
-                    )
-                    .await;
-                })?;
+            let outgoing_connection_task = tokio::task::spawn(async move {
+                call_peer(
+                    peer_with_lost_connection,
+                    global_state_lock,
+                    main_to_peer_broadcast_rx,
+                    peer_task_to_main_tx,
+                    own_handshake_data,
+                    1, // All CLI-specified peers have distance 1
+                )
+                .await;
+            });
             main_loop_state.task_handles.push(outgoing_connection_task);
             main_loop_state.task_handles.retain(|th| !th.is_finished());
         }
@@ -1302,19 +1300,17 @@ impl MainLoopHandler {
         let global_state_lock = self.global_state_lock.clone();
         let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
         let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
-        let outgoing_connection_task = tokio::task::Builder::new()
-            .name("call_peer_wrapper_2")
-            .spawn(async move {
-                call_peer(
-                    peer_candidate,
-                    global_state_lock,
-                    main_to_peer_broadcast_rx,
-                    peer_task_to_main_tx,
-                    own_handshake_data,
-                    candidate_distance,
-                )
-                .await;
-            })?;
+        let outgoing_connection_task = tokio::task::spawn(async move {
+            call_peer(
+                peer_candidate,
+                global_state_lock,
+                main_to_peer_broadcast_rx,
+                peer_task_to_main_tx,
+                own_handshake_data,
+                candidate_distance,
+            )
+            .await;
+        });
         main_loop_state.task_handles.push(outgoing_connection_task);
         main_loop_state.task_handles.retain(|th| !th.is_finished());
 
@@ -1542,18 +1538,15 @@ impl MainLoopHandler {
 
         let global_state_lock_clone = self.global_state_lock.clone();
         let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
-        let proof_upgrader_task =
-            tokio::task::Builder::new()
-                .name("proof_upgrader")
-                .spawn(async move {
-                    upgrade_candidate
-                        .handle_upgrade(
-                            vm_job_queue,
-                            global_state_lock_clone,
-                            main_to_peer_broadcast_tx_clone,
-                        )
-                        .await
-                })?;
+        let proof_upgrader_task = tokio::task::spawn(async move {
+            upgrade_candidate
+                .handle_upgrade(
+                    vm_job_queue,
+                    global_state_lock_clone,
+                    main_to_peer_broadcast_tx_clone,
+                )
+                .await
+        });
 
         main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
 
@@ -1585,21 +1578,16 @@ impl MainLoopHandler {
             .cli()
             .proof_job_options(TritonVmJobPriority::Highest);
         let global_state_lock = self.global_state_lock.clone();
-        main_loop_state.update_mempool_txs_handle = Some(
-            tokio::task::Builder::new()
-                .name("mempool tx ms-updater")
-                .spawn(async move {
-                    Self::update_mempool_jobs(
-                        global_state_lock,
-                        update_jobs,
-                        vm_job_queue.clone(),
-                        update_sender,
-                        job_options,
-                    )
-                    .await
-                })
-                .unwrap(),
-        );
+        main_loop_state.update_mempool_txs_handle = Some(tokio::task::spawn(async move {
+            Self::update_mempool_jobs(
+                global_state_lock,
+                update_jobs,
+                vm_job_queue.clone(),
+                update_sender,
+                job_options,
+            )
+            .await
+        }));
         main_loop_state.update_mempool_receiver = update_receiver;
     }
 
@@ -1655,36 +1643,30 @@ impl MainLoopHandler {
 
             // Monitor for SIGTERM
             let mut sigterm = signal(SignalKind::terminate())?;
-            tokio::task::Builder::new()
-                .name("sigterm_handler")
-                .spawn(async move {
-                    if sigterm.recv().await.is_some() {
-                        info!("Received SIGTERM");
-                        tx_term.send(()).await.unwrap();
-                    }
-                })?;
+            tokio::task::spawn(async move {
+                if sigterm.recv().await.is_some() {
+                    info!("Received SIGTERM");
+                    tx_term.send(()).await.unwrap();
+                }
+            });
 
             // Monitor for SIGINT
             let mut sigint = signal(SignalKind::interrupt())?;
-            tokio::task::Builder::new()
-                .name("sigint_handler")
-                .spawn(async move {
-                    if sigint.recv().await.is_some() {
-                        info!("Received SIGINT");
-                        tx_int.send(()).await.unwrap();
-                    }
-                })?;
+            tokio::task::spawn(async move {
+                if sigint.recv().await.is_some() {
+                    info!("Received SIGINT");
+                    tx_int.send(()).await.unwrap();
+                }
+            });
 
             // Monitor for SIGQUIT
             let mut sigquit = signal(SignalKind::quit())?;
-            tokio::task::Builder::new()
-                .name("sigquit_handler")
-                .spawn(async move {
-                    if sigquit.recv().await.is_some() {
-                        info!("Received SIGQUIT");
-                        tx_quit.send(()).await.unwrap();
-                    }
-                })?;
+            tokio::task::spawn(async move {
+                if sigquit.recv().await.is_some() {
+                    info!("Received SIGQUIT");
+                    tx_quit.send(()).await.unwrap();
+                }
+            });
         }
 
         #[cfg(not(unix))]
@@ -1722,9 +1704,7 @@ impl MainLoopHandler {
                     let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = self.peer_task_to_main_tx.clone();
                     let own_handshake_data: HandshakeData = state.get_own_handshakedata();
                     let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
-                    let incoming_peer_task_handle = tokio::task::Builder::new()
-                        .name("answer_peer_wrapper")
-                        .spawn(async move {
+                    let incoming_peer_task_handle = tokio::task::spawn(async move {
                         match answer_peer(
                             stream,
                             global_state_lock,
@@ -1736,7 +1716,7 @@ impl MainLoopHandler {
                             Ok(()) => (),
                             Err(err) => debug!("Got result: {:?}", err),
                         }
-                    })?;
+                    });
                     main_loop_state.task_handles.push(incoming_peer_task_handle);
                     main_loop_state.task_handles.retain(|th| !th.is_finished());
                 }
@@ -1912,9 +1892,7 @@ impl MainLoopHandler {
 
                     let global_state_lock_clone = self.global_state_lock.clone();
                     let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
-                    let _proof_upgrader_task = tokio::task::Builder::new()
-                        .name("proof_upgrader")
-                        .spawn(async move {
+                    let _proof_upgrader_task = tokio::task::spawn(async move {
                         upgrade_job
                             .handle_upgrade(
                                 vm_job_queue.clone(),
@@ -1922,7 +1900,7 @@ impl MainLoopHandler {
                                 main_to_peer_broadcast_tx_clone,
                             )
                             .await
-                    })?;
+                    });
 
                     // main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
                     // If transaction could not be shared immediately because
@@ -1940,17 +1918,15 @@ impl MainLoopHandler {
                     "Attempting to upgrade transactions: {}",
                     upgrade_job.affected_txids().iter().join(", ")
                 );
-                tokio::task::Builder::new()
-                    .name("proof_upgrader")
-                    .spawn(async move {
-                        upgrade_job
-                            .handle_upgrade(
-                                vm_job_queue,
-                                global_state_lock_clone,
-                                main_to_peer_broadcast_tx_clone,
-                            )
-                            .await
-                    })?;
+                tokio::task::spawn(async move {
+                    upgrade_job
+                        .handle_upgrade(
+                            vm_job_queue,
+                            global_state_lock_clone,
+                            main_to_peer_broadcast_tx_clone,
+                        )
+                        .await
+                });
 
                 Ok(false)
             }
@@ -3070,24 +3046,21 @@ mod tests {
             let peer_to_main_tx_clone = main_loop_handler.peer_task_to_main_tx.clone();
             let global_state_lock_clone = main_loop_handler.global_state_lock.clone();
             let (_main_to_peer_tx_mock, main_to_peer_rx_mock) = tokio::sync::broadcast::channel(10);
-            let incoming_peer_task_handle = tokio::task::Builder::new()
-                .name("answer_peer_wrapper")
-                .spawn(async move {
-                    match answer_peer(
-                        mock_stream,
-                        global_state_lock_clone,
-                        peer_socket_address,
-                        main_to_peer_rx_mock,
-                        peer_to_main_tx_clone,
-                        own_handshake,
-                    )
-                    .await
-                    {
-                        Ok(()) => (),
-                        Err(err) => debug!("Got result: {:?}", err),
-                    }
-                })
-                .unwrap();
+            let incoming_peer_task_handle = tokio::task::spawn(async move {
+                match answer_peer(
+                    mock_stream,
+                    global_state_lock_clone,
+                    peer_socket_address,
+                    main_to_peer_rx_mock,
+                    peer_to_main_tx_clone,
+                    own_handshake,
+                )
+                .await
+                {
+                    Ok(()) => (),
+                    Err(err) => debug!("Got result: {:?}", err),
+                }
+            });
 
             // `answer_peer_wrapper` should send a
             // `DisconnectFromLongestLivedPeer` message to main
