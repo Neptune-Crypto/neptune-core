@@ -2,6 +2,9 @@
 
 prog :=neptune-core
 
+# Specify features: `make install FEATURES="rest"
+FEATURES ?=
+
 # Set another target dir than default to avoid builds from `make`
 # to invalidate cache from barebones use of `cargo` commands.
 # The cache is cleared when a new `RUSTFLAGS` value is encountered,
@@ -38,7 +41,7 @@ happy: clippy format
 	cargo test --doc
 
 install:
-	cargo install --force --locked --path neptune-core/
+	cargo install --force --locked --path neptune-core/ $(if $(FEATURES),--features "$(FEATURES)")
 	cargo install --force --locked --path neptune-core-cli/
 	cargo install --force --locked --path neptune-dashboard/
 
