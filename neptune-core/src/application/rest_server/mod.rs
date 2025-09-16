@@ -1,9 +1,11 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use anyhow::Context;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
+use axum::extract::Query;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -11,9 +13,12 @@ use axum::response::Response;
 use axum_extra::response::ErasedJson;
 use block_selector::BlockSelectorExtended;
 use bytes::Buf;
+use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::twenty_first::prelude::MerkleTree;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -24,10 +29,14 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_info::BlockInfo;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
+use crate::protocol::consensus::block::BlockProof;
 use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
+use crate::twenty_first::prelude::BFieldCodec;
 use crate::util_types::mutator_set::archival_mutator_set::MsMembershipProofEx;
 use crate::util_types::mutator_set::archival_mutator_set::RequestMsMembershipProofEx;
+use crate::Block;
 use crate::RPCServerToMain;
 
 /// An enum of error handlers for the REST API server.
@@ -50,28 +59,102 @@ impl From<anyhow::Error> for RestError {
     }
 }
 
+/// Allow caller to get the block hash without a valid proof to save bandwidth
+/// and space in the application.
+#[derive(Deserialize)]
+struct BlockQuery {
+    include_proof: bool,
+}
+
+/// Data structure for sharing a block with an external program.
+///
+/// If the `proof` value is not the actual proof of the block, the `proof_leaf`
+/// value can be used to recalculate the block hash.
+#[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize)]
+pub struct ExportedBlock {
+    pub kernel: BlockKernel,
+    pub proof: BlockProof,
+    pub proof_leaf: Digest,
+
+    // this is only here as an optimization for Block::hash()
+    // so that we lazily compute the hash at most once.
+    #[serde(skip)]
+    #[bfield_codec(ignore)]
+    #[get_size(ignore)]
+    digest: OnceLock<Digest>,
+}
+
+impl ExportedBlock {
+    /// Convert to a block, without any form of verification.
+    pub fn to_block(self) -> Block {
+        Block::new(
+            self.kernel.header,
+            self.kernel.body,
+            self.kernel.appendix,
+            self.proof,
+        )
+    }
+
+    pub fn from_block(block: Block, include_proof: bool) -> Self {
+        let (kernel, proof) = block.into_kernel_and_proof();
+        let proof_leaf = Tip5::hash_varlen(&proof.encode());
+        let proof = if include_proof {
+            proof
+        } else {
+            BlockProof::Invalid
+        };
+        Self {
+            proof_leaf,
+            digest: OnceLock::default(),
+            kernel,
+            proof,
+        }
+    }
+
+    /// Calculate the block hash without assuming that the proof is valid.
+    fn mast_hash(&self) -> Digest {
+        let block_header_leaf = Tip5::hash_varlen(&self.kernel.header.mast_hash().encode());
+        let body_leaf = Tip5::hash_varlen(&self.kernel.body.mast_hash().encode());
+        let appendix_leaf = Tip5::hash_varlen(&self.kernel.appendix.encode());
+        let kernel_leafs = [
+            block_header_leaf,
+            body_leaf,
+            appendix_leaf,
+            Digest::default(),
+        ];
+        let kernel_hash = MerkleTree::sequential_frugal_root(&kernel_leafs).unwrap();
+        let block_leafs = [Tip5::hash_varlen(&kernel_hash.encode()), self.proof_leaf];
+
+        MerkleTree::sequential_frugal_root(&block_leafs).unwrap()
+    }
+
+    /// Calculate the block hash without reading the proof, meaning that the
+    /// block hash can be calculated without the exported block containing a
+    /// valid proof.
+    #[inline]
+    pub fn hash(&self) -> Digest {
+        *self.digest.get_or_init(|| self.mast_hash())
+    }
+}
+
 pub(crate) async fn run_rpc_server(
     rest_listener: TcpListener,
     rpcstate: NeptuneRPCServer,
 ) -> Result<(), anyhow::Error> {
     let cors = CorsLayer::new()
         .allow_origin(tower_http::cors::Any)
-        .allow_methods([
-            axum::http::Method::GET,
-            axum::http::Method::POST,
-            axum::http::Method::OPTIONS,
-        ])
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
         .allow_headers([axum::http::header::CONTENT_TYPE]);
 
     let router = {
         let routes = axum::Router::new()
             .route(
                 "/rpc/block/{*block_selector}",
-                axum::routing::get(get_block_kernel),
+                axum::routing::get(get_block),
             )
             .route(
                 "/rpc/batch_block/{height}/{batch_size}",
-                axum::routing::get(get_batch_block_kernel),
+                axum::routing::get(get_batch_block),
             )
             .route(
                 "/rpc/block_info/{*block_selector}",
@@ -105,9 +188,10 @@ pub(crate) async fn run_rpc_server(
     Ok(())
 }
 
-async fn get_block_kernel(
+async fn get_block(
     State(rpcstate): State<NeptuneRPCServer>,
     Path(block_selector): Path<BlockSelectorExtended>,
+    Query(params): Query<BlockQuery>,
 ) -> Result<ErasedJson, RestError> {
     let block_selector = BlockSelector::from(block_selector);
     let state = rpcstate.state.lock_guard().await;
@@ -119,12 +203,15 @@ async fn get_block_kernel(
         return Ok(ErasedJson::pretty(Option::<BlockKernel>::None));
     };
 
-    Ok(ErasedJson::pretty(block.kernel.clone()))
+    let ret = ExportedBlock::from_block(block, params.include_proof);
+
+    Ok(ErasedJson::pretty(ret))
 }
 
-async fn get_batch_block_kernel(
+async fn get_batch_block(
     State(rpcstate): State<NeptuneRPCServer>,
     Path((height, batch_size)): Path<(u64, u64)>,
+    Query(params): Query<BlockQuery>,
 ) -> Result<Vec<u8>, RestError> {
     let mut blocks = Vec::with_capacity(batch_size as usize);
     for cur_height in height..height + batch_size {
@@ -138,7 +225,8 @@ async fn get_batch_block_kernel(
             break;
         };
 
-        blocks.push(block.kernel.clone());
+        let block = ExportedBlock::from_block(block, params.include_proof);
+        blocks.push(block);
     }
 
     bincode::serialize(&blocks).map_err(|e| RestError(e.to_string()))
@@ -258,14 +346,14 @@ async fn broadcast_transaction(
     }))
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct SendTx {
-    broadcast_tx: BroadcastTx,
-    amount: String,
-    sender_randomness: String,
-    fee_address: String,
-    block_height: u64,
-}
+// #[derive(Debug, Deserialize, Serialize, Clone)]
+// struct SendTx {
+//     broadcast_tx: BroadcastTx,
+//     amount: String,
+//     sender_randomness: String,
+//     fee_address: String,
+//     block_height: u64,
+// }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ResponseSendTx {
@@ -399,5 +487,33 @@ mod block_selector {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::export::Network;
+    use crate::tests::shared::blocks::invalid_empty_block_with_proof_size;
+
+    #[test]
+    fn exported_block_hash_calculation_is_consistent() {
+        let network = Network::Main;
+
+        // Set proof-size to none-zero to ensure that proof is accounted
+        // correctly for in the block hash.
+        let proof_size = 533;
+        let block =
+            invalid_empty_block_with_proof_size(&Block::genesis(network), network, proof_size);
+        let as_exported_block_with_proof = ExportedBlock::from_block(block.clone(), true);
+        let as_exported_block_without_proof = ExportedBlock::from_block(block.clone(), true);
+
+        assert_eq!(block.hash(), as_exported_block_with_proof.hash());
+        assert_eq!(block.hash(), as_exported_block_without_proof.hash());
+        assert_eq!(block.hash(), as_exported_block_with_proof.to_block().hash());
+        assert_eq!(
+            block.hash(),
+            as_exported_block_without_proof.to_block().hash()
+        );
     }
 }
