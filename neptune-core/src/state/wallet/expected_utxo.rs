@@ -56,7 +56,7 @@ pub struct ExpectedUtxo {
 }
 
 impl ExpectedUtxo {
-    pub(crate) fn new(
+    pub fn new(
         utxo: Utxo,
         sender_randomness: Digest,
         receiver_preimage: Digest,

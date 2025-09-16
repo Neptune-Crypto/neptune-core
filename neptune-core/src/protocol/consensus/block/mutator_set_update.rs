@@ -73,7 +73,7 @@ impl MutatorSetUpdate {
     /// Returns an error if some removal record could not be removed. This
     /// return value **must** be verified to be OK. If it is not, then the
     /// mutator set will be in an invalid state.
-    pub(crate) fn apply_to_accumulator_and_records(
+    pub fn apply_to_accumulator_and_records(
         &self,
         ms_accumulator: &mut MutatorSetAccumulator,
         removal_records: &mut [&mut RemovalRecord],
