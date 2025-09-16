@@ -7,7 +7,7 @@ use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::RemovalRecord;
 
 #[derive(Debug, Clone)]
-pub(crate) struct AuthenticatedItem {
+pub struct AuthenticatedItem {
     pub(crate) item: Digest,
     pub(crate) ms_membership_proof: MsMembershipProof,
 }

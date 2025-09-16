@@ -67,7 +67,7 @@ pub struct MergeWitness {
     pub(crate) right_kernel: TransactionKernel,
 
     // This field, exceptionally, *CAN* contain packed `RemovalRecord`s.
-    pub(crate) new_kernel: TransactionKernel,
+    pub new_kernel: TransactionKernel,
     pub(crate) left_proof: Proof,
     pub(crate) right_proof: Proof,
 }
@@ -108,7 +108,7 @@ impl MergeWitness {
     /// Generate a `MergeWitness` from two transactions (kernels plus proofs).
     /// Assumes the transactions can be merged. Takes randomness for shuffling
     /// the concatenations of inputs, outputs, and announcements.
-    pub(crate) fn from_transactions(
+    pub fn from_transactions(
         left: Transaction,
         right: Transaction,
         shuffle_seed: [u8; 32],

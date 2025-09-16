@@ -28,7 +28,7 @@ pub struct WalletEntropy {
 }
 
 impl WalletEntropy {
-    pub(crate) fn new(secret_seed: SecretKeyMaterial) -> Self {
+    pub fn new(secret_seed: SecretKeyMaterial) -> Self {
         Self { secret_seed }
     }
 
@@ -56,7 +56,7 @@ impl WalletEntropy {
 
     /// Returns the receiving address for prover rewards, *i.e.*, composer fee
     /// or proof-upgrader (gobbling) fee.
-    pub(crate) fn prover_fee_address(&self) -> ReceivingAddress {
+    pub fn prover_fee_address(&self) -> ReceivingAddress {
         self.composer_fee_key().to_address().into()
     }
 

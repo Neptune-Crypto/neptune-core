@@ -136,7 +136,7 @@ impl TransactionDetails {
     ///
     /// - If the supplied fee is negative.
     /// - If UtxoNotifyMethod is set to none
-    pub(crate) fn fee_gobbler(
+    pub fn fee_gobbler(
         gobbled_fee: NativeCurrencyAmount,
         sender_randomness: Digest,
         mutator_set_accumulator: MutatorSetAccumulator,
@@ -220,7 +220,7 @@ impl TransactionDetails {
     /// - mutator set membership proofs, must be valid wrt. supplied mutator set
     ///
     /// See also: [Self::new_with_coinbase].
-    pub(crate) fn new_without_coinbase(
+    pub fn new_without_coinbase(
         tx_inputs: impl Into<TxInputList>,
         tx_outputs: impl Into<TxOutputList>,
         fee: NativeCurrencyAmount,

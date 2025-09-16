@@ -68,7 +68,7 @@ impl SingleProofWitness {
         Self::Update(witness)
     }
 
-    pub(crate) fn from_merge(merge_witness: MergeWitness) -> Self {
+    pub fn from_merge(merge_witness: MergeWitness) -> Self {
         Self::Merger(merge_witness)
     }
 }
