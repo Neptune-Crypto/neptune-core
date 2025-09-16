@@ -23,7 +23,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 /// See [UtxoNotificationPayload], [ExpectedUtxo]
 #[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
-pub(crate) struct IncomingUtxo {
+pub struct IncomingUtxo {
     pub(crate) utxo: Utxo,
     pub(crate) sender_randomness: Digest,
     pub(crate) receiver_preimage: Digest,
@@ -70,6 +70,36 @@ impl From<&ExpectedUtxo> for IncomingUtxo {
 }
 
 impl IncomingUtxo {
+    pub fn new(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
+        is_guesser_fee: bool,
+    ) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_preimage,
+            is_guesser_fee,
+        }
+    }
+
+    pub fn is_guesser_fee(&self) -> bool {
+        self.is_guesser_fee
+    }
+
+    pub fn utxo(&self) -> &Utxo {
+        &self.utxo
+    }
+
+    pub fn sender_randomness(&self) -> Digest {
+        self.sender_randomness
+    }
+
+    pub fn receiver_preimage(&self) -> Digest {
+        self.receiver_preimage
+    }
+
     pub(crate) fn utxo_triple(&self) -> UtxoTriple {
         UtxoTriple {
             utxo: self.utxo.clone(),
@@ -77,7 +107,7 @@ impl IncomingUtxo {
             receiver_digest: self.receiver_preimage.hash(),
         }
     }
-    pub(crate) fn addition_record(&self) -> AdditionRecord {
+    pub fn addition_record(&self) -> AdditionRecord {
         self.utxo_triple().addition_record()
     }
 

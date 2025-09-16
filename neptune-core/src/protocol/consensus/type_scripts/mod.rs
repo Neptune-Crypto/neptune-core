@@ -95,7 +95,7 @@ impl TypeScriptAndWitness {
         }
     }
 
-    pub(crate) fn nondeterminism(&self) -> NonDeterminism {
+    pub fn nondeterminism(&self) -> NonDeterminism {
         NonDeterminism::new(self.nd_tokens.clone())
             .with_digests(self.nd_digests.clone())
             .with_ram(self.nd_memory.iter().copied().collect::<HashMap<_, _>>())

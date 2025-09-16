@@ -131,7 +131,7 @@ impl SpendingKey {
     }
 
     /// Return the lock script and its witness
-    pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
+    pub fn lock_script_and_witness(&self) -> LockScriptAndWitness {
         match self {
             SpendingKey::Generation(generation_spending_key) => {
                 generation_spending_key.lock_script_and_witness()
@@ -146,7 +146,7 @@ impl SpendingKey {
         }
     }
 
-    pub(crate) fn lock_script_hash(&self) -> Digest {
+    pub fn lock_script_hash(&self) -> Digest {
         self.lock_script().hash()
     }
 
@@ -207,10 +207,7 @@ impl SpendingKey {
     ///
     ///  - Logs a warning for any announcement targeted at this key that cannot
     ///    be decrypted.
-    pub(crate) fn scan_for_announced_utxos(
-        &self,
-        tx_kernel: &TransactionKernel,
-    ) -> Vec<IncomingUtxo> {
+    pub fn scan_for_announced_utxos(&self, tx_kernel: &TransactionKernel) -> Vec<IncomingUtxo> {
         // pre-compute some fields, and early-abort if key cannot receive.
         let receiver_identifier = self.receiver_identifier();
         let receiver_preimage = self.privacy_preimage();
