@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-#[cfg(test)]
-use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
@@ -30,7 +28,7 @@ use super::shared::WINDOW_SIZE;
 use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct MutatorSetAccumulator {
     pub aocl: MmrAccumulator,
     pub swbf_inactive: MmrAccumulator,
