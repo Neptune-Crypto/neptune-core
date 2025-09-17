@@ -43,6 +43,7 @@
 //!
 //! Every RPC method returns an [RpcResult] which is wrapped inside a
 //! [tarpc::Response] by the rpc server.
+pub mod coinbase_output_readable;
 pub mod proof_of_work_puzzle;
 
 use std::collections::HashMap;
@@ -76,7 +77,7 @@ use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
-use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
+use crate::application::rpc::server::coinbase_output_readable::CoinbaseOutputReadable;
 use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::macros::fn_name;
@@ -1881,7 +1882,7 @@ pub trait RPC {
     /// working on an already started block proposal with another distribution.
     async fn set_coinbase_distribution(
         token: auth::Token,
-        coinbase_distribution: Vec<CoinbaseOutput>,
+        coinbase_distribution: Vec<CoinbaseOutputReadable>,
     ) -> RpcResult<()>;
 
     /// Remove a coinbase distribution from state, thus defaulting back to
@@ -3349,24 +3350,35 @@ impl RPC for NeptuneRPCServer {
         mut self,
         _context: tarpc::context::Context,
         token: auth::Token,
-        coinbase_distribution: Vec<CoinbaseOutput>,
+        coinbase_distribution_readable: Vec<CoinbaseOutputReadable>,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
+
+        let network = self.state.cli().network;
+        let mut coinbase_distribution = vec![];
+        for output in coinbase_distribution_readable {
+            let output = match output.into_coinbase_output(network) {
+                Ok(cbo) => cbo,
+                Err(err) => return Err(RpcError::InvalidCoinbaseDistribution(err.to_string())),
+            };
+            coinbase_distribution.push(output);
+        }
 
         let coinbase_distribution = match CoinbaseDistribution::try_new(coinbase_distribution) {
             Ok(cd) => cd,
             Err(err) => return Err(RpcError::InvalidCoinbaseDistribution(err.to_string())),
         };
 
-        if self.state.cli().mine() {
-            let mut state = self.state.lock_guard_mut().await;
-            state
-                .mining_state
-                .set_coinbase_distribution(coinbase_distribution);
-        } else {
-            warn!("Cannot set coinbase distribution as node is not mining");
+        if !self.state.cli().compose {
+            warn!("Cannot set coinbase distribution as node is not composing");
+            return Err(RpcError::NotComposing);
         }
+
+        let mut state = self.state.lock_guard_mut().await;
+        state
+            .mining_state
+            .set_coinbase_distribution(coinbase_distribution);
 
         Ok(())
     }
@@ -4010,6 +4022,9 @@ pub mod error {
 
         #[error("Invalid coinbase distribution: {0}")]
         InvalidCoinbaseDistribution(String),
+
+        #[error("Node is not setup to compose")]
+        NotComposing,
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
@@ -4315,6 +4330,14 @@ mod tests {
 
         let _ = rpc_server.clone().pause_miner(ctx, token).await;
         let _ = rpc_server.clone().restart_miner(ctx, token).await;
+        let _ = rpc_server
+            .clone()
+            .set_coinbase_distribution(ctx, token, vec![])
+            .await;
+        let _ = rpc_server
+            .clone()
+            .unset_coinbase_distribution(ctx, token)
+            .await;
         let _ = rpc_server
             .clone()
             .prune_abandoned_monitored_utxos(ctx, token)
@@ -5055,6 +5078,61 @@ mod tests {
             )
             .await
             .is_err());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn coinbase_distribution_happy_path() {
+        let network = Network::Main;
+        let ctx = context::current();
+        let mut rng = rand::rng();
+        let address0 = GenerationSpendingKey::derive_from_seed(rng.random()).to_address();
+        let output0 = CoinbaseOutputReadable::new(205, address0.to_bech32m(network).unwrap(), true);
+
+        let address1 = GenerationSpendingKey::derive_from_seed(rng.random()).to_address();
+        let output1 = CoinbaseOutputReadable::new(300, address1.to_bech32m(network).unwrap(), true);
+
+        let address2 = GenerationSpendingKey::derive_from_seed(rng.random()).to_address();
+        let output2 =
+            CoinbaseOutputReadable::new(495, address2.to_bech32m(network).unwrap(), false);
+
+        let cli = cli_args::Args {
+            network,
+            compose: true,
+            ..Default::default()
+        };
+        let rpc_server = test_rpc_server(WalletEntropy::new_random(), 2, cli).await;
+        let token = cookie_token(&rpc_server).await;
+        assert!(rpc_server
+            .state
+            .lock_guard()
+            .await
+            .mining_state
+            .overridden_coinbase_distribution()
+            .is_none());
+        assert!(rpc_server
+            .clone()
+            .set_coinbase_distribution(ctx, token, vec![output0, output1, output2])
+            .await
+            .is_ok());
+        assert!(rpc_server
+            .state
+            .lock_guard()
+            .await
+            .mining_state
+            .overridden_coinbase_distribution()
+            .is_some());
+        assert!(rpc_server
+            .clone()
+            .unset_coinbase_distribution(ctx, token)
+            .await
+            .is_ok());
+        assert!(rpc_server
+            .state
+            .lock_guard()
+            .await
+            .mining_state
+            .overridden_coinbase_distribution()
+            .is_none());
     }
 
     mod pow_puzzle_tests {

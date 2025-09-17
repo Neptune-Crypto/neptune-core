@@ -2,12 +2,10 @@ use std::ops::Deref;
 
 use anyhow::ensure;
 use anyhow::Result;
-use serde::Deserialize;
-use serde::Serialize;
 
 use crate::api::export::ReceivingAddress;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct CoinbaseOutput {
     pub fraction_in_promille: u32,
     pub recipient: ReceivingAddress,
