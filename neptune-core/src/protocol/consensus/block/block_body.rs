@@ -13,7 +13,11 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
+use crate::api::export::AdditionRecord;
+use crate::api::export::NativeCurrencyAmount;
 use crate::prelude::twenty_first;
+use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
+use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
@@ -122,6 +126,34 @@ impl BlockBody {
     /// The kernel of the transaction contained in the block.
     pub fn transaction_kernel(&self) -> &TransactionKernel {
         &self.transaction_kernel
+    }
+
+    /// Return the mutator set as it looks after the application of this block.
+    ///
+    /// Includes the guesser-fee UTXOs which are not included by the
+    /// `mutator_set_accumulator` field on the block body.
+    pub(crate) fn mutator_set_accumulator_after(
+        &self,
+        guesser_fee_addition_records: Vec<AdditionRecord>,
+    ) -> MutatorSetAccumulator {
+        let mutator_set_update = MutatorSetUpdate::new(vec![], guesser_fee_addition_records);
+        let mut msa = self.mutator_set_accumulator.clone();
+        mutator_set_update.apply_to_accumulator(&mut msa).expect("mutator set update derived from guesser fees should be applicable to mutator set accumulator contained in body");
+
+        msa
+    }
+
+    /// The amount rewarded to the guesser who finds a valid nonce for this
+    /// block.
+    pub(crate) fn total_guesser_reward(
+        &self,
+    ) -> Result<NativeCurrencyAmount, BlockValidationError> {
+        let r = self.transaction_kernel.fee;
+        if r.is_negative() {
+            Err(BlockValidationError::NegativeFee)
+        } else {
+            Ok(r)
+        }
     }
 }
 

@@ -5422,7 +5422,7 @@ mod tests {
                 block1.set_header_guesser_address(guesser_address.into());
                 assert_eq!(block1.hash(), resulting_block_hash);
                 assert_eq!(
-                    block1.total_guesser_reward().unwrap(),
+                    block1.body().total_guesser_reward().unwrap(),
                     pow_puzzle.total_guesser_reward
                 );
 

@@ -1064,6 +1064,7 @@ impl MainLoopHandler {
                     let verdict = global_state_mut.favor_incoming_block_proposal(
                         block.header().prev_block_digest,
                         block
+                            .body()
                             .total_guesser_reward()
                             .expect("block received by main loop must have guesser reward"),
                     );

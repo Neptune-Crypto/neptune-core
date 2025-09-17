@@ -836,7 +836,8 @@ impl GlobalState {
         }
 
         let maybe_existing_fee = self.mining_state.block_proposal.map(|x| {
-            x.total_guesser_reward()
+            x.body()
+                .total_guesser_reward()
                 .expect("block in state must be valid")
         });
         if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
@@ -872,7 +873,8 @@ impl GlobalState {
         }
 
         let maybe_existing_fee = self.mining_state.block_proposal.map(|x| {
-            x.total_guesser_reward()
+            x.body()
+                .total_guesser_reward()
                 .expect("block in state must be valid")
         });
         if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
@@ -904,6 +906,7 @@ impl GlobalState {
             MiningStatus::Guessing(guessing_work_info) => {
                 let old_guesser_reward = guessing_work_info.total_guesser_fee;
                 let new_guesser_reward = new_proposal
+                    .body()
                     .total_guesser_reward()
                     .expect("New proposal must be valid");
                 let Some(delta) = new_guesser_reward.checked_sub(&old_guesser_reward) else {
@@ -4396,7 +4399,10 @@ mod tests {
                 state
                     .favor_incoming_block_proposal(
                         small_prev_block_digest,
-                        small_guesser_fraction.total_guesser_reward().unwrap()
+                        small_guesser_fraction
+                            .body()
+                            .total_guesser_reward()
+                            .unwrap()
                     )
                     .is_ok(),
                 "Must favor low guesser fee over none"
@@ -4408,7 +4414,7 @@ mod tests {
                 state
                     .favor_incoming_block_proposal(
                         big_prev_block_digest,
-                        big_guesser_fraction.total_guesser_reward().unwrap()
+                        big_guesser_fraction.body().total_guesser_reward().unwrap()
                     )
                     .is_ok(),
                 "Must favor big guesser fee over low"
@@ -4418,13 +4424,13 @@ mod tests {
                 BlockProposal::foreign_proposal(big_guesser_fraction.clone());
             assert_eq!(
                 BlockProposalRejectError::InsufficientFee {
-                    current: Some(big_guesser_fraction.total_guesser_reward().unwrap()),
-                    received: big_guesser_fraction.total_guesser_reward().unwrap()
+                    current: Some(big_guesser_fraction.body().total_guesser_reward().unwrap()),
+                    received: big_guesser_fraction.body().total_guesser_reward().unwrap()
                 },
                 state
                     .favor_incoming_block_proposal(
                         big_prev_block_digest,
-                        big_guesser_fraction.total_guesser_reward().unwrap()
+                        big_guesser_fraction.body().total_guesser_reward().unwrap()
                     )
                     .unwrap_err(),
                 "Must favor existing over incoming equivalent"

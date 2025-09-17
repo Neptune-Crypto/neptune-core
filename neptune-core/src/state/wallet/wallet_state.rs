@@ -857,6 +857,7 @@ impl WalletState {
         let incoming_utxos = if was_guessed_by_us {
             let sender_randomness = block.hash();
             block
+                .kernel
                 .guesser_fee_utxos()
                 .expect("Block argument must have guesser fee UTXOs")
                 .into_iter()

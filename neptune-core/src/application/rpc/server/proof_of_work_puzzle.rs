@@ -42,6 +42,7 @@ impl ProofOfWorkPuzzle {
     /// guesser digest.
     pub fn new(block_proposal: Block, latest_block_header: BlockHeader) -> Self {
         let guesser_reward = block_proposal
+            .body()
             .total_guesser_reward()
             .expect("Block proposal must have well-defined guesser reward");
         let auth_paths = block_proposal.pow_mast_paths();

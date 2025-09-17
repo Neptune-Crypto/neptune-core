@@ -1564,6 +1564,7 @@ impl PeerLoopHandler {
                 let is_favorable = state.favor_incoming_block_proposal(
                     new_proposal.header().prev_block_digest,
                     new_proposal
+                        .body()
                         .total_guesser_reward()
                         .expect("Block was validated"),
                 );

@@ -1803,7 +1803,7 @@ pub(super) mod tests {
         );
 
         assert_eq!(
-            num_premine_utxos + block_1b.guesser_fee_utxos().unwrap().len(),
+            num_premine_utxos + block_1b.kernel.guesser_fee_utxos().unwrap().len(),
             alice
                 .lock_guard()
                 .await
