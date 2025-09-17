@@ -24,11 +24,13 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::*;
 
+use crate::api::export::AdditionRecord;
 use crate::application::rpc::server::NeptuneRPCServer;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_info::BlockInfo;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
+use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::BlockProof;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
@@ -36,6 +38,8 @@ use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::twenty_first::prelude::BFieldCodec;
 use crate::util_types::mutator_set::archival_mutator_set::MsMembershipProofEx;
 use crate::util_types::mutator_set::archival_mutator_set::RequestMsMembershipProofEx;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use crate::Block;
 use crate::RPCServerToMain;
 
@@ -85,16 +89,6 @@ pub struct ExportedBlock {
 }
 
 impl ExportedBlock {
-    /// Convert to a block, without any form of verification.
-    pub fn to_block(self) -> Block {
-        Block::new(
-            self.kernel.header,
-            self.kernel.body,
-            self.kernel.appendix,
-            self.proof,
-        )
-    }
-
     pub fn from_block(block: Block, include_proof: bool) -> Self {
         let (kernel, proof) = block.into_kernel_and_proof();
         let proof_leaf = Tip5::hash_varlen(&proof.encode());
@@ -126,6 +120,45 @@ impl ExportedBlock {
         let block_leafs = [Tip5::hash_varlen(&kernel_hash.encode()), self.proof_leaf];
 
         MerkleTree::sequential_frugal_root(&block_leafs).unwrap()
+    }
+
+    fn guesser_fee_addition_records(&self) -> Vec<AdditionRecord> {
+        let block_hash = self.hash();
+        self.kernel
+            .guesser_fee_addition_records(block_hash)
+            .expect("Exported blocks are assumed valid")
+    }
+
+    /// Return the mutator set as it looks after the application of this block.
+    ///
+    /// Includes the guesser-fee UTXOs which are not included by the
+    /// `mutator_set_accumulator` field on the block body.
+    pub fn mutator_set_accumulator_after(&self) -> MutatorSetAccumulator {
+        let guesser_fee_addition_records = self.guesser_fee_addition_records();
+        let msa = self
+            .kernel
+            .body
+            .mutator_set_accumulator_after(guesser_fee_addition_records);
+
+        msa
+    }
+
+    pub fn mutator_set_update(&self) -> MutatorSetUpdate {
+        let inputs =
+            RemovalRecordList::try_unpack(self.kernel.body.transaction_kernel.inputs.clone())
+                .expect(
+                    "Exported blocks are assumed valid, so removal record list unpacking must work",
+                );
+
+        let mut mutator_set_update =
+            MutatorSetUpdate::new(inputs, self.kernel.body.transaction_kernel.outputs.clone());
+
+        let guesser_addition_records = self.guesser_fee_addition_records();
+        mutator_set_update
+            .additions
+            .extend(guesser_addition_records);
+
+        mutator_set_update
     }
 
     /// Calculate the block hash without reading the proof, meaning that the
@@ -510,10 +543,5 @@ mod tests {
 
         assert_eq!(block.hash(), as_exported_block_with_proof.hash());
         assert_eq!(block.hash(), as_exported_block_without_proof.hash());
-        assert_eq!(block.hash(), as_exported_block_with_proof.to_block().hash());
-        assert_eq!(
-            block.hash(),
-            as_exported_block_without_proof.to_block().hash()
-        );
     }
 }
