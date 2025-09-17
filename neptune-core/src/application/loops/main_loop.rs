@@ -3129,7 +3129,6 @@ mod tests {
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
-        #[cfg(unix)]
         async fn new_block_from_peer_invokes_block_notify() {
             use std::fs;
 
@@ -3137,7 +3136,7 @@ mod tests {
             use crate::tests::shared::files::unit_test_data_directory;
             use crate::tests::shared::files::wait_for_file_to_exist;
 
-            const BLOCK_NOTIFY_SHELL_SCRIPT_NAME: &str = "block_notify_dummy.sh";
+            const BLOCK_NOTIFY_SHELL_SCRIPT_NAME: &str = "block_notify_dummy.py";
 
             let network = Network::Main;
             let dummy_block = invalid_empty_block(&Block::genesis(network), network);

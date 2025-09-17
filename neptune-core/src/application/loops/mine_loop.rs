@@ -1457,7 +1457,11 @@ pub(crate) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn block_proposal_with_custom_coinbase_distribution_is_valid() {
         let network = Network::Main;
-        let cli = cli_args::Args::default_with_network(network);
+        let cli = cli_args::Args {
+            network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
         let mut alice = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
         let address: ReceivingAddress = alice
             .lock_guard()
