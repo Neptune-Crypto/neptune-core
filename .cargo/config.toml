@@ -5,7 +5,10 @@ rustflags = ["--cfg", "tokio_unstable"]
 
 [env]
 # workaround for rustc 1.80 running out of stack space when building triton-vm
-RUST_MIN_STACK="33554432"
-# so that anyhow errors automatically display stack trace
-RUST_BACKTRACE="1"
+RUST_MIN_STACK = "33554432"
 
+# so that anyhow errors automatically display stack trace
+RUST_BACKTRACE = "1"
+
+# workaround for dependency `leveldb-sys v2.0.9`
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
