@@ -26,7 +26,6 @@ use tracing::*;
 
 use crate::api::export::AdditionRecord;
 use crate::application::rpc::server::NeptuneRPCServer;
-use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_info::BlockInfo;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
@@ -36,9 +35,9 @@ use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::twenty_first::prelude::BFieldCodec;
-use crate::util_types::mutator_set::archival_mutator_set::MsMembershipProofEx;
-use crate::util_types::mutator_set::archival_mutator_set::RequestMsMembershipProofEx;
+use crate::util_types::mutator_set::archival_mutator_set::ResponseMsMembershipProofPrivacyPreserving;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use crate::Block;
 use crate::RPCServerToMain;
@@ -199,7 +198,7 @@ pub(crate) async fn run_rpc_server(
             )
             .route(
                 "/rpc/generate_membership_proof",
-                axum::routing::post(generate_restore_membership_proof),
+                axum::routing::post(restore_membership_proof_privacy_preserving),
             );
 
         routes
@@ -307,40 +306,44 @@ async fn get_block_info(
     Ok(ErasedJson::pretty(block_info))
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResponseMsMembershipProofEx {
-    pub height: BlockHeight,
-    pub block_id: Digest,
-    pub proofs: Vec<MsMembershipProofEx>,
-}
-
-async fn generate_restore_membership_proof(
+async fn restore_membership_proof_privacy_preserving(
     State(rpcstate): State<NeptuneRPCServer>,
     body: axum::body::Bytes,
 ) -> Result<Vec<u8>, RestError> {
-    let r_datas: Vec<RequestMsMembershipProofEx> =
+    let r_datas: Vec<AbsoluteIndexSet> =
         bincode::deserialize_from(body.reader()).context("deserialize error")?;
+    trace!("Received request of length {}", r_datas.len());
     let state = rpcstate.state.lock_guard().await;
 
     let ams = state.chain.archival_state().archival_mutator_set.ams();
 
-    let mut proofs = Vec::with_capacity(r_datas.len());
+    let mut membership_proofs = Vec::with_capacity(r_datas.len());
     for r_data in r_datas {
-        if let Ok(p) = ams.restore_membership_proof_ex(r_data).await {
-            proofs.push(p);
+        match ams
+            .restore_membership_proof_privacy_preserving(r_data)
+            .await
+        {
+            Ok(msmp) => membership_proofs.push(msmp),
+            Err(err) => debug!("Failed to restore MSMP: {err}"),
         }
     }
 
-    let cur_block = state.chain.archival_state().get_tip().await;
+    trace!("Restored {} msmps", membership_proofs.len());
 
-    let height = cur_block.header().height;
-    let block_id = cur_block.hash();
+    let cur_block = state.chain.light_state();
+    let tip_height = cur_block.header().height;
+    let tip_hash = cur_block.hash();
+    let tip_mutator_set = cur_block
+        .mutator_set_accumulator_after()
+        .expect("Tip must have valid MSA after");
 
-    let response = ResponseMsMembershipProofEx {
-        height,
-        block_id,
-        proofs,
+    let response = ResponseMsMembershipProofPrivacyPreserving {
+        tip_height,
+        tip_hash,
+        membership_proofs,
+        tip_mutator_set,
     };
+
     bincode::serialize(&response).map_err(|e| RestError(e.to_string()))
 }
 
@@ -533,7 +536,7 @@ mod tests {
     fn exported_block_hash_calculation_is_consistent() {
         let network = Network::Main;
 
-        // Set proof-size to none-zero to ensure that proof is accounted
+        // Set proof-size to non-zero to ensure that proof is accounted
         // correctly for in the block hash.
         let proof_size = 533;
         let block =
