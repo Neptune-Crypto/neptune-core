@@ -162,6 +162,18 @@ pub enum TransactionProofError {
     ProverLockWasTaken,
 }
 
+#[cfg(feature = "mock-rpc")]
+impl rand::distr::Distribution<TransactionProofType> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionProofType {
+        match rng.random_range(0..3) {
+            0 => TransactionProofType::PrimitiveWitness,
+            1 => TransactionProofType::ProofCollection,
+            2 => TransactionProofType::SingleProof,
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

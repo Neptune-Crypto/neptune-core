@@ -44,6 +44,8 @@
 //! Every RPC method returns an [RpcResult] which is wrapped inside a
 //! [tarpc::Response] by the rpc server.
 pub mod coinbase_output_readable;
+pub mod mempool_transaction_info;
+pub mod overview_data;
 pub mod proof_of_work_puzzle;
 
 use std::collections::HashMap;
@@ -79,6 +81,8 @@ use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::rpc::server::coinbase_output_readable::CoinbaseOutputReadable;
 use crate::application::rpc::server::error::RpcError;
+use crate::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
+use crate::application::rpc::server::overview_data::OverviewData;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
@@ -101,11 +105,9 @@ use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
-use crate::state::mining::mining_status::MiningStatus;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::ReceivingAddress;
@@ -126,94 +128,6 @@ use crate::DataDirectory;
 
 /// result returned by RPC methods
 pub type RpcResult<T> = Result<T, error::RpcError>;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DashBoardOverviewDataFromClient {
-    pub tip_digest: Digest,
-    pub tip_header: BlockHeader,
-    pub syncing: bool,
-    pub confirmed_available_balance: NativeCurrencyAmount,
-    pub confirmed_total_balance: NativeCurrencyAmount,
-    pub unconfirmed_available_balance: NativeCurrencyAmount,
-    pub unconfirmed_total_balance: NativeCurrencyAmount,
-    pub mempool_size: usize,
-    pub mempool_total_tx_count: usize,
-    pub mempool_own_tx_count: usize,
-
-    // `None` symbolizes failure in getting peer count
-    pub peer_count: Option<usize>,
-    pub max_num_peers: usize,
-
-    // `None` symbolizes failure to get mining status
-    pub mining_status: Option<MiningStatus>,
-
-    pub proving_capability: TxProvingCapability,
-
-    // # of confirmations of the last wallet balance change.
-    //
-    // Starts at 1, as the block in which a tx is included is considered the 1st
-    // confirmation.
-    //
-    // `None` indicates that wallet balance has never changed.
-    pub confirmations: Option<BlockHeight>,
-
-    /// CPU temperature in degrees Celsius
-    pub cpu_temp: Option<f32>,
-}
-
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
-pub struct MempoolTransactionInfo {
-    pub id: TransactionKernelId,
-    pub proof_type: TransactionProofType,
-    pub num_inputs: usize,
-    pub num_outputs: usize,
-    pub positive_balance_effect: NativeCurrencyAmount,
-    pub negative_balance_effect: NativeCurrencyAmount,
-    pub fee: NativeCurrencyAmount,
-    pub synced: bool,
-}
-
-impl From<&Transaction> for MempoolTransactionInfo {
-    fn from(mptx: &Transaction) -> Self {
-        MempoolTransactionInfo {
-            id: mptx.kernel.txid(),
-            proof_type: match mptx.proof {
-                TransactionProof::Witness(_) => TransactionProofType::PrimitiveWitness,
-                TransactionProof::SingleProof(_) => TransactionProofType::SingleProof,
-                TransactionProof::ProofCollection(_) => TransactionProofType::ProofCollection,
-            },
-            num_inputs: mptx.kernel.inputs.len(),
-            num_outputs: mptx.kernel.outputs.len(),
-            positive_balance_effect: NativeCurrencyAmount::zero(),
-            negative_balance_effect: NativeCurrencyAmount::zero(),
-            fee: mptx.kernel.fee,
-            synced: false,
-        }
-    }
-}
-
-impl MempoolTransactionInfo {
-    pub(crate) fn with_positive_effect_on_balance(
-        mut self,
-        positive_balance_effect: NativeCurrencyAmount,
-    ) -> Self {
-        self.positive_balance_effect = positive_balance_effect;
-        self
-    }
-
-    pub(crate) fn with_negative_effect_on_balance(
-        mut self,
-        negative_balance_effect: NativeCurrencyAmount,
-    ) -> Self {
-        self.negative_balance_effect = negative_balance_effect;
-        self
-    }
-
-    pub fn synced(mut self) -> Self {
-        self.synced = true;
-        self
-    }
-}
 
 #[tarpc::service]
 pub trait RPC {
@@ -1180,9 +1094,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn dashboard_overview_data(
-        token: auth::Token,
-    ) -> RpcResult<DashBoardOverviewDataFromClient>;
+    async fn dashboard_overview_data(token: auth::Token) -> RpcResult<OverviewData>;
 
     /// Determine whether the user-supplied string is a valid address
     ///
@@ -2925,7 +2837,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: auth::Token,
-    ) -> RpcResult<DashBoardOverviewDataFromClient> {
+    ) -> RpcResult<OverviewData> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2986,7 +2898,7 @@ impl RPC for NeptuneRPCServer {
             wallet_state.unconfirmed_total_balance(&wallet_status)
         };
 
-        Ok(DashBoardOverviewDataFromClient {
+        Ok(OverviewData {
             tip_digest,
             tip_header,
             syncing,
@@ -5877,6 +5789,7 @@ mod tests {
 
     mod send_tests {
         use super::*;
+        use crate::api::export::TxProvingCapability;
         use crate::application::rpc::server::error::RpcError;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 

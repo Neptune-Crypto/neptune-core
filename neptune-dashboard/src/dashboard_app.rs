@@ -25,7 +25,6 @@ use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::rpc::auth;
-use neptune_cash::application::rpc::server::RPCClient;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -48,6 +47,8 @@ use strum::EnumIter;
 use strum::IntoEnumIterator;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
+
+use crate::dashboard_rpc_client::DashboardRpcClient;
 
 use super::address_screen::AddressScreen;
 use super::history_screen::HistoryScreen;
@@ -180,7 +181,7 @@ pub struct DashboardApp {
 impl DashboardApp {
     pub fn new(
         config: Arc<Config>,
-        rpc_server: Arc<RPCClient>,
+        rpc_server: Arc<DashboardRpcClient>,
         network: Network,
         token: auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
@@ -302,7 +303,7 @@ impl DashboardApp {
 
     pub async fn run(
         config: Config,
-        client: RPCClient,
+        client: DashboardRpcClient,
         network: Network,
         token: auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,

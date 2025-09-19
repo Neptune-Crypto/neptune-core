@@ -124,6 +124,13 @@ impl TransactionKernel {
     }
 }
 
+#[cfg(any(feature = "mock-rpc", test))]
+impl rand::distr::Distribution<TransactionKernelId> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionKernelId {
+        TransactionKernelId(rng.random())
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -132,19 +139,11 @@ mod tests {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use rand::distr::Distribution;
-    use rand::distr::StandardUniform;
     use test_strategy::proptest;
 
     use super::*;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::transaction::Transaction;
-
-    impl Distribution<TransactionKernelId> for StandardUniform {
-        fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionKernelId {
-            TransactionKernelId(rng.random::<Digest>())
-        }
-    }
 
     #[test]
     fn txid_value_is_constant_under_transaction_update() {

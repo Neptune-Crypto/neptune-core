@@ -104,3 +104,30 @@ impl Display for MiningStatus {
         write!(f, "{work_type_and_duration}{input_output_info}{reward}",)
     }
 }
+
+#[cfg(feature = "mock-rpc")]
+impl rand::distr::Distribution<MiningStatus> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> MiningStatus {
+        let random_time = SystemTime::UNIX_EPOCH + Duration::from_millis(rng.next_u64() >> 20);
+        match rng.random_range(0..3) {
+            0 => MiningStatus::Inactive,
+            1 => {
+                let composing_work_info = ComposingWorkInfo {
+                    work_start: random_time,
+                };
+                MiningStatus::Composing(composing_work_info)
+            }
+            2 => {
+                let guessing_work_info = GuessingWorkInfo {
+                    work_start: random_time,
+                    num_inputs: rng.random_range(0..10000),
+                    num_outputs: rng.random_range(0..10000),
+                    total_coinbase: rng.random(),
+                    total_guesser_fee: rng.random(),
+                };
+                MiningStatus::Guessing(guessing_work_info)
+            }
+            _ => unreachable!(),
+        }
+    }
+}
