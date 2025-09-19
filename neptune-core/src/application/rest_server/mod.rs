@@ -76,6 +76,9 @@ struct BlockQuery {
 #[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize)]
 pub struct ExportedBlock {
     pub kernel: BlockKernel,
+    // We don't use `Option<BlockProof>` here, even though the proof may or may
+    // not be set. The reason for this is that we want a clean/simple JSON
+    // format without enums (or nested enums).
     pub proof: BlockProof,
     pub proof_leaf: Digest,
 
@@ -88,7 +91,7 @@ pub struct ExportedBlock {
 }
 
 impl ExportedBlock {
-    pub fn from_block(block: Block, include_proof: bool) -> Self {
+    fn from_block(block: Block, include_proof: bool) -> Self {
         let (kernel, proof) = block.into_kernel_and_proof();
         let proof_leaf = Tip5::hash_varlen(&proof.encode());
         let proof = if include_proof {
