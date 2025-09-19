@@ -316,14 +316,21 @@ where
 
 /// Converts a UTC millisecond timestamp (millis since 1970 UTC) into
 /// a `DateTime<Local>`, ie local-time.
-pub fn utc_timestamp_to_localtime<T>(timestamp: T) -> DateTime<Local>
+///
+/// # Return Value
+///
+/// Returns `None` if
+///  - the given argument cannot be converted to an `i64`, or
+///  - the given argument, after conversion to `i64`, is out of range (whatever
+///    that means).
+pub fn utc_timestamp_to_localtime<T>(timestamp: T) -> Option<DateTime<Local>>
 where
     T: TryInto<i64>,
     <T as TryInto<i64>>::Error: std::fmt::Debug,
 {
-    let millis: i64 = timestamp.try_into().unwrap();
-    let utc = DateTime::<Utc>::from_timestamp_millis(millis).expect("Invalid timestamp");
-    utc.with_timezone(&Local)
+    let millis: i64 = timestamp.try_into().ok()?;
+    let utc = DateTime::<Utc>::from_timestamp_millis(millis)?;
+    Some(utc.with_timezone(&Local))
 }
 
 #[cfg(feature = "log-lock_events")]

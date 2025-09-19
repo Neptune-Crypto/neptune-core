@@ -9,7 +9,6 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::application::rpc::auth;
-use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
@@ -32,6 +31,8 @@ use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use unicode_width::UnicodeWidthStr;
+
+use crate::dashboard_rpc_client::DashboardRpcClient;
 
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
@@ -117,7 +118,7 @@ pub struct HistoryScreen {
     bg: Color,
     in_focus: bool,
     data: BalanceUpdateArc,
-    server: Arc<RPCClient>,
+    server: Arc<DashboardRpcClient>,
     poll_task: Option<JoinHandleArc>,
     escalatable_event: DashboardEventArc,
     events: Events,
@@ -125,7 +126,7 @@ pub struct HistoryScreen {
 }
 
 impl HistoryScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, token: auth::Token) -> Self {
+    pub fn new(rpc_server: Arc<DashboardRpcClient>, token: auth::Token) -> Self {
         let data = Arc::new(Mutex::new(vec![]));
         Self {
             active: false,
@@ -142,7 +143,7 @@ impl HistoryScreen {
     }
 
     async fn run_polling_loop(
-        rpc_client: Arc<RPCClient>,
+        rpc_client: Arc<DashboardRpcClient>,
         token: auth::Token,
         balance_updates: BalanceUpdateArc,
         escalatable_event: DashboardEventArc,

@@ -9,7 +9,6 @@ use bytesize::ByteSize;
 use itertools::Itertools;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::rpc::auth;
-use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::protocol::consensus::block::block_header::BlockHeader;
 use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -29,6 +28,8 @@ use tasm_lib::twenty_first::prelude::Digest;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time;
+
+use crate::dashboard_rpc_client::DashboardRpcClient;
 
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
@@ -91,7 +92,7 @@ pub struct OverviewScreen {
     bg: Color,
     in_focus: bool,
     data: Arc<std::sync::Mutex<OverviewData>>,
-    server: Arc<RPCClient>,
+    server: Arc<DashboardRpcClient>,
     token: auth::Token,
     poll_task: Option<Arc<Mutex<JoinHandle<()>>>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
@@ -99,7 +100,7 @@ pub struct OverviewScreen {
 
 impl OverviewScreen {
     pub fn new(
-        rpc_server: Arc<RPCClient>,
+        rpc_server: Arc<DashboardRpcClient>,
         network: Network,
         token: auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
@@ -121,7 +122,7 @@ impl OverviewScreen {
     }
 
     async fn run_polling_loop(
-        rpc_client: Arc<RPCClient>,
+        rpc_client: Arc<DashboardRpcClient>,
         token: auth::Token,
         overview_data: Arc<std::sync::Mutex<OverviewData>>,
         escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
@@ -356,9 +357,13 @@ impl Widget for OverviewScreen {
 
         lines.push(format!(
             "latest block timestamp: {}",
-            dashifnotset!(data.block_header.as_ref().map(|bh| {
-                neptune_cash::utc_timestamp_to_localtime(bh.timestamp.0.value()).to_string()
-            })),
+            dashifnotset!(data
+                .block_header
+                .as_ref()
+                .map(|bh| bh.timestamp.0.value())
+                .and_then(|ts| i64::try_from(ts).ok())
+                .and_then(neptune_cash::utc_timestamp_to_localtime)
+                .map(|ts| ts.to_string())),
         ));
 
         lines.push(format!(

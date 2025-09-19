@@ -47,6 +47,11 @@ arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:propt
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]
 
+# Implements `StandardUniform: Distribution<T>` for various types `T` that are
+# served through the RPC interface. Enables the RPC interface to be mocked on
+# the client side.
+mock-rpc = []
+
 [dependencies]
 
 # note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]

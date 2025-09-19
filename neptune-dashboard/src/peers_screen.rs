@@ -9,7 +9,6 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::application::rpc::auth;
-use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::protocol::peer::peer_info::PeerInfo;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
@@ -32,6 +31,8 @@ use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use unicode_width::UnicodeWidthStr;
+
+use crate::dashboard_rpc_client::DashboardRpcClient;
 
 use super::dashboard_app::Config;
 use super::dashboard_app::DashboardEvent;
@@ -99,7 +100,7 @@ pub struct PeersScreen {
     bg: Color,
     in_focus: bool,
     data: PeerInfoArc,
-    server: Arc<RPCClient>,
+    server: Arc<DashboardRpcClient>,
     token: auth::Token,
     poll_task: Option<JoinHandleArc>,
     escalatable_event: DashboardEventArc,
@@ -109,7 +110,11 @@ pub struct PeersScreen {
 }
 
 impl PeersScreen {
-    pub fn new(config: Arc<Config>, rpc_server: Arc<RPCClient>, token: auth::Token) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        rpc_server: Arc<DashboardRpcClient>,
+        token: auth::Token,
+    ) -> Self {
         let data = Arc::new(Mutex::new(vec![]));
         Self {
             sort_column: config.peer_sort_column,
@@ -129,7 +134,7 @@ impl PeersScreen {
     }
 
     async fn run_polling_loop(
-        rpc_client: Arc<RPCClient>,
+        rpc_client: Arc<DashboardRpcClient>,
         token: auth::Token,
         peer_info: PeerInfoArc,
         escalatable_event_arc: DashboardEventArc,
@@ -374,7 +379,8 @@ impl Widget for PeersScreen {
                     addr.to_string(),
                     pi.version().to_string(),
                     neptune_cash::utc_timestamp_to_localtime(connection_established.as_millis())
-                        .to_string(),
+                        .map(|ts| ts.to_string())
+                        .unwrap_or("-".to_string()),
                     format!("{:>8}", pi.standing().to_string()),
                     latest_punishment.unwrap_or_default(),
                     latest_reward.unwrap_or_default(),

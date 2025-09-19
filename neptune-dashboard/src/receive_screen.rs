@@ -7,7 +7,6 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::rpc::auth;
-use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::state::wallet::address::KeyType;
 use neptune_cash::state::wallet::address::ReceivingAddress;
 use ratatui::layout::Alignment;
@@ -23,6 +22,8 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use tarpc::context;
 
+use crate::dashboard_rpc_client::DashboardRpcClient;
+
 use super::dashboard_app::ConsoleIO;
 use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
@@ -35,7 +36,7 @@ pub struct ReceiveScreen {
     bg: Color,
     in_focus: bool,
     data: Arc<std::sync::Mutex<Option<ReceivingAddress>>>,
-    server: Arc<RPCClient>,
+    server: Arc<DashboardRpcClient>,
     generating: Arc<Mutex<bool>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     network: Network,
@@ -43,7 +44,7 @@ pub struct ReceiveScreen {
 }
 
 impl ReceiveScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, network: Network, token: auth::Token) -> Self {
+    pub fn new(rpc_server: Arc<DashboardRpcClient>, network: Network, token: auth::Token) -> Self {
         Self {
             active: false,
             fg: Color::Gray,
@@ -60,7 +61,7 @@ impl ReceiveScreen {
 
     fn populate_receiving_address_async(
         &self,
-        rpc_client: Arc<RPCClient>,
+        rpc_client: Arc<DashboardRpcClient>,
         token: auth::Token,
         data: Arc<Mutex<Option<ReceivingAddress>>>,
     ) {
@@ -82,7 +83,7 @@ impl ReceiveScreen {
 
     fn generate_new_receiving_address_async(
         &self,
-        rpc_client: Arc<RPCClient>,
+        rpc_client: Arc<DashboardRpcClient>,
         token: auth::Token,
         data: Arc<Mutex<Option<ReceivingAddress>>>,
         generating: Arc<Mutex<bool>>,
