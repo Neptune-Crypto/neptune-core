@@ -625,24 +625,6 @@ where
     }
 }
 
-/// Data structure for requesting components of a mutator set membership proof
-/// from an archival state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg(feature = "rest")]
-pub struct RequestMsMembershipProofEx {
-    pub swbf_indices: Vec<u128>,
-    pub aocl_leaf_index: u64,
-}
-
-/// Data structure for returning components of a mutator set membership proof
-/// from an archival state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg(feature = "rest")]
-pub struct MsMembershipProofEx {
-    pub auth_path_aocl: MmrMembershipProof,
-    pub target_chunks: ChunkDictionary,
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
