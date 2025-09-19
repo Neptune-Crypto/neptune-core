@@ -990,7 +990,8 @@ mod tests {
                 ) {
                     assert!(accumulator.verify(item, mp_batch));
 
-                    // Verify that the membership proof can be restored from an archival instance
+                    // Verify that the membership proof can be restored from an archival instance,
+                    // both without and with privacy.
                     let arch_mp = archival_after_remove
                         .restore_membership_proof(
                             item,
@@ -1000,6 +1001,17 @@ mod tests {
                         )
                         .await
                         .unwrap();
+                    let arch_mp_alt = archival_after_remove
+                        .restore_membership_proof_privacy_preserving(arch_mp.compute_indices(item))
+                        .await
+                        .unwrap()
+                        .extract_ms_membership_proof(
+                            mp_batch.aocl_leaf_index,
+                            sender_randomness,
+                            receiver_preimage,
+                        )
+                        .unwrap();
+                    assert_eq!(arch_mp, arch_mp_alt);
                     assert_eq!(arch_mp, mp_batch.to_owned());
 
                     // Verify that sequential and batch update produces the same membership proofs

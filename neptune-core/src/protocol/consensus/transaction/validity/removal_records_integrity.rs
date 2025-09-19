@@ -1393,7 +1393,7 @@ mod tests {
         // ensure entire data structure is hashed and compared. Missing just one
         // word in the hashing would make this snippet (and the entire
         // blockchain) unsound.
-        let original_minimum = bad_inputs[mutated_input].absolute_indices.get_minimum();
+        let original_minimum = bad_inputs[mutated_input].absolute_indices.minimum();
         for term in [1, 1 << 32, 1 << 64, 1 << 96] {
             bad_inputs[mutated_input]
                 .absolute_indices

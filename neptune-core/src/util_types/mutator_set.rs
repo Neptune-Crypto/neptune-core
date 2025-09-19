@@ -38,6 +38,10 @@ pub enum MutatorSetError {
         current_max_chunk_index: u64,
         saw_chunk_index: u64,
     },
+    AbsoluteIndexExceedsTheoreticalBound,
+    RequestedAoclAuthPathNotContainedInResponse {
+        request_aocl_leaf_index: u64,
+    },
 }
 
 /// Generates an addition record from an item and explicit random-

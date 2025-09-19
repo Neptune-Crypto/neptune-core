@@ -63,6 +63,7 @@ use systemstat::System;
 use tarpc::context;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
@@ -122,6 +123,8 @@ use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::twenty_first::prelude::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::archival_mutator_set::ResponseMsMembershipProofPrivacyPreserving;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -581,6 +584,17 @@ pub trait RPC {
         token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Vec<(AdditionRecord, Option<u64>)>>;
+
+    /// Restore a mutator set membership proof in a privacy-preserving manner.
+    ///
+    /// Caller only reveals the absolute index set, which ends up on the
+    /// blockchain anyway, and callee returns all possible MMR authentication
+    /// paths into the AOCL MMR as well as all requested cryptographic data from
+    /// the Bloom filter MMR.
+    async fn restore_membership_proof_privacy_preserving(
+        token: auth::Token,
+        index_sets: Vec<AbsoluteIndexSet>,
+    ) -> RpcResult<ResponseMsMembershipProofPrivacyPreserving>;
 
     /// Return the announements contained in a specified block.
     ///
@@ -2541,6 +2555,56 @@ impl RPC for NeptuneRPCServer {
         Ok(addition_records_dictionary)
     }
 
+    async fn restore_membership_proof_privacy_preserving(
+        self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        requests: Vec<AbsoluteIndexSet>,
+    ) -> RpcResult<ResponseMsMembershipProofPrivacyPreserving> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let ams = state.chain.archival_state().archival_mutator_set.ams();
+
+        let mut membership_proofs = Vec::with_capacity(requests.len());
+        for request in requests {
+            match ams
+                .restore_membership_proof_privacy_preserving(request)
+                .await
+            {
+                Ok(msmp) => membership_proofs.push(msmp),
+                Err(err) => {
+                    debug!("Failed to restore MSMP: {err}");
+                    return Err(RpcError::CannotRestoreMembershipProofs(err.to_string()));
+                }
+            }
+        }
+
+        debug!("Restored {} msmps", membership_proofs.len());
+        debug!(
+            "AOCL MMR lengths: [{}]",
+            membership_proofs
+                .iter()
+                .map(|x| x.aocl_auth_paths.len().to_string())
+                .join(", ")
+        );
+
+        let cur_block = state.chain.light_state();
+        let tip_height = cur_block.header().height;
+        let tip_hash = cur_block.hash();
+        let tip_mutator_set = cur_block
+            .mutator_set_accumulator_after()
+            .expect("Tip must have valid MSA after");
+
+        Ok(ResponseMsMembershipProofPrivacyPreserving {
+            tip_height,
+            tip_hash,
+            membership_proofs,
+            tip_mutator_set,
+        })
+    }
+
     // documented in trait. do not add doc-comment.
     async fn announcements_in_block(
         self,
@@ -4025,6 +4089,9 @@ pub mod error {
 
         #[error("Node is not setup to compose")]
         NotComposing,
+
+        #[error("Cannot restore membership proofs: {0}")]
+        CannotRestoreMembershipProofs(String),
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
@@ -4125,6 +4192,7 @@ mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
+    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use crate::Block;
 
     const NUM_ANNOUNCEMENTS_BLOCK1: usize = 7;
@@ -4221,6 +4289,23 @@ mod tests {
         let _ = rpc_server
             .clone()
             .block_kernel(ctx, token, BlockSelector::Digest(Digest::default()))
+            .await;
+        let _ = rpc_server
+            .clone()
+            .addition_record_indices_for_block(ctx, token, BlockSelector::Digest(Digest::default()))
+            .await;
+        let _ = rpc_server
+            .clone()
+            .restore_membership_proof_privacy_preserving(
+                ctx,
+                token,
+                vec![AbsoluteIndexSet::compute(
+                    Digest::default(),
+                    Digest::default(),
+                    Digest::default(),
+                    444,
+                )],
+            )
             .await;
         let _ = rpc_server
             .clone()
@@ -5133,6 +5218,71 @@ mod tests {
             .mining_state
             .overridden_coinbase_distribution()
             .is_none());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn restore_membership_proof_privacy_preserving_devnet_wallet() {
+        let network = Network::Main;
+        let ctx = context::current();
+        let rpc_server =
+            test_rpc_server(WalletEntropy::devnet_wallet(), 2, cli_args::Args::default()).await;
+        let token = cookie_token(&rpc_server).await;
+
+        let utxo = rpc_server
+            .state
+            .lock_guard()
+            .await
+            .wallet_spendable_inputs(Timestamp::now())
+            .await
+            .into_iter()
+            .collect_vec()[0]
+            .clone();
+        let msmp = utxo.mutator_set_mp().clone();
+
+        let resp = rpc_server
+            .clone()
+            .restore_membership_proof_privacy_preserving(
+                ctx,
+                token,
+                vec![msmp.compute_indices(Tip5::hash(&utxo.utxo))],
+            )
+            .await
+            .unwrap();
+
+        let genesis_block = Block::genesis(network);
+        assert_eq!(BlockHeight::genesis(), resp.tip_height);
+        assert_eq!(genesis_block.hash(), resp.tip_hash);
+        assert_eq!(
+            genesis_block.mutator_set_accumulator_after().unwrap(),
+            resp.tip_mutator_set
+        );
+        assert_eq!(1, resp.membership_proofs.len());
+        let restored_msmp_resp = resp.membership_proofs[0].clone();
+        assert_eq!(
+            msmp,
+            restored_msmp_resp
+                .extract_ms_membership_proof(
+                    msmp.aocl_leaf_index,
+                    msmp.sender_randomness,
+                    msmp.receiver_preimage
+                )
+                .unwrap()
+        );
+
+        // Ensure no crash on future AOCL items
+        assert!(rpc_server
+            .restore_membership_proof_privacy_preserving(
+                ctx,
+                token,
+                vec![AbsoluteIndexSet::compute(
+                    Digest::default(),
+                    Digest::default(),
+                    Digest::default(),
+                    u64::from(u32::MAX)
+                )],
+            )
+            .await
+            .is_err());
     }
 
     mod pow_puzzle_tests {
