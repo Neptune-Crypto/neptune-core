@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::error::Error;
 
 use itertools::Itertools;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr;
@@ -17,9 +19,69 @@ use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use crate::application::database::storage::storage_vec::traits::*;
+use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::util_types::archival_mmr::ArchivalMmr;
+use crate::util_types::mutator_set::archival_mutator_set::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::MutatorSetError;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexedAoclAuthPath {
+    pub leaf_index: u64,
+    pub auth_path: MmrMembershipProof,
+}
+
+/// Data structure for returning components of a mutator set membership proof
+/// from an archival state, without callee learning more than the unmined
+/// transaction reveals, namely a fuzzy timestamp of the input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MsMembershipProofPrivacyPreserving {
+    pub(crate) aocl_auth_paths: Vec<IndexedAoclAuthPath>,
+    target_chunks: ChunkDictionary,
+}
+
+impl MsMembershipProofPrivacyPreserving {
+    /// Build the required membership proof by supplying the correct AOCL leaf
+    /// index to extract the right MMR authentication path and the missing
+    /// cryptographic data.
+    pub fn extract_ms_membership_proof(
+        self,
+        aocl_leaf_index: u64,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
+    ) -> Result<MsMembershipProof, Box<dyn Error>> {
+        let aocl_mmr = self
+            .aocl_auth_paths
+            .into_iter()
+            .find(|x| x.leaf_index == aocl_leaf_index)
+            .map(|x| x.auth_path);
+        let Some(aocl_mmr) = aocl_mmr else {
+            return Err(Box::new(
+                MutatorSetError::RequestedAoclAuthPathNotContainedInResponse {
+                    request_aocl_leaf_index: aocl_leaf_index,
+                },
+            ));
+        };
+
+        Ok(MsMembershipProof {
+            sender_randomness,
+            receiver_preimage,
+            auth_path_aocl: aocl_mmr,
+            aocl_leaf_index,
+            target_chunks: self.target_chunks,
+        })
+    }
+}
+
+/// Data structure for returning components of a mutator set membership proof in
+/// a privacy preserving manner. Includes information about the tip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseMsMembershipProofPrivacyPreserving {
+    pub tip_height: BlockHeight,
+    pub tip_hash: Digest,
+    pub tip_mutator_set: MutatorSetAccumulator,
+    pub membership_proofs: Vec<MsMembershipProofPrivacyPreserving>,
+}
 
 #[derive(Debug, Clone)]
 pub struct ArchivalMutatorSet<MmrStorage, ChunkStorage>
@@ -250,6 +312,66 @@ where
         })
     }
 
+    /// Restore a mutator set membership proof in a privacy-preserving manner,
+    /// only leaking a fuzzy-timestamp.
+    pub(crate) async fn restore_membership_proof_privacy_preserving(
+        &self,
+        absolute_indices: AbsoluteIndexSet,
+    ) -> Result<MsMembershipProofPrivacyPreserving, Box<dyn Error>> {
+        let mut aocl_auth_paths = vec![];
+        let num_aocl_leafs = self.aocl.num_leafs().await;
+        let (aocl_index_min, aocl_index_max) = absolute_indices.aocl_range()?;
+
+        if aocl_index_min >= num_aocl_leafs {
+            return Err(Box::new(MutatorSetError::RequestedAoclAuthPathOutOfBounds(
+                (aocl_index_min, num_aocl_leafs),
+            )));
+        }
+
+        // Do not attempt to read past end of AOCL leafs. In other words:
+        // restrict AOCL authentication paths to those actually present in
+        // mutator set.
+        let aocl_index_max = std::cmp::min(aocl_index_max, num_aocl_leafs.saturating_sub(1));
+        for leaf_index in aocl_index_min..=aocl_index_max {
+            let auth_path = self.get_aocl_authentication_path(leaf_index).await?;
+            let auth_path = IndexedAoclAuthPath {
+                leaf_index,
+                auth_path,
+            };
+            aocl_auth_paths.push(auth_path);
+        }
+
+        let mut target_chunks = vec![];
+        let batch_index: u64 = self.get_batch_index_async().await.try_into().unwrap();
+
+        for absolute_bf_index in absolute_indices.to_array() {
+            let chunk_index: u64 = (absolute_bf_index / u128::from(CHUNK_SIZE)).try_into()?;
+
+            // No auth path exists if chunk is part of active window
+            if chunk_index >= batch_index {
+                continue;
+            }
+
+            // Avoid repeating chunk indices in dictionary.
+            if target_chunks
+                .iter()
+                .any(|(chk_idx, _)| *chk_idx == chunk_index)
+            {
+                continue;
+            }
+
+            target_chunks.push((
+                chunk_index,
+                self.get_chunk_and_auth_path(chunk_index).await?,
+            ));
+        }
+
+        Ok(MsMembershipProofPrivacyPreserving {
+            aocl_auth_paths,
+            target_chunks: ChunkDictionary::new(target_chunks),
+        })
+    }
+
     /// Revert the `RemovalRecord` by removing the indices that
     /// were inserted by it. These live in either the active window, or
     /// in a relevant chunk.
@@ -356,6 +478,8 @@ where
         }
     }
 
+    /// The number of times the active window has slid. Equal to the number of
+    /// leafs in the inactive part of the sliding-window Bloom filter.
     pub async fn get_batch_index_async(&self) -> u128 {
         u128::from(self.aocl.num_leafs().await.saturating_sub(1)) / u128::from(BATCH_SIZE)
     }
@@ -510,20 +634,22 @@ mod tests {
 
             // Verify that we can just read out the same membership proofs from the
             // archival MMR as those we get through the membership proof book keeping.
-            let archival_membership_proof = match archival_mutator_set
+            let archival_membership_proof = archival_mutator_set
                 .restore_membership_proof(item, sender_randomness, receiver_preimage, i)
                 .await
-            {
-                Err(err) => panic!(
-                    "Failed to get membership proof from archival mutator set: {}",
-                    err
-                ),
-                Ok(mp) => mp,
-            };
+                .unwrap();
             assert_eq!(
                 archival_membership_proof, membership_proof,
                 "Membership proof from archive and accumulator must agree"
             );
+
+            let archival_membership_proof_alt = archival_mutator_set
+                .restore_membership_proof_privacy_preserving(membership_proof.compute_indices(item))
+                .await
+                .unwrap()
+                .extract_ms_membership_proof(i, sender_randomness, receiver_preimage)
+                .unwrap();
+            assert_eq!(archival_membership_proof, archival_membership_proof_alt);
 
             // For good measure (because I don't trust MP's equality operator sufficiently) I test that the target chunks also agree
             assert_eq!(
