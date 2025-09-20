@@ -54,6 +54,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
+use libp2p::PeerId;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -139,7 +140,6 @@ pub struct DashBoardOverviewDataFromClient {
 
     // `None` symbolizes failure in getting peer count
     pub peer_count: Option<usize>,
-    pub max_num_peers: usize,
 
     // `None` symbolizes failure to get mining status
     pub mining_status: Option<MiningStatus>,
@@ -488,7 +488,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn all_punished_peers(token: auth::Token) -> RpcResult<HashMap<IpAddr, PeerStanding>>;
+    async fn all_punished_peers(token: auth::Token) -> RpcResult<HashMap<PeerId, PeerStanding>>;
 
     /// Returns the digest of the latest n blocks
     ///
@@ -1538,7 +1538,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn clear_standing_by_ip(token: auth::Token, ip: IpAddr) -> RpcResult<()>;
+    async fn clear_standing_by_ip(token: auth::Token, ip: PeerId) -> RpcResult<()>;
 
     /// todo: docs.
     ///
@@ -2598,7 +2598,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: auth::Token,
-    ) -> RpcResult<HashMap<IpAddr, PeerStanding>> {
+    ) -> RpcResult<HashMap<libp2p::PeerId, PeerStanding>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2609,7 +2609,7 @@ impl RPC for NeptuneRPCServer {
         // Get all connected peers
         for (socket_address, peer_info) in &global_state.net.peer_map {
             if peer_info.standing().is_negative() {
-                sanctions_in_memory.insert(socket_address.ip(), peer_info.standing());
+                sanctions_in_memory.insert(socket_address.to_owned(), peer_info.standing());
             }
         }
 
@@ -2930,7 +2930,6 @@ impl RPC for NeptuneRPCServer {
         let proving_capability = self.state.cli().proving_capability();
 
         let peer_count = Some(state.net.peer_map.len());
-        let max_num_peers = self.state.cli().max_num_peers;
 
         let mining_status = Some(state.mining_state.mining_status);
 
@@ -2975,7 +2974,6 @@ impl RPC for NeptuneRPCServer {
             mempool_total_tx_count,
             mempool_own_tx_count,
             peer_count,
-            max_num_peers,
             mining_status,
             proving_capability,
             confirmations,
@@ -3019,7 +3017,7 @@ impl RPC for NeptuneRPCServer {
         mut self,
         _: context::Context,
         token: auth::Token,
-        ip: IpAddr,
+        ip: PeerId,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3030,7 +3028,7 @@ impl RPC for NeptuneRPCServer {
             .peer_map
             .iter_mut()
             .for_each(|(socketaddr, peerinfo)| {
-                if socketaddr.ip() == ip {
+                if socketaddr == &ip {
                     peerinfo.standing.clear_standing();
                 }
             });

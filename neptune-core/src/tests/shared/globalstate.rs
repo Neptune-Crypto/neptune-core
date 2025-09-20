@@ -47,7 +47,7 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     let peer_db = NetworkingState::initialize_peer_databases(&data_dir)
         .await
         .unwrap();
-    let mut peer_map = get_peer_map();
+    let mut peer_map = HashMap::new();
     for i in 0..peer_count {
         let peer_address =
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
@@ -181,18 +181,13 @@ pub(crate) async fn get_test_genesis_setup(
     ))
 }
 
-/// Return an empty peer map
-pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
-    HashMap::new()
-}
-
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
     std::net::SocketAddr::from_str(&format!("113.151.22.{}:8080", count)).unwrap()
 }
 
 /// Get a dummy-peer representing an incoming connection.
-pub(crate) fn get_dummy_peer_incoming(address: SocketAddr) -> PeerInfo {
-    let peer_connection_info = PeerConnectionInfo::new(Some(8080), address, true);
+pub(crate) fn get_dummy_peer_incoming(address: Multiaddr) -> PeerInfo {
+    let peer_connection_info = PeerConnectionInfo::new(address, true);
     let peer_handshake = get_dummy_handshake_data_for_genesis(Network::Main);
     PeerInfo::new(
         peer_connection_info,
@@ -203,8 +198,8 @@ pub(crate) fn get_dummy_peer_incoming(address: SocketAddr) -> PeerInfo {
 }
 
 /// Get a dummy-peer representing an outgoing connection.
-pub(crate) fn get_dummy_peer_outgoing(address: SocketAddr) -> PeerInfo {
-    let peer_connection_info = PeerConnectionInfo::new(Some(8080), address, false);
+pub(crate) fn get_dummy_peer_outgoing(address: Multiaddr) -> PeerInfo {
+    let peer_connection_info = PeerConnectionInfo::new(address, false);
     let peer_handshake = get_dummy_handshake_data_for_genesis(Network::Main);
     PeerInfo::new(
         peer_connection_info,

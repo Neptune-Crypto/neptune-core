@@ -668,7 +668,7 @@ impl GlobalState {
         // Get latest block. Use hardcoded genesis block if nothing is in database.
         let latest_block: Block = archival_state.get_tip().await;
 
-        let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
+        let peer_map: HashMap<libp2p::PeerId, PeerInfo> = HashMap::new();
         let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;
         debug!("Got peer databases");
 

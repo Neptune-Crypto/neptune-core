@@ -11,6 +11,9 @@ use futures::sink::Sink;
 use futures::sink::SinkExt;
 use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
+use libp2p::Swarm;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -29,7 +32,7 @@ use tracing::warn;
 use crate::application::loops::channel::MainToPeerTask;
 use crate::application::loops::channel::PeerTaskToMain;
 use crate::application::loops::channel::PeerTaskToMainTransaction;
-use crate::application::loops::connect_to_peers::close_peer_connected_callback;
+use crate::application::loops::main_loop::swarm_def::ComposedBehaviour;
 use crate::application::loops::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
@@ -44,7 +47,6 @@ use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerConnectionInfo;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::transfer_block::TransferBlock;
-use crate::protocol::peer::BlockProposalRequest;
 use crate::protocol::peer::BlockRequestBatch;
 use crate::protocol::peer::IssuedSyncChallenge;
 use crate::protocol::peer::MutablePeerState;
@@ -68,6 +70,8 @@ const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
 const DISCONNECT_CONNECTION: bool = true;
+
+const ERR_MSG: &str = "`reqresp` requires a respond channel to be included";
 
 pub type PeerStandingNumber = i32;
 
@@ -152,57 +156,6 @@ impl PeerLoopHandler {
         }
     }
 
-    /// Punish a peer for bad behavior.
-    ///
-    /// Return `Err` if the peer in question is (now) banned.
-    ///
-    /// # Locking:
-    ///   * acquires `global_state_lock` for write
-    async fn punish(&mut self, reason: NegativePeerSanction) -> Result<()> {
-        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-        warn!("Punishing peer {} for {:?}", self.peer_address.ip(), reason);
-        debug!(
-            "Peer standing before punishment is {}",
-            global_state_mut
-                .net
-                .peer_map
-                .get(&self.peer_address)
-                .unwrap()
-                .standing
-        );
-
-        let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_address) else {
-            bail!("Could not read peer map.");
-        };
-        let sanction_result = peer_info.standing.sanction(PeerSanction::Negative(reason));
-        if let Err(err) = sanction_result {
-            warn!("Banning peer: {err}");
-        }
-
-        sanction_result.map_err(|err| anyhow::anyhow!("Banning peer: {err}"))
-    }
-
-    /// Reward a peer for good behavior.
-    ///
-    /// Return `Err` if the peer in question is banned.
-    ///
-    /// # Locking:
-    ///   * acquires `global_state_lock` for write
-    async fn reward(&mut self, reason: PositivePeerSanction) -> Result<()> {
-        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-        debug!("Rewarding peer {} for {:?}", self.peer_address.ip(), reason);
-        let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_address) else {
-            error!("Could not read peer map.");
-            return Ok(());
-        };
-        let sanction_result = peer_info.standing.sanction(PeerSanction::Positive(reason));
-        if sanction_result.is_err() {
-            error!("Cannot reward banned peer");
-        }
-
-        sanction_result.map_err(|err| anyhow::anyhow!("Cannot reward banned peer: {err}"))
-    }
-
     /// Construct a batch response, with blocks and their MMR membership proofs
     /// relative to a specified anchor.
     ///
@@ -258,7 +211,7 @@ impl PeerLoopHandler {
     /// `parent_of_first_block`.
     ///
     /// # Return Value
-    ///  - `Err` when the connection should be closed;
+    ///  - `Err` when the ~~connection should be closed~~ channel to the main loop is full;
     ///  - `Ok(None)` if some block is invalid
     ///  - `Ok(None)` if the last block has insufficient cumulative PoW and we
     ///    are not syncing;
@@ -275,12 +228,14 @@ impl PeerLoopHandler {
     ///     `self.reward(..)`.
     ///
     /// # Panics
-    ///
     ///  - Panics if called with the empty list.
     async fn handle_blocks(
-        &mut self,
+        // &mut self,
         received_blocks: Vec<Block>,
         parent_of_first_block: Block,
+        global_state_lock: GlobalStateLock,
+        peer: PeerId,
+        chan: mpsc::Sender<PeerTaskToMain>,
     ) -> Result<Option<BlockHeight>> {
         debug!(
             "attempting to validate {} {}",
@@ -291,23 +246,23 @@ impl PeerLoopHandler {
                 "blocks"
             }
         );
-        let now = self.now();
+        let now = Timestamp::now();
         debug!("validating with respect to current timestamp {now}");
         let mut previous_block = &parent_of_first_block;
         for new_block in &received_blocks {
             let new_block_has_proof_of_work = new_block.has_proof_of_work(
-                self.global_state_lock.cli().network,
+                global_state_lock.cli().network,
                 previous_block.header(),
             );
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
             let new_block_is_valid = new_block
-                .is_valid(previous_block, now, self.global_state_lock.cli().network)
+                .is_valid(previous_block, now, global_state_lock.cli().network)
                 .await;
             debug!("new block is valid? {new_block_is_valid}");
             if !new_block_has_proof_of_work {
                 warn!(
                     "Received invalid proof-of-work for block of height {} from peer with IP {}",
-                    new_block.kernel.header.height, self.peer_address
+                    new_block.kernel.header.height, peer
                 );
                 warn!("Difficulty is {}.", previous_block.kernel.header.difficulty);
                 warn!(
@@ -315,23 +270,21 @@ impl PeerLoopHandler {
                     previous_block.kernel.header.difficulty.target(),
                     new_block.hash()
                 );
-                self.punish(NegativePeerSanction::InvalidBlock((
+                chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidBlock((
                     new_block.kernel.header.height,
                     new_block.hash(),
-                )))
-                .await?;
+                ))))).await?;
                 warn!("Failed to validate block due to insufficient PoW");
                 return Ok(None);
             } else if !new_block_is_valid {
                 warn!(
                     "Received invalid block of height {} from peer with IP {}",
-                    new_block.kernel.header.height, self.peer_address
+                    new_block.kernel.header.height, peer
                 );
-                self.punish(NegativePeerSanction::InvalidBlock((
+                chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidBlock((
                     new_block.kernel.header.height,
                     new_block.hash(),
-                )))
-                .await?;
+                ))))).await?;
                 warn!("Failed to validate block: invalid block");
                 return Ok(None);
             }
@@ -347,14 +300,12 @@ impl PeerLoopHandler {
         // evaluate the fork choice rule
         debug!("Checking last block's canonicity ...");
         let last_block = received_blocks.last().unwrap();
-        let is_canonical = self
-            .global_state_lock
+        let is_canonical = global_state_lock
             .lock_guard()
             .await
             .incoming_block_is_more_canonical(last_block);
         let last_block_height = last_block.header().height;
-        let sync_mode_active_and_have_new_champion = self
-            .global_state_lock
+        let sync_mode_active_and_have_new_champion = global_state_lock
             .lock_guard()
             .await
             .net
@@ -376,17 +327,14 @@ impl PeerLoopHandler {
         // Send the new blocks to the main task which handles the state update
         // and storage to the database.
         let number_of_received_blocks = received_blocks.len();
-        self.to_main_tx
-            .send(PeerTaskToMain::NewBlocks(received_blocks))
-            .await?;
+        chan.send(PeerTaskToMain::NewBlocks(received_blocks)).await?;
         debug!(
             "Updated block info by block from peer. block height {}",
             last_block_height
         );
 
         // Valuable, new, hard-to-produce information. Reward peer.
-        self.reward(PositivePeerSanction::ValidBlocks(number_of_received_blocks))
-            .await?;
+        chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Positive(PositivePeerSanction::ValidBlocks(number_of_received_blocks)))).await?;
 
         Ok(Some(last_block_height))
     }
@@ -401,25 +349,22 @@ impl PeerLoopHandler {
     ///    received block is pushed to the fork reconciliation list for later
     ///    handling by this function. The fork reconciliation list starts out
     ///    empty, but grows as more parents are requested and transmitted.
-    ///  - If the parent is found in the database, a) block handling continues:
-    ///    the entire list of fork reconciliation blocks are passed down the
-    ///    pipeline, potentially leading to a state update; and b) the fork
-    ///    reconciliation list is cleared.
+    ///  - If the parent is found in the database, 
+    ///     a) block handling continues: the entire list of fork reconciliation blocks are passed down the pipeline, potentially leading to a state update; and 
+    ///     b) the fork reconciliation list is cleared.
     ///
     /// Locking:
     ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
     ///     `self.reward(..)`.
-    async fn try_ensure_path<S>(
-        &mut self,
+    async fn try_ensure_path(
+        // &mut self,
         received_block: Box<Block>,
-        peer: &mut S,
-        peer_state: &mut MutablePeerState,
-    ) -> Result<()>
-    where
-        S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
-        <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-        <S as TryStream>::Error: std::error::Error,
-    {
+        (highest_shared_block_height, peer_state): (BlockHeight, &mut MutablePeerState),
+        global_state_lock: GlobalStateLock,
+        chan: mpsc::Sender<PeerTaskToMain>,
+        peer: libp2p::PeerId,
+        swarm: &mut Swarm<ComposedBehaviour>
+    ) -> Result<()> {
         // Does the received block match the fork reconciliation list?
         let received_block_matches_fork_reconciliation_list = if let Some(successor) =
             peer_state.fork_reconciliation_blocks.last()
@@ -427,8 +372,8 @@ impl PeerLoopHandler {
             let valid = successor
                 .is_valid(
                     received_block.as_ref(),
-                    self.now(),
-                    self.global_state_lock.cli().network,
+                    Timestamp::now(),
+                    global_state_lock.cli().network,
                 )
                 .await;
             if !valid {
@@ -444,7 +389,7 @@ impl PeerLoopHandler {
 
         // Are we running out of RAM?
         let too_many_blocks = peer_state.fork_reconciliation_blocks.len() + 1
-            >= self.global_state_lock.cli().sync_mode_threshold;
+            >= global_state_lock.cli().sync_mode_threshold;
         if too_many_blocks {
             warn!(
                 "Fork reconciliation failed after receiving {} blocks: block count exceeds sync mode threshold",
@@ -454,12 +399,11 @@ impl PeerLoopHandler {
 
         // Block mismatch or too many blocks: abort!
         if !received_block_matches_fork_reconciliation_list || too_many_blocks {
-            self.punish(NegativePeerSanction::ForkResolutionError((
+            chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::ForkResolutionError((
                 received_block.header().height,
                 peer_state.fork_reconciliation_blocks.len() as u16,
                 received_block.hash(),
-            )))
-            .await?;
+            ))))).await?;
             peer_state.fork_reconciliation_blocks = vec![];
             return Ok(());
         }
@@ -478,8 +422,7 @@ impl PeerLoopHandler {
         let parent_height = received_block_header.height.previous()
             .expect("transferred block must have previous height because genesis block cannot be transferred");
         debug!("Try ensure path: fetching parent block");
-        let parent_block = self
-            .global_state_lock
+        let parent_block = global_state_lock
             .lock_guard()
             .await
             .chain
@@ -499,7 +442,7 @@ impl PeerLoopHandler {
         let Some(parent_block) = parent_block else {
             if parent_height.is_genesis() {
                 peer_state.fork_reconciliation_blocks.clear();
-                self.punish(NegativePeerSanction::DifferentGenesis).await?;
+                chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::DifferentGenesis))).await?;
                 return Ok(());
             }
             debug!(
@@ -507,8 +450,7 @@ impl PeerLoopHandler {
                 parent_height
             );
 
-            peer.send(PeerMessage::BlockRequestByHash(parent_digest))
-                .await?;
+            swarm.behaviour_mut().reqresp.send_request(&peer, PeerMessage::BlockRequestByHash(parent_digest));
 
             return Ok(());
         };
@@ -524,19 +466,18 @@ impl PeerLoopHandler {
         let fork_reconciliation_event = !peer_state.fork_reconciliation_blocks.is_empty();
         peer_state.fork_reconciliation_blocks.clear();
 
-        if let Some(new_block_height) = self.handle_blocks(new_blocks, parent_block).await? {
-            // If `BlockNotification` was received during a block reconciliation
-            // event, then the peer might have one (or more (unlikely)) blocks
-            // that we do not have. We should thus request those blocks.
-            if fork_reconciliation_event
-                && peer_state.highest_shared_block_height > new_block_height
-            {
-                peer.send(PeerMessage::BlockRequestByHeight(
-                    peer_state.highest_shared_block_height,
-                ))
-                .await?;
+        if let Some(new_block_height) = PeerLoopHandler::handle_blocks(
+                new_blocks, 
+                parent_block,
+                global_state_lock,
+                peer,
+                chan
+            ).await? {
+                // If `BlockNotification` was received during a block reconciliation event, then the peer might have one (or more (unlikely)) blocks that we do not have. We should thus request those blocks.
+                if fork_reconciliation_event && highest_shared_block_height > new_block_height {
+                    swarm.behaviour_mut().reqresp.send_request(&peer, PeerMessage::BlockRequestByHeight(highest_shared_block_height));
+                }
             }
-        }
 
         Ok(())
     }
@@ -549,21 +490,20 @@ impl PeerLoopHandler {
     ///   * Acquires `global_state_lock` for read.
     ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
     ///     `self.reward(..)`.
-    async fn handle_peer_message<S>(
-        &mut self,
+    pub async fn handle_peer_message(
+        // &mut self,
+        swarm: &mut libp2p::Swarm<super::main_loop::swarm_def::ComposedBehaviour>,
         msg: PeerMessage,
-        peer: &mut S,
-        peer_state_info: &mut MutablePeerState,
-    ) -> Result<bool>
-    where
-        S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
-        <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-        <S as TryStream>::Error: std::error::Error,
-    {
+        peer: libp2p::PeerId,
+        (_highest_shared_block_height, peer_state_info): (BlockHeight, &mut MutablePeerState),
+        chan: mpsc::Sender<PeerTaskToMain>,
+        global_state_lock: GlobalStateLock,
+        resp: Option<libp2p::request_response::ResponseChannel<PeerMessage>>
+    ) -> Result<bool> {
         debug!(
             "Received {} from peer {}",
             msg.get_type(),
-            self.peer_address
+            peer
         );
         match msg {
             PeerMessage::Bye => {
@@ -573,76 +513,69 @@ impl PeerLoopHandler {
                 Ok(DISCONNECT_CONNECTION)
             }
             PeerMessage::PeerListRequest => {
-                let peer_info = {
+                let peer_info: Vec<(PeerId, Vec<Multiaddr>)> = {
                     log_slow_scope!(fn_name!() + "::PeerMessage::PeerListRequest");
 
-                    // We are interested in the address on which peers accept ingoing connections,
-                    // not in the address in which they are connected to us. We are only interested in
-                    // peers that accept incoming connections.
-                    let mut peer_info: Vec<(SocketAddr, u128)> = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .net
-                        .peer_map
-                        .values()
-                        .filter(|peer_info| peer_info.listen_address().is_some())
-                        .take(MAX_PEER_LIST_LENGTH) // limit length of response
-                        .map(|peer_info| {
-                            (
-                                // unwrap is safe bc of above `filter`
-                                peer_info.listen_address().unwrap(),
-                                peer_info.instance_id(),
-                            )
-                        })
-                        .collect();
+                    let peers_gossip = swarm.behaviour().gossipsub.all_peers();
+                    let peers_gossip: Box<dyn Iterator<Item = (PeerId, Vec<Multiaddr>)>> = todo!["enrich with multiaddresses from `swarm`"];
+                    let peers_kad = 
+                        swarm.behaviour().kad.kbuckets().map(|kb| kb.iter().map(|entry| {
+                            let r = entry.node;
+                            (r.key.clone().into_preimage(), r.value.clone().into_vec())
+                        }).collect::<Vec<_>>()).flatten();
 
                     // We sort the returned list, so this function is easier to test
-                    peer_info.sort_by_cached_key(|x| x.0);
-                    peer_info
+                    // peer_info.sort_by_cached_key(|x| x.0);
+                    
+                    peers_gossip.chain(peers_kad).collect()
                 };
 
                 debug!("Responding with: {:?}", peer_info);
-                peer.send(PeerMessage::PeerListResponse(peer_info)).await?;
+                swarm.behaviour_mut().reqresp.send_response(
+                    resp.ok_or(anyhow::anyhow!(ERR_MSG))?,
+                    PeerMessage::PeerListResponse(peer_info.into_iter().map(|(peer, madr)| madr.into_iter().map(move |a| {
+                        let r = a.with_p2p(peer);
+                        debug_assert![r.is_ok()];
+                        match r {
+                            Ok(adr) => adr,
+                            Err(adr) => adr,
+                        }
+                    })).flatten().collect())
+                );
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::PeerListResponse(peers) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::PeerListResponse");
 
+                // TODO the sanction seems redundant with `libp2p`
                 if peers.len() > MAX_PEER_LIST_LENGTH {
-                    self.punish(NegativePeerSanction::FloodPeerListResponse)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::FloodPeerListResponse))).await?;
                 }
-                self.to_main_tx
-                    .send(PeerTaskToMain::PeerDiscoveryAnswer((
-                        peers,
-                        self.peer_address,
+
+                chan.send(PeerTaskToMain::PeerExchangeAnswer((
+                        peers, peer,
                         // The distance to the revealed peers is 1 + this peer's distance
-                        self.distance + 1,
-                    )))
-                    .await?;
+                        todo!["self.distance + 1"],
+                    ))).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotificationRequest => {
                 debug!("Got BlockNotificationRequest");
 
-                peer.send(PeerMessage::BlockNotification(
-                    self.global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .light_state()
-                        .into(),
-                ))
-                .await?;
+                swarm.behaviour_mut().reqresp.send_response(
+                    resp.ok_or(anyhow::anyhow!(ERR_MSG))?, 
+                    PeerMessage::BlockNotification(
+                        global_state_lock.lock_guard().await.chain.light_state().into()
+                    )
+                );
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotification(block_notification) => {
-                const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
+                const SYNC_CHALLENGE_COOLDOWN: std::time::Duration = std::time::Duration::from_mins(10);
 
                 let (tip_header, sync_anchor_is_set) = {
-                    let state = self.global_state_lock.lock_guard().await;
+                    let state = global_state_lock.lock_guard().await;
                     (
                         *state.chain.light_state().header(),
                         state.net.sync_anchor.is_some(),
@@ -653,11 +586,10 @@ impl PeerLoopHandler {
                     block_notification.height, tip_header.height
                 );
 
-                let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
-                let now = self.now();
+                let sync_mode_threshold = global_state_lock.cli().sync_mode_threshold;
                 let time_since_latest_successful_challenge = peer_state_info
                     .successful_sync_challenge_response_time
-                    .map(|then| now - then);
+                    .map(|then| tokio::time::Instant::now().into_std().duration_since(then));
                 let cooldown_expired = time_since_latest_successful_challenge
                     .is_none_or(|time_passed| time_passed > SYNC_CHALLENGE_COOLDOWN);
                 let exceeds_sync_mode_threshold = GlobalState::sync_mode_threshold_stateless(
@@ -680,89 +612,78 @@ impl PeerLoopHandler {
                     let challenge = SyncChallenge::generate(
                         &block_notification,
                         tip_header.height,
-                        self.rng.random(),
+                        StdRng::from_rng(&mut rand::rng()).random(),
                     );
                     peer_state_info.sync_challenge = Some(IssuedSyncChallenge::new(
                         challenge,
                         block_notification.cumulative_proof_of_work,
-                        self.now(),
+                        tokio::time::Instant::now().into(),
                     ));
 
                     debug!("sending challenge ...");
-                    peer.send(PeerMessage::SyncChallenge(challenge)).await?;
+                    // #reqresp
+                    todo!["peer.send(PeerMessage::SyncChallenge(challenge)).await?"];
 
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                peer_state_info.highest_shared_block_height = block_notification.height;
-                let block_is_new = tip_header.cumulative_proof_of_work
-                    < block_notification.cumulative_proof_of_work;
-
-                debug!("block_is_new: {}", block_is_new);
-
-                if block_is_new
-                    && peer_state_info.fork_reconciliation_blocks.is_empty()
-                    && !sync_anchor_is_set
-                    && !exceeds_sync_mode_threshold
-                {
-                    debug!(
-                        "sending BlockRequestByHeight to peer for block with height {}",
-                        block_notification.height
-                    );
-                    peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
-                        .await?;
+                    Ok(KEEP_CONNECTION_ALIVE)
                 } else {
-                    debug!(
-                        "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
-                        block_notification.height,
-                        block_is_new,
-                        !peer_state_info.fork_reconciliation_blocks.is_empty()
-                    );
-                }
+                    // peer_state_info.highest_shared_block_height = block_notification.height;
+                    let block_is_new = 
+                        tip_header.cumulative_proof_of_work < block_notification.cumulative_proof_of_work;
 
-                Ok(KEEP_CONNECTION_ALIVE)
+                    debug!("block_is_new: {}", block_is_new);
+
+                    if block_is_new
+                        && peer_state_info.fork_reconciliation_blocks.is_empty()
+                        && !sync_anchor_is_set
+                        && !exceeds_sync_mode_threshold
+                    {
+                        debug!(
+                            "sending BlockRequestByHeight to peer for block with height {}",
+                            block_notification.height
+                        );
+                        // #reqresp
+                        todo!["peer.send(PeerMessage::BlockRequestByHeight(block_notification.height)).await?"];
+                    } else {
+                        debug!(
+                            "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
+                            block_notification.height,
+                            block_is_new,
+                            !peer_state_info.fork_reconciliation_blocks.is_empty()
+                        );
+                    }
+
+                    Ok(KEEP_CONNECTION_ALIVE)
+                }
             }
             PeerMessage::SyncChallenge(sync_challenge) => {
-                let response = {
-                    log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallenge");
+                log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallenge");
 
-                    info!("Got sync challenge from {}", self.peer_address.ip());
+                info!("Got sync challenge from {}", peer);
 
-                    let response = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .response_to_sync_challenge(sync_challenge)
-                        .await;
+                let response = global_state_lock
+                    .lock_guard()
+                    .await
+                    .response_to_sync_challenge(sync_challenge)
+                    .await;
 
-                    match response {
-                        Ok(resp) => resp,
-                        Err(e) => {
-                            warn!("could not generate sync challenge response:\n{e}");
-                            self.punish(NegativePeerSanction::InvalidSyncChallenge)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
-                        }
+                match response {
+                    Err(e) => {
+                        warn!("could not generate sync challenge response:\n{e}");
+                        chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidSyncChallenge))).await?;
                     }
-                };
-
-                info!(
-                    "Responding to sync challenge from {}",
-                    self.peer_address.ip()
-                );
-                peer.send(PeerMessage::SyncChallengeResponse(Box::new(response)))
-                    .await?;
-
+                    Ok(response) => {
+                        info!("Responding to sync challenge from {}", peer);
+                        // #reqresp
+                        todo!["peer.send(PeerMessage::SyncChallengeResponse(Box::new(response))).await?"];
+                    }
+                }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::SyncChallengeResponse(challenge_response) => {
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(45);
+                const SYNC_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
                 log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallengeResponse");
-                info!(
-                    "Got sync challenge response from {}",
-                    self.peer_address.ip()
-                );
+                info!("Got sync challenge response from {}", peer);
 
                 // The purpose of the sync challenge and sync challenge response
                 // is to avoid going into sync mode based on a malicious target
@@ -780,88 +701,74 @@ impl PeerLoopHandler {
                 // validation) obviates this entire subprotocol.
 
                 // Did we issue a challenge?
-                let Some(issued_challenge) = peer_state_info.sync_challenge else {
+                if let Some(issued_challenge) = peer_state_info.sync_challenge {
+                    // Reset the challenge, regardless of the response's success.
+                    peer_state_info.sync_challenge = None;
+
+                    // Does response match issued challenge?
+                    if challenge_response.matches(global_state_lock.cli().network, issued_challenge) {
+                        // Does response verify?
+                        let claimed_tip_height = challenge_response.tip.header.height;
+                        let now = Timestamp::now();
+                        if challenge_response.is_valid(now, global_state_lock.cli().network).await {
+                            // Does cumulative proof-of-work evolve reasonably?
+                            let own_tip_header = *global_state_lock
+                                .lock_guard()
+                                .await
+                                .chain
+                                .light_state()
+                                .header();
+                            if challenge_response
+                                .check_pow(global_state_lock.cli().network, own_tip_header.height)
+                            {
+                                // Is there some specific (*i.e.*, not aggregate) proof of work?
+                                if !challenge_response.check_difficulty(own_tip_header.difficulty) {
+                                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::FishyDifficultiesChallengeResponse))).await?;
+                                    return Ok(KEEP_CONNECTION_ALIVE);
+                                }
+
+                                // Did it come in time?
+                                let now = tokio::time::Instant::now().into_std();
+                                if now.duration_since(issued_challenge.issued_at) > SYNC_RESPONSE_TIMEOUT {
+                                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::TimedOutSyncChallengeResponse))).await?;
+                                    return Ok(KEEP_CONNECTION_ALIVE);
+                                }
+
+                                info!("Successful sync challenge response; relaying peer tip info to main loop.");
+                                peer_state_info.successful_sync_challenge_response_time = Some(now);
+
+                                let mut sync_mmra_anchor = challenge_response.tip.body.block_mmr_accumulator;
+                                sync_mmra_anchor.append(issued_challenge.challenge.tip_digest);
+
+                                // Inform main loop
+                                chan.send(PeerTaskToMain::AddPeerMaxBlockHeight {
+                                    peer_address: peer,
+                                    claimed_height: claimed_tip_height,
+                                    claimed_cumulative_pow: issued_challenge.accumulated_pow,
+                                    claimed_block_mmra: sync_mmra_anchor,
+                                }).await?;
+
+                                Ok(KEEP_CONNECTION_ALIVE)
+                            } else {
+                                chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::FishyPowEvolutionChallengeResponse))).await?;
+                                Ok(KEEP_CONNECTION_ALIVE)
+                            }
+                        } else {
+                            chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidSyncChallengeResponse))).await?;
+                            Ok(KEEP_CONNECTION_ALIVE)
+                        }
+                    } else {
+                        chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidSyncChallengeResponse))).await?;
+                        Ok(KEEP_CONNECTION_ALIVE)
+                    }
+                } else {
                     warn!("Sync challenge response was not prompted.");
-                    self.punish(NegativePeerSanction::UnexpectedSyncChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                };
-
-                // Reset the challenge, regardless of the response's success.
-                peer_state_info.sync_challenge = None;
-
-                // Does response match issued challenge?
-                if !challenge_response
-                    .matches(self.global_state_lock.cli().network, issued_challenge)
-                {
-                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::UnexpectedSyncChallengeResponse))).await?;
+                    Ok(KEEP_CONNECTION_ALIVE)
                 }
-
-                // Does response verify?
-                let claimed_tip_height = challenge_response.tip.header.height;
-                let now = self.now();
-                if !challenge_response
-                    .is_valid(now, self.global_state_lock.cli().network)
-                    .await
-                {
-                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // Does cumulative proof-of-work evolve reasonably?
-                let own_tip_header = *self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .header();
-                if !challenge_response
-                    .check_pow(self.global_state_lock.cli().network, own_tip_header.height)
-                {
-                    self.punish(NegativePeerSanction::FishyPowEvolutionChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // Is there some specific (*i.e.*, not aggregate) proof of work?
-                if !challenge_response.check_difficulty(own_tip_header.difficulty) {
-                    self.punish(NegativePeerSanction::FishyDifficultiesChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // Did it come in time?
-                if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
-                    self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                info!("Successful sync challenge response; relaying peer tip info to main loop.");
-                peer_state_info.successful_sync_challenge_response_time = Some(now);
-
-                let mut sync_mmra_anchor = challenge_response.tip.body.block_mmr_accumulator;
-                sync_mmra_anchor.append(issued_challenge.challenge.tip_digest);
-
-                // Inform main loop
-                self.to_main_tx
-                    .send(PeerTaskToMain::AddPeerMaxBlockHeight {
-                        peer_address: self.peer_address,
-                        claimed_height: claimed_tip_height,
-                        claimed_cumulative_pow: issued_challenge.accumulated_pow,
-                        claimed_block_mmra: sync_mmra_anchor,
-                    })
-                    .await?;
-
-                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
-                let block = self
-                    .global_state_lock
+                let block = global_state_lock
                     .lock_guard()
                     .await
                     .chain
@@ -870,53 +777,28 @@ impl PeerLoopHandler {
                     .await?;
 
                 match block {
-                    None => {
-                        // TODO: Consider punishing here
-                        warn!("Peer requested unknown block with hash {:x}", block_digest);
-                        Ok(KEEP_CONNECTION_ALIVE)
-                    }
-                    Some(b) => {
-                        peer.send(PeerMessage::Block(Box::new(b.try_into().unwrap())))
-                            .await?;
-                        Ok(KEEP_CONNECTION_ALIVE)
-                    }
+                    None => warn!("Peer requested unknown block with hash {:x}", block_digest), // TODO: Consider punishing here
+                    Some(b) => {todo!["peer.send(PeerMessage::Block(Box::new(b.try_into().unwrap()))).await?"];} // #reqresp
                 }
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestByHeight(block_height) => {
-                let block_response = {
-                    log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
 
-                    debug!("Got BlockRequestByHeight of height {}", block_height);
+                debug!("Got BlockRequestByHeight of height {}", block_height);
 
-                    let canonical_block_digest = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .archival_state()
-                        .archival_block_mmr
-                        .ammr()
-                        .try_get_leaf(block_height.into())
-                        .await;
-
-                    let Some(canonical_block_digest) = canonical_block_digest else {
-                        let own_tip_height = self
-                            .global_state_lock
-                            .lock_guard()
-                            .await
-                            .chain
-                            .light_state()
-                            .header()
-                            .height;
-                        warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
-                        self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
-                            .await?;
-
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    };
-
-                    let canonical_chain_block: Block = self
-                        .global_state_lock
+                let canonical_block_digest = global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .archival_block_mmr
+                    .ammr()
+                    .try_get_leaf(block_height.into())
+                    .await;
+                
+                if let Some(canonical_block_digest) = canonical_block_digest {
+                    let canonical_chain_block: Block = global_state_lock
                         .lock_guard()
                         .await
                         .chain
@@ -925,12 +807,22 @@ impl PeerLoopHandler {
                         .await?
                         .unwrap();
 
-                    PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()))
-                };
-
-                debug!("Sending block");
-                peer.send(block_response).await?;
-                debug!("Sent block");
+                    let block_response = PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()));
+                    debug!("Sending block");
+                    // #reqresp
+                    todo!["peer.send(block_response).await?"];
+                    debug!("Sent block");
+                } else {
+                    let own_tip_height = global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .header()
+                        .height;
+                    warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::BlockRequestUnknownHeight))).await?;
+                }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Block(t_block) => {
@@ -938,32 +830,35 @@ impl PeerLoopHandler {
 
                 debug!(
                     "Got new block from peer {}, height {}, mined {}",
-                    self.peer_address,
+                    peer,
                     t_block.header.height,
                     t_block.header.timestamp.standard_format()
                 );
                 let new_block_height = t_block.header.height;
 
-                let block = match Block::try_from(*t_block) {
-                    Ok(block) => Box::new(block),
+                match Block::try_from(*t_block) {
+                    Ok(block) => {
+                        let block = Box::new(block);
+                        // Update the value for the highest known height that peer possesses iff we are not in a fork reconciliation state.
+                        // if peer_state_info.fork_reconciliation_blocks.is_empty() {
+                        //     peer_state_info.highest_shared_block_height = new_block_height;
+                        // }
+
+                        PeerLoopHandler::try_ensure_path(
+                            block, (new_block_height, peer_state_info),
+                            global_state_lock,
+                            chan,
+                            peer,
+                            swarm
+                        ).await?;
+
+                        // Reward happens as part of `try_ensure_path`
+                    }
                     Err(e) => {
                         warn!("Peer sent invalid block: {e:?}");
-                        self.punish(NegativePeerSanction::InvalidTransferBlock)
-                            .await?;
-
-                        return Ok(KEEP_CONNECTION_ALIVE);
+                        chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidTransferBlock))).await?;
                     }
-                };
-
-                // Update the value for the highest known height that peer possesses iff
-                // we are not in a fork reconciliation state.
-                if peer_state_info.fork_reconciliation_blocks.is_empty() {
-                    peer_state_info.highest_shared_block_height = new_block_height;
                 }
-
-                self.try_ensure_path(block, peer, peer_state_info).await?;
-
-                // Reward happens as part of `try_ensure_path`
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -974,12 +869,11 @@ impl PeerLoopHandler {
             }) => {
                 debug!(
                     "Received BlockRequestBatch from peer {}, max_response_len: {max_response_len}",
-                    self.peer_address
+                    peer
                 );
 
                 if known_blocks.len() > MAX_NUM_DIGESTS_IN_BATCH_REQUEST {
-                    self.punish(NegativePeerSanction::BatchBlocksRequestTooManyDigests)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::BatchBlocksRequestTooManyDigests))).await?;
 
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -991,14 +885,13 @@ impl PeerLoopHandler {
                 let least_preferred = match known_blocks.last() {
                     Some(least_preferred) => *least_preferred,
                     None => {
-                        self.punish(NegativePeerSanction::BatchBlocksRequestEmpty)
-                            .await?;
+                        chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::BatchBlocksRequestEmpty))).await?;
 
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
                 };
 
-                let state = self.global_state_lock.lock_guard().await;
+                let state = global_state_lock.lock_guard().await;
                 let block_mmr_num_leafs = state.chain.light_state().header().height.next().into();
                 let luca_is_known = state
                     .chain
@@ -1007,9 +900,11 @@ impl PeerLoopHandler {
                     .await;
                 if !luca_is_known || anchor.num_leafs() > block_mmr_num_leafs {
                     drop(state);
-                    self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
-                        .await?;
-                    peer.send(PeerMessage::UnableToSatisfyBatchRequest).await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::BatchBlocksUnknownRequest))).await?;
+                    swarm.behaviour_mut().reqresp.send_response(
+                        resp.ok_or(anyhow::anyhow!(ERR_MSG))?, 
+                        PeerMessage::UnableToSatisfyBatchRequest
+                    );
 
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -1055,7 +950,7 @@ impl PeerLoopHandler {
                 // or `STANDARD_BLOCK_BATCH_SIZE` number of blocks in response.
                 let max_response_len = cmp::min(
                     max_response_len,
-                    self.global_state_lock.cli().sync_mode_threshold,
+                    global_state_lock.cli().sync_mode_threshold,
                 );
                 let max_response_len = cmp::max(max_response_len, MINIMUM_BLOCK_BATCH_SIZE);
                 let max_response_len = cmp::min(max_response_len, STANDARD_BLOCK_BATCH_SIZE);
@@ -1100,15 +995,16 @@ impl PeerLoopHandler {
 
                 let Some(response) = response else {
                     warn!("Unable to satisfy batch-block request");
-                    self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::BatchBlocksUnknownRequest))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
 
                 debug!("Returning {} blocks in batch response", response.len());
 
-                let response = PeerMessage::BlockResponseBatch(response);
-                peer.send(response).await?;
+                swarm.behaviour_mut().reqresp.send_response(
+                    resp.ok_or(anyhow::anyhow!(ERR_MSG))?,
+                    PeerMessage::BlockResponseBatch(response)
+                );
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1123,16 +1019,14 @@ impl PeerLoopHandler {
                 // (Alan:) why is there even a minimum?
                 if authenticated_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
                     warn!("Got smaller batch response than allowed");
-                    self.punish(NegativePeerSanction::TooShortBlockBatch)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::TooShortBlockBatch))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Verify that we are in fact in syncing mode
                 // TODO: Separate peer messages into those allowed under syncing
                 // and those that are not
-                let Some(sync_anchor) = self
-                    .global_state_lock
+                let Some(sync_anchor) = global_state_lock
                     .lock_guard()
                     .await
                     .net
@@ -1140,8 +1034,7 @@ impl PeerLoopHandler {
                     .clone()
                 else {
                     warn!("Received a batch of blocks without being in syncing mode");
-                    self.punish(NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
 
@@ -1150,8 +1043,7 @@ impl PeerLoopHandler {
                 // only valid for archival nodes.
                 let (first_block, _) = &authenticated_blocks[0];
                 let first_blocks_parent_digest: Digest = first_block.header.prev_block_digest;
-                let most_canonical_own_block_match: Option<Block> = self
-                    .global_state_lock
+                let most_canonical_own_block_match: Option<Block> = global_state_lock
                     .lock_guard()
                     .await
                     .chain
@@ -1163,8 +1055,7 @@ impl PeerLoopHandler {
                     Some(block) => block,
                     None => {
                         warn!("Got batch response with invalid start block");
-                        self.punish(NegativePeerSanction::BatchBlocksInvalidStartHeight)
-                            .await?;
+                        chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::BatchBlocksInvalidStartHeight))).await?;
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
                 };
@@ -1178,8 +1069,7 @@ impl PeerLoopHandler {
                 for (t_block, membership_proof) in authenticated_blocks {
                     let Ok(block) = Block::try_from(t_block) else {
                         warn!("Received invalid transfer block from peer");
-                        self.punish(NegativePeerSanction::InvalidTransferBlock)
-                            .await?;
+                        chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidTransferBlock))).await?;
                         return Ok(KEEP_CONNECTION_ALIVE);
                     };
 
@@ -1190,8 +1080,7 @@ impl PeerLoopHandler {
                         sync_anchor.block_mmr.num_leafs(),
                     ) {
                         warn!("Authentication of received block fails relative to anchor");
-                        self.punish(NegativePeerSanction::InvalidBlockMmrAuthentication)
-                            .await?;
+                        chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidBlockMmrAuthentication))).await?;
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
 
@@ -1199,8 +1088,10 @@ impl PeerLoopHandler {
                 }
 
                 // Get the latest block that we know of and handle all received blocks
-                self.handle_blocks(received_blocks, most_canonical_own_block_match)
-                    .await?;
+                PeerLoopHandler::handle_blocks(
+                    received_blocks, most_canonical_own_block_match,
+                    global_state_lock, peer, chan
+                ).await?;
 
                 // Reward happens as part of `handle_blocks`.
 
@@ -1208,10 +1099,7 @@ impl PeerLoopHandler {
             }
             PeerMessage::UnableToSatisfyBatchRequest => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::UnableToSatisfyBatchRequest");
-                warn!(
-                    "Peer {} reports inability to satisfy batch request.",
-                    self.peer_address
-                );
+                warn!("Peer {} reports inability to satisfy batch request.", peer);
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1221,7 +1109,7 @@ impl PeerLoopHandler {
                 // The handshake should have been sent during connection
                 // initialization. Here it is out of order at best, malicious at
                 // worst.
-                self.punish(NegativePeerSanction::InvalidMessage).await?;
+                chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidMessage))).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::ConnectionStatus(_) => {
@@ -1231,7 +1119,7 @@ impl PeerLoopHandler {
                 // initialization. Here it is out of order at best, malicious at
                 // worst.
 
-                self.punish(NegativePeerSanction::InvalidMessage).await?;
+                chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidMessage))).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Transaction(transaction) => {
@@ -1247,7 +1135,7 @@ impl PeerLoopHandler {
                 let transaction: Transaction = (*transaction).into();
 
                 let (tip, mutator_set_accumulator_after, current_block_height) = {
-                    let state = self.global_state_lock.lock_guard().await;
+                    let state = global_state_lock.lock_guard().await;
 
                     (
                         state.chain.light_state().hash(),
@@ -1261,13 +1149,12 @@ impl PeerLoopHandler {
                 };
 
                 // 1. If transaction is invalid, punish.
-                let network = self.global_state_lock.cli().network;
+                let network = global_state_lock.cli().network;
                 let consensus_rule_set =
                     ConsensusRuleSet::infer_from(network, current_block_height);
                 if !transaction.is_valid(network, consensus_rule_set).await {
                     warn!("Received invalid tx");
-                    self.punish(NegativePeerSanction::InvalidTransaction)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidTransaction))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -1276,22 +1163,19 @@ impl PeerLoopHandler {
                 // Only the miner is allowed to produce transactions with non-empty coinbase fields.
                 if transaction.kernel.coinbase.is_some() {
                     warn!("Received non-mined transaction with coinbase.");
-                    self.punish(NegativePeerSanction::NonMinedTransactionHasCoinbase)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::NonMinedTransactionHasCoinbase))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // 3. If negative fee, punish.
                 if transaction.kernel.fee.is_negative() {
                     warn!("Received negative-fee transaction.");
-                    self.punish(NegativePeerSanction::TransactionWithNegativeFee)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::TransactionWithNegativeFee))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // 4. Check if transaction is already known.
-                if !self
-                    .global_state_lock
+                if !global_state_lock
                     .lock_guard()
                     .await
                     .mempool
@@ -1340,26 +1224,22 @@ impl PeerLoopHandler {
                                     debug!("invalid because membership proof for chunk index {chunk_index} is invalid");
                                 }
                             };
-                            self.punish(NegativePeerSanction::UnconfirmableTransaction)
-                                .await?;
+                            chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::UnconfirmableTransaction))).await?;
                             return Ok(KEEP_CONNECTION_ALIVE);
                         }
                         Err(TransactionConfirmabilityError::DuplicateInputs) => {
                             warn!("duplicate inputs");
-                            self.punish(NegativePeerSanction::DoubleSpendingTransaction)
-                                .await?;
+                            chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::DoubleSpendingTransaction))).await?;
                             return Ok(KEEP_CONNECTION_ALIVE);
                         }
                         Err(TransactionConfirmabilityError::AlreadySpentInput(index)) => {
                             warn!("already spent input (at index {index})");
-                            self.punish(NegativePeerSanction::DoubleSpendingTransaction)
-                                .await?;
+                            chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::DoubleSpendingTransaction))).await?;
                             return Ok(KEEP_CONNECTION_ALIVE);
                         }
                         Err(TransactionConfirmabilityError::RemovalRecordUnpackFailure) => {
                             warn!("Failed to unpack removal records");
-                            self.punish(NegativePeerSanction::InvalidTransaction)
-                                .await?;
+                            chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidTransaction))).await?;
                             return Ok(KEEP_CONNECTION_ALIVE);
                         }
                     };
@@ -1378,15 +1258,14 @@ impl PeerLoopHandler {
                 if !can_apply {
                     warn!("Cannot apply transaction to current mutator set.");
                     warn!("Transaction ID: {}", transaction.kernel.txid());
-                    self.punish(NegativePeerSanction::CannotApplyTransactionToMutatorSet)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::CannotApplyTransactionToMutatorSet))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 let tx_timestamp = transaction.kernel.timestamp;
 
                 // 6. Ignore if transaction is too old
-                let now = self.now();
+                let now = Timestamp::now();
                 if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
@@ -1405,9 +1284,7 @@ impl PeerLoopHandler {
                     transaction,
                     confirmable_for_block: tip,
                 };
-                self.to_main_tx
-                    .send(PeerTaskToMain::Transaction(Box::new(pt2m_transaction)))
-                    .await?;
+                chan.send(PeerTaskToMain::Transaction(Box::new(pt2m_transaction))).await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1419,7 +1296,7 @@ impl PeerLoopHandler {
 
                     // 1. Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
-                    let state = self.global_state_lock.lock_guard().await;
+                    let state = global_state_lock.lock_guard().await;
                     let accept_tx = state.mempool.accept_transaction(
                         tx_notification.txid,
                         tx_notification.proof_quality,
@@ -1447,13 +1324,12 @@ impl PeerLoopHandler {
 
                 // 2. Request the actual `Transaction` from peer
                 debug!("requesting transaction from peer");
-                peer.send(PeerMessage::TransactionRequest(tx_notification.txid))
-                    .await?;
+                swarm.behaviour_mut().reqresp.send_request(&peer, PeerMessage::TransactionRequest(tx_notification.txid));
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
-                let state = self.global_state_lock.lock_guard().await;
+                let state = global_state_lock.lock_guard().await;
                 let Some(transaction) = state.mempool.get(transaction_identifier) else {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
@@ -1466,55 +1342,43 @@ impl PeerLoopHandler {
                 // Drop state immediately to prevent holding over a response.
                 drop(state);
 
-                peer.send(PeerMessage::Transaction(Box::new(transfer_transaction)))
-                    .await?;
+                swarm.behaviour_mut().reqresp.send_response(
+                    resp.ok_or(anyhow::anyhow!(ERR_MSG))?, 
+                    PeerMessage::Transaction(Box::new(transfer_transaction))
+                );
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::BlockProposalNotification(block_proposal_notification) => {
-                let peer_ip = self.peer_address.ip();
-                if !self
-                    .global_state_lock
-                    .cli()
-                    .accept_block_proposal_from(peer_ip)
-                {
-                    debug!(
-                        "Ignoring proposal notification because they are not whitelisted. \
-                     Peer IP: {peer_ip}"
-                    );
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
+            // PeerMessage::BlockProposalNotification(block_proposal_notification) => {
+            //     if !global_state_lock.cli().accept_block_proposal_from(peer) {
+            //         debug!(
+            //             "Ignoring proposal notification because they are not whitelisted. \
+            //          Peer IP: {peer}"
+            //         );
+            //         return Ok(KEEP_CONNECTION_ALIVE);
+            //     }
 
-                let verdict = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .favor_incoming_block_proposal_legacy(
-                        block_proposal_notification.height,
-                        block_proposal_notification.guesser_fee,
-                    );
-                match verdict {
-                    Ok(_) => {
-                        peer.send(PeerMessage::BlockProposalRequest(
-                            BlockProposalRequest::new(block_proposal_notification.body_mast_hash),
-                        ))
-                        .await?
-                    }
-                    Err(reject_reason) => {
-                        debug!(
-                        "Rejecting notification of block proposal with guesser fee {} from peer \
-                        {}. Reason:\n{reject_reason}",
-                        block_proposal_notification.guesser_fee.display_n_decimals(5),
-                        self.peer_address
-                    )
-                    }
-                }
+            //     let verdict = global_state_lock
+            //         .lock_guard()
+            //         .await
+            //         .favor_incoming_block_proposal_legacy(
+            //             block_proposal_notification.height,
+            //             block_proposal_notification.guesser_fee,
+            //         );
+            //     match verdict {
+            //         Ok(_) => {swarm.behaviour_mut().reqresp.send_request(&peer, PeerMessage::BlockProposalRequest(BlockProposalRequest::new(block_proposal_notification.body_mast_hash)));}
+            //         Err(reject_reason) => {debug!(
+            //             "Rejecting notification of block proposal with guesser fee {} from peer \
+            //             {}. Reason:\n{reject_reason}",
+            //             block_proposal_notification.guesser_fee.display_n_decimals(5),
+            //             peer
+            //         )}
+            //     }
 
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
+            //     Ok(KEEP_CONNECTION_ALIVE)
+            // }
             PeerMessage::BlockProposalRequest(block_proposal_request) => {
-                let matching_proposal = self
-                    .global_state_lock
+                let matching_proposal = global_state_lock
                     .lock_guard()
                     .await
                     .mining_state
@@ -1522,11 +1386,9 @@ impl PeerLoopHandler {
                     .filter(|x| x.body().mast_hash() == block_proposal_request.body_mast_hash)
                     .map(|x| x.to_owned());
                 if let Some(proposal) = matching_proposal {
-                    peer.send(PeerMessage::BlockProposal(Box::new(proposal)))
-                        .await?;
+                    swarm.behaviour_mut().reqresp.send_response(resp.ok_or(anyhow::anyhow![ERR_MSG])?, PeerMessage::BlockProposal(Box::new(proposal)));
                 } else {
-                    self.punish(NegativePeerSanction::BlockProposalNotFound)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::BlockProposalNotFound))).await?;
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -1534,13 +1396,9 @@ impl PeerLoopHandler {
             PeerMessage::BlockProposal(new_proposal) => {
                 debug!("Got block proposal from peer.");
 
-                if !self
-                    .global_state_lock
-                    .cli()
-                    .accept_block_proposal_from(self.peer_address.ip())
-                {
+                if !global_state_lock.cli().accept_block_proposal_from(&peer) {
                     warn!("Got block proposal from unwanted peer");
-                    self.punish(NegativePeerSanction::UnwantedMessage).await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::UnwantedMessage))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -1548,15 +1406,12 @@ impl PeerLoopHandler {
                 // Lock needs to be held here because race conditions: otherwise
                 // the block proposal that was validated might not match with
                 // the one whose favorability is being computed.
-                let state = self.global_state_lock.lock_guard().await;
+                let state = global_state_lock.lock_guard().await;
                 let tip = state.chain.light_state();
-                let proposal_is_valid = new_proposal
-                    .is_valid(tip, self.now(), self.global_state_lock.cli().network)
-                    .await;
+                let proposal_is_valid = new_proposal.is_valid(tip, Timestamp::now(), global_state_lock.cli().network).await;
                 if !proposal_is_valid {
                     drop(state);
-                    self.punish(NegativePeerSanction::InvalidBlockProposal)
-                        .await?;
+                    chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::InvalidBlockProposal))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -1580,18 +1435,16 @@ impl PeerLoopHandler {
                         }
                         _ => {
                             warn!("Rejecting new block proposal:\n{rejection_reason}");
-                            self.punish(NegativePeerSanction::NonFavorableBlockProposal)
-                                .await?;
+                            chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::NonFavorableBlockProposal))).await?;
                             return Ok(KEEP_CONNECTION_ALIVE);
                         }
                     }
                 };
 
-                self.send_to_main(PeerTaskToMain::BlockProposal(new_proposal), line!())
-                    .await?;
+                chan.send(PeerTaskToMain::BlockProposal(new_proposal)).await?;
 
                 // Valuable, new, hard-to-produce information. Reward peer.
-                self.reward(PositivePeerSanction::NewBlockProposal).await?;
+                chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Positive(PositivePeerSanction::NewBlockProposal))).await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1619,352 +1472,106 @@ impl PeerLoopHandler {
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for write via Self::punish()
-    async fn handle_main_task_message<S>(
-        &mut self,
+    pub async fn handle_main_task_message(
+        // &mut self,
         msg: MainToPeerTask,
-        peer: &mut S,
-        peer_state_info: &mut MutablePeerState,
-    ) -> Result<bool>
-    where
-        S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
-        <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-        <S as TryStream>::Error: std::error::Error,
-    {
-        debug!("Handling {} message from main in peer loop", msg.get_type());
+        // peer: &mut S,
+        highest_shared_block_height: BlockHeight,
+        // (highest_shared_block_height, peer_state_info): (BlockHeight, &mut MutablePeerState),
+        swarm: &mut Swarm<ComposedBehaviour>,
+        global_state_lock: GlobalStateLock,
+        chan: mpsc::Sender<PeerTaskToMain>,
+    ) -> Result<bool> {
+        debug!("Handling {msg} message from main in peer loop");
         match msg {
             MainToPeerTask::Block(block) => {
-                // We don't currently differentiate whether a new block came from a peer, or from our
-                // own miner. It's always shared through this logic.
+                /* ~~We don't currently differentiate whether a new block came from a peer, or from our own miner. It's always shared through this logic.~~ */
+                //      with the new system it's easier to separate the flow and say it's our block
                 let new_block_height = block.kernel.header.height;
-                if new_block_height > peer_state_info.highest_shared_block_height {
+                if new_block_height > highest_shared_block_height {
                     debug!("Sending PeerMessage::BlockNotification");
-                    peer_state_info.highest_shared_block_height = new_block_height;
-                    peer.send(PeerMessage::BlockNotification(block.as_ref().into()))
-                        .await?;
-                    debug!("Sent PeerMessage::BlockNotification");
+                    // peer_state_info.highest_shared_block_height = new_block_height;
+                    swarm.behaviour_mut().gossipsub.publish(
+                        libp2p::gossipsub::IdentTopic::new(
+                            crate::application::loops::main_loop::TOPIC_BLOCK
+                        ).hash(), 
+                        // PeerMessage::serialize(
+                        //     &PeerMessage::Block(block),
+                        //     cbor4ii::serde::Serializer::new(writer)
+                        // )
+                        cbor4ii::serde::to_vec(Vec::with_capacity(8 * block.size()), &PeerMessage::Block(Box::new(TransferBlock::try_from(*block).expect("TODO")))).expect("TODO")
+                    );
+                    debug!("~~Sent `PeerMessage::BlockNotification`~~ published `PeerMessage::Block`");
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::RequestBlockBatch(batch_block_request) => {
                 // Only ask one of the peers about the batch of blocks
-                if batch_block_request.peer_addr_target != self.peer_address {
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
+                //      TODO should we employ the challenge mechanism here since it's easy to abuse this with a malicious node
+                // if batch_block_request.peer_addr_target != self.peer_address {
+                //     return Ok(KEEP_CONNECTION_ALIVE);
+                // }
 
                 let max_response_len = std::cmp::min(
+                    // TODO this will hit the size limit: either limit batching to 10 blocks to align with sync mode, either add another layer of `Behaviour` composition
                     STANDARD_BLOCK_BATCH_SIZE,
-                    self.global_state_lock.cli().sync_mode_threshold,
+                    global_state_lock.cli().sync_mode_threshold,
                 );
 
-                peer.send(PeerMessage::BlockRequestBatch(BlockRequestBatch {
-                    known_blocks: batch_block_request.known_blocks,
-                    max_response_len,
-                    anchor: batch_block_request.anchor_mmr,
-                }))
-                .await?;
+                swarm.behaviour_mut().reqresp.send_request(
+                    &batch_block_request.peer_addr_target, PeerMessage::BlockRequestBatch(BlockRequestBatch {
+                        known_blocks: batch_block_request.known_blocks,
+                        max_response_len,
+                        anchor: batch_block_request.anchor_mmr,
+                    })
+                );
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::PeerSynchronizationTimeout(socket_addr) => {
+            MainToPeerTask::PeerSynchronizationTimeout(peer) => {
                 log_slow_scope!(fn_name!() + "::MainToPeerTask::PeerSynchronizationTimeout");
 
-                if self.peer_address != socket_addr {
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                self.punish(NegativePeerSanction::SynchronizationTimeout)
-                    .await?;
+                chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::SynchronizationTimeout))).await?;
 
                 // If this peer failed the last synchronization attempt, we only
                 // sanction, we don't disconnect.
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::MakePeerDiscoveryRequest => {
-                peer.send(PeerMessage::PeerListRequest).await?;
+                swarm.behaviour_mut().reqresp.send_request(
+                    todo!("choose a peer somehow"), PeerMessage::PeerListRequest
+                );
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::Disconnect(peer_address) => {
-                log_slow_scope!(fn_name!() + "::MainToPeerTask::Disconnect");
-
-                // Only disconnect from the peer the main task requested a disconnect for.
-                if peer_address != self.peer_address {
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-                self.register_peer_disconnection().await;
-
-                Ok(DISCONNECT_CONNECTION)
-            }
-            MainToPeerTask::DisconnectAll() => {
-                self.register_peer_disconnection().await;
-
-                Ok(DISCONNECT_CONNECTION)
-            }
-            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
-                if target_socket_addr == self.peer_address {
-                    peer.send(PeerMessage::PeerListRequest).await?;
-                }
+            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(peer) => {
+                swarm.behaviour_mut().reqresp.send_request(
+                    &peer, PeerMessage::PeerListRequest
+                );
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::TransactionNotification(transaction_notification) => {
+            MainToPeerTask::NewTransaction(transaction_notification) => {
                 debug!("Sending PeerMessage::TransactionNotification");
-                peer.send(PeerMessage::TransactionNotification(
-                    transaction_notification,
-                ))
-                .await?;
-                debug!("Sent PeerMessage::TransactionNotification");
+                // TODO look into tx `send` as just spreading is done outside of here
+                swarm.behaviour_mut().gossipsub.publish(
+                    libp2p::gossipsub::IdentTopic::new(crate::application::loops::main_loop::TOPIC_TX).hash(), 
+                    cbor4ii::serde::to_vec(Vec::new(), &PeerMessage::Transaction(transaction_notification.into())).expect("TODO")
+                );
+                debug!("~~Sent PeerMessage::TransactionNotification~~ published `PeerMessage::Transaction`");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::BlockProposalNotification(block_proposal_notification) => {
+            MainToPeerTask::BlockProposal(block_proposal_notification) => {
                 debug!("Sending PeerMessage::BlockProposalNotification");
-                peer.send(PeerMessage::BlockProposalNotification(
-                    block_proposal_notification,
-                ))
-                .await?;
+                swarm.behaviour_mut().gossipsub.publish(
+                    libp2p::gossipsub::IdentTopic::new(crate::application::loops::main_loop::TOPIC_PROPOSAL).hash(), 
+                    cbor4ii::serde::to_vec(Vec::with_capacity(8 * block_proposal_notification.size()), &PeerMessage::BlockProposal(block_proposal_notification.into())).expect("TODO")
+                );
                 debug!("Sent PeerMessage::BlockProposalNotification");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
         }
     }
 
-    /// Loop for the peer tasks. Awaits either a message from the peer over TCP,
-    /// or a message from main over the main-to-peer-tasks broadcast channel.
-    async fn run<S>(
-        &mut self,
-        mut peer: S,
-        mut from_main_rx: broadcast::Receiver<MainToPeerTask>,
-        peer_state_info: &mut MutablePeerState,
-    ) -> Result<()>
-    where
-        S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
-        <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-        <S as TryStream>::Error: std::error::Error,
-    {
-        loop {
-            select! {
-                // Handle peer messages
-                peer_message = peer.try_next() => {
-                    let peer_address = self.peer_address;
-                    let peer_message = match peer_message {
-                        Ok(message) => message,
-                        Err(err) => {
-                            // Don't disconnect if message type is unknown, as
-                            // this allows the adding of new message types in
-                            // the future. Consider only keeping connection open
-                            // if this is a deserialization error, and close
-                            // otherwise.
-                            let msg = format!("Error when receiving from peer: {peer_address}");
-                            warn!("{msg}. Error: {err}");
-                            self.punish(NegativePeerSanction::InvalidMessage).await?;
-                            continue;
-                        }
-                    };
-                    let Some(peer_message) = peer_message else {
-                        info!("Peer {peer_address} closed connection.");
-                        break;
-                    };
-
-                    let (syncing, frozen) =
-                        self.global_state_lock.lock(|s| (s.net.sync_anchor.is_some(), s.net.freeze)).await;
-                    let message_type = peer_message.get_type();
-                    if syncing && peer_message.ignore_during_sync() {
-                        debug!(
-                            "Ignoring {message_type} message when syncing, from {peer_address}",
-                        );
-                        continue;
-                    }
-                    if peer_message.ignore_when_not_sync() && !syncing {
-                        debug!(
-                            "Ignoring {message_type} message when not syncing, from {peer_address}",
-                        );
-                        continue;
-                    }
-                    if frozen && peer_message.ignore_on_freeze() {
-                        debug!("Ignoring message because state updates have been paused.");
-                        continue;
-                    }
-
-                    match self
-                        .handle_peer_message(peer_message, &mut peer, peer_state_info)
-                        .await
-                    {
-                        Ok(false) => {}
-                        Ok(true) => {
-                            info!("Closing connection to {peer_address}");
-                            break;
-                        }
-                        Err(err) => {
-                            warn!("Closing connection to {peer_address} because of error {err}.");
-                            bail!("{err}");
-                        }
-                    };
-                }
-
-                // Handle messages from main task
-                main_msg_res = from_main_rx.recv() => {
-                    let main_msg = main_msg_res.unwrap_or_else(|err| {
-                        let err_msg = format!("Failed to read from main loop: {err}");
-                        error!(err_msg);
-                        panic!("{err_msg}");
-                    });
-
-                    let frozen = self.global_state_lock.lock_guard().await.net.freeze;
-                    if frozen && main_msg.ignore_on_freeze() {
-                        warn!("Peer loop ignores message from main loop because state updates have been paused");
-                        continue;
-                    }
-
-                    let close_connection = self
-                        .handle_main_task_message(main_msg, &mut peer, peer_state_info)
-                        .await
-                        .unwrap_or_else(|err| {
-                            warn!("handle_main_task_message returned an error: {err}");
-                            true
-                        });
-
-                    if close_connection {
-                        info!(
-                            "handle_main_task_message is closing the connection to {}",
-                            self.peer_address
-                        );
-                        break;
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Function called before entering the peer loop. Reads the potentially stored
-    /// peer standing from the database and does other book-keeping before entering
-    /// its final resting place: the `peer_loop`. Note that the peer has already been
-    /// accepted for a connection for this loop to be entered. So we don't need
-    /// to check the standing again.
-    ///
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
-    pub(crate) async fn run_wrapper<S>(
-        &mut self,
-        mut peer: S,
-        from_main_rx: broadcast::Receiver<MainToPeerTask>,
-    ) -> Result<()>
-    where
-        S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
-        <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-        <S as TryStream>::Error: std::error::Error,
-    {
-        const TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS: i128 = 120;
-
-        let cli_args = self.global_state_lock.cli().clone();
-
-        let standing = self
-            .global_state_lock
-            .lock_guard()
-            .await
-            .net
-            .peer_databases
-            .peer_standings
-            .get(self.peer_address.ip())
-            .await
-            .unwrap_or_else(|| PeerStanding::new(cli_args.peer_tolerance));
-
-        // Add peer to peer map
-        let peer_connection_info = PeerConnectionInfo::new(
-            self.peer_handshake_data.listen_port,
-            self.peer_address,
-            self.inbound_connection,
-        );
-        let new_peer = PeerInfo::new(
-            peer_connection_info,
-            &self.peer_handshake_data,
-            SystemTime::now(),
-            cli_args.peer_tolerance,
-        )
-        .with_standing(standing);
-
-        // If timestamps are different, we currently just log a warning.
-        let peer_clock_ahead_in_seconds = new_peer.time_difference_in_seconds();
-        let own_clock_ahead_in_seconds = -peer_clock_ahead_in_seconds;
-        if peer_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
-            || own_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
-        {
-            let own_datetime_utc: DateTime<Utc> =
-                new_peer.own_timestamp_connection_established.into();
-            let peer_datetime_utc: DateTime<Utc> =
-                new_peer.peer_timestamp_connection_established.into();
-            warn!(
-                "New peer {} disagrees with us about time. Peer reports time {} but our clock at handshake was {}.",
-                new_peer.connected_address(),
-                peer_datetime_utc.format("%Y-%m-%d %H:%M:%S"),
-                own_datetime_utc.format("%Y-%m-%d %H:%M:%S"));
-        }
-
-        // Multiple tasks might attempt to set up a connection concurrently. So
-        // even though we've checked that this connection is allowed, this check
-        // could have been invalidated by another task, for one accepting an
-        // incoming connection from a peer we're currently connecting to. So we
-        // need to make the a check again while holding a write-lock, since
-        // we're modifying `peer_map` here. Holding a read-lock doesn't work
-        // since it would have to be dropped before acquiring the write-lock.
-        {
-            let mut global_state = self.global_state_lock.lock_guard_mut().await;
-            let peer_map = &mut global_state.net.peer_map;
-            if peer_map
-                .values()
-                .any(|pi| pi.instance_id() == self.peer_handshake_data.instance_id)
-            {
-                bail!("Attempted to connect to already connected peer. Aborting connection.");
-            }
-
-            if peer_map.len() >= cli_args.max_num_peers {
-                bail!("Attempted to connect to more peers than allowed. Aborting connection.");
-            }
-
-            if peer_map.contains_key(&self.peer_address) {
-                // This shouldn't be possible, unless the peer reports a different instance ID than
-                // for the other connection. Only a malignant client would do that.
-                bail!("Already connected to peer. Aborting connection");
-            }
-
-            peer_map.insert(self.peer_address, new_peer);
-        }
-
-        // `MutablePeerState` contains the part of the peer-loop's state that is mutable
-        let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
-
-        // If peer indicates more canonical block, request a block notification to catch up ASAP
-        if self.peer_handshake_data.tip_header.cumulative_proof_of_work
-            > self
-                .global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .kernel
-                .header
-                .cumulative_proof_of_work
-        {
-            // Send block notification request to catch up ASAP, in case we're
-            // behind the newly-connected peer.
-            peer.send(PeerMessage::BlockNotificationRequest).await?;
-        }
-
-        let res = self.run(peer, from_main_rx, &mut peer_state).await;
-        debug!("Exited peer loop for {}", self.peer_address);
-
-        close_peer_connected_callback(
-            self.global_state_lock.clone(),
-            self.peer_address,
-            &self.to_main_tx,
-        )
-        .await;
-
-        debug!("Ending peer loop for {}", self.peer_address);
-
-        // Return any error that `run` returned. Returning and not suppressing errors is a quite nice
-        // feature to have for testing purposes.
-        res
-    }
+    // TODO from `run_wrapper` preserve saving black-listed peers and other ratings in `NetworkingState::PeerDatabases`
 
     /// Register graceful peer disconnection in the global state.
     ///

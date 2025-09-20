@@ -1,5 +1,4 @@
 use std::net::IpAddr;
-use std::net::SocketAddr;
 use std::num::NonZero;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
@@ -11,6 +10,7 @@ use clap::builder::RangedI64ValueParser;
 use clap::builder::TypedValueParser;
 use clap::Parser;
 use itertools::Itertools;
+use libp2p::Multiaddr;
 use num_traits::Zero;
 use sysinfo::System;
 
@@ -90,17 +90,17 @@ pub struct Args {
     #[arg(long)]
     pub restrict_peers_to_list: bool,
 
-    /// Maximum number of peers to accept connections from.
-    ///
-    /// Will not prevent outgoing connections made with `--peer`.
-    /// Set this value to 0 to refuse all incoming connections.
-    #[clap(
-        long,
-        default_value = "10",
-        value_name = "COUNT",
-        value_parser = clap::value_parser!(u16).map(|u| usize::from(u)),
-    )]
-    pub(crate) max_num_peers: usize,
+    // /// Maximum number of peers to accept connections from.
+    // ///
+    // /// Will not prevent outgoing connections made with `--peer`.
+    // /// Set this value to 0 to refuse all incoming connections.
+    // #[clap(
+    //     long,
+    //     default_value = "10",
+    //     value_name = "COUNT",
+    //     value_parser = clap::value_parser!(u16).map(|u| usize::from(u)),
+    // )]
+    // pub(crate) max_num_peers: usize,
 
     /// Maximum number of peers to accept from each IP address.
     ///
@@ -216,8 +216,10 @@ pub struct Args {
     ///
     /// Example: `--whitelisted-composer=8.8.8.8 --whitelisted-composer=8.8.4.4`
     ///          `--whitelisted-composer=2001:db8:3333:4444:5555:6666:7777:8888`
+    // TODO persistent `PeerId` capability would be beneficial for this
+    // TODO `Multiadr` support would be cool for this
     #[clap(long = "whitelisted-composer")]
-    pub(crate) whitelisted_composers: Vec<IpAddr>,
+    pub(crate) whitelisted_composers: Vec<libp2p::PeerId>,
 
     /// Regulates the fraction of the block subsidy that a composer sends to the
     /// guesser.
@@ -327,7 +329,7 @@ pub struct Args {
 
     /// IPs of nodes to connect to, e.g.: --peer 8.8.8.8:9798 --peer 8.8.4.4:1337.
     #[structopt(long = "peer")]
-    pub peers: Vec<SocketAddr>,
+    pub peers: Vec<Multiaddr>,
 
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "main", short)]
@@ -571,7 +573,7 @@ fn parse_range(unparsed_range: &str) -> Result<RangeInclusive<u64>, String> {
 impl Args {
     /// Indicates if all incoming peer connections are disallowed.
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
-        self.max_num_peers.is_zero()
+        todo!("if this is a feature it needs another implementation")
     }
 
     /// Return the port that peer can connect on. None if incoming connections
@@ -615,15 +617,8 @@ impl Args {
     }
 
     /// Check if block proposal should be accepted from this IP address.
-    pub(crate) fn accept_block_proposal_from(&self, ip_address: IpAddr) -> bool {
-        let ip_address = match ip_address {
-            IpAddr::V4(_) => ip_address,
-            IpAddr::V6(v6) => match v6.to_ipv4() {
-                Some(v4) => std::net::IpAddr::V4(v4),
-                None => ip_address,
-            },
-        };
-        self.whitelisted_composers.is_empty() || self.whitelisted_composers.contains(&ip_address)
+    pub(crate) fn accept_block_proposal_from(&self, peer: &libp2p::PeerId) -> bool {
+        self.whitelisted_composers.is_empty() || self.whitelisted_composers.contains(peer)
     }
 
     fn estimate_proving_capability() -> TxProvingCapability {

@@ -1,6 +1,7 @@
 use std::fmt;
 use std::net::IpAddr;
 
+use libp2p::PeerId;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -157,7 +158,7 @@ impl BlockIndexValue {
 
 #[derive(Clone)]
 pub struct PeerDatabases {
-    pub peer_standings: NeptuneLevelDb<IpAddr, PeerStanding>,
+    pub peer_standings: NeptuneLevelDb<PeerId, PeerStanding>,
 }
 
 impl fmt::Debug for PeerDatabases {

@@ -2,6 +2,8 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use libp2p::core::ConnectedPoint;
+use libp2p::Multiaddr;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -11,19 +13,16 @@ use crate::HandshakeData;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub(crate) struct PeerConnectionInfo {
-    port_for_incoming_connections: Option<u16>,
-    connected_address: SocketAddr,
+    connected_address: Multiaddr,
     inbound: bool,
 }
 
 impl PeerConnectionInfo {
     pub(crate) fn new(
-        port_for_incoming_connections: Option<u16>,
-        connected_address: SocketAddr,
+        connected_address: Multiaddr,
         inbound: bool,
     ) -> Self {
         Self {
-            port_for_incoming_connections,
             connected_address,
             inbound,
         }
@@ -32,7 +31,7 @@ impl PeerConnectionInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerInfo {
-    peer_connection_info: PeerConnectionInfo,
+    peer_connection_info: PeerConnectionInfo, // `ConnectedPoint` sadly isn't `serde`
     instance_id: InstanceId,
     pub(crate) own_timestamp_connection_established: SystemTime,
     pub(crate) peer_timestamp_connection_established: SystemTime,
@@ -100,8 +99,8 @@ impl PeerInfo {
         self.standing
     }
 
-    pub fn connected_address(&self) -> SocketAddr {
-        self.peer_connection_info.connected_address
+    pub fn connected_address(&self) -> libp2p::Multiaddr {
+        self.peer_connection_info.connected_address.clone()
     }
 
     pub fn connection_established(&self) -> SystemTime {
@@ -129,10 +128,9 @@ impl PeerInfo {
 
     /// Return the socket address that the peer is expected to listen on. Returns `None` if peer does not accept
     /// incoming connections.
-    pub fn listen_address(&self) -> Option<SocketAddr> {
-        self.peer_connection_info
-            .port_for_incoming_connections
-            .map(|port| SocketAddr::new(self.peer_connection_info.connected_address.ip(), port))
+    // TODO if this will remain relevant, there are better ways (like dialing unknown, or collecting known/checked listen addrs)
+    pub fn listen_address(&self) -> Option<Multiaddr> {
+        Some(self.peer_connection_info.connected_address.clone())
     }
 
     #[cfg(test)]

@@ -248,8 +248,8 @@ enum Command {
     ClearAllStandings,
 
     /// clear standings for peer with a given IP
-    ClearStandingByIp {
-        ip: IpAddr,
+    ClearStandingByPeer {
+        id: libp2p::PeerId,
     },
 
     /// claim an off-chain utxo-transfer.
@@ -1076,9 +1076,9 @@ async fn main() -> Result<()> {
             client.clear_all_standings(ctx, token).await??;
             println!("Cleared all standings.");
         }
-        Command::ClearStandingByIp { ip } => {
-            client.clear_standing_by_ip(ctx, token, ip).await??;
-            println!("Cleared standing of {ip}");
+        Command::ClearStandingByPeer { id } => {
+            client.clear_standing_by_ip(ctx, token, id).await??;
+            println!("Cleared standing of {id}");
         }
         Command::ClaimUtxo {
             format,

@@ -115,11 +115,14 @@ impl Mul<usize> for Timestamp {
 
 impl Timestamp {
     pub fn now() -> Timestamp {
+        #[cfg(not(test))]
+        let now = SystemTime::now();
+        #[cfg(test)]
+        let now: SystemTime = todo![];
+        
         Timestamp(BFieldElement::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64,
+            now.duration_since(UNIX_EPOCH).expect("can't be that much backwards")
+            .as_millis() as u64,
         ))
     }
 

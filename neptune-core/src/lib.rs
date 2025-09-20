@@ -77,7 +77,6 @@ use crate::application::loops::channel::MainToPeerTask;
 use crate::application::loops::channel::MinerToMain;
 use crate::application::loops::channel::PeerTaskToMain;
 use crate::application::loops::channel::RPCServerToMain;
-use crate::application::loops::connect_to_peers::call_peer;
 use crate::application::loops::main_loop::MainLoopHandler;
 use crate::application::rpc::server::RPC;
 use crate::state::archival_state::ArchivalState;
@@ -176,47 +175,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         .await?;
     info!("UTXO restoration check complete");
 
-    // Bind socket to port on this machine, to handle incoming connections from peers
-    let incoming_peer_listener = if let Some(incoming_peer_listener) = cli_args.own_listen_port() {
-        let ret = TcpListener::bind((cli_args.peer_listen_addr, incoming_peer_listener))
-           .await
-           .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.peer_listen_addr, incoming_peer_listener))?;
-        info!("Now listening for incoming peer-connections");
-        ret
-    } else {
-        info!("Not accepting incoming peer-connections");
-        TcpListener::bind("127.0.0.1:0").await?
-    };
-
-    // Connect to peers, and provide each peer task with a thread-safe copy of the state
-    let own_handshake_data: HandshakeData =
-        global_state_lock.lock_guard().await.get_own_handshakedata();
-    info!(
-        "Most known canonical block has height {}",
-        own_handshake_data.tip_header.height
-    );
     let mut task_join_handles = vec![];
-    for peer_address in global_state_lock.cli().peers.clone() {
-        let peer_state_var = global_state_lock.clone(); // bump arc refcount
-        let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
-            main_to_peer_broadcast_tx.subscribe();
-        let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = peer_task_to_main_tx.clone();
-        let peer_join_handle = tokio::task::Builder::new()
-            .name("call_peer_wrapper_3")
-            .spawn(async move {
-                call_peer(
-                    peer_address,
-                    peer_state_var.clone(),
-                    main_to_peer_broadcast_rx_clone,
-                    peer_task_to_main_tx_clone,
-                    own_handshake_data,
-                    1, // All outgoing connections have distance 1
-                )
-                .await;
-            })?;
-        task_join_handles.push(peer_join_handle);
-    }
-    debug!("Made outgoing connections to peers");
 
     // Start mining tasks if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
@@ -285,7 +244,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
 
     // Handle incoming connections, messages from peer tasks, and messages from the mining task
     Ok(MainLoopHandler::new(
-        incoming_peer_listener,
         global_state_lock,
         main_to_peer_broadcast_tx,
         peer_task_to_main_tx,

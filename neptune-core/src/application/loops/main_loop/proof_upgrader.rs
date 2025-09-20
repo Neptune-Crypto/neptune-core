@@ -527,7 +527,7 @@ impl UpgradeJob {
 
                     // Inform all peers about our hard work
                     let peer_msg =
-                        MainToPeerTask::TransactionNotification((&upgraded).try_into().unwrap());
+                        MainToPeerTask::NewTransaction((&upgraded).try_into().unwrap());
 
                     if let Err(e) = main_to_peer_channel.send(peer_msg) {
                         // panic only if receiver_count is non-zero.
@@ -1142,13 +1142,13 @@ mod tests {
                 .await;
 
             let peer_msg = main_to_peer_rx.recv().await.unwrap();
-            let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {
+            let MainToPeerTask::NewTransaction(tx_notification) = peer_msg else {
                 panic!("Proof upgrader must inform peer tasks about upgraded tx");
             };
 
             assert_eq!(
                 pwtx.kernel.txid(),
-                tx_notification.txid,
+                tx_notification.kernel.txid(),
                 "TXID in peer msg must match that from transaction"
             );
 
@@ -1249,13 +1249,13 @@ mod tests {
                 .await;
 
             let peer_msg = main_to_peer_rx.recv().await.unwrap();
-            let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {
+            let MainToPeerTask::NewTransaction(tx_notification) = peer_msg else {
                 panic!("Proof upgrader must inform peer tasks about upgraded tx");
             };
 
             assert_eq!(
                 pwtx.kernel.txid(),
-                tx_notification.txid,
+                tx_notification.kernel.txid(),
                 "TXID in peer msg must match that from transaction"
             );
 

@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use anyhow::Result;
+use libp2p::PeerId;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
@@ -20,7 +21,7 @@ use crate::state::database::PeerDatabases;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 
-type PeerMap = HashMap<SocketAddr, PeerInfo>;
+type PeerMap = HashMap<PeerId, PeerInfo>;
 
 /// Information about a foreign tip towards which the client is syncing.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -125,7 +126,7 @@ impl NetworkingState {
         let database_dir_path = data_dir.database_dir_path();
         DataDirectory::create_dir_if_not_exists(&database_dir_path).await?;
 
-        let peer_standings = NeptuneLevelDb::<IpAddr, PeerStanding>::new(
+        let peer_standings = NeptuneLevelDb::<PeerId, PeerStanding>::new(
             &data_dir.banned_ips_database_dir_path(),
             &create_db_if_missing(),
         )
@@ -135,7 +136,7 @@ impl NetworkingState {
     }
 
     /// Return a list of peer sanctions stored in the database.
-    pub fn all_peer_sanctions_in_database(&self) -> HashMap<IpAddr, PeerStanding> {
+    pub fn all_peer_sanctions_in_database(&self) -> HashMap<PeerId, PeerStanding> {
         let mut sanctions = HashMap::default();
 
         let mut dbiterator = self.peer_databases.peer_standings.iter();
@@ -148,11 +149,11 @@ impl NetworkingState {
         sanctions
     }
 
-    pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
+    pub async fn get_peer_standing_from_database(&self, ip: PeerId) -> Option<PeerStanding> {
         self.peer_databases.peer_standings.get(ip).await
     }
 
-    pub async fn clear_ip_standing_in_database(&mut self, ip: IpAddr) {
+    pub async fn clear_ip_standing_in_database(&mut self, ip: PeerId) {
         let old_standing = self.peer_databases.peer_standings.get(ip).await;
 
         if let Some(mut standing) = old_standing {
@@ -186,7 +187,7 @@ impl NetworkingState {
     // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
     pub async fn write_peer_standing_on_decrease(
         &mut self,
-        ip: IpAddr,
+        ip: PeerId,
         current_standing: PeerStanding,
     ) {
         let old_standing = self.peer_databases.peer_standings.get(ip).await;

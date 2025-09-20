@@ -367,9 +367,9 @@ impl Widget for PeersScreen {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap();
                 // convert ip to canonical form, then update SocketAddr with it.
-                let ip = pi.connected_address().ip().to_canonical();
-                let mut addr = pi.connected_address();
-                addr.set_ip(ip);
+                // let ip = pi.connected_address().ip().to_canonical();
+                let addr = pi.connected_address();
+                // addr.set_ip(ip);
                 vec![
                     addr.to_string(),
                     pi.version().to_string(),

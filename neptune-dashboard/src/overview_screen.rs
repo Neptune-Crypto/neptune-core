@@ -156,7 +156,6 @@ impl OverviewScreen {
                                 own_overview_data.mempool_total_tx_count = Some(resp.mempool_total_tx_count.try_into().unwrap());
                                 own_overview_data.mempool_own_tx_count = Some(resp.mempool_own_tx_count.try_into().unwrap());
                                 own_overview_data.peer_count=resp.peer_count;
-                                own_overview_data.max_num_peers = Some(resp.max_num_peers);
                                 own_overview_data.authenticated_peer_count=Some(0);
                                 own_overview_data.syncing=resp.syncing;
                                 own_overview_data.confirmed_available_balance = Some(resp.confirmed_available_balance);

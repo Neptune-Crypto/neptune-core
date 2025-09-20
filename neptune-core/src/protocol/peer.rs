@@ -7,10 +7,12 @@ pub mod transfer_transaction;
 
 use std::fmt::Display;
 use std::net::SocketAddr;
+use std::time::Instant;
 use std::time::SystemTime;
 
 use handshake_data::HandshakeData;
 use itertools::Itertools;
+use libp2p::Multiaddr;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use num_traits::Zero;
@@ -454,8 +456,6 @@ pub(crate) enum PeerMessage {
     SyncChallenge(SyncChallenge),
     SyncChallengeResponse(Box<SyncChallengeResponse>),
 
-    BlockProposalNotification(BlockProposalNotification),
-
     BlockProposalRequest(BlockProposalRequest),
 
     BlockProposal(Box<Block>),
@@ -471,7 +471,7 @@ pub(crate) enum PeerMessage {
     TransactionRequest(TransactionKernelId),
     PeerListRequest,
     /// (socket address, instance_id)
-    PeerListResponse(Vec<(SocketAddr, u128)>),
+    PeerListResponse(Vec<Multiaddr>),
     /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(TransferConnectionStatus),
@@ -496,7 +496,6 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => "peer list resp",
             PeerMessage::Bye => "bye",
             PeerMessage::ConnectionStatus(_) => "connection status",
-            PeerMessage::BlockProposalNotification(_) => "block proposal notification",
             PeerMessage::BlockProposalRequest(_) => "block proposal request",
             PeerMessage::BlockProposal(_) => "block proposal",
             PeerMessage::UnableToSatisfyBatchRequest => "unable to satisfy batch request",
@@ -523,7 +522,6 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
-            PeerMessage::BlockProposalNotification(_) => false,
             PeerMessage::BlockProposalRequest(_) => false,
             PeerMessage::BlockProposal(_) => false,
             PeerMessage::UnableToSatisfyBatchRequest => true,
@@ -550,7 +548,6 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
-            PeerMessage::BlockProposalNotification(_) => true,
             PeerMessage::BlockProposalRequest(_) => true,
             PeerMessage::BlockProposal(_) => true,
             PeerMessage::UnableToSatisfyBatchRequest => false,
@@ -574,7 +571,6 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => true,
             PeerMessage::SyncChallenge(_) => true,
             PeerMessage::SyncChallengeResponse(_) => true,
-            PeerMessage::BlockProposalNotification(_) => true,
             PeerMessage::BlockProposalRequest(_) => true,
             PeerMessage::BlockProposal(_) => true,
             PeerMessage::Transaction(_) => true,
@@ -590,22 +586,25 @@ impl PeerMessage {
 
 /// `MutablePeerState` contains information about the peer's blockchain state.
 /// Under normal conditions, this information varies across time.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct MutablePeerState {
-    pub highest_shared_block_height: BlockHeight,
+    // pub highest_shared_block_height: BlockHeight,
     pub fork_reconciliation_blocks: Vec<Block>,
     pub(crate) sync_challenge: Option<IssuedSyncChallenge>,
 
     /// Timestamp for the last successful sync challenge response.
     ///
     /// Used to prevent issuing multiple sync challenges in short succession.
-    pub(crate) successful_sync_challenge_response_time: Option<Timestamp>,
+    pub(crate) successful_sync_challenge_response_time: Option<
+        // `tokio` offers testing utils
+        // tokio::time::Instant
+        std::time::Instant
+    >, 
 }
 
 impl MutablePeerState {
     pub fn new(block_height: BlockHeight) -> Self {
         Self {
-            highest_shared_block_height: block_height,
             fork_reconciliation_blocks: vec![],
             sync_challenge: None,
             successful_sync_challenge_response_time: None,
@@ -616,14 +615,14 @@ impl MutablePeerState {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct IssuedSyncChallenge {
     pub(crate) challenge: SyncChallenge,
-    pub(crate) issued_at: Timestamp,
+    pub(crate) issued_at: Instant,
     pub(crate) accumulated_pow: ProofOfWork,
 }
 impl IssuedSyncChallenge {
     pub(crate) fn new(
         challenge: SyncChallenge,
         claimed_pow: ProofOfWork,
-        timestamp: Timestamp,
+        timestamp: Instant,
     ) -> Self {
         Self {
             challenge,
