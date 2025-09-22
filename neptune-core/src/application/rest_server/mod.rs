@@ -91,6 +91,8 @@ pub struct ExportedBlock {
 }
 
 impl ExportedBlock {
+    /// Consert a block to an [`ExportedBlock`], with or without the
+    /// block proof.
     fn from_block(block: Block, include_proof: bool) -> Self {
         let (kernel, proof) = block.into_kernel_and_proof();
         let proof_leaf = Tip5::hash_varlen(&proof.encode());
@@ -124,6 +126,7 @@ impl ExportedBlock {
         MerkleTree::sequential_frugal_root(&block_leafs).unwrap()
     }
 
+    /// Return the addition records of the guesser reward of this block.
     fn guesser_fee_addition_records(&self) -> Vec<AdditionRecord> {
         let block_hash = self.hash();
         self.kernel
@@ -145,6 +148,8 @@ impl ExportedBlock {
         msa
     }
 
+    /// Return the mutator set update representing the change to the mutator set
+    /// caused by this block.
     pub fn mutator_set_update(&self) -> MutatorSetUpdate {
         let inputs =
             RemovalRecordList::try_unpack(self.kernel.body.transaction_kernel.inputs.clone())
