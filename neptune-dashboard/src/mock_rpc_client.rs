@@ -152,7 +152,7 @@ impl MockRpcClient {
 
         let num_peers = rng.random_range(1..10);
         let mut peers = vec![];
-        for _ in 0..rng.random_range(1..num_peers) {
+        for _ in 0..num_peers {
             peers.push(rng.random());
         }
 

@@ -174,10 +174,8 @@ impl Widget for MempoolScreen {
         let header = vec![
             "id",
             "proof type",
-            "#inputs",
-            "#outputs",
-            "+ effect on balance",
-            "- effect on balance",
+            "#in",
+            "#out",
             "Δ balance",
             "fee",
             "synced",
@@ -205,8 +203,6 @@ impl Widget for MempoolScreen {
                     mptxi.proof_type.to_string(),
                     mptxi.num_inputs.to_string(),
                     mptxi.num_outputs.to_string(),
-                    mptxi.positive_balance_effect.to_string(),
-                    mptxi.negative_balance_effect.to_string(),
                     balance_delta.to_string(),
                     mptxi.fee.to_string(),
                     if mptxi.synced {
