@@ -190,8 +190,6 @@ impl TransactionDetails {
     /// Does sanity checks on:
     /// - amounts, must be balanced
     /// - mutator set membership proofs, must be valid wrt. supplied mutator set
-    ///
-    /// See also: [Self::new_without_coinbase].
     pub(crate) fn new_with_coinbase(
         tx_inputs: impl Into<TxInputList>,
         tx_outputs: impl Into<TxOutputList>,
@@ -218,8 +216,6 @@ impl TransactionDetails {
     /// Does sanity checks on:
     /// - amounts, must be balanced
     /// - mutator set membership proofs, must be valid wrt. supplied mutator set
-    ///
-    /// See also: [Self::new_with_coinbase].
     pub fn new_without_coinbase(
         tx_inputs: impl Into<TxInputList>,
         tx_outputs: impl Into<TxOutputList>,

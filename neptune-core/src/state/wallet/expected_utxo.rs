@@ -21,10 +21,8 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 /// The on-chain notifications follow a completely different code path and never
 /// touch [ExpectedUtxo]s.
 ///
-/// The `ExpectedUtxo` will exist in the local
-/// [RustyWalletDatabase](super::rusty_wallet_database::RustyWalletDatabase)
-/// from the time the transaction is sent until it is mined in a block and
-/// claimed by the wallet.
+/// The `ExpectedUtxo` will exist in the local wallet database from the time the
+/// transaction is sent until it is mined in a block and claimed by the wallet.
 ///
 /// note that when using `ExpectedUtxo` there is a risk of losing funds because
 /// the wallet stores this state on disk and if the associated file(s) are lost

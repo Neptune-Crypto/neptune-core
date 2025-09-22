@@ -219,6 +219,7 @@ impl PartialEq for Block {
 impl Eq for Block {}
 
 impl Block {
+    #[cfg(feature = "rest")]
     pub(crate) fn into_kernel_and_proof(self) -> (BlockKernel, BlockProof) {
         (self.kernel, self.proof)
     }
