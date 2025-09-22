@@ -8,10 +8,10 @@ use neptune_cash::application::rpc::auth;
 use neptune_cash::application::rpc::server::error::RpcError;
 use neptune_cash::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
 use neptune_cash::application::rpc::server::overview_data::OverviewData;
+use neptune_cash::application::rpc::server::ui_utxo::UiUtxo;
 use neptune_cash::application::rpc::server::RpcResult;
 use neptune_cash::protocol::peer::peer_info::PeerInfo;
 use neptune_cash::state::wallet::address::generation_address::GenerationReceivingAddress;
-use neptune_cash::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use rand::rngs::StdRng;
 use rand::{rng, Rng};
 use rand::{RngCore, SeedableRng};
@@ -190,28 +190,33 @@ impl MockRpcClient {
         Ok(Err(RpcError::Failed("cannot send; mocking".to_string())))
     }
 
-    pub async fn list_own_coins(
+    pub async fn list_utxos(
         &self,
         _ctx: ::tarpc::context::Context,
         _token: auth::Token,
-    ) -> ::core::result::Result<RpcResult<Vec<CoinWithPossibleTimeLock>>, ::tarpc::client::RpcError>
-    {
+    ) -> ::core::result::Result<RpcResult<Vec<UiUtxo>>, ::tarpc::client::RpcError> {
         let mut rng = StdRng::from_seed(self.seed);
         tokio::task::yield_now().await;
 
         let num_utxos = rng.random_range(1..20);
         let mut utxos = vec![];
         for _ in 0..num_utxos {
-            let utxo = CoinWithPossibleTimeLock {
+            let utxo = UiUtxo {
                 amount: rng
                     .random::<NativeCurrencyAmount>()
                     .lossy_f64_fraction_mul(0.0001),
-                confirmed: rng.random(),
                 release_date: if rng.random_bool(0.5) {
                     Some(rng.random())
                 } else {
                     None
                 },
+                received: rng.random(),
+                aocl_leaf_index: if rng.random_bool(0.5) {
+                    Some(rng.random_range(0u64..(u64::MAX >> 20)))
+                } else {
+                    None
+                },
+                spent: rng.random(),
             };
             utxos.push(utxo);
         }

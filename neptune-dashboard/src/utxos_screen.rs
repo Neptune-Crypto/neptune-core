@@ -9,7 +9,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::application::rpc::auth;
-use neptune_cash::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use neptune_cash::application::rpc::server::ui_utxo::UiUtxo;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
@@ -35,7 +35,7 @@ use crate::screen::Screen;
 
 #[derive(Debug, Clone)]
 pub struct ScrollableTable {
-    data: Arc<Mutex<Vec<CoinWithPossibleTimeLock>>>,
+    data: Arc<Mutex<Vec<UiUtxo>>>,
     state: TableState,
 }
 
@@ -85,7 +85,7 @@ impl ScrollableTable {
 pub struct UtxosScreen {
     active: bool,
     in_focus: bool,
-    data: Arc<std::sync::Mutex<Vec<CoinWithPossibleTimeLock>>>,
+    data: Arc<std::sync::Mutex<Vec<UiUtxo>>>,
     fg: Color,
     bg: Color,
     server: Arc<DashboardRpcClient>,
@@ -118,7 +118,7 @@ impl UtxosScreen {
     async fn run_polling_loop(
         rpc_client: Arc<DashboardRpcClient>,
         token: auth::Token,
-        data_arc: Arc<Mutex<Vec<CoinWithPossibleTimeLock>>>,
+        data_arc: Arc<Mutex<Vec<UiUtxo>>>,
         escalatable_event: Arc<Mutex<Option<DashboardEvent>>>,
     ) -> ! {
         // use macros to reduce boilerplate
@@ -140,7 +140,7 @@ impl UtxosScreen {
         loop {
             select! {
                 _ = &mut balance => {
-                    match rpc_client.list_own_coins(context::current(), token).await {
+                    match rpc_client.list_utxos(context::current(), token).await {
                         Ok(Ok(coins)) => {
 
                             *data_arc.lock().unwrap() = coins;
@@ -245,7 +245,7 @@ impl Widget for UtxosScreen {
         // table
         let style = Style::default().fg(self.fg).bg(self.bg);
         let selected_style = style.add_modifier(Modifier::REVERSED);
-        let header = vec!["confirmed", "amount", "release date"];
+        let header = vec!["received", "id", "amount", "release date", "spent"];
 
         let matrix = self
             .data
@@ -254,11 +254,15 @@ impl Widget for UtxosScreen {
             .iter()
             .map(|c| {
                 [
-                    c.confirmed.standard_format(),
+                    c.received.to_string(),
+                    c.aocl_leaf_index
+                        .map(|li| format!("{li}"))
+                        .unwrap_or("".to_string()),
                     c.amount.display_lossless(),
                     c.release_date
                         .map(|rd| rd.standard_format())
                         .unwrap_or_else(|| "-".to_string()),
+                    c.spent.to_string(),
                 ]
             })
             .collect_vec();

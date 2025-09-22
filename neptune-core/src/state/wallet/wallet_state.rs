@@ -557,11 +557,11 @@ impl WalletState {
         }
     }
 
-    pub fn mempool_spent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+    pub fn mempool_spent_utxos_iter(&self) -> impl Iterator<Item = (&Utxo, &u64)> {
         self.mempool_spent_utxos
             .values()
             .flatten()
-            .map(|(_, (utxo, _))| utxo)
+            .map(|(_, (utxo, ali))| (utxo, ali))
     }
 
     pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
@@ -611,7 +611,7 @@ impl WalletState {
     ) -> NativeCurrencyAmount {
         let amount_spent_by_mempool_transactions = self
             .mempool_spent_utxos_iter()
-            .map(|u| u.get_native_currency_amount())
+            .map(|(u, _)| u.get_native_currency_amount())
             .sum();
         let amount_received_from_mempool_transactions = self
             .mempool_unspent_utxos_iter()
@@ -633,7 +633,7 @@ impl WalletState {
             .checked_sub(
                 &self
                     .mempool_spent_utxos_iter()
-                    .map(|u| u.get_native_currency_amount())
+                    .map(|(u, _)| u.get_native_currency_amount())
                     .sum(),
             )
             .expect("balance must never be negative")
@@ -2008,7 +2008,7 @@ impl WalletState {
             .checked_sub(
                 &self
                     .mempool_spent_utxos_iter()
-                    .map(|u| u.get_native_currency_amount())
+                    .map(|(u, _)| u.get_native_currency_amount())
                     .sum(),
             )
             .expect("balance must never be negative");

@@ -47,8 +47,10 @@ pub mod coinbase_output_readable;
 pub mod mempool_transaction_info;
 pub mod overview_data;
 pub mod proof_of_work_puzzle;
+pub mod ui_utxo;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -75,6 +77,7 @@ use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::application::config::network::Network;
+use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
@@ -84,6 +87,8 @@ use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
 use crate::application::rpc::server::overview_data::OverviewData;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
+use crate::application::rpc::server::ui_utxo::UiUtxo;
+use crate::application::rpc::server::ui_utxo::UtxoStatusEvent;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::protocol::consensus::block::block_header::BlockHeader;
@@ -1251,6 +1256,40 @@ pub trait RPC {
     /// # }
     /// ```
     async fn list_own_coins(token: auth::Token) -> RpcResult<Vec<CoinWithPossibleTimeLock>>;
+
+    /// Generate a list of all UTXOs, currently owned, historical, time-locked,
+    /// not, abandoned.
+    ///
+    /// ```no_run
+    /// # use anyhow::Result;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
+    /// # use tarpc::tokio_serde::formats::Json;
+    /// # use tarpc::serde_transport::tcp;
+    /// # use tarpc::client;
+    /// # use tarpc::context;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<()>{
+    /// #
+    /// # // create a serde/json transport over tcp.
+    /// # let transport = tcp::connect("127.0.0.1:9799", Json::default).await?;
+    /// #
+    /// # // create an rpc client using the transport.
+    /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
+    /// #
+    /// # // Defines cookie hint
+    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// #
+    /// # // load the cookie file from disk and assign it to a token
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// #
+    /// // query neptune-core server to get the list of UTXOs
+    /// let own_coins = client.list_utxos(context::current(), token ).await??;
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn list_utxos(token: auth::Token) -> RpcResult<Vec<UiUtxo>>;
 
     /// Get CPU temperature.
     ///
@@ -3461,6 +3500,97 @@ impl RPC for NeptuneRPCServer {
             .wallet_state
             .get_all_own_coins_with_possible_timelocks(&tip_msa, tip_hash)
             .await)
+    }
+
+    async fn list_utxos(
+        self,
+        _context: ::tarpc::context::Context,
+        token: auth::Token,
+    ) -> RpcResult<Vec<UiUtxo>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // get owned UTXOs
+        let mut ui_utxos = vec![];
+        let state = self.state.lock_guard().await;
+        for monitored_utxo in state
+            .wallet_state
+            .wallet_db
+            .monitored_utxos()
+            .get_all()
+            .await
+        {
+            let received =
+                if let Some((_, timestamp, block_height)) = monitored_utxo.confirmed_in_block {
+                    UtxoStatusEvent::Confirmed {
+                        block_height,
+                        timestamp,
+                    }
+                } else {
+                    UtxoStatusEvent::Abandoned
+                };
+            let spent = if let Some((_, timestamp, block_height)) = monitored_utxo.spent_in_block {
+                UtxoStatusEvent::Confirmed {
+                    block_height,
+                    timestamp,
+                }
+            } else {
+                UtxoStatusEvent::None
+            };
+            let ui_utxo = UiUtxo {
+                received,
+                spent,
+                aocl_leaf_index: Some(monitored_utxo.aocl_index()),
+                amount: monitored_utxo.utxo.get_native_currency_amount(),
+                release_date: monitored_utxo.utxo.release_date(),
+            };
+            ui_utxos.push(ui_utxo);
+        }
+
+        // get expected UTXOs
+        for expected_utxo in state
+            .wallet_state
+            .wallet_db
+            .expected_utxos()
+            .get_all()
+            .await
+        {
+            let ui_utxo = UiUtxo {
+                received: UtxoStatusEvent::Expected,
+                aocl_leaf_index: None,
+                spent: UtxoStatusEvent::None,
+                amount: expected_utxo.utxo.get_native_currency_amount(),
+                release_date: expected_utxo.utxo.release_date(),
+            };
+            ui_utxos.push(ui_utxo);
+        }
+
+        // get unconfirmed incoming UTXOs
+        for incoming_utxo in state.wallet_state.mempool_unspent_utxos_iter() {
+            let ui_utxo = UiUtxo {
+                received: UtxoStatusEvent::Pending,
+                aocl_leaf_index: None,
+                spent: UtxoStatusEvent::None,
+                amount: incoming_utxo.get_native_currency_amount(),
+                release_date: incoming_utxo.release_date(),
+            };
+            ui_utxos.push(ui_utxo);
+        }
+
+        // mark unconfirmed outgoing UTXOs as "pending"
+        let mut markable_indices = HashSet::new();
+        for (_outgoing_utxo, aocl_leaf_index) in state.wallet_state.mempool_spent_utxos_iter() {
+            markable_indices.insert(aocl_leaf_index);
+        }
+        for ui_utxo in &mut ui_utxos {
+            if let Some(aocl_leaf_index) = ui_utxo.aocl_leaf_index {
+                if markable_indices.contains(&aocl_leaf_index) {
+                    ui_utxo.spent = UtxoStatusEvent::Pending;
+                }
+            }
+        }
+
+        Ok(ui_utxos)
     }
 
     // documented in trait. do not add doc-comment.

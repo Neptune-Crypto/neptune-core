@@ -13,10 +13,10 @@ use neptune_cash::api::export::TxCreationArtifacts;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
 use neptune_cash::application::rpc::server::overview_data::OverviewData;
+use neptune_cash::application::rpc::server::ui_utxo::UiUtxo;
 use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::application::rpc::server::RpcResult;
 use neptune_cash::protocol::peer::peer_info::PeerInfo;
-use neptune_cash::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use std::net::SocketAddr;
 use tasm_lib::prelude::Digest;
 
@@ -205,16 +205,17 @@ impl DashboardRpcClient {
         }
     }
 
-    pub async fn list_own_coins(
+    pub async fn list_utxos(
         &self,
         ctx: ::tarpc::context::Context,
         token: auth::Token,
-    ) -> ::core::result::Result<RpcResult<Vec<CoinWithPossibleTimeLock>>, ::tarpc::client::RpcError>
-    {
+    ) -> ::core::result::Result<RpcResult<Vec<UiUtxo>>, ::tarpc::client::RpcError> {
         match self {
-            DashboardRpcClient::Authentic(rpcclient) => rpcclient.list_own_coins(ctx, token).await,
+            DashboardRpcClient::Authentic(rpcclient) => rpcclient.list_utxos(ctx, token).await,
+
+            #[cfg(feature = "mock")]
             DashboardRpcClient::Mock(mock_rpc_client) => {
-                mock_rpc_client.list_own_coins(ctx, token).await
+                mock_rpc_client.list_utxos(ctx, token).await
             }
         }
     }
