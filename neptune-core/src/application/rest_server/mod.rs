@@ -14,6 +14,7 @@ use axum_extra::response::ErasedJson;
 use block_selector::BlockSelectorExtended;
 use bytes::Buf;
 use get_size2::GetSize;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -218,6 +219,10 @@ pub(crate) async fn run_rpc_server(
             .route(
                 "/rpc/broadcast_tx",
                 axum::routing::post(broadcast_transaction),
+            )
+            .route(
+                "/rpc/incentivized_proof_collection_transaction",
+                axum::routing::post(incentivized_proof_collection_transaction),
             )
             .route(
                 "/rpc/generate_membership_proof",
@@ -440,14 +445,163 @@ async fn broadcast_transaction(
     }))
 }
 
-// #[derive(Debug, Deserialize, Serialize, Clone)]
-// struct SendTx {
-//     broadcast_tx: BroadcastTx,
-//     amount: String,
-//     sender_randomness: String,
-//     fee_address: String,
-//     block_height: u64,
-// }
+/// Data type for a transaction that rewards the RPC server for upgrading the
+/// proof type from ProofCollection to SingleProof.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct IncentivizedProofCollectionTransaction {
+    kernel: TransactionKernel,
+    proof_collection: ProofCollection,
+    incentive_amount: NativeCurrencyAmount,
+    sender_randomness: Digest,
+    incentive_address: String,
+}
+
+impl IncentivizedProofCollectionTransaction {
+    /// Returns true if the transaction contains the advertised output, returs
+    /// false otherwise.
+    fn contains_advertised_output(&self, network: Network) -> bool {
+        let Ok(address) = ReceivingAddress::from_bech32m(&self.incentive_address, network) else {
+            return false;
+        };
+        let privacy_digest = address.privacy_digest();
+        let utxo = Utxo::new_native_currency(address.lock_script_hash(), self.incentive_amount);
+        let utxo = UtxoTriple {
+            utxo,
+            sender_randomness: self.sender_randomness,
+            receiver_digest: privacy_digest,
+        };
+        let addition_record = utxo.addition_record();
+
+        // Is the advertised output contained in the transaction?
+        if !self.kernel.outputs.contains(&addition_record) {
+            return false;
+        }
+
+        true
+    }
+}
+
+async fn incentivized_proof_collection_transaction(
+    State(mut rpcstate): State<NeptuneRPCServer>,
+    body: axum::body::Bytes,
+) -> Result<ErasedJson, RestError> {
+    let tx: IncentivizedProofCollectionTransaction =
+        bincode::deserialize_from(body.reader()).context("deserialize error")?;
+
+    // Does transaction have advertised output?
+    let cli = rpcstate.state.cli();
+    let network = cli.network;
+    if !tx.contains_advertised_output(network) {
+        return Err(RestError(
+            "Transaction does not contain advertised output for server".to_owned(),
+        ));
+    }
+
+    // Does advertised address match our tx-proof upgrading address?
+    let reward_key = rpcstate
+        .state
+        .lock_guard()
+        .await
+        .wallet_state
+        .wallet_entropy
+        .composer_fee_key();
+    let reward_address: ReceivingAddress = reward_key.to_address().into();
+    if reward_address.to_bech32m(network).unwrap() != tx.incentive_address {
+        return Err(RestError(
+            "Transaction does not reward expected address".to_owned(),
+        ));
+    }
+
+    // Does advertised output meet threshold for proof upgrading?
+    let incentive = tx.incentive_amount;
+    let min_fee = cli.min_gobbling_fee;
+    if incentive < min_fee {
+        return Err(RestError(format!(
+            "Fee for upgrading transaction {incentive} does not meet threshold of {min_fee}"
+        )));
+    }
+
+    // If transaction too complex to upgrade?
+    let num_proofs = tx.proof_collection.num_proofs();
+    if num_proofs > cli.max_num_proofs {
+        return Err(RestError(format!(
+            "Transaction contains too many proofs ({num_proofs}) to handle upgrade. Max number of\
+              proofs: {}. Try lowering the number of inputs.",
+            cli.max_num_proofs
+        )));
+    }
+
+    // Is transaction valid?
+    let consensus_rule_set = rpcstate.state.lock_guard().await.consensus_rule_set();
+    let transaction: Transaction = Transaction {
+        kernel: tx.kernel.clone(),
+        proof: TransactionProof::ProofCollection(tx.proof_collection.clone()),
+    };
+    if !transaction.is_valid(network, consensus_rule_set).await {
+        return Err(RestError("Received transaction is not valid".to_owned()));
+    }
+
+    if transaction.kernel.coinbase.is_some() {
+        return Err(RestError(
+            "Does not accept coinbase transactions".to_owned(),
+        ));
+    }
+
+    // Require a positive transaction fee.
+    if !transaction.kernel.fee.is_positive() {
+        return Err(RestError("Fee may not be negative, or zero".to_owned()));
+    }
+
+    // Is transaction confirmable?
+    let mut state = rpcstate.state.lock_guard_mut().await;
+    let msa = state
+        .chain
+        .light_state()
+        .mutator_set_accumulator_after()
+        .expect("Tip block must have mutator set");
+    if !transaction.is_confirmable_relative_to(&msa) {
+        return Err(RestError("Transaction is not confirmable".to_owned()));
+    }
+
+    // Does transaction have acceptable timestamp?
+    let timestamp = transaction.kernel.timestamp;
+    let now = Timestamp::now();
+    if timestamp >= now + FUTUREDATING_LIMIT {
+        return Err(RestError(format!(
+            "Received tx too far into the future. Got timestamp {timestamp}"
+        )));
+    }
+
+    // All checks passed. Notify wallet of expected upgrade reward.
+    let upgrade_reward =
+        Utxo::new_native_currency(reward_address.lock_script_hash(), tx.incentive_amount);
+    let upgrade_reward = ExpectedUtxo::new(
+        upgrade_reward,
+        tx.sender_randomness,
+        reward_key.receiver_preimage(),
+        UtxoNotifier::FeeGobbler,
+    );
+    state.wallet_state.add_expected_utxo(upgrade_reward).await;
+
+    let raise_job = state
+        .upgrade_proof_collection_job(
+            tx.kernel,
+            tx.proof_collection,
+            UpgradeIncentive::BalanceAffecting(incentive),
+        )
+        .await?;
+    let raise_job = UpgradeJob::ProofCollectionToSingleProof(raise_job);
+
+    let _ = rpcstate
+        .rpc_server_to_main_tx
+        .send(RPCServerToMain::PerformTxProofUpgrade(Box::new(raise_job)))
+        .await;
+
+    Ok(ErasedJson::pretty(ResponseBroadcastTx {
+        status: 0,
+        message: "Transaction broadcasted".to_string(),
+    }))
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ResponseSendTx {
