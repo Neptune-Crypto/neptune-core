@@ -32,6 +32,7 @@ use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::BlockProof;
 use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::peer::transfer_transaction::TransferTransaction;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::twenty_first::prelude::BFieldCodec;
@@ -356,33 +357,31 @@ async fn restore_membership_proof_privacy_preserving(
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct BroadcastTx {
-    pub(crate) transaction: Transaction,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ResponseBroadcastTx {
     pub(crate) status: u64,
     pub(crate) message: String,
 }
+
 async fn broadcast_transaction(
     State(mut rpcstate): State<NeptuneRPCServer>,
     body: axum::body::Bytes,
 ) -> Result<ErasedJson, RestError> {
-    let tx: BroadcastTx = bincode::deserialize_from(body.reader()).context("deserialize error")?;
+    // Interface uses `TransferTransaction` so caller gets a type guarantee
+    // that no secrets are leaked.
+    let tx: TransferTransaction =
+        bincode::deserialize_from(body.reader()).context("deserialize error")?;
 
-    info!(
-        "broadcasted insert tx: {}",
-        tx.transaction.kernel.txid().to_string()
-    );
+    let tx: Transaction = tx.try_into().context("Failed to convert to transaction")?;
+
+    info!("broadcasted insert tx: {}", tx.kernel.txid().to_string());
     let mut state = rpcstate.state.lock_guard_mut().await;
 
     state
-        .mempool_insert(tx.transaction.clone(), UpgradePriority::Critical)
+        .mempool_insert(tx.clone(), UpgradePriority::Critical)
         .await;
     let _ = rpcstate
         .rpc_server_to_main_tx
-        .send(RPCServerToMain::BroadcastTx(Arc::new(tx.transaction)))
+        .send(RPCServerToMain::BroadcastTx(Arc::new(tx)))
         .await;
     Ok(ErasedJson::pretty(ResponseBroadcastTx {
         status: 0,

@@ -41,7 +41,7 @@ pub(crate) enum TransferTransactionProof {
 /// [TransactionProof::Witness] is never shared between peers, as this would
 /// leak secret keys and lead to loss of funds.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct TransferTransaction {
+pub struct TransferTransaction {
     pub(crate) kernel: TransactionKernel,
     pub(crate) proof: TransferTransactionProof,
 }
