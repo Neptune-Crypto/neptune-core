@@ -577,7 +577,7 @@ impl WalletState {
         impl Iterator<Item = (TransactionKernelId, NativeCurrencyAmount)> + '_,
         impl Iterator<Item = (TransactionKernelId, NativeCurrencyAmount)> + '_,
     ) {
-        let incoming = self.mempool_spent_utxos.iter().map(|(txkid, sender_data)| {
+        let outgoing = self.mempool_spent_utxos.iter().map(|(txkid, sender_data)| {
             (
                 *txkid,
                 sender_data
@@ -587,7 +587,7 @@ impl WalletState {
             )
         });
 
-        let outgoing = self
+        let incoming = self
             .mempool_unspent_utxos
             .iter()
             .map(|(txkid, announced_utxos)| {
