@@ -25,16 +25,30 @@ use tower_http::trace::TraceLayer;
 use tracing::*;
 
 use crate::api::export::AdditionRecord;
+use crate::api::export::NativeCurrencyAmount;
+use crate::api::export::Network;
+use crate::api::export::ReceivingAddress;
+use crate::api::export::Timestamp;
+use crate::api::export::TransactionProof;
+use crate::api::export::Utxo;
+use crate::api::export::UtxoTriple;
+use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::rpc::server::NeptuneRPCServer;
 use crate::protocol::consensus::block::block_info::BlockInfo;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::BlockProof;
+use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::peer::transfer_transaction::TransferTransaction;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
+use crate::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::twenty_first::prelude::BFieldCodec;
 use crate::util_types::mutator_set::archival_mutator_set::ResponseMsMembershipProofPrivacyPreserving;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -370,11 +384,48 @@ async fn broadcast_transaction(
     // that no secrets are leaked.
     let tx: TransferTransaction =
         bincode::deserialize_from(body.reader()).context("deserialize error")?;
-
     let tx: Transaction = tx.try_into().context("Failed to convert to transaction")?;
 
-    info!("broadcasted insert tx: {}", tx.kernel.txid().to_string());
+    // Is transaction valid?
+    let cli = rpcstate.state.cli();
+    let network = cli.network;
+    let consensus_rule_set = rpcstate.state.lock_guard().await.consensus_rule_set();
+    if !tx.is_valid(network, consensus_rule_set).await {
+        return Err(RestError("Received transaction is not valid".to_owned()));
+    }
+
+    if tx.kernel.coinbase.is_some() {
+        return Err(RestError(
+            "Does not accept coinbase transactions".to_owned(),
+        ));
+    }
+
+    // Require a non-negative transaction fee.
+    if tx.kernel.fee.is_negative() {
+        return Err(RestError("Fee may not be negative, or zero".to_owned()));
+    }
+
+    // Does transaction have acceptable timestamp?
+    let timestamp = tx.kernel.timestamp;
+    let now = Timestamp::now();
+    if timestamp >= now + FUTUREDATING_LIMIT {
+        return Err(RestError(format!(
+            "Received tx too far into the future. Got timestamp {timestamp}"
+        )));
+    }
+
+    // Is transaction confirmable?
     let mut state = rpcstate.state.lock_guard_mut().await;
+    let msa = state
+        .chain
+        .light_state()
+        .mutator_set_accumulator_after()
+        .expect("Tip block must have mutator set");
+    if !tx.is_confirmable_relative_to(&msa) {
+        return Err(RestError("Transaction is not confirmable".to_owned()));
+    }
+
+    info!("broadcasted insert tx: {}", tx.kernel.txid().to_string());
 
     state
         .mempool_insert(tx.clone(), UpgradePriority::Critical)
