@@ -8,6 +8,7 @@ mod peers_screen;
 mod receive_screen;
 mod screen;
 mod send_screen;
+mod utxos_screen;
 
 #[cfg(feature = "mock")]
 mod mock_rpc_client;

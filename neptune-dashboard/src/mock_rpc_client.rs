@@ -11,6 +11,7 @@ use neptune_cash::application::rpc::server::overview_data::OverviewData;
 use neptune_cash::application::rpc::server::RpcResult;
 use neptune_cash::protocol::peer::peer_info::PeerInfo;
 use neptune_cash::state::wallet::address::generation_address::GenerationReceivingAddress;
+use neptune_cash::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use rand::rngs::StdRng;
 use rand::{rng, Rng};
 use rand::{RngCore, SeedableRng};
@@ -127,7 +128,7 @@ impl MockRpcClient {
     ) -> ::core::result::Result<RpcResult<Vec<MempoolTransactionInfo>>, ::tarpc::client::RpcError>
     {
         let mut rng = StdRng::from_seed(self.seed);
-        let total_num_entries = rng.random_range(0..100);
+        let total_num_entries = rng.random_range(5..100);
         let mut rng = StdRng::seed_from_u64(rng.next_u64().wrapping_add(page_start as u64));
 
         tokio::task::yield_now().await;
@@ -186,6 +187,34 @@ impl MockRpcClient {
     ) -> ::core::result::Result<RpcResult<TxCreationArtifacts>, ::tarpc::client::RpcError> {
         // thank you!
         tokio::task::yield_now().await;
-        Ok(Err(RpcError::Failed("cannot send".to_string())))
+        Ok(Err(RpcError::Failed("cannot send; mocking".to_string())))
+    }
+
+    pub async fn list_own_coins(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+    ) -> ::core::result::Result<RpcResult<Vec<CoinWithPossibleTimeLock>>, ::tarpc::client::RpcError>
+    {
+        let mut rng = StdRng::from_seed(self.seed);
+        tokio::task::yield_now().await;
+
+        let num_utxos = rng.random_range(1..20);
+        let mut utxos = vec![];
+        for _ in 0..num_utxos {
+            let utxo = CoinWithPossibleTimeLock {
+                amount: rng
+                    .random::<NativeCurrencyAmount>()
+                    .lossy_f64_fraction_mul(0.0001),
+                confirmed: rng.random(),
+                release_date: if rng.random_bool(0.5) {
+                    Some(rng.random())
+                } else {
+                    None
+                },
+            };
+            utxos.push(utxo);
+        }
+        Ok(Ok(utxos))
     }
 }

@@ -16,6 +16,7 @@ use neptune_cash::application::rpc::server::overview_data::OverviewData;
 use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::application::rpc::server::RpcResult;
 use neptune_cash::protocol::peer::peer_info::PeerInfo;
+use neptune_cash::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use std::net::SocketAddr;
 use tasm_lib::prelude::Digest;
 
@@ -200,6 +201,20 @@ impl DashboardRpcClient {
                 mock_rpc_client
                     .send(ctx, token, outputs, change_policy, fee)
                     .await
+            }
+        }
+    }
+
+    pub async fn list_own_coins(
+        &self,
+        ctx: ::tarpc::context::Context,
+        token: auth::Token,
+    ) -> ::core::result::Result<RpcResult<Vec<CoinWithPossibleTimeLock>>, ::tarpc::client::RpcError>
+    {
+        match self {
+            DashboardRpcClient::Authentic(rpcclient) => rpcclient.list_own_coins(ctx, token).await,
+            DashboardRpcClient::Mock(mock_rpc_client) => {
+                mock_rpc_client.list_own_coins(ctx, token).await
             }
         }
     }
