@@ -1458,7 +1458,7 @@ pub trait RPC {
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_details()]
     async fn generate_tx_details(
-        token: rpc_auth::Token,
+        token: auth::Token,
         tx_inputs: TxInputList,
         tx_outputs: TxOutputList,
         change_policy: ChangePolicy,
@@ -3783,7 +3783,7 @@ impl RPC for NeptuneRPCServer {
     async fn generate_tx_details(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         tx_inputs: TxInputList,
         tx_outputs: TxOutputList,
         change_policy: ChangePolicy,
