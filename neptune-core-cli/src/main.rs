@@ -855,10 +855,10 @@ async fn main() -> Result<()> {
         }
         Command::Header { block_selector } => {
             let res = client.header(ctx, token, block_selector).await??;
-            if res.is_none() {
-                println!("Block did not exist in database.");
+            if let Some(res) = res {
+                println!("{res}");
             } else {
-                println!("{}", res.unwrap());
+                println!("Block did not exist in database.");
             }
         }
         Command::ConfirmedAvailableBalance => {

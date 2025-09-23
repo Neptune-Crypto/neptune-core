@@ -341,43 +341,48 @@ mod tests {
 
     #[test]
     fn individual_cases() {
-        let all_zeros = AbsoluteIndexSet::new_raw(0, [0; _]);
+        let all_zeros = AbsoluteIndexSet::new_raw(0, [0; NUM_TRIALS as usize]);
         let mut range = all_zeros.aocl_range().unwrap();
         assert_eq!(0, range.0);
         assert_eq!(7, range.1);
 
-        let all_ones = AbsoluteIndexSet::new_raw(1, [0; _]);
+        let all_ones = AbsoluteIndexSet::new_raw(1, [0; NUM_TRIALS as usize]);
         range = all_ones.aocl_range().unwrap();
         assert_eq!(0, range.0);
         assert_eq!(7, range.1);
 
-        let all_chunk_size_minus_1 = AbsoluteIndexSet::new_raw(u128::from(CHUNK_SIZE) - 1, [0; _]);
+        let all_chunk_size_minus_1 =
+            AbsoluteIndexSet::new_raw(u128::from(CHUNK_SIZE) - 1, [0; NUM_TRIALS as usize]);
         range = all_chunk_size_minus_1.aocl_range().unwrap();
         assert_eq!(0, range.0);
         assert_eq!(7, range.1);
 
-        let all_chunk_size = AbsoluteIndexSet::new_raw(u128::from(CHUNK_SIZE), [0; _]);
+        let all_chunk_size =
+            AbsoluteIndexSet::new_raw(u128::from(CHUNK_SIZE), [0; NUM_TRIALS as usize]);
         range = all_chunk_size.aocl_range().unwrap();
         assert_eq!(0, range.0);
         assert_eq!(15, range.1);
 
         let all_2x_chunk_size_minus_one =
-            AbsoluteIndexSet::new_raw(2 * u128::from(CHUNK_SIZE) - 1, [0; _]);
+            AbsoluteIndexSet::new_raw(2 * u128::from(CHUNK_SIZE) - 1, [0; NUM_TRIALS as usize]);
         range = all_2x_chunk_size_minus_one.aocl_range().unwrap();
         assert_eq!(0, range.0);
         assert_eq!(15, range.1);
 
-        let all_2x_chunk_size = AbsoluteIndexSet::new_raw(2 * u128::from(CHUNK_SIZE), [0; _]);
+        let all_2x_chunk_size =
+            AbsoluteIndexSet::new_raw(2 * u128::from(CHUNK_SIZE), [0; NUM_TRIALS as usize]);
         range = all_2x_chunk_size.aocl_range().unwrap();
         assert_eq!(0, range.0);
         assert_eq!(23, range.1);
 
-        let all_last_in_1st_window = AbsoluteIndexSet::new_raw(u128::from(WINDOW_SIZE) - 1, [0; _]);
+        let all_last_in_1st_window =
+            AbsoluteIndexSet::new_raw(u128::from(WINDOW_SIZE) - 1, [0; NUM_TRIALS as usize]);
         range = all_last_in_1st_window.aocl_range().unwrap();
         assert_eq!(0, range.0);
         assert_eq!(256 * u64::from(BATCH_SIZE) - 1, range.1);
 
-        let all_first_in_2nd_window = AbsoluteIndexSet::new_raw(u128::from(WINDOW_SIZE), [0; _]);
+        let all_first_in_2nd_window =
+            AbsoluteIndexSet::new_raw(u128::from(WINDOW_SIZE), [0; NUM_TRIALS as usize]);
         range = all_first_in_2nd_window.aocl_range().unwrap();
         assert_eq!(8, range.0);
         assert_eq!(257 * u64::from(BATCH_SIZE) - 1, range.1);

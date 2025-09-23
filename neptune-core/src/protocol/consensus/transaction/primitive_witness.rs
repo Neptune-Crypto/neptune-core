@@ -693,7 +693,6 @@ pub mod neptune_arbitrary {
                         let fee = total_amount.checked_sub(&total_outputs).unwrap();
                         let total_inputs = input_utxos
                             .iter()
-                            .cloned()
                             .map(|utxo| utxo.get_native_currency_amount())
                             .sum::<NativeCurrencyAmount>();
 
