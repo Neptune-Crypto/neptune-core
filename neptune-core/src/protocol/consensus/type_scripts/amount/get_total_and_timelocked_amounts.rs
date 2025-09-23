@@ -192,7 +192,7 @@ mod test {
                     if i == bit || rng.random_bool(0.5) {
                         coins.push(TimeLock::until(rng.random()));
                     }
-                    Utxo::from((rng.random(), coins))
+                    Utxo::new(rng.random(), coins)
                 })
                 .collect_vec();
 

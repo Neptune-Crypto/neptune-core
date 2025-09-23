@@ -91,6 +91,7 @@ use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_input::TxInput;
 use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
@@ -340,7 +341,7 @@ impl GlobalStateLock {
         // can group inputs and outputs together, eg for history purposes.
         let tip_digest = gsm.chain.light_state().hash();
         gsm.wallet_state
-            .add_sent_transaction((details.as_ref(), tip_digest).into())
+            .add_sent_transaction(SentTransaction::new(details.as_ref(), tip_digest))
             .await;
 
         // insert transaction into mempool

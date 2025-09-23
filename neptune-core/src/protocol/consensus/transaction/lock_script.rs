@@ -113,22 +113,6 @@ pub struct LockScriptAndWitness {
     nd_digests: Vec<Digest>,
 }
 
-impl From<LockScriptAndWitness> for LockScript {
-    fn from(lock_script_and_witness: LockScriptAndWitness) -> Self {
-        Self {
-            program: lock_script_and_witness.program,
-        }
-    }
-}
-
-impl From<&LockScriptAndWitness> for LockScript {
-    fn from(lock_script_and_witness: &LockScriptAndWitness) -> Self {
-        Self {
-            program: lock_script_and_witness.program.clone(),
-        }
-    }
-}
-
 impl LockScriptAndWitness {
     pub fn new_with_nondeterminism(program: Program, witness: NonDeterminism) -> Self {
         Self {

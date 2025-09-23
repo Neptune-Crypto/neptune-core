@@ -24,13 +24,6 @@ pub struct SentTransaction {
     pub tip_when_sent: Digest, // tip block when sent.  (not when confirmed)
 }
 
-impl From<(&TransactionDetails, Digest)> for SentTransaction {
-    fn from(data: (&TransactionDetails, Digest)) -> Self {
-        let (td, tip_when_sent) = data;
-        Self::new(td, tip_when_sent)
-    }
-}
-
 impl SentTransaction {
     pub(crate) fn new(td: &TransactionDetails, tip_when_sent: Digest) -> Self {
         Self {

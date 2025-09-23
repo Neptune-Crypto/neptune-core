@@ -21,7 +21,6 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::transaction::transaction_details::TransactionDetails;
@@ -296,8 +295,7 @@ impl TransactionDetailsBuilder {
                 .collect::<Vec<_>>();
             let transparent_outputs = tx_outputs
                 .iter()
-                .cloned()
-                .map(UtxoTriple::from)
+                .map(|x| x.utxo_triple())
                 .collect::<Vec<_>>();
             let transparent_transaction_details =
                 TransparentTransactionInfo::new(transparent_inputs, transparent_outputs);

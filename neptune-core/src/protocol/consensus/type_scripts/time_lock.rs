@@ -672,7 +672,7 @@ impl From<PrimitiveWitness> for TimeLockWitness {
             .iter()
             .map(TimeLock::extract_release_date)
             .collect_vec();
-        let transaction_kernel = TransactionKernel::from(primitive_witness.clone());
+        let transaction_kernel = primitive_witness.kernel;
         let input_utxos = primitive_witness.input_utxos.clone();
 
         Self {
@@ -745,7 +745,7 @@ pub mod neptune_arbitrary {
                                 let time_lock_coin = TimeLock::until(*release_date);
                                 let mut coins = utxo.coins().to_vec();
                                 coins.push(time_lock_coin);
-                                *utxo = (utxo.lock_script_hash(), coins).into()
+                                *utxo = Utxo::new(utxo.lock_script_hash(), coins);
                             }
                         }
 
@@ -958,13 +958,13 @@ pub mod neptune_arbitrary {
                         let time_lock = TimeLock::until(release_date);
                         let mut coins = utxo.coins().to_vec();
                         coins.push(time_lock);
-                        *utxo = Utxo::from((utxo.lock_script_hash(), coins));
+                        *utxo = Utxo::new(utxo.lock_script_hash(), coins);
                         counter += 1;
                     }
                     for utxo in &mut output_utxos {
                         let mut coins = utxo.coins().to_vec();
                         coins.push(TimeLock::until(release_dates[counter]));
-                        *utxo = Utxo::from((utxo.lock_script_hash(), coins));
+                        *utxo = Utxo::new(utxo.lock_script_hash(), coins);
                         counter += 1;
                     }
 

@@ -41,12 +41,6 @@ pub struct TxOutput {
 }
 
 impl TxOutput {
-    fn addition_record(&self) -> AdditionRecord {
-        UtxoTriple::from(self.clone()).addition_record()
-    }
-}
-
-impl TxOutput {
     // note: normally use one of the other constructors.
     pub(crate) fn new(
         utxo: Utxo,
@@ -427,6 +421,18 @@ impl TxOutput {
         let utxo = self.utxo();
         let sender_randomness = self.sender_randomness();
         ExpectedUtxo::new(utxo, sender_randomness, receiver_preimage, notifier)
+    }
+
+    pub(crate) fn utxo_triple(&self) -> UtxoTriple {
+        UtxoTriple {
+            utxo: self.utxo(),
+            sender_randomness: self.sender_randomness,
+            receiver_digest: self.receiver_digest(),
+        }
+    }
+
+    pub(crate) fn addition_record(&self) -> AdditionRecord {
+        self.utxo_triple().addition_record()
     }
 }
 

@@ -6,7 +6,6 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::state::wallet::transaction_output::TxOutput;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 
@@ -27,16 +26,6 @@ impl UtxoTriple {
             self.sender_randomness,
             self.receiver_digest,
         )
-    }
-}
-
-impl From<TxOutput> for UtxoTriple {
-    fn from(value: TxOutput) -> Self {
-        Self {
-            utxo: value.utxo(),
-            sender_randomness: value.sender_randomness(),
-            receiver_digest: value.receiver_digest(),
-        }
     }
 }
 

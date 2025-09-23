@@ -225,12 +225,6 @@ impl UpdateMutatorSetDataJob {
     }
 }
 
-impl From<UpdateMutatorSetDataJob> for UpgradeJob {
-    fn from(value: UpdateMutatorSetDataJob) -> Self {
-        Self::UpdateMutatorSetData(value)
-    }
-}
-
 impl UpgradeJob {
     /// Create an upgrade job from a primitive witness, for upgrading proof-
     /// support for a transaction that this client has initiated.

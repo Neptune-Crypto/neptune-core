@@ -103,15 +103,6 @@ impl GetSize for Utxo {
     }
 }
 
-impl From<(Digest, Vec<Coin>)> for Utxo {
-    fn from((lock_script_hash, coins): (Digest, Vec<Coin>)) -> Self {
-        Self {
-            lock_script_hash,
-            coins,
-        }
-    }
-}
-
 impl Utxo {
     pub fn new(lock_script_hash: Digest, coins: Vec<Coin>) -> Self {
         Self {
@@ -275,10 +266,10 @@ impl StdHash for Utxo {
 
 impl Distribution<Utxo> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Utxo {
-        Utxo::from((
+        Utxo::new(
             rng.random(),
             NativeCurrencyAmount::coins(rng.next_u32() % 42000000).to_native_coins(),
-        ))
+        )
     }
 }
 
@@ -298,7 +289,7 @@ pub mod neptune_arbitrary {
                 type_script_hash,
                 state: amount.encode(),
             }];
-            Ok((lock_script_hash, coins).into())
+            Ok(Utxo::new(lock_script_hash, coins))
         }
     }
 }

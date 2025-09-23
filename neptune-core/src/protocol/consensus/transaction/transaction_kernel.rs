@@ -13,7 +13,6 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::announcement::Announcement;
-use super::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
@@ -97,12 +96,6 @@ impl PartialEq for TransactionKernel {
 }
 
 impl Eq for TransactionKernel {}
-
-impl From<PrimitiveWitness> for TransactionKernel {
-    fn from(transaction_primitive_witness: PrimitiveWitness) -> Self {
-        transaction_primitive_witness.kernel
-    }
-}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum TransactionConfirmabilityError {
@@ -543,6 +536,7 @@ pub mod tests {
 
     use super::*;
     use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
+    use crate::protocol::consensus::transaction::PrimitiveWitness;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
 

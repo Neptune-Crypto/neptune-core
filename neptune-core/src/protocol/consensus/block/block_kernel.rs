@@ -59,8 +59,8 @@ impl BlockKernel {
         let coins_unlocked = value_unlocked.to_native_coins();
         let coins_timelocked = value_timelocked.to_native_coins();
         let lock_script_hash = self.header.guesser_receiver_data.lock_script_hash;
-        let unlocked_utxo = Utxo::from((lock_script_hash, coins_unlocked));
-        let locked_utxo = Utxo::from((lock_script_hash, coins_timelocked))
+        let unlocked_utxo = Utxo::new(lock_script_hash, coins_unlocked);
+        let locked_utxo = Utxo::new(lock_script_hash, coins_timelocked)
             .with_time_lock(self.header.timestamp + MINER_REWARD_TIME_LOCK_PERIOD);
 
         Ok(vec![locked_utxo, unlocked_utxo])

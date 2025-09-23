@@ -2537,7 +2537,7 @@ pub(crate) mod tests {
             .wallet_state
             .add_expected_utxos(expected_bad_utxos)
             .await;
-        let bad_utxo_triple = UtxoTriple::from(bad_txo);
+        let bad_utxo_triple = bad_txo.utxo_triple();
         let bad_addition_record = bad_utxo_triple.addition_record();
         let bad_kernel = TransactionKernelModifier::default()
             .outputs(vec![bad_addition_record])
@@ -2642,7 +2642,7 @@ pub(crate) mod tests {
             .wallet_state
             .add_expected_utxos(expected_bad_utxos)
             .await;
-        let bad_addition_record = UtxoTriple::from(bad_txo).addition_record();
+        let bad_addition_record = bad_txo.addition_record();
         let bad_kernel = TransactionKernelModifier::default()
             .outputs(vec![bad_addition_record])
             .modify(tx_block2.kernel.clone());
