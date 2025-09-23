@@ -40,16 +40,30 @@ jobs:
         run: cargo build --benches
 
       - name: Run tests without benches
-        run: >
-          cargo test
-          --lib --bins --tests --examples
-          --
-          --skip mine_20_blocks_in_40_seconds
-          --skip hash_rate_independent_of_tx_size
-          --skip blocks_with_0_to_10_inputs_and_successors_are_valid
-          --skip can_cancel_preprocess_within_one_second
-          --skip can_cancel_merkle_tree_construction_within_two_seconds
-          --skip alice_updates_mutator_set_data_on_own_transaction
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cargo test \
+              --lib --bins --tests --examples \
+              -- \
+              --test-threads=1
+              --skip mine_20_blocks_in_40_seconds \
+              --skip hash_rate_independent_of_tx_size \
+              --skip blocks_with_0_to_10_inputs_and_successors_are_valid \
+              --skip can_cancel_preprocess_within_one_second \
+              --skip can_cancel_merkle_tree_construction_within_two_seconds \
+              --skip alice_updates_mutator_set_data_on_own_transaction
+          else
+            cargo test \
+              --lib --bins --tests --examples \
+              -- \
+              --skip mine_20_blocks_in_40_seconds \
+              --skip hash_rate_independent_of_tx_size \
+              --skip blocks_with_0_to_10_inputs_and_successors_are_valid \
+              --skip can_cancel_preprocess_within_one_second \
+              --skip can_cancel_merkle_tree_construction_within_two_seconds \
+              --skip alice_updates_mutator_set_data_on_own_transaction
+          fi
+        shell: bash
 
         # `--doc` cannot be mixed with other target option
       - name: Run documentation tests
