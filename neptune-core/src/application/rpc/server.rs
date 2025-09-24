@@ -1454,7 +1454,9 @@ pub trait RPC {
         outputs: Vec<OutputFormat>,
     ) -> RpcResult<TxOutputList>;
 
-    /// todo: docs.
+    /// Helper endpoint for constructing a transaction. Can be used in
+    /// connection with other endpoints, e.g. endpoints that select inputs and
+    /// outputs to a transaction.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_details()]
     async fn generate_tx_details(
@@ -4215,6 +4217,7 @@ mod tests {
     use crate::protocol::peer::NegativePeerSanction;
     use crate::protocol::peer::PeerSanction;
     use crate::protocol::proof_abstractions::mast_hash::MastHash;
+    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -4386,6 +4389,47 @@ mod tests {
             .unwrap();
         let _ = rpc_server
             .clone()
+            .spendable_inputs(ctx, token)
+            .await
+            .unwrap();
+        let _ = rpc_server
+            .clone()
+            .select_spendable_inputs(
+                ctx,
+                token,
+                InputSelectionPolicy::Random,
+                NativeCurrencyAmount::coins(5),
+            )
+            .await;
+        let _ = rpc_server
+            .clone()
+            .generate_tx_outputs(ctx, token, vec![])
+            .await
+            .unwrap();
+        let tx_details = rpc_server
+            .clone()
+            .generate_tx_details(
+                ctx,
+                token,
+                TxInputList::default(),
+                TxOutputList::default(),
+                ChangePolicy::default(),
+                NativeCurrencyAmount::zero(),
+            )
+            .await
+            .unwrap();
+        let tx_proof = rpc_server
+            .clone()
+            .generate_witness_proof(ctx, token, tx_details.clone())
+            .await
+            .unwrap();
+        let _ = rpc_server
+            .clone()
+            .assemble_transaction(ctx, token, tx_details, tx_proof)
+            .await
+            .unwrap();
+        let _ = rpc_server
+            .clone()
             .provide_new_tip(ctx, token, rng.random(), Block::genesis(network))
             .await
             .unwrap();
@@ -4481,6 +4525,126 @@ mod tests {
         assert!(balance.is_zero());
 
         Ok(())
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn create_and_broadcast_valid_tx_through_rpc_endpoints() {
+        // Go through a list of endpoints resulting in a valid
+        // PrimitiveWitness-backed transaction. Uses the devnet premine UTXO to
+        // fund the transaction.
+        let network = Network::Main;
+        let rpc_server = test_rpc_server(
+            WalletEntropy::devnet_wallet(),
+            2,
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let token = cookie_token(&rpc_server).await;
+        let ctx = context::current();
+        let spendable_inputs = rpc_server
+            .clone()
+            .spendable_inputs(ctx, token)
+            .await
+            .unwrap();
+        assert_eq!(
+            1,
+            spendable_inputs.len(),
+            "Devnet wallet on genesis block must have one spendable input (since timelock has passed)."
+        );
+
+        let third_party_address = GenerationReceivingAddress::derive_from_seed(Default::default());
+        let inputs = rpc_server
+            .clone()
+            .select_spendable_inputs(
+                ctx,
+                token,
+                InputSelectionPolicy::Random,
+                NativeCurrencyAmount::coins(19),
+            )
+            .await
+            .unwrap();
+
+        let send_amt = NativeCurrencyAmount::coins(17);
+        let outputs = rpc_server
+            .clone()
+            .generate_tx_outputs(
+                ctx,
+                token,
+                vec![OutputFormat::AddressAndAmount(
+                    third_party_address.into(),
+                    send_amt,
+                )],
+            )
+            .await
+            .unwrap();
+        let fee = NativeCurrencyAmount::coins(2);
+        let tx_details = rpc_server
+            .clone()
+            .generate_tx_details(ctx, token, inputs, outputs, ChangePolicy::default(), fee)
+            .await
+            .unwrap();
+        assert_eq!(1, tx_details.tx_inputs.len());
+        assert_eq!(
+            2,
+            tx_details.tx_outputs.len(),
+            "Must have recipient and change output"
+        );
+        assert_eq!(
+            NativeCurrencyAmount::coins(18),
+            tx_details.tx_outputs.total_native_coins(),
+            "Total output must be balance - fee = 20 - 2 = 18 coins."
+        );
+
+        let tx_proof = rpc_server
+            .clone()
+            .generate_witness_proof(ctx, token, tx_details.clone())
+            .await
+            .unwrap();
+        let tx = rpc_server
+            .clone()
+            .assemble_transaction(ctx, token, tx_details.clone(), tx_proof.clone())
+            .await
+            .unwrap();
+
+        let consensus_rule_set = rpc_server.state.lock_guard().await.consensus_rule_set();
+        assert!(
+            tx.is_valid(network, consensus_rule_set).await,
+            "Constructed tx must be valid"
+        );
+
+        assert_eq!(1, tx.kernel.inputs.len());
+        assert_eq!(2, tx.kernel.outputs.len());
+        assert_eq!(fee, tx.kernel.fee);
+
+        let tx_artifacts = rpc_server
+            .clone()
+            .assemble_transaction_artifacts(ctx, token, tx_details.clone(), tx_proof.clone())
+            .await
+            .unwrap();
+        let output_amount = tx_artifacts.details.tx_outputs.total_native_coins();
+        assert_eq!(
+            NativeCurrencyAmount::coins(18),
+            output_amount,
+            "Total output must be balance - fee = 20 - 2 = 18 coins. Got: {output_amount}"
+        );
+
+        // Broadcast transaction and verify insertion into mempool
+        assert_eq!(0, rpc_server.state.lock_guard().await.mempool.len());
+        rpc_server
+            .clone()
+            .record_and_broadcast_transaction(ctx, token, tx_artifacts)
+            .await
+            .unwrap();
+        assert_eq!(1, rpc_server.state.lock_guard().await.mempool.len());
+        assert!(rpc_server
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .contains(tx.txid()));
+
+        // Ensure `proof_type` endpoint finds the transaction in the mempool
+        rpc_server.proof_type(ctx, token, tx.txid()).await.unwrap();
     }
 
     #[expect(clippy::shadow_unrelated)]
