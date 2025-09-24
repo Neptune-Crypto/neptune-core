@@ -557,6 +557,8 @@ impl WalletState {
         }
     }
 
+    /// Get an iterator over (utxo, aocl_leaf_index) pairs corresponding to
+    /// own inputs into transactions that live in the mempool.
     pub fn mempool_spent_utxos_iter(&self) -> impl Iterator<Item = (&Utxo, &u64)> {
         self.mempool_spent_utxos
             .values()
