@@ -7,7 +7,6 @@ pub mod transfer_transaction;
 
 use std::fmt::Display;
 use std::net::SocketAddr;
-use std::time::Duration;
 use std::time::SystemTime;
 
 use handshake_data::HandshakeData;
@@ -22,7 +21,6 @@ use rand::RngCore;
 use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
-use strum::EnumCount;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -56,7 +54,8 @@ pub(crate) trait Sanction {
 }
 
 /// The reason for degrading a peer's standing
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, strum::EnumCount)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[cfg_attr(any(test, feature = "mock-rpc"), derive(strum::EnumCount))]
 pub enum NegativePeerSanction {
     InvalidBlock((BlockHeight, Digest)),
     DifferentGenesis,
@@ -106,7 +105,7 @@ pub enum NegativePeerSanction {
 #[cfg(any(feature = "mock-rpc", test))]
 impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NegativePeerSanction {
-        match rng.random_range(0..NegativePeerSanction::COUNT) {
+        match rng.random_range(0..<NegativePeerSanction as strum::EnumCount>::COUNT) {
             0 => NegativePeerSanction::InvalidBlock((rng.random(), rng.random())),
             1 => NegativePeerSanction::DifferentGenesis,
             2 => NegativePeerSanction::ForkResolutionError((
@@ -159,7 +158,8 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
 }
 
 /// The reason for improving a peer's standing
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, strum::EnumCount)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[cfg_attr(any(test, feature = "mock-rpc"), derive(strum::EnumCount))]
 pub enum PositivePeerSanction {
     // positive sanctions (standing-improving)
     // We only reward events that are unlikely to occur more frequently than the
@@ -173,7 +173,7 @@ pub enum PositivePeerSanction {
 #[cfg(any(feature = "mock-rpc", test))]
 impl rand::distr::Distribution<PositivePeerSanction> for rand::distr::StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PositivePeerSanction {
-        match rng.random_range(0..PositivePeerSanction::COUNT) {
+        match rng.random_range(0..<PositivePeerSanction as strum::EnumCount>::COUNT) {
             0 => PositivePeerSanction::ValidBlocks(rng.random_range(0_usize..1000)),
             1 => PositivePeerSanction::NewBlockProposal,
             _ => unreachable!(),
@@ -433,11 +433,14 @@ impl Display for PeerStanding {
     }
 }
 
+#[cfg(any(test, feature = "mock-rpc"))]
 impl rand::distr::Distribution<PeerStanding> for rand::distr::StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PeerStanding {
-        let punishment_time = SystemTime::UNIX_EPOCH + Duration::from_millis(rng.next_u64() >> 20);
+        let punishment_time =
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(rng.next_u64() >> 20);
         let punishment_sanction = rng.random();
-        let reward_time = SystemTime::UNIX_EPOCH + Duration::from_millis(rng.next_u64() >> 20);
+        let reward_time =
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(rng.next_u64() >> 20);
         let reward_sanction = rng.random();
         PeerStanding {
             standing: rng.random(),

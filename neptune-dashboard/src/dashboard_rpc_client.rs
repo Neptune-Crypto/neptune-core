@@ -194,6 +194,8 @@ impl DashboardRpcClient {
                     .send(ctx, token, outputs, change_policy, fee)
                     .await
             }
+
+            #[cfg(feature = "mock")]
             DashboardRpcClient::Mock(mock_rpc_client) => {
                 mock_rpc_client
                     .send(ctx, token, outputs, change_policy, fee)

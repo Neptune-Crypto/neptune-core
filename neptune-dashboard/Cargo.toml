@@ -11,7 +11,7 @@ homepage = "https://neptune.cash/"
 repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
 [features]
-default = ["mock"]
+default = []
 mock = ["rand", "neptune-cash/mock-rpc"]
 
 [dependencies]

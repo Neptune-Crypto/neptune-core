@@ -1,10 +1,7 @@
-use std::net::Ipv4Addr;
 use std::net::SocketAddr;
-use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use rand::rngs::StdRng;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -43,7 +40,7 @@ impl rand::distr::Distribution<PeerConnectionInfo> for rand::distr::StandardUnif
                 None
             },
             connected_address: SocketAddr::new(
-                std::net::IpAddr::V4(Ipv4Addr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(
                     rng.random(),
                     rng.random(),
                     rng.random(),
@@ -171,20 +168,23 @@ impl PeerInfo {
 impl rand::distr::Distribution<PeerInfo> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> PeerInfo {
         let own_timestamp_connection_established =
-            SystemTime::UNIX_EPOCH + Duration::from_millis(rng.next_u64() >> 20);
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(rng.next_u64() >> 20);
         let peer_timestamp_connection_established =
-            SystemTime::UNIX_EPOCH + Duration::from_millis(rng.next_u64() >> 20);
-        let local_rng = <StdRng as rand::SeedableRng>::from_seed(rng.random());
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(rng.next_u64() >> 20);
+        let local_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(rng.random());
         PeerInfo {
             peer_connection_info: rng.random(),
             instance_id: rng.random(),
             own_timestamp_connection_established,
             peer_timestamp_connection_established,
             standing: rng.random(),
-            version: <StdRng as rand::Rng>::sample_iter(local_rng, &rand::distr::Alphanumeric)
-                .take(10)
-                .map(char::from)
-                .collect(),
+            version: <rand::rngs::StdRng as rand::Rng>::sample_iter(
+                local_rng,
+                &rand::distr::Alphanumeric,
+            )
+            .take(10)
+            .map(char::from)
+            .collect(),
             is_archival_node: rng.random(),
         }
     }
