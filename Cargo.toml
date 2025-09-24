@@ -64,9 +64,9 @@ verbose_bit_mask = "warn"
 # transaction with STARK proofs. The other flags are there to make compilation
 # of Triton VM faster.
 [profile.dev.package.triton-vm]
-opt-level = 3
+opt-level = 0
 debug = false
-incremental = false
+incremental = true
 debug-assertions = false
 overflow-checks = false
 
@@ -85,9 +85,9 @@ debug-assertions = false
 overflow-checks = false
 
 [profile.test.package.triton-vm]
-opt-level = 3
+opt-level = 1
 debug = false
-incremental = false
+incremental = true
 debug-assertions = false
 overflow-checks = false
 
@@ -95,7 +95,7 @@ overflow-checks = false
 # that should run with `opt-level=3` set.
 [profile.test]
 build-override.opt-level = 3
-opt-level = 3                # Set to make execution of tests in this crate faster. Cf: https://github.com/Neptune-Crypto/neptune-core/issues/204
+opt-level = 2                # Set to make execution of tests in this crate faster. Cf: https://github.com/Neptune-Crypto/neptune-core/issues/204
 
 [profile.release]
 build-override.opt-level = 3
