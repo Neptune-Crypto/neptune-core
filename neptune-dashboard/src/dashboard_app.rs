@@ -25,7 +25,6 @@ use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::rpc::auth;
-use neptune_cash::application::rpc::server::RPCClient;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -48,6 +47,9 @@ use strum::EnumIter;
 use strum::IntoEnumIterator;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
+
+use crate::dashboard_rpc_client::DashboardRpcClient;
+use crate::utxos_screen::UtxosScreen;
 
 use super::address_screen::AddressScreen;
 use super::history_screen::HistoryScreen;
@@ -89,6 +91,7 @@ enum MenuItem {
     Send,
     Address,
     Mempool,
+    Utxos,
     Quit,
 }
 
@@ -111,7 +114,8 @@ impl From<MenuItem> for usize {
             MenuItem::Send => 4,
             MenuItem::Address => 5,
             MenuItem::Mempool => 6,
-            MenuItem::Quit => 7,
+            MenuItem::Utxos => 7,
+            MenuItem::Quit => 8,
         }
     }
 }
@@ -137,6 +141,7 @@ impl fmt::Display for MenuItem {
             MenuItem::Send => write!(f, "Send"),
             MenuItem::Address => write!(f, "Addresses"),
             MenuItem::Mempool => write!(f, "Mempool"),
+            MenuItem::Utxos => write!(f, "UTXOs"),
             MenuItem::Quit => write!(f, "Quit"),
         }
     }
@@ -171,6 +176,7 @@ pub struct DashboardApp {
     receive_screen: Rc<RefCell<ReceiveScreen>>,
     send_screen: Rc<RefCell<SendScreen>>,
     mempool_screen: Rc<RefCell<MempoolScreen>>,
+    utxos_screen: Rc<RefCell<UtxosScreen>>,
     screens: HashMap<MenuItem, Rc<RefCell<dyn Screen>>>,
     output: String,
     console_io: Arc<Mutex<Vec<ConsoleIO>>>,
@@ -180,7 +186,7 @@ pub struct DashboardApp {
 impl DashboardApp {
     pub fn new(
         config: Arc<Config>,
-        rpc_server: Arc<RPCClient>,
+        rpc_server: Arc<DashboardRpcClient>,
         network: Network,
         token: auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
@@ -236,6 +242,10 @@ impl DashboardApp {
         let mempool_screen_dyn = Rc::clone(&mempool_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Mempool, Rc::clone(&mempool_screen_dyn));
 
+        let utxos_screen = Rc::new(RefCell::new(UtxosScreen::new(rpc_server.clone(), token)));
+        let utxos_screen_dyn = Rc::clone(&utxos_screen) as Rc<RefCell<dyn Screen>>;
+        screens.insert(MenuItem::Utxos, Rc::clone(&utxos_screen_dyn));
+
         Self {
             running: false,
             current_menu_item: MenuItem::Overview,
@@ -247,6 +257,7 @@ impl DashboardApp {
             send_screen,
             address_screen,
             mempool_screen,
+            utxos_screen,
             screens,
             output: "".to_string(),
             console_io: Arc::new(Mutex::new(vec![])),
@@ -302,7 +313,7 @@ impl DashboardApp {
 
     pub async fn run(
         config: Config,
-        client: RPCClient,
+        client: DashboardRpcClient,
         network: Network,
         token: auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
@@ -496,6 +507,10 @@ impl DashboardApp {
                     let mut send_screen = self.send_screen.as_ref().borrow_mut();
                     send_screen.handle(event, refresh_tx)
                 }
+                MenuItem::Utxos => {
+                    let mut utxos_screen = self.utxos_screen.as_ref().borrow_mut();
+                    utxos_screen.handle(event)
+                }
                 _ => Some(event),
             };
 
@@ -623,6 +638,9 @@ impl DashboardApp {
                     self.mempool_screen.borrow().to_owned(),
                     screen_chunk,
                 );
+            }
+            MenuItem::Utxos => {
+                f.render_widget::<UtxosScreen>(self.utxos_screen.borrow().to_owned(), screen_chunk);
             }
             MenuItem::Quit => {
                 let messages: Vec<ListItem> = [

@@ -508,6 +508,15 @@ impl Display for NativeCurrencyAmount {
     }
 }
 
+#[cfg(feature = "mock-rpc")]
+impl rand::distr::Distribution<NativeCurrencyAmount> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> NativeCurrencyAmount {
+        NativeCurrencyAmount::from_nau(
+            rng.random_range(-NativeCurrencyAmount::MAX_NAU..NativeCurrencyAmount::MAX_NAU),
+        )
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
     use arbitrary::Arbitrary;

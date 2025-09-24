@@ -205,7 +205,7 @@ impl Cookie {
     }
 
     // creates a cookie that exists in mem only, no .cookie file written to disk.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "mock-rpc"))]
     pub fn new_in_mem() -> Self {
         Self(Self::gen_secret())
     }

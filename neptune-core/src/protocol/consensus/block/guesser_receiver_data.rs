@@ -16,3 +16,13 @@ pub struct GuesserReceiverData {
     pub receiver_digest: Digest,
     pub lock_script_hash: Digest,
 }
+
+#[cfg(feature = "mock-rpc")]
+impl rand::distr::Distribution<GuesserReceiverData> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> GuesserReceiverData {
+        GuesserReceiverData {
+            receiver_digest: rng.random(),
+            lock_script_hash: rng.random(),
+        }
+    }
+}

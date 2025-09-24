@@ -4,19 +4,24 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use crossterm::event::Event;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::application::rpc::auth;
-use neptune_cash::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
-use num_traits::CheckedSub;
+use neptune_cash::application::rpc::server::ui_utxo::UiUtxo;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
+use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Cell;
 use ratatui::widgets::Row;
+use ratatui::widgets::StatefulWidget;
 use ratatui::widgets::Table;
+use ratatui::widgets::TableState;
 use ratatui::widgets::Widget;
 use tarpc::context;
 use tokio::select;
@@ -24,49 +29,97 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use unicode_width::UnicodeWidthStr;
 
+use crate::dashboard_app::DashboardEvent;
 use crate::dashboard_rpc_client::DashboardRpcClient;
-
-use super::dashboard_app::DashboardEvent;
-use super::screen::Screen;
-
-const PAGE_SIZE: usize = 20;
+use crate::screen::Screen;
 
 #[derive(Debug, Clone)]
-pub struct MempoolScreen {
-    active: bool,
-    fg: Color,
-    bg: Color,
-    in_focus: bool,
-    data: Arc<std::sync::Mutex<Vec<MempoolTransactionInfo>>>,
-    server: Arc<DashboardRpcClient>,
-    poll_task: Option<Arc<std::sync::Mutex<JoinHandle<()>>>>,
-    escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
-    page_start: Arc<std::sync::Mutex<usize>>,
-    token: auth::Token,
+pub struct ScrollableTable {
+    data: Arc<Mutex<Vec<UiUtxo>>>,
+    state: TableState,
 }
 
-impl MempoolScreen {
+impl ScrollableTable {
+    // # of rows in table header (1 text row, 2 border rows).
+    // this is used to avoid selecting the header rows.
+    // kind of a hack, but appears to be necessary for now.
+    // ratatui seems to be redesigning scrollable widgets at present.
+    const TABLE_HEADER_ROWS: usize = 3;
+
+    // Select the next item. This will not be reflected until the widget is drawn
+    // with `Frame::render_stateful_widget`.
+    pub fn next(&mut self) {
+        let offset = Self::TABLE_HEADER_ROWS;
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i >= self.data.lock().unwrap().len() + offset - 1 {
+                    i // end on last entry.  (no wrap to start)
+                } else {
+                    i + 1
+                }
+            }
+            None => offset,
+        };
+        self.state.select(Some(i));
+    }
+
+    // Select the previous item. This will not be reflected until the widget is drawn
+    // with `Frame::render_stateful_widget`.
+    pub fn previous(&mut self) {
+        let offset = Self::TABLE_HEADER_ROWS;
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i == offset {
+                    i // stay at first entry.  (no wrap to end.)
+                } else {
+                    i - 1
+                }
+            }
+            None => offset,
+        };
+        self.state.select(Some(i));
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UtxosScreen {
+    active: bool,
+    in_focus: bool,
+    data: Arc<std::sync::Mutex<Vec<UiUtxo>>>,
+    fg: Color,
+    bg: Color,
+    server: Arc<DashboardRpcClient>,
+    token: auth::Token,
+    poll_task: Option<Arc<Mutex<JoinHandle<()>>>>,
+    escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
+    scrollable_table: ScrollableTable,
+}
+
+impl UtxosScreen {
     pub fn new(rpc_server: Arc<DashboardRpcClient>, token: auth::Token) -> Self {
-        MempoolScreen {
+        let data = Arc::new(Mutex::new(vec![]));
+        Self {
             active: false,
+            in_focus: false,
+            data: data.clone(),
             fg: Color::Gray,
             bg: Color::Black,
-            in_focus: false,
-            data: Arc::new(Mutex::new(vec![])),
             server: rpc_server,
+            token,
             poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
-            page_start: Arc::new(std::sync::Mutex::new(0)),
-            token,
+            scrollable_table: ScrollableTable {
+                data: data.clone(),
+                state: TableState::default(),
+            },
         }
     }
 
     async fn run_polling_loop(
-        page_start: Arc<std::sync::Mutex<usize>>,
         rpc_client: Arc<DashboardRpcClient>,
         token: auth::Token,
-        mempool_transaction_info: Arc<std::sync::Mutex<Vec<MempoolTransactionInfo>>>,
-        escalatable_event_arc: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
+        data_arc: Arc<Mutex<Vec<UiUtxo>>>,
+        escalatable_event: Arc<Mutex<Option<DashboardEvent>>>,
     ) -> ! {
         // use macros to reduce boilerplate
         macro_rules! setup_poller {
@@ -87,44 +140,59 @@ impl MempoolScreen {
         loop {
             select! {
                 _ = &mut balance => {
-                    let page_start_clone = *page_start.lock().unwrap();
-                    match rpc_client.mempool_overview(context::current(), token, page_start_clone, PAGE_SIZE).await {
-                        Ok(Ok(mo)) => {
-                            *mempool_transaction_info.lock().unwrap() = mo;
+                    match rpc_client.list_utxos(context::current(), token).await {
+                        Ok(Ok(coins)) => {
 
-                            *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
+                            *data_arc.lock().unwrap() = coins;
+
+                            *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
+
                             reset_poller!(balance, Duration::from_secs(10));
                         },
                         Ok(Err(e)) => {
-                            *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string()));
+                            *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string()));
                         }
                         Err(e) => {
-                            *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string()));
+                            *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string()));
+                        }
+                    }
+                },
+
+            }
+        }
+    }
+
+    /// Handle Up/Down keypress for scrolling
+    pub fn handle(&mut self, event: DashboardEvent) -> Option<DashboardEvent> {
+        let mut escalate_event = None;
+
+        if self.in_focus {
+            if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Down => self.scrollable_table.next(),
+                        KeyCode::Up => self.scrollable_table.previous(),
+                        // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
+                        _ => {
+                            escalate_event = Some(event);
                         }
                     }
                 }
             }
         }
+        escalate_event
     }
 }
 
-impl Screen for MempoolScreen {
+impl Screen for UtxosScreen {
     fn activate(&mut self) {
         self.active = true;
-        let page_start_arc = self.page_start.clone();
         let server_arc = self.server.clone();
-        let token = self.token;
         let data_arc = self.data.clone();
         let escalatable_event_arc = self.escalatable_event.clone();
+        let token = self.token;
         self.poll_task = Some(Arc::new(Mutex::new(tokio::spawn(async move {
-            MempoolScreen::run_polling_loop(
-                page_start_arc,
-                server_arc,
-                token,
-                data_arc,
-                escalatable_event_arc,
-            )
-            .await;
+            UtxosScreen::run_polling_loop(server_arc, token, data_arc, escalatable_event_arc).await;
         }))));
     }
 
@@ -145,14 +213,14 @@ impl Screen for MempoolScreen {
         self.in_focus = false;
     }
 
-    fn escalatable_event(&self) -> Arc<std::sync::Mutex<Option<DashboardEvent>>> {
+    fn escalatable_event(&self) -> Arc<Mutex<Option<DashboardEvent>>> {
         self.escalatable_event.clone()
     }
 }
 
-impl Widget for MempoolScreen {
-    fn render(self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
-        // overview box
+impl Widget for UtxosScreen {
+    fn render(mut self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
+        // address box
         let style: Style = if self.in_focus {
             Style::default().fg(Color::LightCyan).bg(self.bg)
         } else {
@@ -160,56 +228,41 @@ impl Widget for MempoolScreen {
         };
         Block::default()
             .borders(Borders::ALL)
-            .title("Mempool")
+            .title("UTXOs")
             .style(style)
             .render(area, buf);
 
-        let mut inner = area.inner(Margin {
+        // subdivide into two parts
+        let mut table_canvas = area.inner(Margin {
             vertical: 2,
             horizontal: 2,
         });
 
+        // chart
+        // ?
+        // todo
+
         // table
         let style = Style::default().fg(self.fg).bg(self.bg);
-        let header = vec![
-            "id",
-            "proof type",
-            "#in",
-            "#out",
-            "Δ balance",
-            "fee",
-            "synced",
-        ];
+        let selected_style = style.add_modifier(Modifier::REVERSED);
+        let header = vec!["received", "id", "amount", "release date", "spent"];
+
         let matrix = self
             .data
             .lock()
             .unwrap()
             .iter()
-            .map(|mptxi| {
-                let balance_delta = if mptxi.positive_balance_effect > mptxi.negative_balance_effect
-                {
-                    mptxi
-                        .positive_balance_effect
-                        .checked_sub(&mptxi.negative_balance_effect)
-                        .unwrap()
-                } else {
-                    -mptxi
-                        .negative_balance_effect
-                        .checked_sub(&mptxi.positive_balance_effect)
-                        .unwrap()
-                };
-                vec![
-                    mptxi.id.to_string(),
-                    mptxi.proof_type.to_string(),
-                    mptxi.num_inputs.to_string(),
-                    mptxi.num_outputs.to_string(),
-                    balance_delta.to_string(),
-                    mptxi.fee.to_string(),
-                    if mptxi.synced {
-                        "✓".to_string()
-                    } else {
-                        "✕".to_string()
-                    },
+            .map(|c| {
+                [
+                    c.received.to_string(),
+                    c.aocl_leaf_index
+                        .map(|li| format!("{li}"))
+                        .unwrap_or("".to_string()),
+                    c.amount.display_lossless(),
+                    c.release_date
+                        .map(|rd| rd.standard_format())
+                        .unwrap_or_else(|| "-".to_string()),
+                    c.spent.to_string(),
                 ]
             })
             .collect_vec();
@@ -312,11 +365,13 @@ impl Widget for MempoolScreen {
             .iter()
             .map(|w| Constraint::Length(*w as u16))
             .collect_vec();
-        let table = Table::new(rows, width_constraints).style(style);
-        inner.width = min(
-            inner.width,
+        let table = Table::new(rows, width_constraints)
+            .style(style)
+            .row_highlight_style(selected_style);
+        table_canvas.width = min(
+            table_canvas.width,
             widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,
         );
-        table.render(inner, buf);
+        StatefulWidget::render(table, table_canvas, buf, &mut self.scrollable_table.state);
     }
 }

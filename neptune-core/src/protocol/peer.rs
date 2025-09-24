@@ -55,6 +55,7 @@ pub(crate) trait Sanction {
 
 /// The reason for degrading a peer's standing
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[cfg_attr(any(test, feature = "mock-rpc"), derive(strum::EnumCount))]
 pub enum NegativePeerSanction {
     InvalidBlock((BlockHeight, Digest)),
     DifferentGenesis,
@@ -101,8 +102,64 @@ pub enum NegativePeerSanction {
     NoStandingFoundMaybeCrash,
 }
 
+#[cfg(any(feature = "mock-rpc", test))]
+impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NegativePeerSanction {
+        match rng.random_range(0..<NegativePeerSanction as strum::EnumCount>::COUNT) {
+            0 => NegativePeerSanction::InvalidBlock((rng.random(), rng.random())),
+            1 => NegativePeerSanction::DifferentGenesis,
+            2 => NegativePeerSanction::ForkResolutionError((
+                rng.random(),
+                rng.random(),
+                rng.random(),
+            )),
+            3 => NegativePeerSanction::InvalidSyncChallengeResponse,
+
+            4 => NegativePeerSanction::InvalidSyncChallenge,
+            5 => NegativePeerSanction::InvalidSyncChallengeResponse,
+            6 => NegativePeerSanction::TimedOutSyncChallengeResponse,
+            7 => NegativePeerSanction::UnexpectedSyncChallengeResponse,
+            8 => NegativePeerSanction::FishyPowEvolutionChallengeResponse,
+            9 => NegativePeerSanction::FishyDifficultiesChallengeResponse,
+
+            10 => NegativePeerSanction::FloodPeerListResponse,
+            11 => NegativePeerSanction::BlockRequestUnknownHeight,
+
+            12 => NegativePeerSanction::InvalidMessage,
+            13 => NegativePeerSanction::NonMinedTransactionHasCoinbase,
+            14 => NegativePeerSanction::TooShortBlockBatch,
+            15 => NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync,
+            16 => NegativePeerSanction::BatchBlocksInvalidStartHeight,
+            17 => NegativePeerSanction::BatchBlocksUnknownRequest,
+            18 => NegativePeerSanction::BatchBlocksRequestEmpty,
+            19 => NegativePeerSanction::BatchBlocksRequestTooManyDigests,
+
+            20 => NegativePeerSanction::InvalidTransaction,
+            21 => NegativePeerSanction::UnconfirmableTransaction,
+            22 => NegativePeerSanction::TransactionWithNegativeFee,
+            23 => NegativePeerSanction::DoubleSpendingTransaction,
+            24 => NegativePeerSanction::CannotApplyTransactionToMutatorSet,
+
+            25 => NegativePeerSanction::InvalidBlockMmrAuthentication,
+
+            26 => NegativePeerSanction::InvalidTransferBlock,
+
+            27 => NegativePeerSanction::BlockProposalNotFound,
+            28 => NegativePeerSanction::InvalidBlockProposal,
+            29 => NegativePeerSanction::NonFavorableBlockProposal,
+            30 => NegativePeerSanction::BlockProposalFromBlockedPeer,
+
+            31 => NegativePeerSanction::UnwantedMessage,
+
+            32 => NegativePeerSanction::NoStandingFoundMaybeCrash,
+            _ => unreachable!(),
+        }
+    }
+}
+
 /// The reason for improving a peer's standing
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[cfg_attr(any(test, feature = "mock-rpc"), derive(strum::EnumCount))]
 pub enum PositivePeerSanction {
     // positive sanctions (standing-improving)
     // We only reward events that are unlikely to occur more frequently than the
@@ -111,6 +168,17 @@ pub enum PositivePeerSanction {
     // the global tip.
     ValidBlocks(usize),
     NewBlockProposal,
+}
+
+#[cfg(any(feature = "mock-rpc", test))]
+impl rand::distr::Distribution<PositivePeerSanction> for rand::distr::StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PositivePeerSanction {
+        match rng.random_range(0..<PositivePeerSanction as strum::EnumCount>::COUNT) {
+            0 => PositivePeerSanction::ValidBlocks(rng.random_range(0_usize..1000)),
+            1 => PositivePeerSanction::NewBlockProposal,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Display for NegativePeerSanction {
@@ -362,6 +430,32 @@ impl PeerStanding {
 impl Display for PeerStanding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.standing)
+    }
+}
+
+#[cfg(any(test, feature = "mock-rpc"))]
+impl rand::distr::Distribution<PeerStanding> for rand::distr::StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PeerStanding {
+        let punishment_time =
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(rng.next_u64() >> 20);
+        let punishment_sanction = rng.random();
+        let reward_time =
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(rng.next_u64() >> 20);
+        let reward_sanction = rng.random();
+        PeerStanding {
+            standing: rng.random(),
+            latest_punishment: if rng.random_bool(0.5) {
+                Some((punishment_sanction, punishment_time))
+            } else {
+                None
+            },
+            latest_reward: if rng.random_bool(0.5) {
+                Some((reward_sanction, reward_time))
+            } else {
+                None
+            },
+            peer_tolerance: rng.random(),
+        }
     }
 }
 

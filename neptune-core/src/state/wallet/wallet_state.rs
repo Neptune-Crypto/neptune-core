@@ -557,11 +557,13 @@ impl WalletState {
         }
     }
 
-    pub fn mempool_spent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+    /// Get an iterator over (utxo, aocl_leaf_index) pairs corresponding to
+    /// own inputs into transactions that live in the mempool.
+    pub fn mempool_spent_utxos_iter(&self) -> impl Iterator<Item = (&Utxo, &u64)> {
         self.mempool_spent_utxos
             .values()
             .flatten()
-            .map(|(_, (utxo, _))| utxo)
+            .map(|(_, (utxo, ali))| (utxo, ali))
     }
 
     pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
@@ -577,7 +579,7 @@ impl WalletState {
         impl Iterator<Item = (TransactionKernelId, NativeCurrencyAmount)> + '_,
         impl Iterator<Item = (TransactionKernelId, NativeCurrencyAmount)> + '_,
     ) {
-        let incoming = self.mempool_spent_utxos.iter().map(|(txkid, sender_data)| {
+        let outgoing = self.mempool_spent_utxos.iter().map(|(txkid, sender_data)| {
             (
                 *txkid,
                 sender_data
@@ -587,7 +589,7 @@ impl WalletState {
             )
         });
 
-        let outgoing = self
+        let incoming = self
             .mempool_unspent_utxos
             .iter()
             .map(|(txkid, announced_utxos)| {
@@ -611,7 +613,7 @@ impl WalletState {
     ) -> NativeCurrencyAmount {
         let amount_spent_by_mempool_transactions = self
             .mempool_spent_utxos_iter()
-            .map(|u| u.get_native_currency_amount())
+            .map(|(u, _)| u.get_native_currency_amount())
             .sum();
         let amount_received_from_mempool_transactions = self
             .mempool_unspent_utxos_iter()
@@ -633,7 +635,7 @@ impl WalletState {
             .checked_sub(
                 &self
                     .mempool_spent_utxos_iter()
-                    .map(|u| u.get_native_currency_amount())
+                    .map(|(u, _)| u.get_native_currency_amount())
                     .sum(),
             )
             .expect("balance must never be negative")
@@ -2008,7 +2010,7 @@ impl WalletState {
             .checked_sub(
                 &self
                     .mempool_spent_utxos_iter()
-                    .map(|u| u.get_native_currency_amount())
+                    .map(|(u, _)| u.get_native_currency_amount())
                     .sum(),
             )
             .expect("balance must never be negative");

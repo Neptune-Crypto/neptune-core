@@ -44,9 +44,13 @@
 //! Every RPC method returns an [RpcResult] which is wrapped inside a
 //! [tarpc::Response] by the rpc server.
 pub mod coinbase_output_readable;
+pub mod mempool_transaction_info;
+pub mod overview_data;
 pub mod proof_of_work_puzzle;
+pub mod ui_utxo;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -74,13 +78,18 @@ use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::application::config::network::Network;
+use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::rpc::server::coinbase_output_readable::CoinbaseOutputReadable;
 use crate::application::rpc::server::error::RpcError;
+use crate::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
+use crate::application::rpc::server::overview_data::OverviewData;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
+use crate::application::rpc::server::ui_utxo::UiUtxo;
+use crate::application::rpc::server::ui_utxo::UtxoStatusEvent;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::protocol::consensus::block::block_header::BlockHeader;
@@ -102,11 +111,9 @@ use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
-use crate::state::mining::mining_status::MiningStatus;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::ReceivingAddress;
@@ -129,94 +136,6 @@ use crate::DataDirectory;
 
 /// result returned by RPC methods
 pub type RpcResult<T> = Result<T, error::RpcError>;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DashBoardOverviewDataFromClient {
-    pub tip_digest: Digest,
-    pub tip_header: BlockHeader,
-    pub syncing: bool,
-    pub confirmed_available_balance: NativeCurrencyAmount,
-    pub confirmed_total_balance: NativeCurrencyAmount,
-    pub unconfirmed_available_balance: NativeCurrencyAmount,
-    pub unconfirmed_total_balance: NativeCurrencyAmount,
-    pub mempool_size: usize,
-    pub mempool_total_tx_count: usize,
-    pub mempool_own_tx_count: usize,
-
-    // `None` symbolizes failure in getting peer count
-    pub peer_count: Option<usize>,
-    pub max_num_peers: usize,
-
-    // `None` symbolizes failure to get mining status
-    pub mining_status: Option<MiningStatus>,
-
-    pub proving_capability: TxProvingCapability,
-
-    // # of confirmations of the last wallet balance change.
-    //
-    // Starts at 1, as the block in which a tx is included is considered the 1st
-    // confirmation.
-    //
-    // `None` indicates that wallet balance has never changed.
-    pub confirmations: Option<BlockHeight>,
-
-    /// CPU temperature in degrees Celsius
-    pub cpu_temp: Option<f32>,
-}
-
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
-pub struct MempoolTransactionInfo {
-    pub id: TransactionKernelId,
-    pub proof_type: TransactionProofType,
-    pub num_inputs: usize,
-    pub num_outputs: usize,
-    pub positive_balance_effect: NativeCurrencyAmount,
-    pub negative_balance_effect: NativeCurrencyAmount,
-    pub fee: NativeCurrencyAmount,
-    pub synced: bool,
-}
-
-impl From<&Transaction> for MempoolTransactionInfo {
-    fn from(mptx: &Transaction) -> Self {
-        MempoolTransactionInfo {
-            id: mptx.kernel.txid(),
-            proof_type: match mptx.proof {
-                TransactionProof::Witness(_) => TransactionProofType::PrimitiveWitness,
-                TransactionProof::SingleProof(_) => TransactionProofType::SingleProof,
-                TransactionProof::ProofCollection(_) => TransactionProofType::ProofCollection,
-            },
-            num_inputs: mptx.kernel.inputs.len(),
-            num_outputs: mptx.kernel.outputs.len(),
-            positive_balance_effect: NativeCurrencyAmount::zero(),
-            negative_balance_effect: NativeCurrencyAmount::zero(),
-            fee: mptx.kernel.fee,
-            synced: false,
-        }
-    }
-}
-
-impl MempoolTransactionInfo {
-    pub(crate) fn with_positive_effect_on_balance(
-        mut self,
-        positive_balance_effect: NativeCurrencyAmount,
-    ) -> Self {
-        self.positive_balance_effect = positive_balance_effect;
-        self
-    }
-
-    pub(crate) fn with_negative_effect_on_balance(
-        mut self,
-        negative_balance_effect: NativeCurrencyAmount,
-    ) -> Self {
-        self.negative_balance_effect = negative_balance_effect;
-        self
-    }
-
-    pub fn synced(mut self) -> Self {
-        self.synced = true;
-        self
-    }
-}
 
 #[tarpc::service]
 pub trait RPC {
@@ -1194,9 +1113,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn dashboard_overview_data(
-        token: auth::Token,
-    ) -> RpcResult<DashBoardOverviewDataFromClient>;
+    async fn dashboard_overview_data(token: auth::Token) -> RpcResult<OverviewData>;
 
     /// Determine whether the user-supplied string is a valid address
     ///
@@ -1353,6 +1270,40 @@ pub trait RPC {
     /// # }
     /// ```
     async fn list_own_coins(token: auth::Token) -> RpcResult<Vec<CoinWithPossibleTimeLock>>;
+
+    /// Generate a list of all UTXOs, currently owned, historical, time-locked,
+    /// not, abandoned.
+    ///
+    /// ```no_run
+    /// # use anyhow::Result;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
+    /// # use tarpc::tokio_serde::formats::Json;
+    /// # use tarpc::serde_transport::tcp;
+    /// # use tarpc::client;
+    /// # use tarpc::context;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<()>{
+    /// #
+    /// # // create a serde/json transport over tcp.
+    /// # let transport = tcp::connect("127.0.0.1:9799", Json::default).await?;
+    /// #
+    /// # // create an rpc client using the transport.
+    /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
+    /// #
+    /// # // Defines cookie hint
+    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// #
+    /// # // load the cookie file from disk and assign it to a token
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// #
+    /// // query neptune-core server to get the list of UTXOs
+    /// let own_coins = client.list_utxos(context::current(), token ).await??;
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn list_utxos(token: auth::Token) -> RpcResult<Vec<UiUtxo>>;
 
     /// Get CPU temperature.
     ///
@@ -3002,7 +2953,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: auth::Token,
-    ) -> RpcResult<DashBoardOverviewDataFromClient> {
+    ) -> RpcResult<OverviewData> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -3063,7 +3014,7 @@ impl RPC for NeptuneRPCServer {
             wallet_state.unconfirmed_total_balance(&wallet_status)
         };
 
-        Ok(DashBoardOverviewDataFromClient {
+        Ok(OverviewData {
             tip_digest,
             tip_header,
             syncing,
@@ -3626,6 +3577,97 @@ impl RPC for NeptuneRPCServer {
             .wallet_state
             .get_all_own_coins_with_possible_timelocks(&tip_msa, tip_hash)
             .await)
+    }
+
+    async fn list_utxos(
+        self,
+        _context: ::tarpc::context::Context,
+        token: auth::Token,
+    ) -> RpcResult<Vec<UiUtxo>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // get owned UTXOs
+        let mut ui_utxos = vec![];
+        let state = self.state.lock_guard().await;
+        for monitored_utxo in state
+            .wallet_state
+            .wallet_db
+            .monitored_utxos()
+            .get_all()
+            .await
+        {
+            let received =
+                if let Some((_, timestamp, block_height)) = monitored_utxo.confirmed_in_block {
+                    UtxoStatusEvent::Confirmed {
+                        block_height,
+                        timestamp,
+                    }
+                } else {
+                    UtxoStatusEvent::Abandoned
+                };
+            let spent = if let Some((_, timestamp, block_height)) = monitored_utxo.spent_in_block {
+                UtxoStatusEvent::Confirmed {
+                    block_height,
+                    timestamp,
+                }
+            } else {
+                UtxoStatusEvent::None
+            };
+            let ui_utxo = UiUtxo {
+                received,
+                spent,
+                aocl_leaf_index: Some(monitored_utxo.aocl_index()),
+                amount: monitored_utxo.utxo.get_native_currency_amount(),
+                release_date: monitored_utxo.utxo.release_date(),
+            };
+            ui_utxos.push(ui_utxo);
+        }
+
+        // get expected UTXOs
+        for expected_utxo in state
+            .wallet_state
+            .wallet_db
+            .expected_utxos()
+            .get_all()
+            .await
+        {
+            let ui_utxo = UiUtxo {
+                received: UtxoStatusEvent::Expected,
+                aocl_leaf_index: None,
+                spent: UtxoStatusEvent::None,
+                amount: expected_utxo.utxo.get_native_currency_amount(),
+                release_date: expected_utxo.utxo.release_date(),
+            };
+            ui_utxos.push(ui_utxo);
+        }
+
+        // get unconfirmed incoming UTXOs
+        for incoming_utxo in state.wallet_state.mempool_unspent_utxos_iter() {
+            let ui_utxo = UiUtxo {
+                received: UtxoStatusEvent::Pending,
+                aocl_leaf_index: None,
+                spent: UtxoStatusEvent::None,
+                amount: incoming_utxo.get_native_currency_amount(),
+                release_date: incoming_utxo.release_date(),
+            };
+            ui_utxos.push(ui_utxo);
+        }
+
+        // mark unconfirmed outgoing UTXOs as "pending"
+        let mut markable_indices = HashSet::new();
+        for (_outgoing_utxo, aocl_leaf_index) in state.wallet_state.mempool_spent_utxos_iter() {
+            markable_indices.insert(aocl_leaf_index);
+        }
+        for ui_utxo in &mut ui_utxos {
+            if let Some(aocl_leaf_index) = ui_utxo.aocl_leaf_index {
+                if markable_indices.contains(&aocl_leaf_index) {
+                    ui_utxo.spent = UtxoStatusEvent::Pending;
+                }
+            }
+        }
+
+        Ok(ui_utxos)
     }
 
     // documented in trait. do not add doc-comment.
@@ -6223,6 +6265,7 @@ mod tests {
 
     mod send_tests {
         use super::*;
+        use crate::api::export::TxProvingCapability;
         use crate::application::rpc::server::error::RpcError;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
