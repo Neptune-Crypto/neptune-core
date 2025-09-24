@@ -81,9 +81,19 @@ async fn main() {
 
     let token: auth::Token = match auth::Cookie::try_load(&data_directory).await {
         Ok(t) => t,
-        Err(e) => {
-            eprintln!("Unable to load RPC auth cookie. error = {e}");
-            process::exit(2)
+        Err(_e) => {
+            // if we are mocking the RPC server, and we get here, then we do not
+            // care about cookies
+            #[cfg(feature = "mock")]
+            {
+                auth::Cookie::new_in_mem()
+            }
+            // otherwise, big problem. report, crash, and burn.
+            #[cfg(not(feature = "mock"))]
+            {
+                eprintln!("Unable to load RPC auth cookie. error = {_e}");
+                process::exit(2)
+            }
         }
     }
     .into();
