@@ -43,6 +43,7 @@ impl ChunkDictionary {
         dictionary.sort_by_key(|(k, _v)| *k);
         Self { dictionary }
     }
+
     pub fn indices_and_leafs(&self) -> Vec<(ChunkIndex, Digest)> {
         self.dictionary
             .iter()
