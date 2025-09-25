@@ -3587,8 +3587,19 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        // Get [`UiUtxo`]s from three sources: 1) the wallet database for
+        // monitored UTXOs (these are confirmed); 2) the mempool (these are
+        // pending); and 3) the wallet database for expected UTXOs (expected).
+        // The assembled list of [`UiUtxo`]s is deduplicated based on addition
+        // record, which is collected separately in a hash set. Note that the
+        // order 1 -> 2 -> 3 is important because it implicitly resolves
+        // duplicate conflicts. A duplicate [`UiUtxo`] cannot be inserted again,
+        // so the first stage that applies determines the "received" label --
+        // confirmed / pending / expected.
+
         // get owned UTXOs
         let mut ui_utxos = vec![];
+        let mut present_addition_records = HashSet::new();
         let state = self.state.lock_guard().await;
         for monitored_utxo in state
             .wallet_state
@@ -3621,7 +3632,24 @@ impl RPC for NeptuneRPCServer {
                 amount: monitored_utxo.utxo.get_native_currency_amount(),
                 release_date: monitored_utxo.utxo.release_date(),
             };
-            ui_utxos.push(ui_utxo);
+
+            if present_addition_records.insert(monitored_utxo.addition_record()) {
+                ui_utxos.push(ui_utxo);
+            }
+        }
+
+        // get unconfirmed incoming UTXOs
+        for (incoming_utxo, addition_record) in state.wallet_state.mempool_unspent_utxos_iter() {
+            let ui_utxo = UiUtxo {
+                received: UtxoStatusEvent::Pending,
+                aocl_leaf_index: None,
+                spent: UtxoStatusEvent::None,
+                amount: incoming_utxo.get_native_currency_amount(),
+                release_date: incoming_utxo.release_date(),
+            };
+            if present_addition_records.insert(addition_record) {
+                ui_utxos.push(ui_utxo);
+            }
         }
 
         // get expected UTXOs
@@ -3639,22 +3667,12 @@ impl RPC for NeptuneRPCServer {
                 amount: expected_utxo.utxo.get_native_currency_amount(),
                 release_date: expected_utxo.utxo.release_date(),
             };
-            ui_utxos.push(ui_utxo);
+            if present_addition_records.insert(expected_utxo.addition_record) {
+                ui_utxos.push(ui_utxo);
+            }
         }
 
-        // get unconfirmed incoming UTXOs
-        for incoming_utxo in state.wallet_state.mempool_unspent_utxos_iter() {
-            let ui_utxo = UiUtxo {
-                received: UtxoStatusEvent::Pending,
-                aocl_leaf_index: None,
-                spent: UtxoStatusEvent::None,
-                amount: incoming_utxo.get_native_currency_amount(),
-                release_date: incoming_utxo.release_date(),
-            };
-            ui_utxos.push(ui_utxo);
-        }
-
-        // mark unconfirmed outgoing UTXOs as "pending"
+        // mark "spent" label on unconfirmed outgoing UTXOs as "pending"
         let mut markable_indices = HashSet::new();
         for (_outgoing_utxo, aocl_leaf_index) in state.wallet_state.mempool_spent_utxos_iter() {
             markable_indices.insert(aocl_leaf_index);
