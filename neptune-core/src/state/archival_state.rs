@@ -1376,16 +1376,10 @@ impl ArchivalState {
             }
 
             // Remove items, thus removing the input UTXOs from the mutator set
-            while let Some(removal_record) = removals_mutable.pop() {
-                // Batch-update all removal records to keep them valid after next removal
-                RemovalRecord::batch_update_from_remove(&mut removals_mutable, removal_record);
-
-                // Remove the element from the mutator set
-                self.archival_mutator_set
-                    .ams_mut()
-                    .remove(removal_record)
-                    .await;
-            }
+            self.archival_mutator_set
+                .ams_mut()
+                .batch_remove(removals)
+                .await;
         }
 
         // Sanity check that archival mutator set has been updated consistently with the new block

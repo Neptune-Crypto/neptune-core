@@ -181,6 +181,11 @@ path = "benchmark/benches/fast_kernel_mast_hash.rs"
 harness = false
 
 [[bench]]
+name = "set_new_tip"
+path = "benchmark/benches/set_new_tip.rs"
+harness = false
+
+[[bench]]
 name = "wallet_state"
 path = "benchmark/benches/wallet_state.rs"
 harness = false
