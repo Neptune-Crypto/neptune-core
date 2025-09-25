@@ -712,7 +712,7 @@ mod tests {
         let mut items: Vec<Digest> = vec![];
 
         // Add N elements to the MS
-        let num_additions = 44;
+        let num_additions = 400;
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
@@ -750,9 +750,39 @@ mod tests {
         }
 
         // Remove the entries with batch_remove
-        accumulator.batch_remove(
-            removal_records,
+        let mut accumulator_batch_remove = accumulator.clone();
+        let updated_chunks = accumulator_batch_remove.batch_remove(
+            removal_records.clone(),
             &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+        );
+
+        // Verify return value from batch-removal method: updated chunks must
+        // agree with chunks in membership proofs. If all membership proofs are
+        // valid, then this check verifies that the returned chunks are correct.
+        for (chk_idx, chunk) in &updated_chunks {
+            for msmp in &membership_proofs {
+                for (chidx, (_, chnk)) in &msmp.target_chunks.dictionary {
+                    if *chidx == *chk_idx {
+                        assert_eq!(chunk, chnk);
+                    }
+                }
+            }
+        }
+
+        // Remove the entries one-by-one
+        let mut accumulator_individual_remove = accumulator;
+        while let Some(rr) = removal_records.pop() {
+            RemovalRecord::batch_update_from_remove(
+                &mut removal_records.iter_mut().collect_vec(),
+                &rr,
+            );
+
+            accumulator_individual_remove.remove(&rr);
+        }
+
+        assert_eq!(
+            accumulator_individual_remove, accumulator_batch_remove,
+            "Mutator sets must agree regardless of removal method"
         );
 
         // Verify that the expected membership proofs fail/pass
@@ -762,7 +792,7 @@ mod tests {
             skipped_removes.into_iter()
         ) {
             // If this removal record was not applied, then the membership proof must verify
-            assert_eq!(skipped, accumulator.verify(item, mp));
+            assert_eq!(skipped, accumulator_individual_remove.verify(item, mp));
         }
     }
 

@@ -106,6 +106,11 @@ impl Chunk {
         ret
     }
 
+    /// Remove the indices in a chunk from a chunk.
+    ///
+    /// /// # Panics
+    ///
+    /// - If one of the subtracted indices are not present in the chunk.
     pub fn subtract(&mut self, other: Self) {
         for remove_index in other.relative_indices {
             // Find the 1st match and remove that

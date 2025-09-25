@@ -152,38 +152,71 @@ where
 
     /// Apply a list of removal records while keeping a list of mutator set
     /// membership proofs up-to-date.
-    pub async fn batch_remove(
-        &mut self,
-        removal_records: Vec<RemovalRecord>,
-        preserved_membership_proofs: &mut [&mut MsMembershipProof],
-    ) {
-        // update the active window and inactive MMR
-        let mut kernel = MutatorSetAccumulator {
-            aocl: self.aocl.to_accumulator_async().await,
-            swbf_inactive: self.swbf_inactive.to_accumulator_async().await,
-            swbf_active: self.swbf_active.clone(),
-        };
-        let chunk_index_to_chunk_new_state =
-            kernel.batch_remove(removal_records, preserved_membership_proofs);
-        self.swbf_active = kernel.swbf_active;
+    pub async fn batch_remove(&mut self, removal_records: Vec<RemovalRecord>) {
+        let batch_index = self.get_batch_index_async().await;
+        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
 
-        // extract modified leafs with indices
-        let mut indices_and_new_leafs = chunk_index_to_chunk_new_state
+        // Collect all indices that that are set by the removal records
+        let all_removal_records_indices: Vec<u128> = removal_records
             .iter()
-            .map(|(index, chunk)| (*index, Tip5::hash(chunk)))
-            .collect_vec();
-        indices_and_new_leafs.sort_by_key(|(i, _d)| *i);
+            .map(|x| x.absolute_indices.to_vec())
+            .concat();
 
-        // Apply the batch-update to the inactive part of the sliding window
-        // Bloom filter. The next line updates the inactive part of the SWBF
-        // only. We do *not* want to update the MMR membership proofs again;
-        // they were already updated in the call to
-        // `MutatorSetAccumulator::batch_remove`.
+        // Loop over all indices from removal records in order to create a
+        // mapping {chunk index => chunk mutation } where "chunk mutation" has
+        // the type of `Chunk` but only represents the values which are set by
+        // the removal records being handled.
+        let mut chunkidx_to_chunk_difference_dict: HashMap<u64, Chunk> = HashMap::new();
+        for index in all_removal_records_indices {
+            if index >= active_window_start {
+                let relative_index = (index - active_window_start) as u32;
+                self.swbf_active.insert(relative_index);
+            } else {
+                chunkidx_to_chunk_difference_dict
+                    .entry((index / u128::from(CHUNK_SIZE)) as u64)
+                    .or_insert_with(Chunk::empty_chunk)
+                    .insert((index % u128::from(CHUNK_SIZE)) as u32);
+            }
+        }
+
+        // Collect all affected chunks as they look before these removal records
+        // are applied. These chunks are part of the removal records, so we
+        // fetch them there.
+        let mut new_chunks: HashMap<u64, Chunk> = HashMap::new();
+        for removal_record in removal_records {
+            for (chunk_index, (_, chunk)) in removal_record.target_chunks.dictionary {
+                debug_assert!(
+                    new_chunks
+                        .get(&chunk_index)
+                        .is_none_or(|chk| Tip5::hash(chk) == Tip5::hash(&chunk)),
+                    "Sanity check: All removal records must agree on chunks"
+                );
+                new_chunks.insert(chunk_index, chunk);
+            }
+        }
+
+        // Apply the removal records: the new chunk is obtained by adding the
+        // chunk difference
+        for (chunk_index, chunk) in &mut new_chunks {
+            let new_chunk = chunk
+                .clone()
+                .combine(chunkidx_to_chunk_difference_dict[chunk_index].clone());
+            *chunk = new_chunk.clone();
+            self.chunks.set(*chunk_index, new_chunk).await;
+        }
+
+        // the Bloom filter such that we can apply a batch-update operation to
+        // the MMR through which this part of the Bloom filter is represented.
+        let swbf_inactive_mutation_data: Vec<(u64, Digest)> = new_chunks
+            .into_iter()
+            .map(|(idx, chk)| (idx, Tip5::hash(&chk)))
+            .collect();
+
+        // Apply the batch-update to the inactive part of the sliding window Bloom filter.
+        // This updates both the inactive part of the SWBF and the MMR membership proofs
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut [], indices_and_new_leafs)
+            .batch_mutate_leaf_and_update_mps(&mut [], swbf_inactive_mutation_data)
             .await;
-
-        self.chunks.set_many(chunk_index_to_chunk_new_state).await
     }
 
     /// Clear the mutator set: revert all operations so as to bring it into a
@@ -375,6 +408,12 @@ where
     /// Revert the `RemovalRecord` by removing the indices that
     /// were inserted by it. These live in either the active window, or
     /// in a relevant chunk.
+    ///
+    /// # Panics
+    ///
+    /// - If the supplied removal record does not have all its index set, i.e.
+    ///   if the supplied removal record was not already applied to the mutator
+    ///   set.
     pub async fn revert_remove(&mut self, removal_record: &RemovalRecord) {
         let removal_record_indices: Vec<u128> = removal_record.absolute_indices.to_vec();
         let batch_index = self.get_batch_index_async().await;
@@ -1084,9 +1123,7 @@ mod tests {
         for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(archival_mutator_set.verify(item, mp).await);
         }
-        archival_mutator_set
-            .batch_remove(removal_records, &mut [])
-            .await;
+        archival_mutator_set.batch_remove(removal_records).await;
         for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(!archival_mutator_set.verify(item, mp).await);
         }
@@ -1094,35 +1131,40 @@ mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn archival_set_batch_remove_dynamic_test() {
-        let mut rms = empty_rusty_mutator_set().await;
-        let archival_mutator_set = rms.ams_mut();
+        let num_additions = 45 * BATCH_SIZE;
 
-        let num_additions = 4 * BATCH_SIZE;
-
-        for remove_factor in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] {
+        let mut ams_batch = empty_rusty_mutator_set().await;
+        let ams_batch = ams_batch.ams_mut();
+        let mut ams_separate = empty_rusty_mutator_set().await;
+        let ams_separate = ams_separate.ams_mut();
+        for remove_factor in [0.0, 0.05, 0.2, 0.6, 0.95, 1.0] {
+            println!("remove_factor: {remove_factor}");
             let mut membership_proofs: Vec<MsMembershipProof> = vec![];
             let mut items: Vec<Digest> = vec![];
             for _ in 0..num_additions {
                 let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
                 let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
-                let membership_proof = archival_mutator_set
+                let membership_proof = ams_batch
                     .prove(item, sender_randomness, receiver_preimage)
                     .await;
 
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &archival_mutator_set.accumulator().await,
+                    &ams_batch.accumulator().await,
                     &addition_record,
                 )
                 .expect("MS membership update must work");
 
-                archival_mutator_set.add(&addition_record).await;
+                ams_batch.add(&addition_record).await;
+                ams_separate.add(&addition_record).await;
 
                 membership_proofs.push(membership_proof);
                 items.push(item);
             }
+
+            assert_eq!(ams_separate.hash().await, ams_batch.hash().await);
 
             let mut rng = rand::rng();
             let mut skipped_removes: Vec<bool> = vec![];
@@ -1131,21 +1173,34 @@ mod tests {
                 let skipped = rng.random_range(0.0..1.0) < remove_factor;
                 skipped_removes.push(skipped);
                 if !skipped {
-                    removal_records.push(archival_mutator_set.drop(item, mp).await);
+                    removal_records.push(ams_batch.drop(item, mp).await);
                 }
             }
 
             for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
-                assert!(archival_mutator_set.verify(item, mp).await);
+                assert!(ams_batch.verify(item, mp).await);
+                assert!(ams_separate.verify(item, mp).await);
             }
 
-            let commitment_prior_to_removal = archival_mutator_set.hash().await;
-            archival_mutator_set
-                .batch_remove(
-                    removal_records.clone(),
-                    &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+            let commitment_prior_to_removal = ams_batch.hash().await;
+            ams_batch.batch_remove(removal_records.clone()).await;
+
+            let mut applied_rrs = removal_records.clone();
+            while let Some(rr) = applied_rrs.pop() {
+                RemovalRecord::batch_update_from_remove(
+                    &mut applied_rrs.iter_mut().collect_vec(),
+                    &rr,
+                );
+                MsMembershipProof::batch_update_from_remove(
+                    &mut membership_proofs.iter_mut().collect_vec(),
+                    &rr,
                 )
-                .await;
+                .unwrap();
+                ams_separate.remove(&rr).await;
+            }
+
+            // Ensure both AMSs are in the same state.
+            assert_eq!(ams_separate.hash().await, ams_batch.hash().await);
 
             for ((mp, &item), skipped) in membership_proofs
                 .iter()
@@ -1153,20 +1208,44 @@ mod tests {
                 .zip_eq(skipped_removes.into_iter())
             {
                 // If this removal record was not applied, then the membership proof must verify
-                assert_eq!(
-                    skipped,
-                    archival_mutator_set.verify(item, mp).await,
-                    "item was not removed but membership proof is invalid"
-                );
+                if skipped {
+                    assert!(
+                        ams_separate.verify(item, mp).await,
+                        "Item was not removed so msmp must be valid"
+                    );
+                    assert!(
+                        ams_batch.verify(item, mp).await,
+                        "Item was not removed so msmp must be valid"
+                    );
+                } else {
+                    assert!(
+                        !ams_separate.verify(item, mp).await,
+                        "Item was removed so msmp must be invalid"
+                    );
+                    assert!(
+                        !ams_batch.verify(item, mp).await,
+                        "Item was removed so msmp must be invalid"
+                    );
+                }
             }
 
             // Verify that removal record indices were applied. If not, below function call will crash.
             for removal_record in &removal_records {
-                archival_mutator_set.revert_remove(removal_record).await;
+                ams_batch.revert_remove(removal_record).await;
+                ams_separate.revert_remove(removal_record).await;
             }
 
             // Verify that mutator set before and after removal are the same
-            assert_eq!(commitment_prior_to_removal, archival_mutator_set.hash().await, "After reverting the removes, mutator set's commitment must equal the one before elements were removed.");
+            assert_eq!(
+                commitment_prior_to_removal,
+                ams_batch.hash().await,
+                "Mutator set \"batch\" must return to previous state when reverting removes."
+            );
+            assert_eq!(
+                commitment_prior_to_removal,
+                ams_separate.hash().await,
+                "Mutator set \"separate\" must return to previous state when reverting removes."
+            );
         }
     }
 
