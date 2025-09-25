@@ -30,12 +30,11 @@ use ratatui::widgets::Wrap;
 use tarpc::context;
 use tokio::sync::Mutex;
 
-use crate::dashboard_rpc_client::DashboardRpcClient;
-
 use super::dashboard_app::ConsoleIO;
 use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
+use crate::dashboard_rpc_client::DashboardRpcClient;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SendScreenWidget {

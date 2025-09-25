@@ -29,10 +29,9 @@ use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time;
 
-use crate::dashboard_rpc_client::DashboardRpcClient;
-
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
+use crate::dashboard_rpc_client::DashboardRpcClient;
 
 #[derive(Debug, Clone, Default)]
 pub struct OverviewData {

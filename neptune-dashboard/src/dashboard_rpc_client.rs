@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::ops::Deref;
 
 use neptune_cash::api::export::BlockHeight;
@@ -17,7 +18,6 @@ use neptune_cash::application::rpc::server::ui_utxo::UiUtxo;
 use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::application::rpc::server::RpcResult;
 use neptune_cash::protocol::peer::peer_info::PeerInfo;
-use std::net::SocketAddr;
 use tasm_lib::prelude::Digest;
 
 #[derive(Debug, Clone)]
