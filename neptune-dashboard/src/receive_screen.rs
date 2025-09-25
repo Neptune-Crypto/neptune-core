@@ -22,12 +22,11 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use tarpc::context;
 
-use crate::dashboard_rpc_client::DashboardRpcClient;
-
 use super::dashboard_app::ConsoleIO;
 use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
+use crate::dashboard_rpc_client::DashboardRpcClient;
 
 #[derive(Debug, Clone)]
 pub struct ReceiveScreen {

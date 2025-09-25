@@ -31,10 +31,9 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use unicode_width::UnicodeWidthStr;
 
-use crate::dashboard_rpc_client::DashboardRpcClient;
-
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
+use crate::dashboard_rpc_client::DashboardRpcClient;
 
 type AddressUpdate = SpendingKey;
 type AddressUpdateArc = Arc<std::sync::Mutex<Vec<AddressUpdate>>>;

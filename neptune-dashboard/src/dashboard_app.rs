@@ -48,9 +48,6 @@ use strum::IntoEnumIterator;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-use crate::dashboard_rpc_client::DashboardRpcClient;
-use crate::utxos_screen::UtxosScreen;
-
 use super::address_screen::AddressScreen;
 use super::history_screen::HistoryScreen;
 use super::mempool_screen::MempoolScreen;
@@ -61,6 +58,8 @@ use super::peers_screen::SortOrder;
 use super::receive_screen::ReceiveScreen;
 use super::screen::Screen;
 use super::send_screen::SendScreen;
+use crate::dashboard_rpc_client::DashboardRpcClient;
+use crate::utxos_screen::UtxosScreen;
 
 #[derive(Debug, Parser, Clone)]
 #[clap(name = "neptune-dashboard", about = "Terminal user interface")]
