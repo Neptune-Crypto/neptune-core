@@ -566,11 +566,13 @@ impl WalletState {
             .map(|(_, (utxo, ali))| (utxo, ali))
     }
 
-    pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+    /// Get an iterator over (utxo, addition_record) pairs corresponding to
+    /// outputs of transactions that live in the mempool.
+    pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = (&Utxo, AdditionRecord)> {
         self.mempool_unspent_utxos
             .values()
             .flatten()
-            .map(|au| &au.utxo)
+            .map(|iu| (&iu.utxo, iu.addition_record()))
     }
 
     pub(crate) fn mempool_balance_updates(
@@ -617,8 +619,8 @@ impl WalletState {
             .sum();
         let amount_received_from_mempool_transactions = self
             .mempool_unspent_utxos_iter()
-            .filter(|utxo| utxo.can_spend_at(timestamp))
-            .map(|u| u.get_native_currency_amount())
+            .filter(|(utxo, _)| utxo.can_spend_at(timestamp))
+            .map(|(u, _)| u.get_native_currency_amount())
             .sum();
         wallet_status
             .available_confirmed(timestamp)
@@ -642,7 +644,7 @@ impl WalletState {
             .checked_add(
                 &self
                     .mempool_unspent_utxos_iter()
-                    .map(|u| u.get_native_currency_amount())
+                    .map(|(u, _)| u.get_native_currency_amount())
                     .sum(),
             )
             .expect("balance must never overflow")
