@@ -3579,6 +3579,16 @@ impl RPC for NeptuneRPCServer {
             .await)
     }
 
+    /// Get [`UiUtxo`] from three sources:
+    /// 1) the wallet database for monitored UTXOs (these are confirmed);
+    /// 2) the mempool (these are pending); and
+    /// 3) the wallet database for expected UTXOs (expected).
+    ///
+    /// The assembled list of [`UiUtxo`] is deduplicated based on addition record, which is
+    /// collected separately in a hash set. Note that this order is important because it
+    /// implicitly resolves duplicate conflicts. A duplicate [`UiUtxo`] cannot be inserted again,
+    /// so the first stage that applies determines the "received" label --
+    /// confirmed / pending / expected.
     async fn list_utxos(
         self,
         _context: ::tarpc::context::Context,
@@ -3586,16 +3596,6 @@ impl RPC for NeptuneRPCServer {
     ) -> RpcResult<Vec<UiUtxo>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
-
-        // Get [`UiUtxo`]s from three sources: 1) the wallet database for
-        // monitored UTXOs (these are confirmed); 2) the mempool (these are
-        // pending); and 3) the wallet database for expected UTXOs (expected).
-        // The assembled list of [`UiUtxo`]s is deduplicated based on addition
-        // record, which is collected separately in a hash set. Note that the
-        // order 1 -> 2 -> 3 is important because it implicitly resolves
-        // duplicate conflicts. A duplicate [`UiUtxo`] cannot be inserted again,
-        // so the first stage that applies determines the "received" label --
-        // confirmed / pending / expected.
 
         // get owned UTXOs
         let mut ui_utxos = vec![];
@@ -3625,30 +3625,28 @@ impl RPC for NeptuneRPCServer {
             } else {
                 UtxoStatusEvent::None
             };
-            let ui_utxo = UiUtxo {
-                received,
-                spent,
-                aocl_leaf_index: Some(monitored_utxo.aocl_index()),
-                amount: monitored_utxo.utxo.get_native_currency_amount(),
-                release_date: monitored_utxo.utxo.release_date(),
-            };
 
             if present_addition_records.insert(monitored_utxo.addition_record()) {
-                ui_utxos.push(ui_utxo);
+                ui_utxos.push(UiUtxo {
+                    received,
+                    spent,
+                    aocl_leaf_index: Some(monitored_utxo.aocl_index()),
+                    amount: monitored_utxo.utxo.get_native_currency_amount(),
+                    release_date: monitored_utxo.utxo.release_date(),
+                });
             }
         }
 
         // get unconfirmed incoming UTXOs
         for (incoming_utxo, addition_record) in state.wallet_state.mempool_unspent_utxos_iter() {
-            let ui_utxo = UiUtxo {
-                received: UtxoStatusEvent::Pending,
-                aocl_leaf_index: None,
-                spent: UtxoStatusEvent::None,
-                amount: incoming_utxo.get_native_currency_amount(),
-                release_date: incoming_utxo.release_date(),
-            };
             if present_addition_records.insert(addition_record) {
-                ui_utxos.push(ui_utxo);
+                ui_utxos.push(UiUtxo {
+                    received: UtxoStatusEvent::Pending,
+                    aocl_leaf_index: None,
+                    spent: UtxoStatusEvent::None,
+                    amount: incoming_utxo.get_native_currency_amount(),
+                    release_date: incoming_utxo.release_date(),
+                });
             }
         }
 
@@ -3660,15 +3658,14 @@ impl RPC for NeptuneRPCServer {
             .get_all()
             .await
         {
-            let ui_utxo = UiUtxo {
-                received: UtxoStatusEvent::Expected,
-                aocl_leaf_index: None,
-                spent: UtxoStatusEvent::None,
-                amount: expected_utxo.utxo.get_native_currency_amount(),
-                release_date: expected_utxo.utxo.release_date(),
-            };
             if present_addition_records.insert(expected_utxo.addition_record) {
-                ui_utxos.push(ui_utxo);
+                ui_utxos.push(UiUtxo {
+                    received: UtxoStatusEvent::Expected,
+                    aocl_leaf_index: None,
+                    spent: UtxoStatusEvent::None,
+                    amount: expected_utxo.utxo.get_native_currency_amount(),
+                    release_date: expected_utxo.utxo.release_date(),
+                });
             }
         }
 
