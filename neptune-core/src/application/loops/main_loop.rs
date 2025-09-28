@@ -3,7 +3,9 @@ pub(crate) mod upgrade_incentive;
 pub(super) mod swarm_def;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -13,9 +15,14 @@ use futures::StreamExt;
 use itertools::Itertools;
 use libp2p::gossipsub::MessageAcceptance;
 use libp2p::gossipsub::IdentTopic;
+use libp2p::identify;
+use libp2p::identity::ed25519::Keypair;
 use libp2p::multiaddr::Protocol;
+use libp2p::noise;
 use libp2p::ping;
+use libp2p::relay;
 use libp2p::swarm::SwarmEvent;
+use libp2p::yamux;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use libp2p::Swarm;
@@ -48,8 +55,8 @@ use crate::application::loops::channel::RPCServerToMain;
 // use crate::application::loops::connect_to_peers::precheck_incoming_connection_is_allowed;
 use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
+use crate::application::loops::main_loop::swarm_def::ComposedBehaviour;
 use crate::application::loops::main_loop::swarm_def::ComposedBehaviourEvent;
-use crate::application::loops::main_loop::swarm_def::ConnectionStatus;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::loops::peer_loop::PeerLoopHandler;
 use crate::application::triton_vm_job_queue::vm_job_queue;
@@ -1311,17 +1318,26 @@ impl MainLoopHandler {
         #[cfg(not(unix))]
         drop((tx_term, tx_int, tx_quit));
 
-        // let restart = tokio::spawn(|| {
-            let mut connections = HashMap::new();
-            let mut swarm = 
-                // libp2p::SwarmBuilder::with_existing_identity(todo!("actually it maybe the place for the id generation"))
-                libp2p::SwarmBuilder::with_new_identity().with_tokio().with_quic()
-                // .with_tcp()
-                // .with_dns()? // ?
-                .with_behaviour(|kp| swarm_def::ComposedBehaviour::new(kp))?
-                .build();
-        // });
+        // TODO Add an `Args` an use it here for a persistent peer. This should include precausion about running a copy. I guess it'd be good to save the seed so that `persistant` argument would 1) load the seed from the designated place, 2) generate and save a seed if the place is empty, 3) if a value given to it then ignore the place, 4) document how to get the seed
+        let mut swarm = ComposedBehaviour::new_swarm(Keypair::generate().into());
+        
         // TODO somewhere down the line of operation `kad.kbuckets()` should be checked to have some peers, and if not return to the user to be restarted with some peers been indicated in the arguments
+        /* TODO make a note in the docs that when giving a `peer` argument the trust assumptions are interpreted in spirit of multiaddress:
+        - without `/p2p/...` it will be adding any peer on that endpoint
+        - with `/p2p/...` connections to the given endpoint will fail if the peer id there had changed
+        - with only `/p2p/...` it will try to reach the peer if it will ever find how to connect to the network
+        
+        TL;DR it's easier to connect without `/p2p/...` in the end of the address */
+        // the idea here is that a successful `.dial` effectively does `.kad.add_address` but 1) enriches an address with the current `PeerId` when it has no, and 2) only adds currently reachable peers which is important too
+        self.global_state_lock.cli().peers.clone().into_iter().for_each(
+            |a| swarm.dial(a).unwrap_or_else(|e| debug!("{e}"))
+        );
+        /* TODO ~~add the guys from the DB~~
+                The legacy DB isn't useful now, so it makes more sense to develop the new one which would 
+                - hold only good peers,
+                - hold the multiaddrs in addition to the standings,
+                - hold also the ratings from the components like Gossip-sub, Kademlia */
+        
         let mut swarm_commands = self.main_to_peer_broadcast_tx.subscribe();
         trace!("every node subscribes to the 'block' topic");
         let topic_block = IdentTopic::new(TOPIC_BLOCK);
@@ -1333,24 +1349,26 @@ impl MainLoopHandler {
 
         type SingleHeightPeerState = (BlockHeight, HashMap<PeerId, crate::protocol::peer::MutablePeerState>);
         let mut peers_info: SingleHeightPeerState = Default::default();
+        let mut peer_pings: HashMap<PeerId, Option<Duration>> = HashMap::new();
+        let mut peer_infos: HashMap<PeerId, identify::Info> = HashMap::new();
+        // let mut peers: HashMap<PeerId, Peer> = HashMap::new();
 
         info!["If all listeners `Result::Err` -- we will continue using just outgoing connection (and relay?)."];
-        let mut swarm_listeners: Vec<libp2p::core::transport::ListenerId> = Default::default();
-        // https://docs.libp2p.io/concepts/transports/quic/#distinguishing-multiple-quic-versions-in-libp2p
-        [
-            swarm.listen_on(Multiaddr::empty().with(Protocol::Ip4(
-                std::net::Ipv4Addr::UNSPECIFIED
-                // std::net::Ipv4Addr::new(127, 0, 0, 1)
-            )).with(Protocol::Udp(
-                // TODO move this to <neptune-core/neptune-core/src/application/config/cli_args.rs>
-                9800
-            )).with(Protocol::QuicV1)),
-            swarm.listen_on(Multiaddr::empty().with(Protocol::Ip6(std::net::Ipv6Addr::UNSPECIFIED)).with(Protocol::Udp(9800)).with(Protocol::QuicV1)),
+        let mut swarm_listeners = [
+            swarm.listen_on(Multiaddr::empty().with(self.global_state_lock.cli().peer_listen_addr.into()).with(Protocol::Tcp(self.global_state_lock.cli().peer_port_tcp))),
+            swarm.listen_on(Multiaddr::empty().with(self.global_state_lock.cli().peer_listen_addr.into())
+            .with(Protocol::Udp(self.global_state_lock.cli().peer_port_quic)).with(Protocol::QuicV1)), // @SKaunov guess `...V1` is the only fine variant now. https://docs.libp2p.io/concepts/transports/quic/#distinguishing-multiple-quic-versions-in-libp2p
+            
             // swarm_listeners.push(swarm.listen_on(Multiaddr::empty().with(Protocol::Onion3(multiaddr::Onion3Addr::from(([0; 35], 0))))));
-        ].into_iter().for_each(|l| {
+        ].into_iter().filter_map(|l| {
             info!["{l:?}"];
-            if let Ok(l) = l {swarm_listeners.push(l)}
-        });
+            l.ok()
+        }).collect::<std::collections::HashSet<_>>();
+        // }).zip(std::iter::repeat(Default::default())).collect::<HashMap<
+        //     libp2p::core::transport::ListenerId, 
+        //     std::collections::HashSet<Multiaddr>
+        // >>();
+        let mut swarm_listener_multiaddrs_autonat = HashMap::<Multiaddr, Option<bool>>::new();
         
         let exit_code: i32 = loop {
             select! {
@@ -1475,24 +1493,101 @@ impl MainLoopHandler {
 
                     match ev {
                         SwarmEvent::Behaviour(ComposedBehaviourEvent::Ping(ping::Event{ peer, connection, result })) => {
-                            /* TODO replace `connections` for the additional field in peers tracking and set it to `result.ok` to choose a faster peer for like syncing 
-                            or `ping::Failure::Unsupported` to punish the peer just once */
-                            // let was = connections.insert(connection, ConnectionStatus::Pinged(result));
-                            // if let ConnectionStatus::Pinged(Err(er)) = connections.get(&connection).expect("just inserted") {
-                            //     match er {
-                            //         ping::Failure::Timeout => {swarm.close_connection(connection);}
-                            //         // @skaunov see no good reason to not to implement `ping`
-                            //         ping::Failure::Unsupported => if let Some(ConnectionStatus::Pinged(Err(ping::Failure::Unsupported))) = was {} else {
-                            //             debug!("peers conforming to `ping` are preferred |{}|{}", peer, connection);
-                            //             todo!["send to punish"];
-                            //         },
-                            //         ping::Failure::Other { error } => warn!(error),
-                            //     }
-                            // } else {trace!["pinged with {peer} on {connection}"]}
+                            match result {
+                                Err(ping::Failure::Timeout) => {swarm.close_connection(connection);}
+                                Err(ping::Failure::Other { error }) => warn!(error),
+                                result => 
+                                    // if let Some(p) = peers.get_mut(&peer) {p.deref_mut().ping = }
+                                    {peer_pings.insert(peer, result.ok());}
+                            }
                         },
-                        SwarmEvent::Behaviour(ComposedBehaviourEvent::Identify(libp2p::identify::Event::Error{ connection_id, peer_id, error })) => match error {
+                        SwarmEvent::Behaviour(ComposedBehaviourEvent::Identify(identify::Event::Received{ connection_id, peer_id, info })) => {
+                            peer_infos.insert(peer_id, info);
+                            // peers.entry(peer_id).or_insert(Peer { 
+                            //     info, 
+                            //     ping: None, // there's a small chance this to be interpreted as `Unsupported` and get the peer punished, but that seems to be okay and offset by long standing fine behaviour
+                            //     legacy_sync: Default::default() 
+                            // }).info = info;
+                        }
+                        SwarmEvent::Behaviour(ComposedBehaviourEvent::Identify(identify::Event::Error{ connection_id, peer_id, error })) => match error {
                             libp2p::swarm::StreamUpgradeError::Timeout => {swarm.close_connection(connection_id);}
                             _ => warn!("{error}")
+                        },
+                        SwarmEvent::Behaviour(ComposedBehaviourEvent::AutonatClient(libp2p::autonat::v2::client::Event{ tested_addr, bytes_sent, server, result })) => {
+                            const MSG_TODO: &str = "checked in the condition";
+                            if swarm_listener_multiaddrs_autonat.keys().into_iter().contains(&tested_addr) {
+                                *swarm_listener_multiaddrs_autonat.get_mut(&tested_addr).expect(MSG_TODO) = match result {
+                                    Ok(()) => Some(true),
+                                    /* TODO https://github.com/libp2p/rust-libp2p/pull/6168
+                                    ~~the component is funny: it has `pub(crate) enum DialBackError` currently having two variants: `NoConnection` and `StreamFailed`
+                                    as @skaunov thought to make a fall-back to `observed_addr` by `identify` in indefinite future if ever
+                                    for now it's treated as `NoConnection` hoping the visibility will be fixed~~ */
+                                    Err(_) => Some(false),
+                                    Err(_) => None
+                                };
+                                if swarm_listener_multiaddrs_autonat.values().all(|s| s == &Some(false)) {
+                                    info!["`autonat` checked all the addresses we're listening onto, and all of them failed; hence we need to use a relay"];
+                                    let mut relays = peer_infos.iter().filter(|(_id, info)| info.protocols.contains(
+                                            &relay::HOP_PROTOCOL_NAME // TODO debug this to be sure this approach works
+                                        ) && info.listen_addrs.iter().any(|adr| {
+                                            !adr.protocol_stack().contains(&Protocol::P2pCircuit.tag()) && adr.protocol_stack().contains(&Protocol::Tcp(0).tag()) // TODO make this a helper #relayMultiadr; or just filter those here
+                                        })) // TODO if none are found check the components for known peers and request Kademlia; though I guess this shouldn't happen
+                                        // .partition_map( {
+                                        //     match  {
+                                        //         Some(rtt) => itertools::Either::Left(),
+                                        //         None => itertools::Either::Right((id, _info))
+                                        //     }
+                                        // });
+                                        .map(|(id, _info)| (id, _info, peer_pings.get(&id).expect("TODO the only case @skaunov see yet is when `ping` `Timeout` and the peer caught disconnecting not yet `remove` from infos")))
+                                        .partition::<Vec<_>, _>(|(_, _, ping)| ping.is_some());
+                                    relays.0.sort_unstable_by(|a, b| b.2.cmp(&a.2));
+                                    relays.1.extend(relays.0);
+                                    let mut relays = relays.1;
+                                    dbg!["TODO check the order is from `None` to the smallest", &relays];
+                                    let mut listener_added = false;
+                                    while !listener_added && !relays.is_empty() {
+                                    // while let Some((_, info, _)) = relays.pop() {
+                                        for addr in relays.pop().expect(MSG_TODO).1.listen_addrs.iter().filter(|adr| {
+                                            !adr.protocol_stack().contains(&Protocol::P2pCircuit.tag()) && adr.protocol_stack().contains(&Protocol::Tcp(0).tag()) // #relayMultiadr
+                                        }) {match swarm.listen_on(addr.clone()) { 
+                                            Ok(value) => {
+                                                swarm_listeners.insert(value);
+                                                swarm_listener_multiaddrs_autonat.insert(addr.to_owned(), None);
+                                                listener_added = true;
+                                                break
+                                            }
+                                            Err(_) => todo!(),
+                                        }}
+                                    }
+                                    if listener_added {todo!["punish `None`"]} else {
+                                        // TODO try the addresses from `kad`; it could be made as a helper to serve both here and dialing the relay neighbors
+                                        trace!["we know no peers we can build a `P2pCircuit` on which"]
+                                    }
+                                }
+                            } else {trace!["`autonat` probed `FromSwarm::NewExternalAddrCandidate` which we never listened to"]}
+                            
+                            // let MSG_TODO = "every listening address should be tracked via `multiaddrs_autonat`";
+                            
+                            // let is_reachable = 
+                            // let is_node_unreachable = {is_reachable == Some(false)}; 
+                            // let mut inserted_result = false;
+                            // let i = swarm_listeners.iter_mut();
+
+                            // while is_node_unreachable || !inserted_result {
+                            //     if let Some((l, adrs)) = i.next() {
+                            //         if !inserted_result {if let Some(a) = adrs.get_mut(&tested_addr) {
+                            //             *a = is_reachable;
+                            //             inserted_result = true;
+                            //         }}
+                            //         if is_node_unreachable {is_node_unreachable = !adrs}
+                                
+                            // }
+                            
+                            // // *multiaddrs_autonat.get_mut(&tested_addr) = ;
+                            // // swarm_listeners.iter().find(|p| p.1.contains(&tested_addr)).expect(MSG_TODO);
+                            // // swarm_listeners.values_mut().flat_map(|ll| ll.entries());//.find(|ads| ads);
+
+                            // if is_node_unreachable {todo!["listen on a relay"]}
                         }
                         SwarmEvent::Behaviour(ComposedBehaviourEvent::Gossipsub(libp2p::gossipsub::Event::Message { propagation_source, message_id, message })) => {
                             let mut acceptance;
@@ -1548,17 +1643,51 @@ impl MainLoopHandler {
                             // bump the height after processing 
                             if let PeerMessage::Block(transfer_block) = m {peers_info.0 = peers_info.0.max(transfer_block.header.height);}
                         }
-                        SwarmEvent::ConnectionEstablished { peer_id, connection_id, endpoint, num_established, concurrent_dial_errors, established_in } => {
-                            connections.insert(connection_id, ConnectionStatus::New { concurrent_dial_errors });
-                            peers_info.1.insert(peer_id, Default::default());
-                        },
                         SwarmEvent::ConnectionClosed { peer_id, connection_id, endpoint, num_established, cause } => {
-                            connections.insert(connection_id, ConnectionStatus::Closed(cause));
-                            let _d = peers_info.1.remove(&peer_id);
-                            // TODO save `_d`?
-                        },
+                            if let Some(e) = cause {warn!["{e} |{peer_id} |{connection_id} |{endpoint:?} |{num_established}"]}
+                            if num_established == 0 {
+                                let _disconnected = (peers_info.1.remove(&peer_id), peer_pings.remove(&peer_id), peer_infos.remove(&peer_id));
+                                // TODO spawn a task to save `_disconnected` to DB (like standings)
+                            }
+                        }
                         SwarmEvent::IncomingConnection { connection_id, local_addr, send_back_addr } => todo!(),
-                        SwarmEvent::NewListenAddr { listener_id, address } => {dbg!["check/test that `identify` catches this", listener_id, address];}
+                        SwarmEvent::NewListenAddr { listener_id, mut address } => { //  TODO check/test that `identify` catches this 
+                            // if let Some(hashset_the) = swarm_listeners.get_mut(&listener_id) {hashset_the.insert(address);} else {
+                            //     warn![?listener_id, " was not tracked in `swarm_listeners` before appearing. |{address}"]
+                            // }
+
+                            debug_assert!(swarm_listeners.contains(&listener_id));
+                            swarm_listener_multiaddrs_autonat.insert(address.clone(), None);
+                            if address.protocol_stack().contains(&Protocol::P2pCircuit.tag()) {
+                                let relay_id = {
+                                    address.pop().expect("can't come without my `PeerId`");
+                                    // @SKaunov assume our relay `PeerId` isn't reused on another node. If it is that'd just leave us without DCUTR here, but that node will be having much more trouble thriving in the network.
+                                    let _debug = address.pop().expect("should be `Protocol::P2pCircuit`");
+                                    debug_assert_eq!(_debug, Protocol::P2pCircuit);
+                                    address.pop().expect("`Protocol::P2pCircuit` should have `Protocol::P2p(PeerId)` before it")
+                                };
+                                std::assert_matches::debug_assert_matches!(relay_id, Protocol::P2p(_), "TODO check/test this well");
+                                if peer_infos.iter()
+                                .filter(|(_, info)| info.listen_addrs.iter().any(|addr| {addr.iter().contains(&relay_id) && addr.iter().contains(&Protocol::P2pCircuit)}))
+                                .map(|(_, info)| info.listen_addrs.iter().cloned()).flatten().map(|adr| swarm.dial(adr)).all(|r| r.is_err()) {
+                                    if swarm.behaviour_mut().kad.kbuckets().map(|bucket| bucket.iter().map(|v| v.node.value.iter().cloned()).flatten().collect::<Vec<_>>())
+                                    .flatten().filter(|addr| {addr.iter().contains(&relay_id) && addr.iter().contains(&Protocol::P2pCircuit)}).collect_vec().into_iter()
+                                    .map(|adr| swarm.dial(adr)).all(|r| r.is_err()) {debug!["we know no peers on our [relay]({relay_id})"]}
+                                }
+                            }
+                            
+                            // let _debug = match swarm_listeners.entry(listener_id) {
+                            //     std::collections::hash_map::Entry::Occupied(occupied_entry) => occupied_entry.into_mut(),
+                            //     std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                            //         
+                            //         vacant_entry.insert(
+                            //             Default::default()
+                            //             // HashMap<libp2p::Multiaddr, std::option::Option<bool>>::new()
+                            //         )
+                            //     }
+                            // }.insert(address, None);
+                            // debug_assert_eq!(_debug, None, "a multiaddr expected to be unique, especially for a listener")
+                        }
                         ev @ SwarmEvent::ExpiredListenAddr { listener_id, address: _ } => {
                             debug!["{ev:?}"];
                             // match listener_restart(&mut swarm) {
@@ -1568,21 +1697,28 @@ impl MainLoopHandler {
                             //     }
                             //     Err(e) => warn!("can continue using only outgoing connections |{e}")
                             // }
-                            todo!["restart just the IPv6"];
-                            swarm_listeners.push(listener_id)
+                            todo!["restart just the IPv6: can it be done without new listen call, can it do this auto and just reporting the IPv6 change?"];
                         }
-                        SwarmEvent::ListenerClosed { listener_id, addresses, reason } => todo!("not here but would be nice to have listener crash monitoring"),
-                        SwarmEvent::ListenerError { listener_id, error } => todo!("why does it say 'a non-fatal'?"),
+                        SwarmEvent::ListenerClosed { listener_id, addresses, reason } => {
+                            // TODO not here but would be nice to have listener crash monitoring
+                            let _debug = swarm_listeners.remove(&listener_id);
+                            debug_assert!(_debug, "all the listeners should be tracked in `swarm_listeners`");
+                        }
                         SwarmEvent::NewExternalAddrOfPeer { peer_id, address } => {swarm.behaviour_mut().kad.add_address(&peer_id, address);}
+                        SwarmEvent::ExternalAddrConfirmed { address } => {todo!["if `Ok`... `swarm.listen_on(address)`"]}
                         // events which doesn't carry an interesting thing are commented here yet to be in front of the eyese at this early stage
+                        // SwarmEvent::ConnectionEstablished { peer_id, connection_id, endpoint, num_established, concurrent_dial_errors, established_in } => {}
+                        // SwarmEvent::ListenerError { listener_id, error } => {
+                        //     /* ~~why does it say 'a non-fatal'?~~
+                        //             fatal will be the `reason` in `ListenerClosed` */
+                        // }
                         // SwarmEvent::IncomingConnectionError { connection_id, local_addr, send_back_addr, error, peer_id } => {}
                         // SwarmEvent::OutgoingConnectionError { connection_id, peer_id, error } => {}
                         // SwarmEvent::Dialing { peer_id, connection_id } => {}
                         // SwarmEvent::NewExternalAddrCandidate { address } => {}
-                        // SwarmEvent::ExternalAddrConfirmed { address } => {}
                         // SwarmEvent::ExternalAddrExpired { address } => {}
                         
-                        // _ => todo!(),
+                        // _ => debug_assert!(false),
                         ev => {dbg![ev];}
                     }
                 }
@@ -1840,7 +1976,7 @@ impl MainLoopHandler {
     }
 
     async fn graceful_shutdown(
-        &mut self, mut join_handles: Vec<JoinHandle<()>>, mut swarm: Swarm<swarm_def::ComposedBehaviour>, swarm_listeners: Vec<libp2p::core::transport::ListenerId>
+        &mut self, mut join_handles: Vec<JoinHandle<()>>, mut swarm: Swarm<swarm_def::ComposedBehaviour>, swarm_listeners: HashSet<libp2p::core::transport::ListenerId>
     ) -> Result<()> {
         info!("Shutdown initiated.");
 

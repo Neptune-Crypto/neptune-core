@@ -11,6 +11,7 @@ use clap::builder::TypedValueParser;
 use clap::Parser;
 use itertools::Itertools;
 use libp2p::Multiaddr;
+use libp2p::PeerId;
 use num_traits::Zero;
 use sysinfo::System;
 
@@ -67,6 +68,7 @@ pub struct Args {
     /// To do this, see `--peer`.
     ///
     /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8
+    #[deprecated = "how is this useful and is it possible to adapt further in an useful way?"]
     #[clap(long, value_name = "IP")]
     pub(crate) ban: Vec<IpAddr>,
 
@@ -90,17 +92,18 @@ pub struct Args {
     #[arg(long)]
     pub restrict_peers_to_list: bool,
 
-    // /// Maximum number of peers to accept connections from.
-    // ///
-    // /// Will not prevent outgoing connections made with `--peer`.
-    // /// Set this value to 0 to refuse all incoming connections.
-    // #[clap(
-    //     long,
-    //     default_value = "10",
-    //     value_name = "COUNT",
-    //     value_parser = clap::value_parser!(u16).map(|u| usize::from(u)),
-    // )]
-    // pub(crate) max_num_peers: usize,
+    /// Maximum number of peers to accept connections from.
+    ///
+    /// Will not prevent outgoing connections made with `--peer`.
+    /// Set this value to 0 to refuse all incoming connections.
+    #[deprecated = "#beefyConfig"]
+    #[clap(
+        long,
+        default_value = "10",
+        value_name = "COUNT",
+        value_parser = clap::value_parser!(u16).map(|u| usize::from(u)),
+    )]
+    pub(crate) max_num_peers: usize,
 
     /// Maximum number of peers to accept from each IP address.
     ///
@@ -217,9 +220,8 @@ pub struct Args {
     /// Example: `--whitelisted-composer=8.8.8.8 --whitelisted-composer=8.8.4.4`
     ///          `--whitelisted-composer=2001:db8:3333:4444:5555:6666:7777:8888`
     // TODO persistent `PeerId` capability would be beneficial for this
-    // TODO `Multiadr` support would be cool for this
     #[clap(long = "whitelisted-composer")]
-    pub(crate) whitelisted_composers: Vec<libp2p::PeerId>,
+    pub(crate) whitelisted_composers: Vec<Multiaddr>,
 
     /// Regulates the fraction of the block subsidy that a composer sends to the
     /// guesser.
@@ -300,15 +302,24 @@ pub struct Args {
     #[clap(long, default_value = "1G", value_name = "SIZE")]
     pub(crate) max_mempool_size: ByteSize,
 
-    /// Port on which to listen for peer connections.
+    /// Port on which to listen for legacy peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
-    pub peer_port: u16,
+    pub peer_port_legacy: u16,
+
+    /// Port on which to listen for peer TCP connections.
+    #[clap(long, default_value = "9800", value_name = "PORT")]
+    pub peer_port_tcp: u16,
+
+    /// Port on which to listen for peer QUIC connections.
+    #[clap(long, default_value = "9801", value_name = "PORT")]
+    pub peer_port_quic: u16,
 
     /// Port on which to listen for RPC connections.
     #[clap(long, default_value = "9799", value_name = "PORT")]
     pub rpc_port: u16,
 
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
+    // TODO should this be a `Vec`?
     #[clap(short, long, default_value = "::")]
     pub peer_listen_addr: IpAddr,
 
@@ -576,13 +587,13 @@ impl Args {
         todo!("if this is a feature it needs another implementation")
     }
 
-    /// Return the port that peer can connect on. None if incoming connections
-    /// are disallowed.
+    /// Return the port that peer can connect on. None if incoming connections are disallowed.
+    #[deprecated = "TODO change this for multiadr because of relays"]
     pub(crate) fn own_listen_port(&self) -> Option<u16> {
         if self.disallow_all_incoming_peer_connections() {
             None
         } else {
-            Some(self.peer_port)
+            Some(self.peer_port_tcp)
         }
     }
 
@@ -617,8 +628,19 @@ impl Args {
     }
 
     /// Check if block proposal should be accepted from this IP address.
-    pub(crate) fn accept_block_proposal_from(&self, peer: &libp2p::PeerId) -> bool {
-        self.whitelisted_composers.is_empty() || self.whitelisted_composers.contains(peer)
+    pub(crate) fn accept_block_proposal_from(&self, mut peer: Multiaddr) -> bool {
+        if self.whitelisted_composers.is_empty() {true} else {
+            let Some(peer_id) = peer.pop() else {
+                tracing::debug!("something is wrong -- this Multiaddr must not be empty; hence rejecting the operation");
+                return false
+            };
+            debug_assert!(
+                matches!(peer_id, libp2p::multiaddr::Protocol::P2p(_)), 
+                r#"@skaunov can't find a case when it can come without `PeerId` ending, but if there is one this can be remade as `if let id @  = peer.iter().last()`"#
+            );
+            let peer_id = peer_id.into();
+            self.whitelisted_composers.iter().any(|w| w.ends_with(&peer_id) || w.ends_with(&peer)) 
+        } 
     }
 
     fn estimate_proving_capability() -> TxProvingCapability {

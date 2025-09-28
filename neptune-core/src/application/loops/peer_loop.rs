@@ -709,8 +709,8 @@ impl PeerLoopHandler {
                     if challenge_response.matches(global_state_lock.cli().network, issued_challenge) {
                         // Does response verify?
                         let claimed_tip_height = challenge_response.tip.header.height;
-                        let now = Timestamp::now();
-                        if challenge_response.is_valid(now, global_state_lock.cli().network).await {
+                        let now_ts = Timestamp::now();
+                        if challenge_response.is_valid(now_ts, global_state_lock.cli().network).await {
                             // Does cumulative proof-of-work evolve reasonably?
                             let own_tip_header = *global_state_lock
                                 .lock_guard()
@@ -1396,7 +1396,7 @@ impl PeerLoopHandler {
             PeerMessage::BlockProposal(new_proposal) => {
                 debug!("Got block proposal from peer.");
 
-                if !global_state_lock.cli().accept_block_proposal_from(&peer) {
+                if !global_state_lock.cli().accept_block_proposal_from(todo!["Put the whole multiaddr this came from. `&peer`"]) {
                     warn!("Got block proposal from unwanted peer");
                     chan.send(PeerTaskToMain::Sanction(peer, PeerSanction::Negative(NegativePeerSanction::UnwantedMessage))).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);

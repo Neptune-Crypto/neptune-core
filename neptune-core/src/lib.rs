@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 // recursion limit for macros (e.g. triton_asm!)
 #![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
@@ -41,7 +42,6 @@ pub mod bench_helpers;
 use std::env;
 use std::path::PathBuf;
 
-use anyhow::Context;
 use anyhow::Result;
 use application::config::cli_args;
 use chrono::DateTime;
