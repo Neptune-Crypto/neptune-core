@@ -1,6 +1,4 @@
-mod behaviour;
-
-use std::{net::Ipv4Addr, time::Duration};
+use std::time::Duration;
 
 use libp2p::{gossipsub, identify, kad::{self, store::MemoryStore}, multiaddr::Protocol, noise, ping, request_response::{self, cbor}, swarm::{NetworkBehaviour, SwarmEvent}, yamux, Multiaddr, Swarm};
 
