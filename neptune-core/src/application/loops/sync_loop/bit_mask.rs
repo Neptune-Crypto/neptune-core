@@ -77,6 +77,9 @@ impl BitMask {
         while self.limbs.len() > new_num_limbs.try_into().unwrap() {
             self.limbs.pop();
         }
+        for index in new_upper_bound..(32 * new_num_limbs) {
+            self.unset(index);
+        }
         self.upper_bound = new_upper_bound;
         self
     }
@@ -391,6 +394,32 @@ pub mod test {
         new_bit_mask = new_bit_mask.expand(large_upper_bound);
         for index in small_upper_bound..large_upper_bound {
             prop_assert!(!new_bit_mask.contains(index));
+        }
+    }
+
+    #[test]
+    fn shrink_then_expand_resets_dropped_bits_unit() {
+        for (large_upper_bound, small_upper_bound, seed) in [(2_u64, 1_u64, 0_u64), (200, 100, 300)]
+        {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let set_indices = (0..u64::min(large_upper_bound, 1000))
+                .map(|_| rng.random_range(0..large_upper_bound))
+                .collect_vec();
+
+            let mut bit_mask = BitMask::new(large_upper_bound);
+            for index in &set_indices {
+                bit_mask.set(*index);
+            }
+
+            let mut new_bit_mask = bit_mask.clone();
+            new_bit_mask = new_bit_mask.shrink(small_upper_bound);
+            new_bit_mask = new_bit_mask.expand(large_upper_bound);
+            for index in small_upper_bound..large_upper_bound {
+                assert!(
+                    !new_bit_mask.contains(index),
+                    "index: {index}\nbit mask: {new_bit_mask:?}"
+                );
+            }
         }
     }
 }
