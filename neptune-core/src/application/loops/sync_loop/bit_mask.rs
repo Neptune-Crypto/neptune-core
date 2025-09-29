@@ -21,12 +21,13 @@ impl PartialEq for BitMask {
             return self.limbs == other.limbs;
         }
         let last = (self.upper_bound / 32) as usize;
-        if self
-            .limbs
-            .iter()
-            .zip(other.limbs.iter())
-            .take(last - 1)
-            .any(|(l, r)| l != r)
+        if last != 0
+            && self
+                .limbs
+                .iter()
+                .zip(other.limbs.iter())
+                .take(last - 1)
+                .any(|(l, r)| l != r)
         {
             return false;
         }
@@ -76,6 +77,7 @@ impl BitMask {
         while self.limbs.len() > new_num_limbs.try_into().unwrap() {
             self.limbs.pop();
         }
+        self.upper_bound = new_upper_bound;
         self
     }
 
@@ -111,17 +113,17 @@ impl BitMask {
     /// Set bits min through max (ends inclusive).
     pub(crate) fn set_range(&mut self, min: u64, max: u64) {
         let first_full_limb = min.div_ceil(32);
-        let first_index_in_full_limb = min.div_ceil(32)*32;
+        let first_index_in_full_limb = min.div_ceil(32) * 32;
         let successor_of_last_full_limb = max / 32;
         let first_index_after_last_full_limb = successor_of_last_full_limb * 32;
 
         for limb_i in first_full_limb..successor_of_last_full_limb {
             self.limbs[limb_i as usize] = u32::MAX;
         }
-        for index in min..u64::min(max,first_index_in_full_limb) {
+        for index in min..u64::min(max, first_index_in_full_limb) {
             self.set(index);
         }
-        for index in u64::max(min,first_index_after_last_full_limb)..=max {
+        for index in u64::max(min, first_index_after_last_full_limb)..=max {
             self.set(index);
         }
     }
@@ -268,7 +270,11 @@ pub mod test {
         let range_start = 0u64;
         let range_stop = 32u64;
 
-        for (upper_bound, range_start, range_stop) in [(38_u64, 0_u64, 32_u64), (5598, 11, 3263), (19666, 9718, 9718)] {
+        for (upper_bound, range_start, range_stop) in [
+            (38_u64, 0_u64, 32_u64),
+            (5598, 11, 3263),
+            (19666, 9718, 9718),
+        ] {
             let mut bit_mask = BitMask::new(upper_bound);
             bit_mask.set_range(range_start, range_stop);
 
@@ -346,6 +352,26 @@ pub mod test {
         new_bit_mask = new_bit_mask.expand(large_upper_bound);
         new_bit_mask = new_bit_mask.shrink(small_upper_bound);
         prop_assert_eq!(bit_mask, new_bit_mask);
+    }
+
+    #[test]
+    fn expand_then_shrink_is_identity_unit() {
+        for (large_upper_bound, small_upper_bound, seed) in [(2_u64, 1_u64, 0_u64), (200, 100, 483)]
+        {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let set_indices = (0..1000)
+                .map(|_| rng.random_range(0..small_upper_bound))
+                .collect_vec();
+            let mut bit_mask = BitMask::new(small_upper_bound);
+            for index in &set_indices {
+                bit_mask.set(*index);
+            }
+
+            let mut new_bit_mask = bit_mask.clone();
+            new_bit_mask = new_bit_mask.expand(large_upper_bound);
+            new_bit_mask = new_bit_mask.shrink(small_upper_bound);
+            assert_eq!(bit_mask, new_bit_mask);
+        }
     }
 
     #[proptest]
