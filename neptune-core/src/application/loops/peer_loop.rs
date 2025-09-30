@@ -586,7 +586,9 @@ impl PeerLoopHandler {
                         .net
                         .peer_map
                         .values()
-                        .filter(|peer_info| peer_info.listen_address().is_some())
+                        .filter(|peer_info| {
+                            peer_info.listen_address().is_some() && !peer_info.is_local_connection()
+                        })
                         .take(MAX_PEER_LIST_LENGTH) // limit length of response
                         .map(|peer_info| {
                             (
@@ -613,6 +615,12 @@ impl PeerLoopHandler {
                     self.punish(NegativePeerSanction::FloodPeerListResponse)
                         .await?;
                 }
+
+                let peers = peers
+                    .into_iter()
+                    .filter(|(socket_addr, _)| !PeerInfo::ip_is_local(socket_addr.ip()))
+                    .collect();
+
                 self.to_main_tx
                     .send(PeerTaskToMain::PeerDiscoveryAnswer((
                         peers,
@@ -2084,66 +2092,6 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn test_peer_loop_peer_list() {
-        let network = Network::Main;
-
-        let num_already_connected_peers = 2;
-        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(
-                network,
-                num_already_connected_peers,
-                cli_args::Args::default(),
-            )
-            .await
-            .unwrap();
-
-        let peer_infos = state_lock
-            .lock_guard()
-            .await
-            .net
-            .peer_map
-            .clone()
-            .into_values()
-            .collect::<Vec<_>>();
-
-        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(network, 2);
-        let mut expected_response = vec![
-            (
-                peer_infos[0].connected_address(),
-                peer_infos[0].instance_id(),
-            ),
-            (
-                peer_infos[1].connected_address(),
-                peer_infos[1].instance_id(),
-            ),
-            (sa2, hsd2.instance_id),
-        ];
-        expected_response.sort_by_cached_key(|x| x.0);
-
-        let mock = Mock::new(vec![
-            Action::Read(PeerMessage::PeerListRequest),
-            Action::Write(PeerMessage::PeerListResponse(expected_response)),
-            Action::Read(PeerMessage::Bye),
-        ]);
-
-        let from_main_rx_clone = peer_broadcast_tx.subscribe();
-
-        let mut peer_loop_handler =
-            PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa2, hsd2, true, 0);
-        peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            2,
-            state_lock.lock_guard().await.net.peer_map.len(),
-            "peer map must have length 2 after saying goodbye to peer 2"
-        );
-    }
-
-    #[traced_test]
-    #[apply(shared_tokio_runtime)]
     async fn node_does_not_record_disconnection_time_when_peer_initiates_disconnect() -> Result<()>
     {
         let args = cli_args::Args::default();
@@ -2175,6 +2123,209 @@ mod tests {
         drop(from_main_tx);
 
         Ok(())
+    }
+
+    mod peer_discovery {
+        use std::str::FromStr;
+
+        use super::*;
+        use crate::tests::shared::globalstate::get_dummy_peer_outgoing;
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn dont_send_local_ips_in_response() {
+            let network = Network::Main;
+
+            let num_already_connected_peers = 0;
+            let (
+                peer_broadcast_tx,
+                _from_main_rx_clone,
+                to_main_tx,
+                _to_main_rx,
+                mut state_lock,
+                hsd,
+            ) = get_test_genesis_setup(
+                network,
+                num_already_connected_peers,
+                cli_args::Args::default(),
+            )
+            .await
+            .unwrap();
+
+            let local_ip_0 = std::net::SocketAddr::from_str("192.168.0.1:8080").unwrap();
+            state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .peer_map
+                .insert(local_ip_0, get_dummy_peer_outgoing(local_ip_0));
+
+            let global_ip = std::net::SocketAddr::from_str("92.68.0.1:8080").unwrap();
+            let global_ip = get_dummy_peer_outgoing(global_ip);
+            state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .peer_map
+                .insert(global_ip.connected_address(), global_ip.clone());
+
+            let expected_response =
+                vec![(global_ip.listen_address().unwrap(), global_ip.instance_id())];
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::PeerListRequest),
+                Action::Write(PeerMessage::PeerListResponse(expected_response)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main_rx_clone = peer_broadcast_tx.subscribe();
+            let local_ip_1 = std::net::SocketAddr::from_str("192.168.0.4:8080").unwrap();
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                local_ip_1,
+                hsd,
+                true,
+                1,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            drop(to_main_tx);
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn ignore_local_ips_in_incoming_response() {
+            let network = Network::Main;
+
+            let num_already_connected_peers = 2;
+            let (
+                peer_broadcast_tx,
+                _from_main_rx_clone,
+                to_main_tx,
+                mut to_main_rx,
+                state_lock,
+                hsd,
+            ) = get_test_genesis_setup(
+                network,
+                num_already_connected_peers,
+                cli_args::Args::default(),
+            )
+            .await
+            .unwrap();
+
+            let potential_peer_public_ip = (
+                std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap(),
+                7,
+            );
+            let response_with_local_and_global_ip = vec![
+                potential_peer_public_ip,
+                (
+                    std::net::SocketAddr::from_str("192.168.0.23:8080").unwrap(),
+                    55,
+                ),
+                (
+                    std::net::SocketAddr::from_str("[fe80::1]:8080").unwrap(),
+                    42,
+                ),
+            ];
+
+            let mock = Mock::new(vec![
+                Action::Write(PeerMessage::PeerListRequest),
+                Action::Read(PeerMessage::PeerListResponse(
+                    response_with_local_and_global_ip,
+                )),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main_rx_clone = peer_broadcast_tx.subscribe();
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                std::net::SocketAddr::from_str("22.21.20.122:8080").unwrap(),
+                hsd,
+                true,
+                1,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .expect("sending (one) invalid block should not result in closed connection");
+
+            // Verify that the local IPs were not sent to main loop
+            let Some(PeerTaskToMain::PeerDiscoveryAnswer((potential_peers, _, _))) =
+                to_main_rx.recv().await
+            else {
+                panic!("Main loop must receive peer discovery info")
+            };
+
+            assert_eq!(vec![potential_peer_public_ip], potential_peers);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn test_peer_loop_peer_list() {
+            let network = Network::Main;
+
+            let num_already_connected_peers = 2;
+            let (
+                peer_broadcast_tx,
+                _from_main_rx_clone,
+                to_main_tx,
+                _to_main_rx1,
+                state_lock,
+                _hsd,
+            ) = get_test_genesis_setup(
+                network,
+                num_already_connected_peers,
+                cli_args::Args::default(),
+            )
+            .await
+            .unwrap();
+
+            let peer_infos = state_lock
+                .lock_guard()
+                .await
+                .net
+                .peer_map
+                .clone()
+                .into_values()
+                .collect::<Vec<_>>();
+
+            let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(network, 2);
+            let mut expected_response = vec![
+                (
+                    peer_infos[0].connected_address(),
+                    peer_infos[0].instance_id(),
+                ),
+                (
+                    peer_infos[1].connected_address(),
+                    peer_infos[1].instance_id(),
+                ),
+                (sa2, hsd2.instance_id),
+            ];
+            expected_response.sort_by_cached_key(|x| x.0);
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::PeerListRequest),
+                Action::Write(PeerMessage::PeerListResponse(expected_response)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let from_main_rx_clone = peer_broadcast_tx.subscribe();
+
+            let mut peer_loop_handler =
+                PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa2, hsd2, true, 0);
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                2,
+                state_lock.lock_guard().await.net.peer_map.len(),
+                "peer map must have length 2 after saying goodbye to peer 2"
+            );
+        }
     }
 
     mod blocks {

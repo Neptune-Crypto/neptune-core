@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -143,6 +144,25 @@ impl PeerInfo {
         !self.connection_is_inbound()
     }
 
+    pub(crate) fn ip_is_local(address: IpAddr) -> bool {
+        match address {
+            IpAddr::V4(ipv4_addr) => {
+                ipv4_addr.is_private() || ipv4_addr.is_loopback() || ipv4_addr.is_link_local()
+            }
+            IpAddr::V6(ipv6_addr) => {
+                ipv6_addr.is_unique_local()
+                    || ipv6_addr.is_loopback()
+                    || ipv6_addr.is_unicast_link_local()
+            }
+        }
+    }
+
+    /// Determine if the connection was established on a local network, i.e.,
+    /// if the IP used for the connection is a local IP.
+    pub(crate) fn is_local_connection(&self) -> bool {
+        Self::ip_is_local(self.peer_connection_info.connected_address.ip())
+    }
+
     /// returns the neptune-core version-string reported by the peer.
     ///
     /// note: the peer might not be honest.
@@ -207,5 +227,18 @@ mod tests {
     #[proptest]
     fn time_difference_doesnt_crash(now: SystemTime, and_now: SystemTime) {
         PeerInfo::system_time_diff_seconds(now, and_now);
+    }
+
+    #[test]
+    fn can_identify_local_addresses() {
+        assert!(PeerInfo::ip_is_local("10.125.55.26".parse().unwrap()));
+        assert!(PeerInfo::ip_is_local("192.168.0.23".parse().unwrap()));
+        assert!(PeerInfo::ip_is_local("169.254.1.1".parse().unwrap()));
+        assert!(PeerInfo::ip_is_local("127.0.0.1".parse().unwrap()));
+        assert!(!PeerInfo::ip_is_local("8.8.8.8".parse().unwrap()));
+        assert!(PeerInfo::ip_is_local("::1".parse().unwrap()));
+        assert!(PeerInfo::ip_is_local("fd00::1".parse().unwrap()));
+        assert!(PeerInfo::ip_is_local("fe80::1".parse().unwrap()));
+        assert!(!PeerInfo::ip_is_local("2001:db8::1".parse().unwrap()));
     }
 }
