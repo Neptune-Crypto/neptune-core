@@ -77,6 +77,11 @@ help:
 restart:
 	@rm -rf ~/.local/share/neptune-integration-test
 
+clear-incremental:
+	@rm -rf target/debug/incremental
+	@rm -rf target/release/incremental
+	@rm -rf "$CARGO_TARGET_DIR/debug/incremental"
+
 clean:
 	@echo "      ._.  ██    ██  ███  ██ ██ █████    ████ ██    █████  ███  ██  ██"
 	@echo "    c/-|   ███  ███ ██ ██ ████  ██      ██    ██    ██    ██ ██ ███ ██"
