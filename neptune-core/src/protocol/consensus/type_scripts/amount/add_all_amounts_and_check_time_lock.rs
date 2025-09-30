@@ -131,7 +131,7 @@ impl BasicSnippet for AddAllAmountsAndCheckTimeLock {
                 // _ M j *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked (type_script_hash == own_program_digest)
 
                 skiz call {read_and_add_amount}
-                // _ M j *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked
+                // _ M j *coins[j]_si [amount] [timelocked_amount] [utxo_amount'] utxo_is_timelocked
 
 
                 // if coin is timelock, test and mark if necessary

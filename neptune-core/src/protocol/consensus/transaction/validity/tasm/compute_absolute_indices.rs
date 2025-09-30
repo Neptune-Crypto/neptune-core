@@ -242,7 +242,6 @@ impl BasicSnippet for ComputeAbsoluteIndices {
 mod tests {
     use std::collections::HashMap;
 
-    use itertools::Itertools;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -255,10 +254,10 @@ mod tests {
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
-    use tasm_lib::triton_vm::prelude::BFieldCodec;
     use tasm_lib::triton_vm::prelude::BFieldElement;
 
     use super::*;
+    use crate::tests::shared::pop_encodable;
     use crate::twenty_first::bfe;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
@@ -268,14 +267,6 @@ mod tests {
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
         ) {
-            // TODO: Use this function from `tasm-lib` once upgraded to latest
-            // version. And delete this locally declared function.
-            fn pop_encodable<T: BFieldCodec>(stack: &mut Vec<BFieldElement>) -> T {
-                let len = T::static_length().unwrap();
-                let limbs = (0..len).map(|_| stack.pop().unwrap()).collect_vec();
-                *T::decode(&limbs).unwrap()
-            }
-
             let item = pop_encodable::<Digest>(stack);
             let sender_randomness = pop_encodable::<Digest>(stack);
             let receiver_preimage = pop_encodable::<Digest>(stack);
