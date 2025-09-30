@@ -62,7 +62,7 @@ use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::util_types::mutator_set::removal_record::RemovalRecordValidityError;
 
-const STANDARD_BLOCK_BATCH_SIZE: usize = 250;
+const STANDARD_BLOCK_BATCH_SIZE: usize = 35;
 const MAX_PEER_LIST_LENGTH: usize = 10;
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
 
