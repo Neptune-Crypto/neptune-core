@@ -137,6 +137,7 @@ impl BitMask {
         let mut elements = vec![];
         for limb in self.limbs.iter() {
             if *limb == 0 {
+                offset += 32;
                 continue;
             }
 
@@ -162,6 +163,7 @@ impl BitMask {
         let mut elements = vec![];
         for limb in self.limbs.iter() {
             if *limb == u32::MAX {
+                offset += 32;
                 continue;
             }
 
@@ -292,7 +294,7 @@ pub mod test {
 
     #[proptest]
     fn sample_dense_samples_target(
-        #[strategy(1..(1_u64<<15))] upper_bound: u64,
+        #[strategy(100..(1_u64<<15))] upper_bound: u64,
         #[strategy(vec(0u64..#upper_bound, 10))] set_indices: Vec<u64>,
         #[strategy(0u64..u64::MAX)] seed: u64,
         target: bool,
@@ -310,13 +312,38 @@ pub mod test {
         }
 
         let mut rng = StdRng::seed_from_u64(seed);
-        let index = bit_mask.sample(true, rng.random());
+        let index = bit_mask.sample(target, rng.random());
         prop_assert_eq!(target, bit_mask.contains(index));
+    }
+
+    #[test]
+    fn sample_dense_samples_target_unit() {
+        for (upper_bound, seed, target) in [(100_u64, 0_u64, false), (100, 203, true)] {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let set_indices = (0..10)
+                .map(|_| rng.random_range(0u64..upper_bound))
+                .collect_vec();
+
+            let mut bit_mask = BitMask::new(upper_bound);
+            if target {
+                bit_mask.set_range(0, upper_bound - 1);
+                for index in &set_indices {
+                    bit_mask.unset(*index);
+                }
+            } else {
+                for index in &set_indices {
+                    bit_mask.set(*index);
+                }
+            }
+
+            let index = bit_mask.sample(target, rng.random());
+            assert_eq!(target, bit_mask.contains(index));
+        }
     }
 
     #[proptest]
     fn sample_sparse_samples_target(
-        #[strategy(1..(1_u64<<15))] upper_bound: u64,
+        #[strategy(100..(1_u64<<15))] upper_bound: u64,
         #[strategy(vec(0u64..#upper_bound, 10))] set_indices: Vec<u64>,
         #[strategy(0u64..u64::MAX)] seed: u64,
         target: bool,
@@ -335,8 +362,74 @@ pub mod test {
         }
 
         let mut rng = StdRng::seed_from_u64(seed);
-        let index = bit_mask.sample(true, rng.random());
+        let index = bit_mask.sample(target, rng.random());
         prop_assert_eq!(target, bit_mask.contains(index));
+    }
+
+    #[test]
+    fn sample_sparse_samples_target_unit() {
+        for (upper_bound, seed, target) in [
+            (100_u64, 0_u64, false),
+            (100, 1, true),
+            (145, 5528042011211264207, true),
+        ] {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let set_indices = (0..10)
+                .map(|_| rng.random_range(0..upper_bound))
+                .collect_vec();
+
+            let mut bit_mask = BitMask::new(upper_bound);
+
+            if target {
+                for index in &set_indices {
+                    bit_mask.set(*index);
+                }
+            } else {
+                bit_mask.set_range(0, upper_bound - 1);
+                for index in &set_indices {
+                    bit_mask.unset(*index);
+                }
+            }
+
+            let index = bit_mask.sample(target, rng.random());
+            assert_eq!(target, bit_mask.contains(index));
+        }
+    }
+
+    #[test]
+    fn sample_sparse_samples_target_unit_proptest_regression() {
+        for (upper_bound, set_indices, seed, target) in [
+            (
+                145_u64,
+                vec![64, 64, 64, 0, 68, 64, 64, 3, 64, 64],
+                5528042011211264207_u64,
+                true,
+            ),
+            (
+                105,
+                vec![6, 9, 96, 16, 18, 12, 23, 49, 100, 12],
+                9495413841520055326,
+                false,
+            ),
+        ] {
+            let mut bit_mask = BitMask::new(upper_bound);
+
+            if target {
+                for index in &set_indices {
+                    bit_mask.set(*index);
+                }
+            } else {
+                bit_mask.set_range(0, upper_bound - 1);
+                for index in &set_indices {
+                    bit_mask.unset(*index);
+                }
+            }
+
+            let mut rng = StdRng::seed_from_u64(seed);
+            let sampling_seed = rng.random();
+            let index = bit_mask.sample(target, sampling_seed);
+            assert_eq!(target, bit_mask.contains(index));
+        }
     }
 
     #[proptest]
