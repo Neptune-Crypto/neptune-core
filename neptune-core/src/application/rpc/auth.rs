@@ -204,12 +204,6 @@ impl Cookie {
         Ok(Self(secret))
     }
 
-    // creates a cookie that exists in mem only, no .cookie file written to disk.
-    #[cfg(any(test, feature = "mock-rpc"))]
-    pub fn new_in_mem() -> Self {
-        Self(Self::gen_secret())
-    }
-
     /// authenticate against a known valid cookie
     pub fn auth(&self, valid: &Self) -> Result<(), error::AuthError> {
         match self == valid {
@@ -235,6 +229,12 @@ impl Cookie {
             write!(s, "{:02X}", byte).unwrap()
         }
         s
+    }
+
+    // creates a cookie that exists in mem only, no .cookie file written to disk.
+    #[cfg(any(test, feature = "mock-rpc"))]
+    pub fn new_in_mem() -> Self {
+        Self(Self::gen_secret())
     }
 }
 

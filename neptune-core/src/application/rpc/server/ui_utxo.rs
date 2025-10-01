@@ -35,6 +35,15 @@ impl Display for UtxoStatusEvent {
     }
 }
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct UiUtxo {
+    pub received: UtxoStatusEvent,
+    pub aocl_leaf_index: Option<u64>,
+    pub spent: UtxoStatusEvent,
+    pub amount: NativeCurrencyAmount,
+    pub release_date: Option<Timestamp>,
+}
+
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<UtxoStatusEvent> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> UtxoStatusEvent {
@@ -52,15 +61,6 @@ impl rand::distr::Distribution<UtxoStatusEvent> for rand::distr::StandardUniform
             _ => unreachable!(),
         }
     }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-pub struct UiUtxo {
-    pub received: UtxoStatusEvent,
-    pub aocl_leaf_index: Option<u64>,
-    pub spent: UtxoStatusEvent,
-    pub amount: NativeCurrencyAmount,
-    pub release_date: Option<Timestamp>,
 }
 
 #[cfg(feature = "mock-rpc")]

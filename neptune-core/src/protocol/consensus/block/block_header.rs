@@ -215,22 +215,6 @@ impl MastHash for BlockHeader {
     }
 }
 
-#[cfg(feature = "mock-rpc")]
-impl rand::distr::Distribution<BlockHeader> for rand::distr::StandardUniform {
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockHeader {
-        BlockHeader {
-            version: rng.random(),
-            height: rng.random(),
-            prev_block_digest: rng.random(),
-            timestamp: rng.random(),
-            pow: rng.random(),
-            cumulative_proof_of_work: rng.random(),
-            difficulty: rng.random(),
-            guesser_receiver_data: rng.random(),
-        }
-    }
-}
-
 /// The data needed to calculate the block hash, apart from the data present
 /// in the block header.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -337,6 +321,22 @@ impl BlockHeader {
                 },
             )
             .boxed()
+    }
+}
+
+#[cfg(feature = "mock-rpc")]
+impl rand::distr::Distribution<BlockHeader> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockHeader {
+        BlockHeader {
+            version: rng.random(),
+            height: rng.random(),
+            prev_block_digest: rng.random(),
+            timestamp: rng.random(),
+            pow: rng.random(),
+            cumulative_proof_of_work: rng.random(),
+            difficulty: rng.random(),
+            guesser_receiver_data: rng.random(),
+        }
     }
 }
 

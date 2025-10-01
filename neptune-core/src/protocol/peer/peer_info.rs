@@ -31,29 +31,6 @@ impl PeerConnectionInfo {
     }
 }
 
-#[cfg(any(feature = "mock-rpc", test))]
-impl rand::distr::Distribution<PeerConnectionInfo> for rand::distr::StandardUniform {
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> PeerConnectionInfo {
-        PeerConnectionInfo {
-            port_for_incoming_connections: if rng.random_bool(0.5) {
-                Some(rng.random())
-            } else {
-                None
-            },
-            connected_address: SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::new(
-                    rng.random(),
-                    rng.random(),
-                    rng.random(),
-                    rng.random(),
-                )),
-                rng.random_range(1..=65535),
-            ),
-            inbound: rng.random(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerInfo {
     peer_connection_info: PeerConnectionInfo,
@@ -181,6 +158,29 @@ impl PeerInfo {
     #[cfg(test)]
     pub(crate) fn set_connection_established(&mut self, new_timestamp: SystemTime) {
         self.own_timestamp_connection_established = new_timestamp;
+    }
+}
+
+#[cfg(any(feature = "mock-rpc", test))]
+impl rand::distr::Distribution<PeerConnectionInfo> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> PeerConnectionInfo {
+        PeerConnectionInfo {
+            port_for_incoming_connections: if rng.random_bool(0.5) {
+                Some(rng.random())
+            } else {
+                None
+            },
+            connected_address: SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+                    rng.random(),
+                    rng.random(),
+                    rng.random(),
+                    rng.random(),
+                )),
+                rng.random_range(1..=65535),
+            ),
+            inbound: rng.random(),
+        }
     }
 }
 
