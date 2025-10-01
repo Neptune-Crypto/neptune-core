@@ -1,5 +1,6 @@
 pub(crate) mod models;
 mod parser;
+mod rpc;
 
 use std::io;
 use std::io::stdout;
@@ -391,16 +392,48 @@ struct Config {
     #[clap(long)]
     data_dir: Option<PathBuf>,
 
+    /// Start RPC server mode
+    #[clap(long)]
+    rpc_mode: bool,
+
+    /// RPC server port (default: 9798)
+    #[clap(long, default_value = "9798")]
+    rpc_port: u16,
+
     #[clap(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize tracing
+    tracing_subscriber::fmt::init();
+
     let args: Config = Config::parse();
 
+    // Handle RPC server mode
+    if args.rpc_mode {
+        let data_dir = args.data_dir.unwrap_or_else(|| {
+            DataDirectory::get(None, Network::Main)
+                .unwrap()
+                .root_dir_path()
+        });
+
+        let rpc_config = rpc::RpcConfig::new(args.rpc_port, data_dir);
+
+        println!("Starting neptune-cli RPC server on port {}", args.rpc_port);
+        println!("Press Ctrl+C to stop the server");
+
+        rpc::start_rpc_server(rpc_config).await?;
+        return Ok(());
+    }
+
     // Handle commands that don't require a server
-    match &args.command {
+    let command = args
+        .command
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("No command specified"))?;
+    match &command {
         Command::Completions => {
             if let Some(shell) = Shell::from_env() {
                 generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
@@ -751,7 +784,7 @@ async fn main() -> Result<()> {
     }
     .into();
 
-    match args.command {
+    match command {
         Command::Completions
         | Command::GenerateWallet { .. }
         | Command::WhichWallet { .. }

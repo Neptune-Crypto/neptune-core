@@ -1828,6 +1828,8 @@ dependencies = [
  "test-strategy 0.4.3",
  "tiny-bip39",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
