@@ -34,6 +34,7 @@ use crate::protocol::consensus::block::validity::block_program::BlockProgram;
 use crate::protocol::consensus::block::validity::block_proof_witness::BlockProofWitness;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockProof;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
@@ -368,13 +369,13 @@ pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Bloc
 
 /// Return a list of `n` invalid, empty blocks.
 pub(crate) fn invalid_empty_blocks_with_proof_size(
-    ancestor: &Block,
+    parent: &Block,
     n: usize,
     network: Network,
     proof_size: usize,
 ) -> Vec<Block> {
     let mut blocks = vec![];
-    let mut predecessor = ancestor;
+    let mut predecessor = parent;
     for _ in 0..n {
         blocks.push(invalid_empty_block_with_proof_size(
             predecessor,
@@ -440,14 +441,15 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
 
 /// Create a block from a transaction without the hassle of proving but such
 /// that it appears valid.
-pub(crate) async fn fake_valid_block_from_block_tx_for_tests(
+async fn fake_valid_block_from_block_tx_for_tests(
     predecessor: &Block,
     tx: BlockTransaction,
-    seed: [u8; 32],
     network: Network,
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, network).await;
-    block.satisfy_pow(predecessor.header().difficulty, seed);
+    let block_height = predecessor.header().height;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+    block.satisfy_pow(predecessor.header().difficulty, consensus_rule_set);
 
     block
 }
@@ -518,13 +520,7 @@ pub async fn fake_block_successor_with_merged_tx(
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_block_tx_for_tests(
-            predecessor,
-            block_tx,
-            seed_bytes.pop().unwrap(),
-            network,
-        )
-        .await
+        fake_valid_block_from_block_tx_for_tests(predecessor, block_tx, network).await
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx, network).await
     }

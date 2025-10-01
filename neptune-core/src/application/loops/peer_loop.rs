@@ -2407,10 +2407,10 @@ mod tests {
             Ok(())
         }
 
-        /// Return three blocks:
+        /// Return four blocks:
         /// - one with invalid PoW and invalid mock-PoW
         /// - one with invalid PoW and valid mock-Pow
-        /// - one with valid Pow
+        /// - one with valid PoW
         async fn pow_related_blocks(
             network: Network,
             predecessor: &Block,
@@ -2436,12 +2436,16 @@ mod tests {
             assert!(block_with_valid_mock_pow.is_valid_mock_pow(difficulty.target()));
             assert!(!block_with_valid_mock_pow.has_proof_of_work(network, predecessor.header()));
 
-            let mut block_with_valid_pow = block;
-            block_with_valid_pow.satisfy_pow(difficulty, rand::random());
-            assert!(block_with_valid_pow.is_valid_mock_pow(difficulty.target()));
-            assert!(block_with_valid_pow.has_proof_of_work(network, predecessor.header()));
+            let mut block_with_valid_reboot_pow = block.clone();
+            block_with_valid_reboot_pow.satisfy_pow(difficulty, ConsensusRuleSet::Reboot);
+            assert!(block_with_valid_reboot_pow.is_valid_mock_pow(difficulty.target()));
+            assert!(block_with_valid_reboot_pow.has_proof_of_work(network, predecessor.header()));
 
-            (invalid_pow, block_with_valid_mock_pow, block_with_valid_pow)
+            (
+                invalid_pow,
+                block_with_valid_mock_pow,
+                block_with_valid_reboot_pow,
+            )
         }
 
         #[traced_test]
