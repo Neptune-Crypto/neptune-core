@@ -345,6 +345,11 @@ pub trait RPC {
     /// ```
     async fn confirmations(token: auth::Token) -> RpcResult<Option<BlockHeight>>;
 
+    /// Return the most recently generated address of the specified type. Does
+    /// not add a new key to the wallet, and does not change the derivation
+    /// index.
+    async fn latest_address(token: auth::Token, key_type: KeyType) -> RpcResult<ReceivingAddress>;
+
     /// Returns info about the peers we are connected to
     ///
     /// return value will be None if wallet has not received any incoming funds.
@@ -2362,6 +2367,30 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn latest_address(
+        self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        key_type: KeyType,
+    ) -> RpcResult<ReceivingAddress> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+
+        let current_counter = state.wallet_state.spending_key_counter(key_type);
+        let index = current_counter.checked_sub(1);
+        let Some(index) = index else {
+            return Err(RpcError::WalletKeyCounterIsZero);
+        };
+
+        Ok(state
+            .wallet_state
+            .nth_spending_key(key_type, index)
+            .to_address())
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn utxo_digest(
         self,
         _: context::Context,
@@ -4183,6 +4212,9 @@ pub mod error {
 
         #[error("Cannot restore membership proofs: {0}")]
         CannotRestoreMembershipProofs(String),
+
+        #[error("Wallet key counter is zero. This value should always be positive after wallet initialization")]
+        WalletKeyCounterIsZero,
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
@@ -4264,6 +4296,7 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
     use super::*;
@@ -4359,6 +4392,16 @@ mod tests {
         let _ = rpc_server.clone().own_instance_id(ctx, token).await;
         let _ = rpc_server.clone().block_height(ctx, token).await;
         let _ = rpc_server.clone().best_proposal(ctx, token).await;
+        let _ = rpc_server
+            .clone()
+            .latest_address(ctx, token, KeyType::Generation)
+            .await
+            .unwrap();
+        let _ = rpc_server
+            .clone()
+            .latest_address(ctx, token, KeyType::Symmetric)
+            .await
+            .unwrap();
         let _ = rpc_server.clone().peer_info(ctx, token).await;
         let _ = rpc_server
             .clone()
@@ -4563,6 +4606,58 @@ mod tests {
         let _ = rpc_server.shutdown(ctx, token).await;
 
         Ok(())
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn latest_address_and_get_new_address_are_consistent() {
+        let rpc_server = test_rpc_server(
+            WalletEntropy::new_random(),
+            2,
+            cli_args::Args::default_with_network(Network::Main),
+        )
+        .await;
+        let token = cookie_token(&rpc_server).await;
+
+        for key_type in KeyType::iter() {
+            let addr0 = rpc_server
+                .clone()
+                .latest_address(context::current(), token, key_type)
+                .await
+                .unwrap();
+            let addr1 = rpc_server
+                .clone()
+                .next_receiving_address(context::current(), token, key_type)
+                .await
+                .unwrap();
+            assert_ne!(addr0, addr1);
+
+            let addr1_again = rpc_server
+                .clone()
+                .latest_address(context::current(), token, key_type)
+                .await
+                .unwrap();
+            assert_eq!(addr1, addr1_again);
+
+            let addr2 = rpc_server
+                .clone()
+                .next_receiving_address(context::current(), token, key_type)
+                .await
+                .unwrap();
+            let addr2_again = rpc_server
+                .clone()
+                .latest_address(context::current(), token, key_type)
+                .await
+                .unwrap();
+            assert_eq!(addr2, addr2_again);
+
+            // Ensure endpoint is idempotent
+            let addr2_again_again = rpc_server
+                .clone()
+                .latest_address(context::current(), token, key_type)
+                .await
+                .unwrap();
+            assert_eq!(addr2, addr2_again_again);
+        }
     }
 
     #[traced_test]
