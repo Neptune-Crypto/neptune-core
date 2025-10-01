@@ -936,7 +936,9 @@ impl Block {
             return true;
         }
 
-        self.pow_verify(threshold)
+        let consensus_rule_set =
+            ConsensusRuleSet::infer_from(network, previous_block_header.height.next());
+        self.pow_verify(threshold, consensus_rule_set)
     }
 
     /// Produce the MAST authentication paths for the `pow` field on
@@ -964,6 +966,7 @@ impl Block {
         &self,
         maybe_cancel_channel: Option<&dyn Cancelable>,
         num_guesser_threads: Option<usize>,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
         // build a rayon thread pool that respects the limitation on the number
         // of threads
@@ -974,8 +977,14 @@ impl Block {
             .unwrap();
 
         let auth_paths = self.pow_mast_paths();
+        let prev_block_digest = self.header().prev_block_digest;
         thread_pool.install(|| {
-            Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(auth_paths, maybe_cancel_channel)
+            Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(
+                auth_paths,
+                maybe_cancel_channel,
+                consensus_rule_set,
+                prev_block_digest,
+            )
         })
     }
 
@@ -1001,9 +1010,17 @@ impl Block {
     }
 
     /// Verify that block digest is less than threshold and integral.
-    fn pow_verify(&self, target: Digest) -> bool {
+    fn pow_verify(&self, target: Digest, consensus_rule_set: ConsensusRuleSet) -> bool {
         let auth_paths = self.pow_mast_paths();
-        self.header().pow.validate(auth_paths, target).is_ok()
+        self.header()
+            .pow
+            .validate(
+                auth_paths,
+                target,
+                consensus_rule_set,
+                self.header().prev_block_digest,
+            )
+            .is_ok()
     }
 
     pub fn set_header_pow(&mut self, pow: BlockPow) {
@@ -1117,6 +1134,7 @@ pub(crate) mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use strum::IntoEnumIterator;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
     use tracing_test::traced_test;
 
@@ -1133,6 +1151,7 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
     use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
     use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
@@ -1220,21 +1239,19 @@ pub(crate) mod tests {
 
         /// Satisfy PoW for this block. Only to be used for tests since this
         /// function cannot be cancelled.
-        pub(crate) fn satisfy_pow(&mut self, difficulty: Difficulty, seed: [u8; 32]) {
-            let guesser_buffer = self.guess_preprocess(None, None);
-            println!("Trying to guess for difficulty: {difficulty}");
+        pub(crate) fn satisfy_pow(
+            &mut self,
+            parent_difficulty: Difficulty,
+            consensus_rule_set: ConsensusRuleSet,
+        ) {
+            println!("Trying to guess for difficulty: {parent_difficulty}");
             assert!(
-                difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
+                parent_difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
                 "Don't use high difficulty in test"
             );
-            let target = difficulty.target();
-            let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(seed);
 
-            let valid_pow = loop {
-                if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
-                    break valid_pow;
-                }
-            };
+            let puzzle = ProofOfWorkPuzzle::new(self.clone(), parent_difficulty);
+            let valid_pow = puzzle.solve(consensus_rule_set);
 
             self.set_header_pow(valid_pow);
         }
@@ -1286,23 +1303,27 @@ pub(crate) mod tests {
     #[test]
     fn guess_nonce_happy_path() {
         let network = Network::Main;
-        let mut invalid_block = invalid_empty_block(&Block::genesis(network), network);
-        let guesser_buffer = invalid_block.guess_preprocess(None, None);
-        let target = Difficulty::from(2u32).target();
-        let mut rng = rng();
+        let genesis = Block::genesis(network);
+        let mut invalid_block = invalid_empty_block(&genesis, network);
 
-        let valid_pow = loop {
-            if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
-                break valid_pow;
-            }
-        };
+        for consensus_rule_set in ConsensusRuleSet::iter() {
+            let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);
+            let target = Difficulty::from(2u32).target();
+            let mut rng = rng();
 
-        assert!(
-            !invalid_block.pow_verify(target),
-            "Pow verification must fail prior to setting PoW"
-        );
-        invalid_block.set_header_pow(valid_pow);
-        assert!(invalid_block.pow_verify(target));
+            let valid_pow = loop {
+                if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
+                    break valid_pow;
+                }
+            };
+
+            assert!(
+                !invalid_block.pow_verify(target, consensus_rule_set),
+                "Pow verification must fail prior to setting PoW"
+            );
+            invalid_block.set_header_pow(valid_pow);
+            assert!(invalid_block.pow_verify(target, consensus_rule_set));
+        }
     }
 
     #[test]

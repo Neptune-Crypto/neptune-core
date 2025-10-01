@@ -5,10 +5,11 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe_array;
 use tracing::info;
 
-use crate::application::rpc::server::BlockHeader;
 use crate::application::rpc::server::NativeCurrencyAmount;
 use crate::protocol::consensus::block::block_header::BlockPow;
+use crate::protocol::consensus::block::difficulty_control::Difficulty;
 use crate::protocol::consensus::block::pow::PowMastPaths;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::BFieldElement;
 use crate::Block;
 
@@ -40,13 +41,13 @@ pub struct ProofOfWorkPuzzle {
 impl ProofOfWorkPuzzle {
     /// Return a PoW puzzle assuming that the caller has already set the correct
     /// guesser digest.
-    pub fn new(block_proposal: Block, latest_block_header: BlockHeader) -> Self {
+    pub fn new(block_proposal: Block, parent_difficulty: Difficulty) -> Self {
         let guesser_reward = block_proposal
             .body()
             .total_guesser_reward()
             .expect("Block proposal must have well-defined guesser reward");
         let auth_paths = block_proposal.pow_mast_paths();
-        let threshold = latest_block_header.difficulty.target();
+        let threshold = parent_difficulty.target();
         let prev_block = block_proposal.header().prev_block_digest;
 
         let id = Tip5::hash(&auth_paths);
@@ -63,10 +64,11 @@ impl ProofOfWorkPuzzle {
     /// Solve a PoW from a puzzle.
     ///
     /// Takes a very long time and cannot be cancelled while running.
-    pub fn solve(&self) -> BlockPow {
+    pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> BlockPow {
         use rayon::prelude::*;
         info!("Starting PoW preprocessing");
-        let guesser_buffer = BlockPow::preprocess(self.auth_paths, None);
+        let guesser_buffer =
+            BlockPow::preprocess(self.auth_paths, None, consensus_rule_set, self.prev_block);
         info!("Done with PoW preprocessing");
 
         info!("Now attempting to find valid nonce");
