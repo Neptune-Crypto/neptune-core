@@ -18,13 +18,14 @@ use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 pub enum ConsensusRuleSet {
     #[default]
     Reboot,
+    HardforkAlpha,
 }
 
 impl ConsensusRuleSet {
     /// Maximum block size in number of BFieldElements
     pub(crate) const fn max_block_size(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => {
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -37,23 +38,46 @@ impl ConsensusRuleSet {
     /// planned hard or soft forks that activate at a given height. The first
     /// argument is necessary because the forks can activate at different
     /// heights based on the network.
-    pub(crate) fn infer_from(_network: Network, _block_height: BlockHeight) -> Self {
-        Self::Reboot
+    pub(crate) fn infer_from(network: Network, block_height: BlockHeight) -> Self {
+        match network {
+            Network::Main => {
+                if block_height < 12_000u64.into() {
+                    ConsensusRuleSet::Reboot
+                } else {
+                    ConsensusRuleSet::HardforkAlpha
+                }
+            }
+            Network::TestnetMock => ConsensusRuleSet::HardforkAlpha,
+            Network::RegTest => ConsensusRuleSet::HardforkAlpha,
+            Network::Testnet(_) => {
+                if block_height < 120u64.into() {
+                    ConsensusRuleSet::Reboot
+                } else {
+                    ConsensusRuleSet::HardforkAlpha
+                }
+            }
+        }
     }
 
     pub(crate) fn max_num_inputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
+            }
         }
     }
     pub(crate) fn max_num_outputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
+            }
         }
     }
     pub(crate) fn max_num_announcements(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
+            }
         }
     }
 }
