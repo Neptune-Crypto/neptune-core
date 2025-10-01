@@ -19,7 +19,7 @@ pub struct RpcConfig {
     /// Data directory for cookie storage
     pub data_dir: PathBuf,
     /// Whether to use shared cookie with neptune-core
-    pub use_shared_cookie: bool,
+    pub _use_shared_cookie: bool,
 }
 
 impl RpcConfig {
@@ -28,7 +28,7 @@ impl RpcConfig {
         Self {
             port,
             data_dir,
-            use_shared_cookie: true, // Default to shared cookie
+            _use_shared_cookie: true, // Default to shared cookie
         }
     }
 }

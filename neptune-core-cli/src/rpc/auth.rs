@@ -3,9 +3,9 @@
 //! Handles cookie-based authentication following the same pattern as neptune-core.
 
 use anyhow::{Context, Result};
+use hex;
 use rand::{distr::Alphanumeric, Rng};
 use std::path::PathBuf;
-use hex;
 
 /// Cookie authentication token
 #[derive(Debug, Clone, PartialEq)]
@@ -79,7 +79,7 @@ impl Cookie {
     }
 
     /// Validate authentication token
-    pub fn auth(&self, valid_tokens: &[Cookie]) -> Result<()> {
+    pub fn _auth(&self, valid_tokens: &[Cookie]) -> Result<()> {
         if valid_tokens.contains(self) {
             Ok(())
         } else {
@@ -88,12 +88,12 @@ impl Cookie {
     }
 
     /// Get cookie bytes for serialization
-    pub fn as_bytes(&self) -> &[u8; 32] {
+    pub fn _as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 
     /// Get cookie as hex string for HTTP headers
-    pub fn as_hex(&self) -> String {
+    pub fn _as_hex(&self) -> String {
         hex::encode(self.0)
     }
 }

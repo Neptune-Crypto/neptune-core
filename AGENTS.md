@@ -159,6 +159,75 @@ git push origin master
 - Try IPv6 connections if no static IPv4
 - Use known peer addresses: `51.15.139.238:9798`, `139.162.193.206:9798`
 
+## Adding New RPC Methods
+
+### Pattern for Standalone Methods (No Server Required)
+
+1. **Add method to `handlers.rs`**:
+
+   ```rust
+   /// Method description
+   async fn method_name(param1: &str, param2: &str) -> Result<String> {
+       // Implementation using neptune_cash types directly
+       // No tarpc connection needed
+   }
+   ```
+
+2. **Add to `handle_request` function**:
+
+   ```rust
+   "method_name" => {
+       let param1 = extract_string_param(&params, "param1")?;
+       let param2 = extract_string_param(&params, "param2")?;
+       method_name(&param1, &param2).await
+   }
+   ```
+
+3. **Add to `requires_auth` function** (usually `false` for standalone methods):
+   ```rust
+   let public_methods = [
+       // ... existing methods ...
+       "method_name",
+   ];
+   ```
+
+### Pattern for Server-Dependent Methods (Requires neptune-core)
+
+1. **Extract connection logic** from `main.rs` into reusable module
+2. **Add method to `handlers.rs`**:
+
+   ```rust
+   /// Method description
+   async fn method_name(param1: &str, param2: &str) -> Result<String> {
+       // Connect to neptune-core using extracted connection logic
+       // Call tarpc method
+       // Return formatted response
+   }
+   ```
+
+3. **Add to `handle_request` function** (same as standalone)
+4. **Add to `requires_auth` function** (usually `true` for server methods)
+
+### Helper Functions Available
+
+- `extract_string_param(params, "key")` - Extract string parameter
+- `extract_u32_param(params, "key")` - Extract u32 parameter
+- `get_wallet_path(network)` - Get wallet file path
+- `generate_completions()` - Generate shell completions
+- `generate_help()` - Generate help text
+
+### Testing New Methods
+
+```bash
+# Start RPC server
+neptune-cli --rpc-mode --rpc-port 9797
+
+# Test with curl
+curl -X POST http://localhost:9797 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"method_name","params":{"param1":"value1"},"id":1}'
+```
+
 ## Contributing
 
 - Follow the existing code style and patterns

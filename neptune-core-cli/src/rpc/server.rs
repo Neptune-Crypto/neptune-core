@@ -164,9 +164,9 @@ fn parse_http_request(request: &str) -> Result<HttpRequest> {
     }
 
     Ok(HttpRequest {
-        method: method.to_string(),
-        path: path.to_string(),
-        version: version.to_string(),
+        _method: method.to_string(),
+        _path: path.to_string(),
+        _version: version.to_string(),
         headers,
         body,
     })
@@ -175,9 +175,9 @@ fn parse_http_request(request: &str) -> Result<HttpRequest> {
 /// Simple HTTP request structure
 #[derive(Debug)]
 struct HttpRequest {
-    method: String,
-    path: String,
-    version: String,
+    _method: String,
+    _path: String,
+    _version: String,
     headers: Vec<String>,
     body: Option<String>,
 }
@@ -209,10 +209,9 @@ fn validate_cookie(http_request: &HttpRequest, server_cookie: &Cookie) -> bool {
 }
 
 /// Check if a method requires authentication
-fn requires_auth(method: &str) -> bool {
-    // Public methods that don't require authentication
-    let public_methods = ["hello", "network", "help"];
-    !public_methods.contains(&method)
+fn requires_auth(_method: &str) -> bool {
+    // All methods require authentication for security
+    true
 }
 
 /// Create HTTP response
