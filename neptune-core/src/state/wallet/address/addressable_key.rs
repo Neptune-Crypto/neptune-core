@@ -18,6 +18,7 @@ use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[repr(u8)]
 pub enum KeyType {
     /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]
