@@ -46,7 +46,7 @@ pub async fn start(config: crate::rpc::RpcConfig) -> Result<()> {
 }
 
 /// Handle individual HTTP connection
-async fn handle_connection(mut stream: TcpStream, _cookie: Cookie) -> Result<()> {
+async fn handle_connection(mut stream: TcpStream, server_cookie: Cookie) -> Result<()> {
     let mut buffer = [0; 4096];
 
     match stream.read(&mut buffer).await {
@@ -57,27 +57,46 @@ async fn handle_connection(mut stream: TcpStream, _cookie: Cookie) -> Result<()>
             // Parse HTTP request
             let http_request = parse_http_request(&request_str)?;
 
+            // Extract and validate cookie
+            let cookie_valid = validate_cookie(&http_request, &server_cookie);
+
             // Handle JSON-RPC request
             let response = if let Some(json_body) = http_request.body {
                 match serde_json::from_str::<JsonRpcRequest>(&json_body) {
-                    Ok(req) => match handle_request(req).await {
-                        Ok(rpc_response) => {
-                            let response_body = serde_json::to_string(&rpc_response)?;
-                            create_http_response(200, "OK", &response_body)
-                        }
-                        Err(e) => {
+                    Ok(req) => {
+                        // Check if method requires authentication
+                        if requires_auth(&req.method) && !cookie_valid {
                             let error_response = serde_json::json!({
                                 "jsonrpc": "2.0",
                                 "error": {
-                                    "code": -32603,
-                                    "message": format!("Internal error: {}", e)
+                                    "code": -32001,
+                                    "message": "Authentication required"
                                 },
-                                "id": null
+                                "id": req.id
                             });
                             let response_body = serde_json::to_string(&error_response)?;
-                            create_http_response(200, "OK", &response_body)
+                            create_http_response(401, "Unauthorized", &response_body)
+                        } else {
+                            match handle_request(req).await {
+                                Ok(rpc_response) => {
+                                    let response_body = serde_json::to_string(&rpc_response)?;
+                                    create_http_response(200, "OK", &response_body)
+                                }
+                                Err(e) => {
+                                    let error_response = serde_json::json!({
+                                        "jsonrpc": "2.0",
+                                        "error": {
+                                            "code": -32603,
+                                            "message": format!("Internal error: {}", e)
+                                        },
+                                        "id": null
+                                    });
+                                    let response_body = serde_json::to_string(&error_response)?;
+                                    create_http_response(200, "OK", &response_body)
+                                }
+                            }
                         }
-                    },
+                    }
                     Err(e) => {
                         let error_response = serde_json::json!({
                             "jsonrpc": "2.0",
@@ -124,19 +143,31 @@ fn parse_http_request(request: &str) -> Result<HttpRequest> {
     let path = parts[1];
     let version = parts[2];
 
-    // Find body (after empty line)
-    let mut body = None;
+    // Parse headers
+    let mut headers = Vec::new();
+    let mut body_start = 0;
     for (i, line) in lines.iter().enumerate() {
-        if line.is_empty() && i + 1 < lines.len() {
-            body = Some(lines[i + 1..].join("\n"));
+        if line.is_empty() {
+            body_start = i + 1;
             break;
         }
+        if i > 0 {
+            // Skip request line
+            headers.push(line.to_string());
+        }
+    }
+
+    // Find body (after empty line)
+    let mut body = None;
+    if body_start < lines.len() {
+        body = Some(lines[body_start..].join("\n"));
     }
 
     Ok(HttpRequest {
         method: method.to_string(),
         path: path.to_string(),
         version: version.to_string(),
+        headers,
         body,
     })
 }
@@ -147,7 +178,41 @@ struct HttpRequest {
     method: String,
     path: String,
     version: String,
+    headers: Vec<String>,
     body: Option<String>,
+}
+
+/// Validate cookie from HTTP request
+fn validate_cookie(http_request: &HttpRequest, server_cookie: &Cookie) -> bool {
+    // Look for Cookie header
+    for line in http_request.headers.iter() {
+        if line.to_lowercase().starts_with("cookie:") {
+            let cookie_value = line.split(':').nth(1).unwrap_or("").trim();
+            // Look for neptune-cli=value format
+            if let Some(cookie_part) = cookie_value
+                .split(';')
+                .find(|part| part.trim().starts_with("neptune-cli="))
+            {
+                let hex_value = cookie_part.split('=').nth(1).unwrap_or("").trim();
+                if let Ok(cookie_bytes) = hex::decode(hex_value) {
+                    if cookie_bytes.len() == 32 {
+                        let mut cookie_array = [0u8; 32];
+                        cookie_array.copy_from_slice(&cookie_bytes);
+                        let client_cookie = Cookie::from(cookie_array);
+                        return client_cookie == *server_cookie;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Check if a method requires authentication
+fn requires_auth(method: &str) -> bool {
+    // Public methods that don't require authentication
+    let public_methods = ["hello", "network", "help"];
+    !public_methods.contains(&method)
 }
 
 /// Create HTTP response

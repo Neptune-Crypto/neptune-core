@@ -5,6 +5,7 @@
 use anyhow::{Context, Result};
 use rand::{distr::Alphanumeric, Rng};
 use std::path::PathBuf;
+use hex;
 
 /// Cookie authentication token
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +90,11 @@ impl Cookie {
     /// Get cookie bytes for serialization
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    /// Get cookie as hex string for HTTP headers
+    pub fn as_hex(&self) -> String {
+        hex::encode(self.0)
     }
 }
 

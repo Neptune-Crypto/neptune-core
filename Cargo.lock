@@ -1816,6 +1816,7 @@ dependencies = [
  "bech32",
  "clap",
  "clap_complete",
+ "hex",
  "itertools 0.11.0",
  "neptune-cash",
  "proptest",
