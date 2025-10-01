@@ -4213,7 +4213,7 @@ pub mod error {
         #[error("Cannot restore membership proofs: {0}")]
         CannotRestoreMembershipProofs(String),
 
-        #[error("Wallet key counter is zero. This value should always be positive after wallet initialization")]
+        #[error("Wallet key counter is zero. Must be positive after init")]
         WalletKeyCounterIsZero,
     }
 
