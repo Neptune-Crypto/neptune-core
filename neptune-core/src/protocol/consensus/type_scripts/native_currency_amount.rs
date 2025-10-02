@@ -148,6 +148,28 @@ impl NativeCurrencyAmount {
         self.0 as f64
     }
 
+    /// Return the number of whole coins, rounded up to nearest integeer.
+    /// Negative numbers are rounded up to nearest whole negative number such
+    /// that -2.5 is rounded up to -2.
+    ///
+    /// # Panics
+    ///
+    /// - If the amount is outside of the range between minimum and
+    ///   maximum allowed value.
+    pub fn ceil_num_whole_coins(&self) -> i32 {
+        assert!(
+            *self <= Self::max() && *self >= Self::min(),
+            "Amount must be contained between min and max"
+        );
+
+        // Manual implementation of `div_ceil`
+        let conversion_factor = Self::conversion_factor();
+        let term = i128::from(self.is_positive()) * (conversion_factor - 1);
+        ((self.0 + term) / conversion_factor)
+            .try_into()
+            .expect("Any amount divided conversion factor must be a valid i32")
+    }
+
     /// Convert the amount (of Neptune Coins) to Neptune atomic units (nau).
     ///
     /// Quantities whose unit is nau are used for internal logic and are not to
@@ -585,6 +607,8 @@ pub(crate) mod tests {
     use tasm_lib::triton_vm::isa::instruction::AnInstruction;
     use test_strategy::proptest;
 
+    use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+
     use super::*;
 
     impl NativeCurrencyAmount {
@@ -958,6 +982,67 @@ pub(crate) mod tests {
     ) {
         let val = NativeCurrencyAmount(num_naus);
         prop_assert_eq!(val, NativeCurrencyAmount::from_nau(val.to_nau()));
+    }
+
+    #[proptest]
+    fn ceil_num_whole_coins_integers_map_to_integers(#[strategy(0..42_000_000i32)] num_coins: i32) {
+        let one_nau = NativeCurrencyAmount::one_nau();
+        let amt = NativeCurrencyAmount::coins(num_coins as u32);
+        let amt_plus = amt + one_nau;
+        let amt_minus = amt.checked_sub(&one_nau).unwrap();
+        prop_assert_eq!(num_coins, amt_minus.ceil_num_whole_coins());
+        prop_assert_eq!(num_coins, amt.ceil_num_whole_coins());
+        prop_assert_eq!(num_coins + 1, amt_plus.ceil_num_whole_coins());
+
+        prop_assert_eq!(-num_coins, (-amt).ceil_num_whole_coins());
+        prop_assert_eq!(-num_coins, (-amt_plus).ceil_num_whole_coins());
+        prop_assert_eq!(-num_coins + 1, (-amt_minus).ceil_num_whole_coins());
+    }
+
+    #[test]
+    fn ceil_num_whole_coins_unit_test() {
+        let zero = NativeCurrencyAmount::zero();
+        let one_nau = NativeCurrencyAmount::from_nau(1);
+        let two_nau = NativeCurrencyAmount::from_nau(2);
+        let one_coin = NativeCurrencyAmount::coins(1);
+        let six_coins = NativeCurrencyAmount::coins(6);
+        assert_eq!(0, zero.ceil_num_whole_coins());
+        assert_eq!(1, one_nau.ceil_num_whole_coins());
+        assert_eq!(1, two_nau.ceil_num_whole_coins());
+        assert_eq!(
+            1,
+            (one_coin.checked_sub(&one_nau).unwrap()).ceil_num_whole_coins()
+        );
+        assert_eq!(1, one_coin.ceil_num_whole_coins());
+        assert_eq!(2, (one_coin + one_nau).ceil_num_whole_coins());
+        assert_eq!(
+            128,
+            (INITIAL_BLOCK_SUBSIDY.checked_sub(&one_nau).unwrap()).ceil_num_whole_coins()
+        );
+        assert_eq!(128, INITIAL_BLOCK_SUBSIDY.ceil_num_whole_coins());
+        assert_eq!(
+            129,
+            (INITIAL_BLOCK_SUBSIDY + one_nau).ceil_num_whole_coins()
+        );
+        assert_eq!(
+            42_000_000,
+            NativeCurrencyAmount::max().ceil_num_whole_coins()
+        );
+        assert_eq!(6, six_coins.ceil_num_whole_coins());
+        assert_eq!(7, (six_coins + one_nau).ceil_num_whole_coins());
+
+        assert_eq!(-1, (-one_coin).ceil_num_whole_coins());
+        assert_eq!(
+            -42_000_000,
+            NativeCurrencyAmount::min().ceil_num_whole_coins()
+        );
+        assert_eq!(0, (-one_nau).ceil_num_whole_coins());
+        assert_eq!(0, (-two_nau).ceil_num_whole_coins());
+        assert_eq!(
+            0,
+            (-(one_coin.checked_sub(&one_nau).unwrap())).ceil_num_whole_coins()
+        );
+        assert_eq!(-1, (-(one_coin + one_nau)).ceil_num_whole_coins());
     }
 
     #[proptest]
