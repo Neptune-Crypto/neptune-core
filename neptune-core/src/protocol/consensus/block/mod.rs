@@ -105,6 +105,9 @@ pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmo
 /// whose timestamp exceeds now with this value or more.
 pub(crate) const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
 
+/// The size of the premine.
+pub const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
+
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
@@ -1153,7 +1156,6 @@ pub(crate) mod tests {
     use crate::util_types::archival_mmr::ArchivalMmr;
 
     pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
-    pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 
     impl Block {
         pub(crate) fn set_proof(&mut self, proof: BlockProof) {

@@ -175,9 +175,9 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::protocol::consensus::block::tests::PREMINE_MAX_SIZE;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::Network;
+    use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
