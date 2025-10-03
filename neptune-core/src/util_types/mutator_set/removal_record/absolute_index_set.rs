@@ -253,6 +253,16 @@ mod neptune_arbitrary {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<AbsoluteIndexSet> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> AbsoluteIndexSet {
+        AbsoluteIndexSet {
+            minimum: rng.random(),
+            distances: rng.random(),
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest::prelude::TestCaseError;

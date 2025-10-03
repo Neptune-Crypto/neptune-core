@@ -3,6 +3,7 @@ use std::ops::Deref;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -77,5 +78,19 @@ impl Deref for BlockAppendix {
 
     fn deref(&self) -> &Self::Target {
         &self.claims
+    }
+}
+
+impl rand::distr::Distribution<BlockAppendix> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockAppendix {
+        BlockAppendix {
+            claims: (0..10)
+                .map(|_| {
+                    Claim::new(rng.random())
+                        .with_input((0..10).map(|_| rng.random()).collect_vec())
+                        .with_output((0..10).map(|_| rng.random()).collect_vec())
+                })
+                .collect_vec(),
+        }
     }
 }

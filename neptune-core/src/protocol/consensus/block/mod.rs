@@ -1123,6 +1123,24 @@ impl Block {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<Block> for rand::distr::StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Block {
+        use crate::api::export::NeptuneProof;
+
+        let kernel = rng.random::<BlockKernel>();
+        let proof = BlockProof::SingleProof(NeptuneProof::from(
+            (0..10).map(|_| rng.random()).collect_vec(),
+        ));
+        let digest = OnceLock::new();
+        Block {
+            kernel,
+            proof,
+            digest,
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use macro_rules_attr::apply;
@@ -1255,6 +1273,13 @@ pub(crate) mod tests {
             let valid_pow = puzzle.solve(consensus_rule_set);
 
             self.set_header_pow(valid_pow);
+        }
+
+        #[inline]
+        pub(crate) fn set_header_height(&mut self, block_height: BlockHeight) {
+            self.kernel.header.height = block_height;
+
+            self.unset_digest();
         }
     }
 
