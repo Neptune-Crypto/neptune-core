@@ -5,9 +5,18 @@
 use anyhow::Result;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::application::config::network::Network;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::error::RpcError;
+use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::state::wallet::wallet_file::WalletFile;
 use neptune_cash::state::wallet::wallet_file::WalletFileContext;
 use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
+use tarpc::client;
+use tarpc::context;
+use tarpc::tokio_serde::formats::Json;
+use tracing::{debug, info};
 
 /// JSON-RPC request structure
 #[derive(Debug, Deserialize)]
@@ -67,6 +76,67 @@ impl JsonRpcResponse {
             },
             id,
         })
+    }
+}
+
+/// Connect to neptune-core using existing connection logic from main.rs
+async fn connect_to_neptune_core(
+    port: u16,
+    data_dir: Option<PathBuf>,
+) -> Result<(RPCClient, auth::Token)> {
+    debug!("Connecting to neptune-core on port {}", port);
+
+    // Exact same connection pattern as main.rs lines 755-785
+    let server_socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let transport = tarpc::serde_transport::tcp::connect(server_socket, Json::default)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to connect to neptune-core: {}", e))?;
+
+    let client = RPCClient::new(client::Config::default(), transport).spawn();
+    debug!("Connected to neptune-core successfully");
+
+    // Copy get_cookie_hint logic from main.rs
+    let auth::CookieHint {
+        data_directory,
+        network: _network,
+    } = get_cookie_hint(&client, data_dir).await?;
+
+    // Use neptune-core's existing cookie system (same as main.rs)
+    let token: auth::Token = auth::Cookie::try_load(&data_directory).await?.into();
+    debug!("Loaded authentication token from {:?}", data_directory);
+
+    Ok((client, token))
+}
+
+/// Get cookie hint from neptune-core (copied from main.rs lines 1357-1378)
+async fn get_cookie_hint(
+    client: &RPCClient,
+    data_dir: Option<PathBuf>,
+) -> Result<auth::CookieHint> {
+    // If data_dir is provided, use it directly
+    if let Some(data_dir) = data_dir {
+        let network = client.network(context::current()).await??;
+        let data_directory = DataDirectory::get(Some(data_dir), network)?;
+        return Ok(auth::CookieHint {
+            data_directory,
+            network,
+        });
+    }
+
+    // Otherwise, try to get hint from neptune-core
+    let result = client.cookie_hint(context::current()).await?;
+    match result {
+        Ok(hint) => Ok(hint),
+        Err(RpcError::CookieHintDisabled) => {
+            // Fallback to default data directory
+            let network = client.network(context::current()).await??;
+            let data_directory = DataDirectory::get(None, network)?;
+            Ok(auth::CookieHint {
+                data_directory,
+                network,
+            })
+        }
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -157,6 +227,298 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
                 .unwrap_or_else(|| "main".to_string());
             let result_text = shamir_combine(&shares, &network).await?;
             let result = serde_json::Value::String(result_text);
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        // Server-Dependent Methods (Require neptune-core connection)
+        "block_height" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let height = client.block_height(ctx, token).await??;
+            let result = serde_json::Value::String(height.to_string());
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "network" => {
+            let (client, _token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let network = client.network(ctx).await??;
+            let result = serde_json::Value::String(network.to_string());
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "confirmed_available_balance" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let balance = client.confirmed_available_balance(ctx, token).await??;
+            let result = serde_json::Value::String(balance.to_string());
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "dashboard_overview_data" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            match client.dashboard_overview_data(ctx, token).await {
+                Ok(Ok(dashboard_data)) => {
+                    // Create a simplified version that converts problematic fields to strings
+                    let simplified_data = serde_json::json!({
+                        "tip_digest": dashboard_data.tip_digest.to_hex(),
+                        "tip_header": {
+                            "height": dashboard_data.tip_header.height,
+                            "timestamp": dashboard_data.tip_header.timestamp,
+                        },
+                        "syncing": dashboard_data.syncing,
+                        "confirmed_available_balance": dashboard_data.confirmed_available_balance.to_string(),
+                        "confirmed_total_balance": dashboard_data.confirmed_total_balance.to_string(),
+                        "unconfirmed_available_balance": dashboard_data.unconfirmed_available_balance.to_string(),
+                        "unconfirmed_total_balance": dashboard_data.unconfirmed_total_balance.to_string(),
+                        "mempool_size": dashboard_data.mempool_size,
+                        "mempool_total_tx_count": dashboard_data.mempool_total_tx_count,
+                        "mempool_own_tx_count": dashboard_data.mempool_own_tx_count,
+                        "peer_count": dashboard_data.peer_count,
+                        "max_num_peers": dashboard_data.max_num_peers,
+                        "mining_status": dashboard_data.mining_status.map(|s| s.to_string()),
+                        "proving_capability": dashboard_data.proving_capability.to_string(),
+                        "confirmations": dashboard_data.confirmations.map(|c| c.to_string()),
+                        "cpu_temp": dashboard_data.cpu_temp,
+                    });
+                    Ok(JsonRpcResponse::success(request.id, simplified_data))
+                }
+                Ok(Err(e)) => {
+                    eprintln!("RPC error: {:?}", e);
+                    Ok(JsonRpcResponse::error(
+                        request.id,
+                        -32603,
+                        format!("RPC error: {:?}", e),
+                    ))
+                }
+                Err(e) => {
+                    eprintln!("Connection error: {}", e);
+                    Ok(JsonRpcResponse::error(
+                        request.id,
+                        -32603,
+                        format!("Connection error: {}", e),
+                    ))
+                }
+            }
+        }
+
+        // Phase 1: Core Wallet Functionality
+        "next_receiving_address" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let key_type = extract_string_param(&request.params, "key_type")
+                .unwrap_or_else(|| "Generation".to_string());
+            let key_type_enum = match key_type.as_str() {
+                "Generation" => neptune_cash::api::export::KeyType::Generation,
+                "Symmetric" => neptune_cash::api::export::KeyType::Symmetric,
+                _ => neptune_cash::api::export::KeyType::Generation,
+            };
+            debug!(
+                "Generating next receiving address with key_type: {}",
+                key_type
+            );
+            let address = client
+                .next_receiving_address(ctx, token, key_type_enum)
+                .await??;
+            let result = serde_json::Value::String(
+                address.to_bech32m(neptune_cash::api::export::Network::Main)?,
+            );
+            info!("Generated receiving address successfully");
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "wallet_status" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let wallet_status = client.wallet_status(ctx, token).await??;
+            let result = serde_json::to_value(wallet_status)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "confirmations" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let confirmations = client.confirmations(ctx, token).await??;
+            let result = match confirmations {
+                Some(c) => serde_json::Value::String(c.to_string()),
+                None => serde_json::Value::Null,
+            };
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "send" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let outputs = extract_string_param(&request.params, "outputs")
+                .ok_or_else(|| anyhow::anyhow!("Missing outputs parameter"))?;
+            let change_policy = extract_string_param(&request.params, "change_policy")
+                .ok_or_else(|| anyhow::anyhow!("Missing change_policy parameter"))?;
+            let fee = extract_string_param(&request.params, "fee")
+                .ok_or_else(|| anyhow::anyhow!("Missing fee parameter"))?;
+
+            // Parse outputs from JSON string
+            let outputs_parsed: Vec<neptune_cash::api::export::OutputFormat> =
+                serde_json::from_str(&outputs)?;
+            let change_policy_parsed: neptune_cash::api::export::ChangePolicy =
+                serde_json::from_str(&change_policy)?;
+            let fee_parsed: neptune_cash::api::export::NativeCurrencyAmount =
+                serde_json::from_str(&fee)?;
+
+            let tx_artifacts = client
+                .send(ctx, token, outputs_parsed, change_policy_parsed, fee_parsed)
+                .await??;
+            let result = serde_json::to_value(tx_artifacts)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "claim_utxo" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let utxo_transfer_encrypted =
+                extract_string_param(&request.params, "utxo_transfer_encrypted")
+                    .ok_or_else(|| anyhow::anyhow!("Missing utxo_transfer_encrypted parameter"))?;
+            let max_search_depth = extract_u32_param(&request.params, "max_search_depth")
+                .map(|d| Some(d as u64))
+                .unwrap_or(None);
+
+            let claimed = client
+                .claim_utxo(ctx, token, utxo_transfer_encrypted, max_search_depth)
+                .await??;
+            let result = serde_json::Value::Bool(claimed);
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        // Phase 2: Enhanced Features
+        "list_own_coins" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let coins = client.list_own_coins(ctx, token).await??;
+            let result = serde_json::to_value(coins)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "history" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let history = client.history(ctx, token).await??;
+            let result = serde_json::to_value(history)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "validate_address" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let address = extract_string_param(&request.params, "address")
+                .ok_or_else(|| anyhow::anyhow!("Missing address parameter"))?;
+            let network = extract_string_param(&request.params, "network")
+                .unwrap_or_else(|| "main".to_string());
+            let network_enum = match network.as_str() {
+                "main" => neptune_cash::api::export::Network::Main,
+                "testnet" => neptune_cash::api::export::Network::Testnet(0),
+                "regtest" => neptune_cash::api::export::Network::RegTest,
+                _ => neptune_cash::api::export::Network::Main,
+            };
+            let is_valid = client
+                .validate_address(ctx, token, address, network_enum)
+                .await??;
+            let result = serde_json::Value::Bool(is_valid.is_some());
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "validate_amount" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let amount = extract_string_param(&request.params, "amount")
+                .ok_or_else(|| anyhow::anyhow!("Missing amount parameter"))?;
+            let is_valid = client.validate_amount(ctx, token, amount).await??;
+            let result = serde_json::Value::Bool(is_valid.is_some());
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "peer_info" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let peers = client.peer_info(ctx, token).await??;
+            let result = serde_json::to_value(peers)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "mempool_tx_count" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let count = client.mempool_tx_count(ctx, token).await??;
+            let result = serde_json::Value::Number(serde_json::Number::from(count));
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "unconfirmed_available_balance" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let balance = client.unconfirmed_available_balance(ctx, token).await??;
+            let result = serde_json::Value::String(balance.to_string());
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        // Phase 3: Advanced Features
+        "send_transparent" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let outputs = extract_string_param(&request.params, "outputs")
+                .ok_or_else(|| anyhow::anyhow!("Missing outputs parameter"))?;
+            let change_policy = extract_string_param(&request.params, "change_policy")
+                .ok_or_else(|| anyhow::anyhow!("Missing change_policy parameter"))?;
+            let fee = extract_string_param(&request.params, "fee")
+                .ok_or_else(|| anyhow::anyhow!("Missing fee parameter"))?;
+
+            let outputs_parsed: Vec<neptune_cash::api::export::OutputFormat> =
+                serde_json::from_str(&outputs)?;
+            let change_policy_parsed: neptune_cash::api::export::ChangePolicy =
+                serde_json::from_str(&change_policy)?;
+            let fee_parsed: neptune_cash::api::export::NativeCurrencyAmount =
+                serde_json::from_str(&fee)?;
+
+            let tx_artifacts = client
+                .send_transparent(ctx, token, outputs_parsed, change_policy_parsed, fee_parsed)
+                .await??;
+            let result = serde_json::to_value(tx_artifacts)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "upgrade" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let tx_kernel_id = extract_string_param(&request.params, "tx_kernel_id")
+                .ok_or_else(|| anyhow::anyhow!("Missing tx_kernel_id parameter"))?;
+            let tx_kernel_id_parsed: neptune_cash::api::export::TransactionKernelId =
+                serde_json::from_str(&tx_kernel_id)?;
+
+            let upgraded = client.upgrade(ctx, token, tx_kernel_id_parsed).await??;
+            let result = serde_json::Value::Bool(upgraded);
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "pause_miner" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            client.pause_miner(ctx, token).await??;
+            let result = serde_json::Value::Null;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "restart_miner" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            client.restart_miner(ctx, token).await??;
+            let result = serde_json::Value::Null;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "shutdown" => {
+            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let ctx = context::current();
+            let shutdown_result = client.shutdown(ctx, token).await??;
+            let result = serde_json::Value::Bool(shutdown_result);
             Ok(JsonRpcResponse::success(request.id, result))
         }
 

@@ -400,16 +400,31 @@ struct Config {
     #[clap(long, default_value = "9798")]
     rpc_port: u16,
 
+    /// Get authentication cookie for RPC access
+    #[clap(long)]
+    get_cookie: bool,
+
     #[clap(subcommand)]
     command: Option<Command>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
+    // Initialize tracing with neptune-core style formatting
+    tracing_subscriber::fmt()
+        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+        .with_thread_ids(true)
+        .with_target(true)
+        .with_level(true)
+        .init();
 
     let args: Config = Config::parse();
+
+    // Handle get-cookie command
+    if args.get_cookie {
+        get_cookie_command().await?;
+        return Ok(());
+    }
 
     // Handle RPC server mode
     if args.rpc_mode {
@@ -1354,6 +1369,58 @@ async fn main() -> Result<()> {
 //
 // Otherwise, we call cookie_hint() RPC to obtain data-dir.
 // But the API might be disabled, which we detect and fallback to the default data-dir.
+/// Get authentication cookie for RPC access
+async fn get_cookie_command() -> anyhow::Result<()> {
+    use neptune_cash::application::rpc::server::RPCClient;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use tarpc::client;
+    use tarpc::context;
+    use tarpc::tokio_serde::formats::Json;
+
+    // Connect to neptune-core to get cookie hint
+    let server_socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9799);
+    let transport = tarpc::serde_transport::tcp::connect(server_socket, Json::default)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to connect to neptune-core: {}. Is neptune-core running?",
+                e
+            )
+        })?;
+
+    let client = RPCClient::new(client::Config::default(), transport).spawn();
+    let ctx = context::current();
+
+    // Get cookie hint from neptune-core
+    let cookie_hint = client
+        .cookie_hint(ctx)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get cookie hint from neptune-core: {}", e))??;
+
+    // Load the actual cookie from the file (for validation)
+    let _cookie = auth::Cookie::try_load(&cookie_hint.data_directory)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to load cookie from file: {}", e))?;
+
+    // Read cookie file directly to get the raw bytes for hex encoding
+    let cookie_path = auth::Cookie::cookie_file_path(&cookie_hint.data_directory);
+    let cookie_bytes = tokio::fs::read(&cookie_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read cookie file: {}", e))?;
+    let cookie_hex = hex::encode(cookie_bytes);
+
+    println!("Authentication cookie for RPC access:");
+    println!("Cookie: neptune-cli={}", cookie_hex);
+    println!();
+    println!("Use this cookie in your HTTP requests:");
+    println!("curl -X POST http://localhost:9800 \\");
+    println!("  -H \"Content-Type: application/json\" \\");
+    println!("  -H \"Cookie: neptune-cli={}\" \\", cookie_hex);
+    println!("  -d '{{\"jsonrpc\": \"2.0\", \"method\": \"block_height\", \"params\": {{}}, \"id\": 1}}'");
+
+    Ok(())
+}
+
 async fn get_cookie_hint(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
     async fn fallback(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
         let network = client.network(context::current()).await??;

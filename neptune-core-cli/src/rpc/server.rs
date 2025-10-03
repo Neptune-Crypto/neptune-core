@@ -5,12 +5,10 @@
 use anyhow::{Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{error, info};
+use tracing::{debug, error, info, warn};
 
-use crate::rpc::{
-    auth::Cookie,
-    handlers::{handle_request, JsonRpcRequest},
-};
+use crate::rpc::handlers::{handle_request, JsonRpcRequest};
+use neptune_cash::application::rpc::auth::{Cookie, Token};
 
 /// Start the RPC server
 pub async fn start(config: crate::rpc::RpcConfig) -> Result<()> {
@@ -20,20 +18,35 @@ pub async fn start(config: crate::rpc::RpcConfig) -> Result<()> {
         .context("Failed to bind RPC server")?;
 
     info!("Starting neptune-cli RPC server on {}", addr);
+    info!("Data directory: {:?}", config.data_dir);
 
-    // Generate authentication cookie
-    let cookie = Cookie::try_new(&config.data_dir)
-        .await
-        .context("Failed to create authentication cookie")?;
+    // Use neptune-core's existing cookie system (same pattern as main.rs)
+    // The data_dir in RpcConfig is already the full path from DataDirectory::get().root_dir_path()
+    let data_directory = neptune_cash::application::config::data_directory::DataDirectory::get(
+        None, // Use default data directory since config.data_dir is already the full path
+        neptune_cash::application::config::network::Network::Main,
+    )?;
 
-    info!("Authentication cookie generated");
+    // Load cookie using exact same pattern as main.rs
+    let token: neptune_cash::application::rpc::auth::Token =
+        match neptune_cash::application::rpc::auth::Cookie::try_load(&data_directory).await {
+            Ok(t) => t.into(),
+            Err(e) => {
+                error!("Unable to load RPC auth cookie: {}", e);
+                anyhow::bail!("Failed to load authentication cookie: {}", e);
+            }
+        };
+
+    info!("Authentication cookie ready");
+    info!("neptune-cli RPC server is ready to accept connections");
 
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                let cookie = cookie.clone();
+                debug!("New connection from {}", addr);
+                let token = token.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, cookie).await {
+                    if let Err(e) = handle_connection(stream, token).await {
                         error!("Error handling connection from {}: {}", addr, e);
                     }
                 });
@@ -46,43 +59,59 @@ pub async fn start(config: crate::rpc::RpcConfig) -> Result<()> {
 }
 
 /// Handle individual HTTP connection
-async fn handle_connection(mut stream: TcpStream, server_cookie: Cookie) -> Result<()> {
+async fn handle_connection(mut stream: TcpStream, server_token: Token) -> Result<()> {
     let mut buffer = [0; 4096];
 
     match stream.read(&mut buffer).await {
-        Ok(0) => return Ok(()), // Connection closed
+        Ok(0) => {
+            debug!("Connection closed by client");
+            return Ok(());
+        }
         Ok(n) => {
             let request_str = String::from_utf8_lossy(&buffer[..n]);
+            debug!("Received HTTP request ({} bytes)", n);
 
             // Parse HTTP request
             let http_request = parse_http_request(&request_str)?;
 
             // Extract and validate cookie
-            let cookie_valid = validate_cookie(&http_request, &server_cookie);
+            let cookie_valid = validate_cookie(&http_request, &server_token);
+            if !cookie_valid {
+                warn!("Authentication failed for request");
+            } else {
+                debug!("Authentication successful");
+            }
 
             // Handle JSON-RPC request
             let response = if let Some(json_body) = http_request.body {
                 match serde_json::from_str::<JsonRpcRequest>(&json_body) {
                     Ok(req) => {
+                        let method = req.method.clone();
+                        let id = req.id.clone();
+                        info!("RPC request: method='{}', id={}", method, id);
+
                         // Check if method requires authentication
-                        if requires_auth(&req.method) && !cookie_valid {
+                        if requires_auth(&method) && !cookie_valid {
+                            warn!("Authentication required for method '{}'", method);
                             let error_response = serde_json::json!({
                                 "jsonrpc": "2.0",
                                 "error": {
                                     "code": -32001,
                                     "message": "Authentication required"
                                 },
-                                "id": req.id
+                                "id": id
                             });
                             let response_body = serde_json::to_string(&error_response)?;
                             create_http_response(401, "Unauthorized", &response_body)
                         } else {
                             match handle_request(req).await {
                                 Ok(rpc_response) => {
+                                    debug!("RPC method '{}' completed successfully", method);
                                     let response_body = serde_json::to_string(&rpc_response)?;
                                     create_http_response(200, "OK", &response_body)
                                 }
                                 Err(e) => {
+                                    error!("RPC method '{}' failed: {}", method, e);
                                     let error_response = serde_json::json!({
                                         "jsonrpc": "2.0",
                                         "error": {
@@ -98,6 +127,7 @@ async fn handle_connection(mut stream: TcpStream, server_cookie: Cookie) -> Resu
                         }
                     }
                     Err(e) => {
+                        error!("Failed to parse JSON-RPC request: {}", e);
                         let error_response = serde_json::json!({
                             "jsonrpc": "2.0",
                             "error": {
@@ -111,12 +141,14 @@ async fn handle_connection(mut stream: TcpStream, server_cookie: Cookie) -> Resu
                     }
                 }
             } else {
+                warn!("Received request without JSON body");
                 create_http_response(400, "Bad Request", "No JSON body found")
             };
 
             // Send HTTP response
             stream.write_all(response.as_bytes()).await?;
             stream.flush().await?;
+            debug!("Response sent to client");
         }
         Err(e) => {
             error!("Error reading from stream: {}", e);
@@ -182,8 +214,8 @@ struct HttpRequest {
     body: Option<String>,
 }
 
-/// Validate cookie from HTTP request
-fn validate_cookie(http_request: &HttpRequest, server_cookie: &Cookie) -> bool {
+/// Validate cookie from HTTP request using neptune-core's Token system
+fn validate_cookie(http_request: &HttpRequest, server_token: &Token) -> bool {
     // Look for Cookie header
     for line in http_request.headers.iter() {
         if line.to_lowercase().starts_with("cookie:") {
@@ -199,7 +231,10 @@ fn validate_cookie(http_request: &HttpRequest, server_cookie: &Cookie) -> bool {
                         let mut cookie_array = [0u8; 32];
                         cookie_array.copy_from_slice(&cookie_bytes);
                         let client_cookie = Cookie::from(cookie_array);
-                        return client_cookie == *server_cookie;
+                        // Extract the cookie from the server token for comparison
+                        if let Token::Cookie(server_cookie) = server_token {
+                            return client_cookie.auth(server_cookie).is_ok();
+                        }
                     }
                 }
             }

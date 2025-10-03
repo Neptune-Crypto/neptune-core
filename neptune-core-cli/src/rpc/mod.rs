@@ -4,7 +4,6 @@
 //! neptune-cli methods via a REST API. It follows DRY and KISS principles
 //! with clear separation of concerns.
 
-pub mod auth;
 pub mod handlers;
 pub mod server;
 
