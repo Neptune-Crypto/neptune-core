@@ -325,6 +325,22 @@ impl BlockHeader {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<BlockHeader> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockHeader {
+        BlockHeader {
+            version: rng.random(),
+            height: rng.random(),
+            prev_block_digest: rng.random(),
+            timestamp: rng.random(),
+            pow: rng.random(),
+            cumulative_proof_of_work: rng.random(),
+            difficulty: rng.random(),
+            guesser_receiver_data: rng.random(),
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use rand::rng;
@@ -336,25 +352,6 @@ pub(crate) mod tests {
     impl BlockHeader {
         pub(crate) fn set_nonce(&mut self, nonce: Digest) {
             self.pow.nonce = nonce;
-        }
-    }
-
-    pub(crate) fn random_block_header() -> BlockHeader {
-        let mut rng = rand::rng();
-        BlockHeader {
-            version: rng.random(),
-            height: BlockHeight::from(rng.random::<u64>()),
-            prev_block_digest: rng.random(),
-            timestamp: rng.random(),
-            pow: rng.random(),
-            cumulative_proof_of_work: ProofOfWork::new(
-                rng.random::<[u32; ProofOfWork::NUM_LIMBS]>(),
-            ),
-            difficulty: Difficulty::new(rng.random::<[u32; Difficulty::NUM_LIMBS]>()),
-            guesser_receiver_data: GuesserReceiverData {
-                receiver_digest: rng.random(),
-                lock_script_hash: rng.random(),
-            },
         }
     }
 
@@ -385,7 +382,7 @@ pub(crate) mod tests {
 
     #[test]
     fn block_header_display_impl() {
-        let block_header = random_block_header();
+        let block_header = rng().random::<BlockHeader>();
         println!("{block_header}");
     }
 }

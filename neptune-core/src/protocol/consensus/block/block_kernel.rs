@@ -118,3 +118,14 @@ impl MastHash for BlockKernel {
         sequences
     }
 }
+
+#[cfg(test)]
+impl rand::distr::Distribution<BlockKernel> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockKernel {
+        BlockKernel {
+            header: rng.random(),
+            body: rng.random(),
+            appendix: rng.random(),
+        }
+    }
+}

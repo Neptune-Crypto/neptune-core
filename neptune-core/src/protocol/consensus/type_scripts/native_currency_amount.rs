@@ -557,6 +557,15 @@ pub mod neptune_arbitrary {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<NativeCurrencyAmount> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> NativeCurrencyAmount {
+        NativeCurrencyAmount::from_nau(
+            rng.random_range(NativeCurrencyAmount::min().0..NativeCurrencyAmount::max().0),
+        )
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use std::cmp::max;
