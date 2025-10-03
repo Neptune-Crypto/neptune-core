@@ -2212,7 +2212,7 @@ impl NeptuneRPCServer {
         let latest_block_header = *self.state.lock_guard().await.chain.light_state().header();
 
         proposal.set_header_guesser_address(guesser_address);
-        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header);
+        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
 
         // Record block proposal in case of guesser-success, for later
         // retrieval. But limit number of blocks stored this way.
@@ -3778,7 +3778,7 @@ impl RPC for NeptuneRPCServer {
         };
 
         proposal.set_header_guesser_address(guesser_fee_address);
-        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header);
+        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
 
         Ok(Some((proposal, puzzle)))
     }
@@ -5545,6 +5545,7 @@ mod tests {
         use crate::protocol::consensus::block::block_header::BlockPow;
         use crate::protocol::consensus::block::pow::Pow;
         use crate::protocol::consensus::block::BlockProof;
+        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
         use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
         use crate::state::mining::block_proposal::BlockProposal;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -5649,7 +5650,7 @@ mod tests {
                 "Node must reject new tip with invalid PoW solution."
             );
 
-            let solution = puzzle.solve();
+            let solution = puzzle.solve(ConsensusRuleSet::default());
             assert!(
                 bob.clone()
                     .provide_new_tip(context::current(), bob_token, solution, proposal.clone())
@@ -5830,7 +5831,8 @@ mod tests {
                 );
 
                 // Check that succesful guess is accepted by endpoint.
-                let guesser_buffer = block1.guess_preprocess(None, None);
+                let consensus_rule_set = ConsensusRuleSet::Reboot;
+                let guesser_buffer = block1.guess_preprocess(None, None, consensus_rule_set);
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
                     if let Some(valid_pow) = Pow::guess(&guesser_buffer, random(), target) {

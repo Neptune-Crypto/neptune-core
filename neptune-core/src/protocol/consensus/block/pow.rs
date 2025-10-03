@@ -23,6 +23,7 @@ use crate::application::loops::channel::Cancelable;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
@@ -278,6 +279,9 @@ pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
 
     /// Authentication paths for all fields but the PoW field
     mast_auth_paths: PowMastPaths,
+
+    /// The hash of the parent block of this guesser buffer.
+    prev_block_digest: Digest,
 }
 
 impl<const MERKLE_TREE_HEIGHT: usize> Default for GuesserBuffer<MERKLE_TREE_HEIGHT> {
@@ -286,6 +290,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Default for GuesserBuffer<MERKLE_TREE_HEIG
             merkle_tree: MTree::default(),
             hash: Default::default(),
             mast_auth_paths: Default::default(),
+            prev_block_digest: Default::default(),
         }
     }
 }
@@ -321,9 +326,15 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
     pub(crate) fn preprocess(
         mast_auth_paths: PowMastPaths,
         cancel_channel: Option<&dyn Cancelable>,
+        consensus_rule_set: ConsensusRuleSet,
+        prev_block_digest: Digest,
     ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
-        // Commitment to all the fields in the block that are not pow
-        let commitment = mast_auth_paths.commit();
+        let bud_prefix = if consensus_rule_set == ConsensusRuleSet::Reboot {
+            // Commitment to all the fields in the block that are not pow
+            mast_auth_paths.commit()
+        } else {
+            prev_block_digest
+        };
 
         // number steps between checking channel cancellation
         let checkpoint_distance: usize =
@@ -350,7 +361,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                 .into_par_iter()
                 .zip(ins[range].par_iter_mut())
                 .for_each(|(i, bud)| {
-                    bud.write(Self::bud(commitment, i as u64));
+                    bud.write(Self::bud(bud_prefix, i as u64));
                 });
 
             if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
@@ -395,12 +406,13 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             MTree::build_inplace(outs, ins, cancel_channel)
         };
 
-        let hash = Tip5::hash_pair(merkle_tree.root(), commitment);
+        let hash = Tip5::hash_pair(merkle_tree.root(), bud_prefix);
 
         GuesserBuffer::<MERKLE_TREE_HEIGHT> {
             merkle_tree,
             hash,
             mast_auth_paths,
+            prev_block_digest,
         }
     }
 
@@ -444,16 +456,21 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         self,
         auth_paths: PowMastPaths,
         target: Digest,
+        consensus_rule_set: ConsensusRuleSet,
+        parent_digest: Digest,
     ) -> Result<(), PowValidationError> {
-        let commitment = auth_paths.commit();
-        let buffer_hash = Tip5::hash_pair(self.root, commitment);
+        let leaf_prefix = match consensus_rule_set {
+            ConsensusRuleSet::Reboot => auth_paths.commit(),
+            ConsensusRuleSet::HardforkAlpha => parent_digest,
+        };
+        let buffer_hash = Tip5::hash_pair(self.root, leaf_prefix);
         let (index_a, index_b) = Self::indices(buffer_hash, self.nonce);
-        let leaf_a = Self::leaf(commitment, index_a);
+        let leaf_a = Self::leaf(leaf_prefix, index_a);
         if !MTree::verify(self.root, index_a as usize, &self.path_a, leaf_a) {
             return Err(PowValidationError::PathAInvalid);
         }
 
-        let leaf_b = Self::leaf(commitment, index_b);
+        let leaf_b = Self::leaf(leaf_prefix, index_b);
         if !MTree::verify(self.root, index_b as usize, &self.path_b, leaf_b) {
             return Err(PowValidationError::PathBInvalid);
         }
@@ -526,7 +543,13 @@ pub(crate) mod tests {
         const MERKLE_TREE_NUM_LEAFS: usize = 1usize << 10;
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
-        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths, None);
+        let prev_block_digest = rng.random();
+        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
+            auth_paths,
+            None,
+            ConsensusRuleSet::default(),
+            prev_block_digest,
+        );
 
         let index = rng.random_range(0..MERKLE_TREE_NUM_LEAFS);
         let expensive_leaf = Pow::<MERKLE_TREE_HEIGHT>::leaf(auth_paths.commit(), index as u64);
@@ -537,9 +560,17 @@ pub(crate) mod tests {
     #[test]
     #[ignore = "benchmark of memory and time requirements of preprocess for guessing"]
     fn benchmark_memory_requirements() {
-        fn report<const MERKLE_TREE_HEIGHT: usize>(auth_paths: PowMastPaths) {
+        fn report<const MERKLE_TREE_HEIGHT: usize>(
+            auth_paths: PowMastPaths,
+            parent_block_hash: Digest,
+        ) {
             let start = Instant::now();
-            let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths, None);
+            let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
+                auth_paths,
+                None,
+                ConsensusRuleSet::default(),
+                parent_block_hash,
+            );
             let duration = start.elapsed();
             let estimated_mt_size = buffer.merkle_tree.num_leafs() * 2 * Digest::BYTES;
             println!("Merkle tree height: {MERKLE_TREE_HEIGHT}");
@@ -549,11 +580,12 @@ pub(crate) mod tests {
 
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
-        report::<25>(auth_paths);
-        report::<26>(auth_paths);
-        report::<27>(auth_paths);
-        report::<28>(auth_paths);
-        report::<29>(auth_paths);
+        let parent_block_hash = rng.random::<Digest>();
+        report::<25>(auth_paths, parent_block_hash);
+        report::<26>(auth_paths, parent_block_hash);
+        report::<27>(auth_paths, parent_block_hash);
+        report::<28>(auth_paths, parent_block_hash);
+        report::<29>(auth_paths, parent_block_hash);
     }
 
     #[test]
@@ -588,7 +620,13 @@ pub(crate) mod tests {
         const MERKLE_TREE_HEIGHT: usize = 10;
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
-        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths, None);
+        let prev_block_digest = rng.random();
+        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
+            auth_paths,
+            None,
+            ConsensusRuleSet::default(),
+            prev_block_digest,
+        );
 
         for difficulty in [2_u32, 4] {
             let target = Difficulty::from(difficulty).target();
@@ -625,8 +663,14 @@ pub(crate) mod tests {
             let mast_auth_paths = rng.random::<PowMastPaths>();
 
             // spawn preprocess task
+            let prev_block_digest = rng.random();
             let join_handle = tokio::task::spawn_blocking(move || {
-                Pow::<MERKLE_TREE_HEIGHT>::preprocess(mast_auth_paths, Some(&tx))
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess(
+                    mast_auth_paths,
+                    Some(&tx),
+                    ConsensusRuleSet::default(),
+                    prev_block_digest,
+                )
             });
 
             // wait 0.5 millis

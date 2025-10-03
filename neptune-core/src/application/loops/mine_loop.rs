@@ -212,11 +212,12 @@ fn guess_worker(
 
     let threshold = prev_difficulty.target();
     let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
+    let new_block_height = block.header().height;
     info!(
         "Guessing with {} threads on block {:x} of height {} with {} outputs and difficulty {}. Target: {threshold:x}",
         threads_to_use,
         block.hash(),
-        block.header().height,
+        new_block_height,
         block.body().transaction_kernel.outputs.len(),
         previous_block_header.difficulty,
     );
@@ -231,7 +232,9 @@ fn guess_worker(
     block.set_header_guesser_address(guesser_address);
 
     info!("Start: guess preprocessing.");
-    let guesser_buffer = block.guess_preprocess(Some(&sender), Some(threads_to_use));
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block_height);
+    let guesser_buffer =
+        block.guess_preprocess(Some(&sender), Some(threads_to_use), consensus_rule_set);
     if sender.is_canceled() {
         info!("Guess preprocessing canceled. Stopping guessing task.");
         return;
@@ -1072,7 +1075,8 @@ pub(crate) mod tests {
         let tick = std::time::SystemTime::now();
 
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
-        let guesser_buffer = block.guess_preprocess(Some(&worker_task_tx), None);
+        let guesser_buffer =
+            block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(rand::rng, |prng, _i| {
@@ -2137,7 +2141,8 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let guesser_buffer = successor_block.guess_preprocess(None, None);
+        let guesser_buffer =
+            successor_block.guess_preprocess(None, None, ConsensusRuleSet::default());
         let target = predecessor_block.header().difficulty.target();
         loop {
             if BlockPow::guess(&guesser_buffer, rng.random(), target).is_some() {
