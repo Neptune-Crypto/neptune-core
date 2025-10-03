@@ -586,11 +586,11 @@ pub mod neptune_arbitrary {
     }
 }
 
-#[cfg(feature = "mock-rpc")]
+#[cfg(any(feature = "mock-rpc", test))]
 impl rand::distr::Distribution<NativeCurrencyAmount> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> NativeCurrencyAmount {
         NativeCurrencyAmount::from_nau(
-            rng.random_range(-NativeCurrencyAmount::MAX_NAU..NativeCurrencyAmount::MAX_NAU),
+            rng.random_range(NativeCurrencyAmount::min().0..NativeCurrencyAmount::max().0),
         )
     }
 }
