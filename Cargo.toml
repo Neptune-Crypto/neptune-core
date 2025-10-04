@@ -4,7 +4,8 @@ resolver="2"
 members = [
     "neptune-core",
     "neptune-core-cli",
-    "neptune-dashboard"
+    "neptune-dashboard",
+    "neptune-rpc/macros",
 ]
 
 [workspace.lints.rust]
