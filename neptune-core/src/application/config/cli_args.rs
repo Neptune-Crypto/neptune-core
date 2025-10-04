@@ -18,6 +18,7 @@ use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
+use crate::application::json_rpc::core::api::ops::Namespace;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -516,6 +517,29 @@ pub struct Args {
     /// Example: `neptune-core --scan-keys 42`
     #[clap(long)]
     pub(crate) scan_keys: Option<usize>,
+
+    /// Enable JSON/HTTP RPC.
+    /// You can optionally specify an address and port (default: 127.0.0.1:9797).
+    /// If not given, RPC is disabled.
+    #[clap(
+        long,
+        default_missing_value = "127.0.0.1:9797",
+        num_args = 0..=1,
+        value_name = "ADDR"
+    )]
+    pub listen_rpc: Option<SocketAddr>,
+
+    /// RPC modules to enable.
+    /// Specifies which sets of RPC methods are exposed (e.g., node or chain).
+    /// By default, both "node" and "chain" modules are enabled.
+    #[clap(
+        long,
+        value_parser = clap::value_parser!(Namespace),
+        use_value_delimiter = true,
+        default_value = "Node,Chain",
+        value_name = "NAMESPACES"
+    )]
+    pub rpc_modules: Vec<Namespace>,
 }
 
 impl Default for Args {
