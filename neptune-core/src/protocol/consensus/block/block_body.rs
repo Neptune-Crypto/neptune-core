@@ -71,7 +71,7 @@ pub struct BlockBody {
     /// broadcasted transactions that the miner decided to confirm. The inputs
     /// to this transaction kernel must be packed if the consensus rule dictate
     /// that.
-    pub(crate) transaction_kernel: TransactionKernel,
+    pub transaction_kernel: TransactionKernel,
 
     /// The mutator set accumulator represents the UTXO set. It is simultaneously an
     /// accumulator (=> compact representation and membership proofs) and an anonymity
@@ -80,15 +80,18 @@ pub struct BlockBody {
     /// This field represents the state of the MS *after* applying the update
     /// induced by the transaction, but *before* applying the update induced by
     /// guesser fees (and perhaps later composer fees).
+    ///
+    /// For the final post-block state, refer to
+    /// [`Self::mutator_set_accumulator_after`].
     pub(super) mutator_set_accumulator: MutatorSetAccumulator,
 
     /// Lock-free UTXOs do not come with lock scripts and do not live in the mutator set.
-    pub(crate) lock_free_mmr_accumulator: MmrAccumulator,
+    pub lock_free_mmr_accumulator: MmrAccumulator,
 
     /// All blocks live in an MMR, so that we can efficiently prove that a given block
     /// lives on the line between the tip and genesis. This MMRA does not contain the
     /// current block.
-    pub(crate) block_mmr_accumulator: MmrAccumulator,
+    pub block_mmr_accumulator: MmrAccumulator,
 
     // This caching ensures that the hash rate is independent of the size of
     // the block's transaction.
@@ -141,6 +144,15 @@ impl BlockBody {
         mutator_set_update.apply_to_accumulator(&mut msa).expect("mutator set update derived from guesser fees should be applicable to mutator set accumulator contained in body");
 
         msa
+    }
+
+    /// Return the mutator set as it looks after the application of the
+    /// transaction in this block but before the guesser-fee UTXOs are applied.
+    ///
+    /// The returned mutator set accumulator is the same as the field
+    /// [`Self::mutator_set_accumulator`].
+    pub(crate) fn mutator_set_accumulator_without_guesser_fees(&self) -> MutatorSetAccumulator {
+        self.mutator_set_accumulator.clone()
     }
 
     /// The amount rewarded to the guesser who finds a valid nonce for this
