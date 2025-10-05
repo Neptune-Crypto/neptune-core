@@ -225,6 +225,24 @@ impl BitMask {
         }
         elements
     }
+
+    /// Determine whether all bits are set.
+    pub(crate) fn is_complete(&self) -> bool {
+        if self.upper_bound == 0 {
+            return true;
+        }
+        for limb in self.limbs.iter().take(self.limbs.len() - 1) {
+            if *limb != u32::MAX {
+                return false;
+            }
+        }
+        for i in 0..(self.upper_bound % 32) {
+            if (1 << i) & *self.limbs.last().unwrap() == 0 {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 #[cfg(test)]
@@ -253,6 +271,23 @@ pub mod test {
     }
 
     #[proptest]
+    fn bit_mask_is_complete_iff_all_its_are_set(
+        #[strategy(2..(1_u64<<15))] upper_bound: u64,
+        #[strategy(vec(0u64..#upper_bound,(#upper_bound-2) as usize))] bit_indices: Vec<u64>,
+    ) {
+        let mut bit_mask = BitMask::new(upper_bound);
+        prop_assert!(!bit_mask.is_complete());
+
+        for index in bit_indices {
+            bit_mask.set(index);
+        }
+        prop_assert!(!bit_mask.is_complete());
+
+        bit_mask.set_range(0, upper_bound - 1);
+        prop_assert!(bit_mask.is_complete());
+    }
+
+    #[proptest]
     fn set_range_sets_range(
         #[strategy(2..(1_u64<<15))] upper_bound: u64,
         #[strategy(0..(#upper_bound-1))] range_start: u64,
@@ -271,10 +306,6 @@ pub mod test {
 
     #[test]
     fn set_range_sets_range_unit() {
-        let upper_bound = 38u64;
-        let range_start = 0u64;
-        let range_stop = 32u64;
-
         for (upper_bound, range_start, range_stop) in [
             (38_u64, 0_u64, 32_u64),
             (5598, 11, 3263),
