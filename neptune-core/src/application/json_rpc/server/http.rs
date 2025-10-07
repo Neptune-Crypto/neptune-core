@@ -115,7 +115,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn test_network_is_consistent() -> Result<()> {
         let rpc_server = test_rpc_server().await;
-        assert_eq!("mainnet", rpc_server.network().await.network);
+        assert_eq!("main", rpc_server.network().await.network);
         Ok(())
     }
 
