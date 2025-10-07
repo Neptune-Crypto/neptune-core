@@ -81,3 +81,68 @@ impl RpcResponse {
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn rpc_error_serialization() {
+        let error = RpcError::MethodNotFound;
+        let serialized = serde_json::to_string(&error).unwrap();
+        assert_eq!(serialized, r#"{"code":-32601,"message":"Method not found/unavailable"}"#);
+    }
+
+    #[test]
+    fn rpc_response_success() {
+        let response = RpcResponse::success(
+            Some(json!(1)),
+            json!({"success": true}),
+        );
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(serialized.contains(r#"{"jsonrpc":"2.0","id":1,"result":{"success":true}}"#));
+    }
+
+    #[test]
+    fn rpc_response_error() {
+        let response = RpcResponse::error(
+            Some(json!("1")),
+            RpcError::InvalidParams,
+        );
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(serialized.contains(r#"{"jsonrpc":"2.0","id":"1","error":{"code":-32602,"message":"Invalid params"}}"#));
+    }
+
+    #[test]
+    fn rpc_request_deserialization() {
+        let json_data = r#"{
+            "jsonrpc": "2.0",
+            "method": "test",
+            "params": ["arg1", "arg2"],
+            "id": 1
+        }"#;
+
+        let request: RpcRequest = serde_json::from_str(json_data).unwrap();
+        
+        assert_eq!(request.jsonrpc, Some("2.0".to_string()));
+        assert_eq!(request.method, "test");
+        assert_eq!(request.params, json!(["arg1", "arg2"]));
+        assert_eq!(request.id, Some(json!(1)));
+    }
+
+    #[test]
+    fn rpc_response_with_null_id() {
+        let success = RpcResponse::success(None, json!(true));
+        let error = RpcResponse::error(None, RpcError::InternalError);
+
+        let success_str = serde_json::to_string(&success).unwrap();
+        let error_str = serde_json::to_string(&error).unwrap();
+
+        assert!(success_str.contains(r#"{"jsonrpc":"2.0","id":null,"result":true}"#));
+        assert!(error_str.contains(r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}"#));
+    }
+}
