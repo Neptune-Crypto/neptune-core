@@ -1,5 +1,6 @@
 pub mod proof_upgrader;
 pub(crate) mod upgrade_incentive;
+pub mod p2p;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -11,6 +12,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use itertools::Itertools;
+use libp2p::PeerId;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
@@ -43,6 +45,7 @@ use crate::application::loops::connect_to_peers::precheck_incoming_connection_is
 use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::loops::main_loop::p2p::tmp_utils_multiaddr;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
@@ -57,6 +60,7 @@ use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::transaction_notification::TransactionNotification;
+use crate::protocol::peer::PeerSanction;
 use crate::protocol::peer::PeerSynchronizationState;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
@@ -178,6 +182,8 @@ impl MutableMainLoopState {
 }
 
 /// handles batch-downloading of blocks if we are more than n blocks behind
+/// 
+/// TODO `SocketAddr` >>> `PeerID` #libp2p_reqresp_Sync
 #[derive(Default, Debug)]
 struct SyncState {
     peer_sync_states: HashMap<SocketAddr, PeerSynchronizationState>,
@@ -196,6 +202,8 @@ impl SyncState {
 
     /// Return a list of peers that have reported to be in possession of blocks
     /// with a PoW above a threshold.
+    /// 
+    /// TODO `SocketAddr` >>> `PeerID` #libp2p_reqresp_Sync
     fn get_potential_peers_for_sync_request(&self, threshold_pow: ProofOfWork) -> Vec<SocketAddr> {
         self.peer_sync_states
             .iter()
@@ -243,16 +251,16 @@ impl SyncState {
 struct PotentialPeerInfo {
     _reported: SystemTime,
     _reported_by: SocketAddr,
-    instance_id: u128,
+    peer_id: PeerId,
     distance: u8,
 }
 
 impl PotentialPeerInfo {
-    fn new(reported_by: SocketAddr, instance_id: u128, distance: u8, now: SystemTime) -> Self {
+    fn new(reported_by: SocketAddr, peer_id: PeerId, distance: u8, now: SystemTime) -> Self {
         Self {
             _reported: now,
             _reported_by: reported_by,
-            instance_id,
+            peer_id,
             distance,
         }
     }
@@ -273,7 +281,7 @@ impl PotentialPeersState {
     fn add(
         &mut self,
         reported_by: SocketAddr,
-        potential_peer: (SocketAddr, u128),
+        potential_peer: (SocketAddr, PeerId),
         max_peers: usize,
         distance: u8,
         now: SystemTime,
@@ -320,10 +328,9 @@ impl PotentialPeersState {
     fn get_candidate(
         &self,
         connected_clients: &[PeerInfo],
-        own_instance_id: u128,
+        own_instance_id: PeerId,
     ) -> Option<(SocketAddr, u8)> {
-        let peers_instance_ids: Vec<u128> =
-            connected_clients.iter().map(|x| x.instance_id()).collect();
+        let peers_instance_ids: Vec<_> = connected_clients.iter().map(PeerInfo::instance_id).collect();
 
         // Only pick those peers that report a listening port
         let peers_listen_addresses: Vec<SocketAddr> = connected_clients
@@ -338,9 +345,9 @@ impl PotentialPeersState {
             // Prevent connecting to self. Note that we *only* use instance ID to prevent this,
             // meaning this will allow multiple nodes e.g. running on the same computer to form
             // a complete graph.
-            .filter(|pp| pp.1.instance_id != own_instance_id)
+            .filter(|pp| pp.1.peer_id != own_instance_id)
             // Prevent connecting to peer we already are connected to
-            .filter(|potential_peer| !peers_instance_ids.contains(&potential_peer.1.instance_id))
+            .filter(|potential_peer| !peers_instance_ids.contains(&potential_peer.1.peer_id))
             .filter(|potential_peer| !peers_listen_addresses.contains(potential_peer.0))
             .collect::<Vec<_>>();
 
@@ -596,35 +603,30 @@ impl MainLoopHandler {
                         let txid = new_transaction.kernel.txid();
                         info!("Updated transaction {txid} to be valid under new mutator set");
 
-                        // First update the primitive-witness data associated with the transaction,
-                        // then insert the new transaction into the mempool. This ensures that the
-                        // primitive-witness is as up-to-date as possible in case it has to be
-                        // updated again later.
+                        // First update the primitive-witness data associated with the transaction, then insert the new transaction into the mempool. This ensures that the
+                        // primitive-witness is as up-to-date as possible in case it has to be updated again later.
                         if let Some(new_pw) = new_primitive_witness {
                             state
-                                .mempool_update_primitive_witness(txid, *new_pw.to_owned())
-                                .await;
+                                .mempool_update_primitive_witness(txid, *new_pw.to_owned()).await;
                         }
                         state
-                            .mempool_insert(*new_transaction.to_owned(), UpgradePriority::Critical)
-                            .await;
+                            .mempool_insert(*new_transaction.to_owned(), UpgradePriority::Critical).await;
                     }
                 }
             }
         }
 
         // Then notify all peers about shareable transactions.
-        for updated in update_results {
-            if let MempoolUpdateJobResult::Success {
-                new_transaction, ..
-            } = updated
-            {
-                if let Ok(pmsg) = new_transaction.as_ref().try_into() {
-                    let pmsg = MainToPeerTask::TransactionNotification(pmsg);
-                    self.main_to_peer_broadcast(pmsg);
-                }
-            }
-        }
+        update_results.into_iter()
+        .filter_map(|updated| 
+            if let MempoolUpdateJobResult::Success {new_transaction, ..} = updated {
+                Some(new_transaction)
+            } else {None}
+        )
+        .for_each(|new_transaction| {
+            self.main_to_peer_broadcast(MainToPeerTask::TransactionNotification(new_transaction.as_ref().try_into().unwrap()));
+            self.main_to_peer_broadcast(MainToPeerTask::NewTransaction(new_transaction.as_ref().try_into().unwrap()));
+        });
 
         // Tell miner that it can now continue either composing or guessing.
         self.main_to_miner_tx.send(MainToMiner::Continue);
@@ -782,16 +784,15 @@ impl MainLoopHandler {
                 }
 
                 if !self.global_state_lock.cli().secret_compositions {
-                    let pmsg = MainToPeerTask::BlockProposalNotification((&block).into());
-                    self.main_to_peer_broadcast(pmsg);
+                    self.main_to_peer_broadcast(MainToPeerTask::BlockProposal(block.clone()));
+                    self.main_to_peer_broadcast(MainToPeerTask::BlockProposalNotification((&block).into()));
                 }
 
                 {
                     // Use block proposal and add expected UTXOs from this
                     // proposal.
                     let mut state = self.global_state_lock.lock_guard_mut().await;
-                    state.mining_state.block_proposal =
-                        BlockProposal::own_proposal(block.clone(), expected_utxos.clone());
+                    state.mining_state.block_proposal = BlockProposal::own_proposal(block, expected_utxos.clone());
                     state.wallet_state.add_expected_utxos(expected_utxos).await;
                 }
 
@@ -814,7 +815,7 @@ impl MainLoopHandler {
         msg: PeerTaskToMain,
         main_loop_state: &mut MutableMainLoopState,
     ) -> Result<()> {
-        debug!("Received {} from a peer task", msg.get_type());
+        debug!("Received {} from a peer task", msg);
         match msg {
             PeerTaskToMain::NewBlocks(blocks) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
@@ -929,6 +930,7 @@ impl MainLoopHandler {
                 // Inform miner about new block.
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);
             }
+            /* TODO as this is the only entry-point into syncing mode it needs adaptation to take these from the block topic now, but it's not straight-forward #libp2p_reqresp_Sync */
             PeerTaskToMain::AddPeerMaxBlockHeight {
                 peer_address,
                 claimed_height,
@@ -993,7 +995,7 @@ impl MainLoopHandler {
                     }
                 }
             }
-            PeerTaskToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
+            PeerTaskToMain::PeerExchangeAnswer((pot_peers, reported_by, distance)) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::PeerDiscoveryAnswer");
 
                 let max_peers = self.global_state_lock.cli().max_num_peers;
@@ -1006,6 +1008,8 @@ impl MainLoopHandler {
                         self.now(),
                     );
                 }
+
+                // TODO #libp2p_reqresp_px load the peers into the swarm; probably check their addresses; it's `todo!` to not pass `&mut Swarm` - seems better to process right on receive
             }
             PeerTaskToMain::Transaction(pt2m_transaction) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::Transaction");
@@ -1034,16 +1038,13 @@ impl MainLoopHandler {
                         .await;
                 }
 
-                let is_nop = pt2m_transaction.transaction.kernel.inputs.is_empty()
-                    && pt2m_transaction.transaction.kernel.outputs.is_empty()
-                    && pt2m_transaction.transaction.kernel.announcements.is_empty();
-                if !is_nop {
+                if !(pt2m_transaction.transaction.kernel.inputs.is_empty() && pt2m_transaction.transaction.kernel.outputs.is_empty() && pt2m_transaction.transaction.kernel.announcements.is_empty()) {
                     // if meaningful, send notification to peers
-                    let transaction_notification: TransactionNotification =
-                        (&pt2m_transaction.transaction).try_into()?;
+                    
+                    self.main_to_peer_broadcast(MainToPeerTask::TransactionNotification((&pt2m_transaction.transaction).try_into()?));
 
-                    let pmsg = MainToPeerTask::TransactionNotification(transaction_notification);
-                    self.main_to_peer_broadcast(pmsg);
+                    // `Swarm` shares right after sending it here
+                    // self.main_to_peer_broadcast(MainToPeerTask::NewTransaction((&pt2m_transaction.transaction).try_into()?));
                 }
             }
             PeerTaskToMain::BlockProposal(block) => {
@@ -1082,8 +1083,8 @@ impl MainLoopHandler {
                 // Notify all peers of the block proposal we just accepted. Do
                 // this regardless of the difference in guesser fee relative to
                 // the previous proposal (as long as it is positive).
-                let pmsg = MainToPeerTask::BlockProposalNotification((&*block).into());
-                self.main_to_peer_broadcast(pmsg);
+                self.main_to_peer_broadcast(MainToPeerTask::BlockProposalNotification((&*block).into()));
+                self.main_to_peer_broadcast(MainToPeerTask::BlockProposal(*block));
 
                 if should_inform_own_miner {
                     if self.global_state_lock.cli().guess {
@@ -1097,12 +1098,34 @@ impl MainLoopHandler {
             PeerTaskToMain::DisconnectFromLongestLivedPeer => {
                 let global_state = self.global_state_lock.lock_guard().await;
 
-                // get all peers
-                let all_peers = global_state.net.peer_map.iter();
-
                 // filter out CLI peers
-                let disconnect_candidates =
-                    all_peers.filter(|p| !global_state.cli().peers.contains(p.0));
+                let disconnect_candidates = global_state.net.peer_map.iter().filter(
+                    |p| !tmp_utils_multiaddr::mebmership::does_madrs_cover_socketadr(
+                        p.0, global_state.cli().peers.clone().iter_mut()
+                    )
+                );
+                // {
+                    // let global_socketaddrs = global_state.cli().peers.into_iter().filter_map(|madr| {
+                    //     madr.into_iter().skip_while(|proto| match proto {
+                    //         libp2p::core::multiaddr::Protocol::Ip4(_) | libp2p::multiaddr::Protocol::Ip6(_) => false,
+                    //         _ => true
+                    //     })
+                    // });
+                    // global_state.cli().peers.into_iter().partition_map(predicate);
+                    
+                    // let withoutports = 
+                    //     global_state.cli().peers.iter().filter(|madr| madr.len() == 1)
+                    //     .filter(|madr| match madr.iter().next().expect("just checked the `len`") {
+                    //         libp2p::core::multiaddr::Protocol::Ip4(_) | libp2p::multiaddr::Protocol::Ip6(_) => true,
+                    //         _ => false
+                    //     });
+                    // global_state.net.peer_map.iter().map(|p| (p, Multiaddr::from(p.0.ip()))).filter(|(p, madr_ip)| {
+                    //     !withoutports.contains(&madr_ip)
+                    // }).filter(|(p, madr_ip)| {
+                    //     let madr = madr_ip.with(libp2p::multiaddr::Protocol::Tcp(p.0.port()));
+                    //     global_state.cli().peers.iter().all(|peer_madr| !peer_madr.ends_with(&madr))
+                    // }).map(|(p, _)| p)
+                // };
 
                 // find the one with the oldest connection
                 let longest_lived_peer = disconnect_candidates.min_by(
@@ -1120,6 +1143,22 @@ impl MainLoopHandler {
                     self.main_to_peer_broadcast(pmsg);
                 }
             }
+            // /* TODO this will take a lot of changes starting from `return` not fitting here in hope to harmonize a bit `peer_map`, 
+            // standings DB to orient on `PeerId` more and hence improve compatibility */
+            // PeerTaskToMain::Sanction(peer_id, reason) => {
+            //     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+            //     match reason {
+            //         PeerSanction::Positive(positive_peer_sanction) => debug!("Rewarding peer {} for {:?}", peer_id, reason),
+            //         PeerSanction::Negative(negative_peer_sanction) => warn!("Punishing peer {} for {:?}", peer_id, reason)
+            //     }
+            //     debug!("Peer standing before was {}", global_state_mut.net.peer_map.get(todo!["&peer_id"]).unwrap().standing);
+                
+            //     let Some(peer_info) = global_state_mut.net.peer_map.get_mut(todo!["&peer_id"]) else {anyhow::bail!("Could not read peer map.")};
+            //     let sanction_result = peer_info.standing.sanction(reason);
+            //     if let Err(err) = sanction_result {warn!("is banned |{err}")}
+
+            //     return sanction_result.map_err(|err| anyhow::anyhow!("Banning peer: {err}"));
+            // }
         }
 
         Ok(())
@@ -1153,31 +1192,30 @@ impl MainLoopHandler {
         let max_num_peers = cli_args.max_num_peers;
         if num_peers <= max_num_peers {
             debug!("No need to prune any peer connections.");
-            return Ok(());
-        }
-        warn!("Connected to {num_peers} peers, which exceeds the maximum ({max_num_peers}).");
+            Ok(())
+        } else {
+            warn!("Connected to {num_peers} peers, which exceeds the maximum ({max_num_peers}).");
 
-        // If all connections are outbound, it's OK to exceed the max.
-        if connected_peers.iter().all(|p| p.connection_is_outbound()) {
-            warn!("Not disconnecting from any peer because all connections are outbound.");
-            return Ok(());
-        }
+            // If all connections are outbound, it's OK to exceed the max.
+            if connected_peers.iter().all(|p| p.connection_is_outbound()) {
+                warn!("Not disconnecting from any peer because all connections are outbound.");
+                Ok(())
+            } else {
+                let num_peers_to_disconnect = num_peers - max_num_peers;
+                let peers_to_disconnect = connected_peers.into_iter().filter(|peer| !tmp_utils_multiaddr::mebmership::does_madrs_cover_socketadr(
+                        &peer.connected_address(), cli_args.peers.clone().iter_mut()
+                    )).choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
+                match peers_to_disconnect.len() {
+                    0 => warn!("Not disconnecting from any peer because of manual override."),
+                    i => {
+                        info!("Disconnecting from {i} peers.");
+                        peers_to_disconnect.into_iter().for_each(|peer| self.main_to_peer_broadcast(MainToPeerTask::Disconnect(peer.connected_address())))
+                    }
+                }
 
-        let num_peers_to_disconnect = num_peers - max_num_peers;
-        let peers_to_disconnect = connected_peers
-            .into_iter()
-            .filter(|peer| !cli_args.peers.contains(&peer.connected_address()))
-            .choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
-        match peers_to_disconnect.len() {
-            0 => warn!("Not disconnecting from any peer because of manual override."),
-            i => info!("Disconnecting from {i} peers."),
+                Ok(())
+            }
         }
-        for peer in peers_to_disconnect {
-            let pmsg = MainToPeerTask::Disconnect(peer.connected_address());
-            self.main_to_peer_broadcast(pmsg);
-        }
-
-        Ok(())
     }
 
     /// If necessary, reconnect to the peers listed as CLI arguments.
@@ -1185,6 +1223,8 @@ impl MainLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for read
     async fn reconnect(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
+        let own_handshake_data = self.global_state_lock.lock_guard().await.get_own_handshakedata();
+        
         let connected_peers = self
             .global_state_lock
             .lock_guard()
@@ -1194,25 +1234,9 @@ impl MainLoopHandler {
             .keys()
             .copied()
             .collect_vec();
-        let peers_with_lost_connection = self
-            .global_state_lock
-            .cli()
-            .peers
-            .iter()
-            .filter(|peer| !connected_peers.contains(peer));
-
-        // If no connection was lost, there's nothing to do.
-        if peers_with_lost_connection.clone().count() == 0 {
-            return Ok(());
-        }
-
-        // Else, try to reconnect.
-        let own_handshake_data = self
-            .global_state_lock
-            .lock_guard()
-            .await
-            .get_own_handshakedata();
-        for &peer_with_lost_connection in peers_with_lost_connection {
+        
+        for peer_with_lost_connection in self.global_state_lock.cli().peers.clone().iter_mut().filter_map(tmp_utils_multiaddr::try_from)
+        .filter(|peer| !connected_peers.contains(peer)) {
             // Disallow reconnection if peer is in bad standing
             let peer_standing = self
                 .global_state_lock
@@ -1221,28 +1245,23 @@ impl MainLoopHandler {
                 .net
                 .get_peer_standing_from_database(peer_with_lost_connection.ip())
                 .await;
-            if peer_standing.is_some_and(|standing| standing.is_bad()) {
-                debug!("Not reconnecting to peer in bad standing: {peer_with_lost_connection}");
-                continue;
-            }
-
-            debug!("Attempting to reconnect to peer: {peer_with_lost_connection}");
-            let global_state_lock = self.global_state_lock.clone();
-            let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
-            let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
-            let outgoing_connection_task = tokio::task::spawn(async move {
-                call_peer(
+            if peer_standing.is_some_and(|standing| standing.is_bad()) {debug!("Not reconnecting to peer in bad standing: {peer_with_lost_connection}")}
+            else {
+                debug!("Attempting to reconnect to peer: {peer_with_lost_connection}");
+                let global_state_lock = self.global_state_lock.clone();
+                let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
+                let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
+                let outgoing_connection_task = tokio::task::spawn(call_peer(
                     peer_with_lost_connection,
                     global_state_lock,
                     main_to_peer_broadcast_rx,
                     peer_task_to_main_tx,
                     own_handshake_data,
-                    1, // All CLI-specified peers have distance 1
-                )
-                .await;
-            });
-            main_loop_state.task_handles.push(outgoing_connection_task);
-            main_loop_state.task_handles.retain(|th| !th.is_finished());
+                    1, // all CLI-specified peers have distance 1
+                ));
+                main_loop_state.task_handles.push(outgoing_connection_task);
+                main_loop_state.task_handles.retain(|th| !th.is_finished());
+            }
         }
 
         Ok(())
@@ -1407,9 +1426,7 @@ impl MainLoopHandler {
             return Ok(());
         }
 
-        let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
-            .sync_state
-            .get_status_of_last_request(own_tip_height, self.now());
+        let (peer_to_sanction, try_new_request) = main_loop_state.sync_state.get_status_of_last_request(own_tip_height, self.now());
 
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
@@ -1531,23 +1548,11 @@ impl MainLoopHandler {
             upgrade_candidate.affected_txids().iter().join("; ")
         );
 
-        // Perform the upgrade, if we're not using the prover for anything else,
-        // like mining, or proving our own transaction. Running the prover takes
-        // a long time (minutes), so we spawn a task for this such that we do
-        // not block the main loop.
-        let vm_job_queue = vm_job_queue();
-
-        let global_state_lock_clone = self.global_state_lock.clone();
-        let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
-        let proof_upgrader_task = tokio::task::spawn(async move {
-            upgrade_candidate
-                .handle_upgrade(
-                    vm_job_queue,
-                    global_state_lock_clone,
-                    main_to_peer_broadcast_tx_clone,
-                )
-                .await
-        });
+        // Perform the upgrade, if we're not using the prover for anything else, like mining, or proving our own transaction. Running the prover takes
+        // a long time (minutes), so we spawn a task for this such that we do not block the main loop.
+        let proof_upgrader_task = tokio::task::spawn(upgrade_candidate.handle_upgrade(
+            vm_job_queue(), self.global_state_lock.clone(), self.main_to_peer_broadcast_tx.clone(),
+        ));
 
         main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
 
@@ -1579,16 +1584,13 @@ impl MainLoopHandler {
             .cli()
             .proof_job_options(TritonVmJobPriority::Highest);
         let global_state_lock = self.global_state_lock.clone();
-        main_loop_state.update_mempool_txs_handle = Some(tokio::task::spawn(async move {
-            Self::update_mempool_jobs(
-                global_state_lock,
-                update_jobs,
-                vm_job_queue.clone(),
-                update_sender,
-                job_options,
-            )
-            .await
-        }));
+        main_loop_state.update_mempool_txs_handle = Some(tokio::task::spawn(Self::update_mempool_jobs(
+            global_state_lock,
+            update_jobs,
+            vm_job_queue.clone(),
+            update_sender,
+            job_options,
+        )));
         main_loop_state.update_mempool_receiver = update_receiver;
     }
 
@@ -1673,6 +1675,8 @@ impl MainLoopHandler {
         #[cfg(not(unix))]
         drop((tx_term, tx_int, tx_quit));
 
+        main_loop_state.task_handles.push(tokio::task::spawn(p2p::swarm::run(self.global_state_lock.clone(), self.main_to_peer_broadcast_tx.subscribe(), self.peer_task_to_main_tx.clone())));
+        
         let exit_code: i32 = loop {
             select! {
                 Ok(()) = signal::ctrl_c() => {
@@ -1715,7 +1719,7 @@ impl MainLoopHandler {
                             own_handshake_data,
                         ).await {
                             Ok(()) => (),
-                            Err(err) => debug!("Got result: {:?}", err),
+                            Err(err) => debug!("Got `Err`: {:?}", err),
                         }
                     });
                     main_loop_state.task_handles.push(incoming_peer_task_handle);
@@ -1870,8 +1874,8 @@ impl MainLoopHandler {
                 // Is this a transaction we can share with peers? If so, share
                 // it immediately.
                 if let Ok(notification) = transaction.as_ref().try_into() {
-                    let pmsg = MainToPeerTask::TransactionNotification(notification);
-                    self.main_to_peer_broadcast(pmsg);
+                    self.main_to_peer_broadcast(MainToPeerTask::TransactionNotification(notification));
+                    self.main_to_peer_broadcast(MainToPeerTask::NewTransaction(transaction.as_ref().try_into().unwrap()));
                 } else {
                     // Otherwise, upgrade its proof quality, and share it by
                     // spinning up the proof upgrader.
@@ -1945,21 +1949,24 @@ impl MainLoopHandler {
                             .mempool
                             .get(txid)
                             .expect("Transaction from iter must exist in mempool");
-                        let notification = TransactionNotification::try_from(tx);
-                        match notification {
-                            Ok(notification) => {
-                                let pmsg = MainToPeerTask::TransactionNotification(notification);
-                                notifications.push(pmsg);
-                            }
-                            Err(error) => {
-                                warn!("{error}");
-                            }
+                        match TransactionNotification::try_from(tx) {
+                            Ok(notification) => notifications.push((
+                                MainToPeerTask::TransactionNotification(notification), 
+                                MainToPeerTask::NewTransaction(tx.try_into().unwrap())
+                            )),
+                            Err(error) => warn!("{error}")
                         };
                     }
                 }
 
                 for notification in notifications {
-                    self.main_to_peer_broadcast(notification);
+                    self.main_to_peer_broadcast(notification.0);
+                    /* TODO This is something to think about. Rebroadcast the node mempool seems like a needed thing, but nodes won't be happy to chew through it again.
+                    From the top of @skaunov head: can it be done by first *asking* for others mempool and then rebroadcast the difference? Too many back-and-forth though.
+                    
+                    Another approach would be to `publish` the mempool roaster with our `PeerId` (a signature required, btw) and via request-response respond anybody interested in a particular tx id.
+                    A grand question is such an advertisement would be interesting to the nodes. As some messages can reach not a peer or they were freezed or off-line this seems like a good one! */
+                    self.main_to_peer_broadcast(notification.1);
                 }
 
                 Ok(false)
@@ -1982,16 +1989,10 @@ impl MainLoopHandler {
                 Ok(false)
             }
             RPCServerToMain::BroadcastBlockProposal => {
-                let pmsg = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .mining_state
-                    .block_proposal
-                    .map(|proposal| MainToPeerTask::BlockProposalNotification(proposal.into()));
-                if let Some(pmsg) = pmsg {
-                    info!("Broadcasting block proposal notification to all peers.");
-                    self.main_to_peer_broadcast(pmsg);
+                if let Some(proposal) = self.global_state_lock.lock_guard().await.mining_state.block_proposal.map(Clone::clone) {
+                    info!("Broadcasting block proposal (notification) to all peers.");
+                    self.main_to_peer_broadcast(MainToPeerTask::BlockProposalNotification((&proposal).into()));
+                    self.main_to_peer_broadcast(MainToPeerTask::BlockProposal(proposal));
                 } else {
                     info!("Was asked to broadcast block proposal but none is known.");
                 }
@@ -2042,8 +2043,7 @@ impl MainLoopHandler {
         self.main_to_miner_tx.send(MainToMiner::Shutdown);
 
         // Send 'bye' message to all peers.
-        let pmsg = MainToPeerTask::DisconnectAll();
-        self.main_to_peer_broadcast(pmsg);
+        self.main_to_peer_broadcast(MainToPeerTask::Quit);
         debug!("sent bye");
 
         // Flush all databases

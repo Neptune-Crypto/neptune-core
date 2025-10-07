@@ -115,12 +115,7 @@ impl Mul<usize> for Timestamp {
 
 impl Timestamp {
     pub fn now() -> Timestamp {
-        Timestamp(BFieldElement::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64,
-        ))
+        Timestamp(BFieldElement::new(SystemTime::now().duration_since(UNIX_EPOCH).expect("can't be that much backwards").as_millis() as u64))
     }
 
     pub const fn years(num: usize) -> Timestamp {

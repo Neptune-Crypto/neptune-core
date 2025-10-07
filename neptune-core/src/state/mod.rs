@@ -853,8 +853,7 @@ impl GlobalState {
         }
     }
 
-    /// Returns true iff the incoming block proposal is more favorable than the
-    /// one we're currently working on. Returns false if block proposal does not
+    /// Returns `true` iff the incoming block proposal is more favorable than the one we're currently working on. Returns `false` if block proposal does not
     /// have expected parent.
     pub(crate) fn favor_incoming_block_proposal(
         &self,
@@ -863,30 +862,22 @@ impl GlobalState {
     ) -> Result<(), BlockProposalRejectError> {
         let current_tip_digest = self.chain.light_state().hash();
         if incoming_proposal_prev_block_digest != current_tip_digest {
-            return Err(BlockProposalRejectError::WrongParent {
+            Err(BlockProposalRejectError::WrongParent {
                 received: incoming_proposal_prev_block_digest,
                 expected: current_tip_digest,
-            });
-        }
-
-        if self.mining_state.block_proposal.has_own() {
-            return Err(BlockProposalRejectError::HasOwnBlockProposal);
-        }
-
-        let maybe_existing_fee = self.mining_state.block_proposal.map(|x| {
-            x.body()
-                .total_guesser_reward()
-                .expect("block in state must be valid")
-        });
-        if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
-            || incoming_guesser_fee.is_zero()
-        {
-            Err(BlockProposalRejectError::InsufficientFee {
-                current: maybe_existing_fee,
-                received: incoming_guesser_fee,
             })
-        } else {
-            Ok(())
+        } else if self.mining_state.block_proposal.has_own() {Err(BlockProposalRejectError::HasOwnBlockProposal)} 
+        else {
+            let maybe_existing_fee = self.mining_state.block_proposal.map(|x| {
+                x.body().total_guesser_reward().expect("block in state must be valid")
+            });
+            if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee) || 
+            incoming_guesser_fee.is_zero() {
+                Err(BlockProposalRejectError::InsufficientFee {
+                    current: maybe_existing_fee,
+                    received: incoming_guesser_fee,
+                })
+            } else {Ok(())}
         }
     }
 
@@ -1093,7 +1084,7 @@ impl GlobalState {
             tip_header: *self.chain.light_state().header(),
             listen_port,
             network: self.cli().network,
-            instance_id: self.net.instance_id,
+            peer_id: self.net.instance_id,
             version: VersionString::try_from_str(VERSION).unwrap_or_else(|_| {
                 panic!(
                 "Must be able to convert own version number to fixed-size string. Got {VERSION}")

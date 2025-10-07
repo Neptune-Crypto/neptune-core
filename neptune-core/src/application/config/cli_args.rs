@@ -1,5 +1,4 @@
 use std::net::IpAddr;
-use std::net::SocketAddr;
 use std::num::NonZero;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
@@ -11,6 +10,7 @@ use clap::builder::RangedI64ValueParser;
 use clap::builder::TypedValueParser;
 use clap::Parser;
 use itertools::Itertools;
+use libp2p::Multiaddr;
 use num_traits::Zero;
 use sysinfo::System;
 
@@ -80,15 +80,17 @@ pub struct Args {
     /// To do this, see `--peer`.
     ///
     /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8
+    /// 
+    /// TODO #libp2p_adapt
     #[clap(long, value_name = "IP")]
     pub(crate) ban: Vec<IpAddr>,
 
     /// The threshold at which a peer's standing is considered “bad”. Current
-    /// connections to peers in bad standing are terminated. Connection attempts
-    /// from peers in bad standing are refused.
+    /// connections to peers in bad standing are terminated. Connection attempts (TODO requests)
+    /// from peers in bad standing are refused (TODO ignored).
     ///
     /// For a list of reasons that cause bad standing, see
-    /// [NegativePeerSanction](crate::protocol::peer::NegativePeerSanction).
+    /// [`NegativePeerSanction`](crate::protocol::peer::NegativePeerSanction).
     #[clap(
         long,
         default_value = "1000",
@@ -100,6 +102,8 @@ pub struct Args {
     /// Only connect to the peers specified by --peer.
     /// When this flag is set, peer discovery is disabled and incoming
     /// connections from unlisted peers are rejected.
+    /// 
+    /// TODO #libp2p_adapt
     #[arg(long)]
     pub restrict_peers_to_list: bool,
 
@@ -107,6 +111,11 @@ pub struct Args {
     ///
     /// Will not prevent outgoing connections made with `--peer`.
     /// Set this value to 0 to refuse all incoming connections.
+    /// 
+    /// #[deprecated(
+    ///     note = "if this is just about the topology: Gossip-sub has a similar settings but it's 1) a range, 2) further nuanced to interrelated parameters (like 'mesh' peers), 3) changing this requires restarting `Swarm`", 
+    ///     since = "switching to `libp2p`"
+    /// )]
     #[clap(
         long,
         default_value = "10",
@@ -229,8 +238,11 @@ pub struct Args {
     ///
     /// Example: `--whitelisted-composer=8.8.8.8 --whitelisted-composer=8.8.4.4`
     ///          `--whitelisted-composer=2001:db8:3333:4444:5555:6666:7777:8888`
+    /// ```rust
+    /// todo!["update and test the examples"]
+    /// ```
     #[clap(long = "whitelisted-composer")]
-    pub(crate) whitelisted_composers: Vec<IpAddr>,
+    pub(crate) whitelisted_composers: Vec<Multiaddr>,
 
     /// If set, all composition from peers will be ignored.
     #[clap(long)]
@@ -318,12 +330,19 @@ pub struct Args {
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
     pub peer_port: u16,
+    /// Port on which to listen for peer TCP connections.
+    #[clap(long, default_value = "9800", value_name = "PORT_TCP")]
+    pub peer_port_tcp: u16,
+    /// Port on which to listen for peer QUIC connections.
+    #[clap(long, default_value = "9801", value_name = "PORT_QUIC")]
+    pub peer_port_quic: u16,
 
     /// Port on which to listen for RPC connections.
     #[clap(long, default_value = "9799", value_name = "PORT")]
     pub rpc_port: u16,
 
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
+    // TODO make this `Vec` (whitelisted is a good example)
     #[clap(short, long, default_value = "::")]
     pub peer_listen_addr: IpAddr,
 
@@ -343,8 +362,18 @@ pub struct Args {
     pub(crate) sync_mode_threshold: usize,
 
     /// IPs of nodes to connect to, e.g.: --peer 8.8.8.8:9798 --peer 8.8.4.4:1337.
+    /// 
+    /// It's easier to connect without `/p2p/...` in the end of the address.
+    /// 
+    /// The trust assumptions are interpreted in spirit of multiaddress.
+    /// - without `/p2p/...` it will be adding any peer found on the endpoint
+    /// - with `/p2p/...` connections to the given endpoint will fail if the peer id there had changed
+    /// - with only `/p2p/...` it will be trying to reach the peer (if the node will ever find how to connect to the network)
+    /// ```rust
+    /// todo!["update and test the examples"]
+    /// ```
     #[structopt(long = "peer")]
-    pub peers: Vec<SocketAddr>,
+    pub peers: Vec<Multiaddr>,
 
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "main", short)]
@@ -418,6 +447,11 @@ pub struct Args {
     /// Does not affect abnormally closed connections. For example, if a connection
     /// is dropped due to networking issues, an immediate reconnection attempt is
     /// not affected by this cooldown.
+    /// 
+    /// #[deprecated(
+    ///     note = "Gossip-sub has a similar settings ('backoff'), but this doesn't seem to be good for straightforward adapting", 
+    ///     since = "switching to `libp2p`"
+    /// )]
     //
     // The default should be larger than the default interval between peer discovery
     // to meaningfully suppress rapid reconnection attempts.
@@ -587,12 +621,22 @@ fn parse_range(unparsed_range: &str) -> Result<RangeInclusive<u64>, String> {
 
 impl Args {
     /// Indicates if all incoming peer connections are disallowed.
+    /// 
+    /// #[deprecated(
+    ///     note = "if this remains to be a feature it needs another implementation", 
+    ///     since = "switching to `libp2p`"
+    /// )]
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
         self.max_num_peers.is_zero()
     }
 
     /// Return the port that peer can connect on. None if incoming connections
     /// are disallowed.
+    /// 
+    /// #[deprecated(
+    ///     note = "change this to `Vec` of multiadr because of relays", 
+    ///     since = "switching to `libp2p`"
+    /// )]
     pub(crate) fn own_listen_port(&self) -> Option<u16> {
         if self.disallow_all_incoming_peer_connections() {
             None
@@ -631,29 +675,38 @@ impl Args {
         })
     }
 
-    /// Check if block proposal should be accepted from this IP address.
+    /// Check if block proposal should be accepted from this address. 
     pub(crate) fn accept_block_proposal_from(
         &self,
-        ip_address: IpAddr,
+        mut peer: Multiaddr
     ) -> Result<(), BlockProposalRejectError> {
         if self.ignore_foreign_compositions {
-            return Err(BlockProposalRejectError::IgnoreAllForeign);
+            Err(BlockProposalRejectError::IgnoreAllForeign)
+        } else {
+            if self.whitelisted_composers.is_empty() {Ok(())} else {
+                // if let Some(peer_id) = peer.pop() {
+                //     debug_assert!(
+                //         matches!(peer_id, libp2p::multiaddr::Protocol::P2p(_)), 
+                //         r#"@skaunov can't find a case when it can come without `PeerId` ending, but if there is one this can be remade as `if let id @  = peer.iter().last()`"#
+                //     );
+                //     let peer_id = peer_id.into();
+                //     if self.whitelisted_composers.iter().any(|w| w.ends_with(&peer_id) || w.ends_with(&peer)) {Ok(())}
+                //     else {Err(BlockProposalRejectError::NotWhiteListed)}
+                // } else {
+                //     tracing::debug!("something is wrong -- this Multiaddr must not be empty; hence rejecting the operation");
+                //     // ~~seems like going with `anyhow` here to bubble up a deeper internal error which isn't critical~~
+                //     Err(BlockProposalRejectError::NotWhiteListed)
+                // }
+                let (peer_id, peer) = super::super::loops::main_loop::p2p::tmp_utils_multiaddr::peerid_split(&mut peer);
+                if self.whitelisted_composers.iter().any(|w| w.ends_with(&peer)) {Ok(())} else {
+                    if let Some(peer_id) = peer_id {
+                        let peer_id = multiaddr::Protocol::P2p(peer_id).into();
+                        if self.whitelisted_composers.iter().any(|w| w.ends_with(&peer_id)) {return Ok(());}
+                    }
+                    Err(BlockProposalRejectError::NotWhiteListed)
+                }
+            } 
         }
-
-        let ip_address = match ip_address {
-            IpAddr::V4(_) => ip_address,
-            IpAddr::V6(v6) => match v6.to_ipv4() {
-                Some(v4) => std::net::IpAddr::V4(v4),
-                None => ip_address,
-            },
-        };
-        if !self.whitelisted_composers.is_empty()
-            && !self.whitelisted_composers.contains(&ip_address)
-        {
-            return Err(BlockProposalRejectError::NotWhiteListed);
-        }
-
-        Ok(())
     }
 
     fn estimate_proving_capability() -> TxProvingCapability {

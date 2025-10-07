@@ -122,32 +122,11 @@ impl TransactionKernel {
         //       ^^^^^^^^
 
         // meaning: a) all required membership proofs exist; and b) are valid.
-        let inputs = &self.inputs;
-        let maybe_invalid_removal_record = inputs
-            .iter()
-            .enumerate()
-            .find(|(_, rr)| !rr.validate(mutator_set_accumulator));
-        if let Some((index, _invalid_removal_record)) = maybe_invalid_removal_record {
-            return Err(TransactionConfirmabilityError::InvalidRemovalRecord(index));
-        }
-
-        // check for duplicates
-        let has_unique_inputs =
-            inputs.iter().unique_by(|rr| rr.absolute_indices).count() == inputs.len();
-        if !has_unique_inputs {
-            return Err(TransactionConfirmabilityError::DuplicateInputs);
-        }
-
-        // check for already-spent inputs
-        let already_spent_removal_record = inputs
-            .iter()
-            .enumerate()
-            .find(|(_, rr)| !mutator_set_accumulator.can_remove(rr));
-        if let Some((index, _already_spent_removal_record)) = already_spent_removal_record {
-            return Err(TransactionConfirmabilityError::AlreadySpentInput(index));
-        }
-
-        Ok(())
+        if let Some(index ) = self.inputs.iter().position(|rr| !rr.validate(mutator_set_accumulator)) {
+            Err(TransactionConfirmabilityError::InvalidRemovalRecord(index))
+        } else if self.inputs.iter().duplicates_by(|rr| rr.absolute_indices).next().is_some() {Err(TransactionConfirmabilityError::DuplicateInputs)} 
+        else if let Some(index) = self.inputs.iter().position(|rr| !mutator_set_accumulator.can_remove(rr)) 
+        {Err(TransactionConfirmabilityError::AlreadySpentInput(index))} else {Ok(())}
     }
 
     /// Returns `true` iff the "output" transaction kernel is a merged

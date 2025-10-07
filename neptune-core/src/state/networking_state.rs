@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use anyhow::Result;
+use libp2p::PeerId;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
@@ -89,7 +90,7 @@ pub struct NetworkingState {
     pub(crate) sync_anchor: Option<SyncAnchor>,
 
     /// Read-only value set at random during startup
-    pub instance_id: u128,
+    pub instance_id: PeerId,
 
     /// If set to `true`, no blocks, block proposals, or transactions will be
     /// sent from this client, or accepted from peers.
@@ -109,12 +110,14 @@ pub struct NetworkingState {
 }
 
 impl NetworkingState {
+    /// This function is required for benchmarks, but is not part of the public API.
+    #[doc(hidden)]
     pub(crate) fn new(peer_map: PeerMap, peer_databases: PeerDatabases) -> Self {
         Self {
             peer_map,
             peer_databases,
             sync_anchor: None,
-            instance_id: rand::random(),
+            instance_id: PeerId::random(), // *may break a test!*
             freeze: false,
             disconnection_times: HashMap::new(),
         }

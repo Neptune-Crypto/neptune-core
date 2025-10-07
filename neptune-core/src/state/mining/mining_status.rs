@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct GuessingWorkInfo {
     work_start: SystemTime,
     num_inputs: usize,
@@ -29,7 +29,7 @@ impl GuessingWorkInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct ComposingWorkInfo {
     // Only this info is available at the beginning of the composition work.
     // The rest of the information will have to be read from the log.
@@ -42,7 +42,7 @@ impl ComposingWorkInfo {
     }
 }
 
-#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MiningStatus {
     Guessing(GuessingWorkInfo),
     Composing(ComposingWorkInfo),

@@ -78,27 +78,27 @@ impl BlockProposal {
 
 /// Enumerates the reason that a specific block proposal was rejected. The
 /// block proposal is most likely from another peer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum BlockProposalRejectError {
-    /// Incoming block proposal does not have prev_block_digest matching current tip
+    /// Incoming block proposal does not have prev_block_digest matching current tip.
     WrongParent { received: Digest, expected: Digest },
 
-    /// Incoming block proposal wrong height
+    /// Incoming block proposal wrong height.
     WrongHeight {
         received: BlockHeight,
         expected: BlockHeight,
     },
 
-    /// Incoming block proposal does not have sufficient fee
+    /// Incoming block proposal does not have sufficient fee.
     InsufficientFee {
         current: Option<NativeCurrencyAmount>,
         received: NativeCurrencyAmount,
     },
 
-    /// All foreign block proposals are ignored
+    /// All foreign block proposals are ignored.
     IgnoreAllForeign,
 
-    /// Block proposal comes from a peer that's not whitelisted
+    /// Block proposal comes from a peer that's not whitelisted.
     NotWhiteListed,
 
     /// Block proposal is rejected because we already built one locally.

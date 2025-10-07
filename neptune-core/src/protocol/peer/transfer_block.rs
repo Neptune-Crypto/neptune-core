@@ -41,6 +41,22 @@ impl TryFrom<TransferBlock> for Block {
     }
 }
 
+// impl From<TransferBlock> for Block {
+//     fn from(t_block: TransferBlock) -> Self {
+//         ensure!(
+//             t_block.header.height != BlockHeight::genesis(),
+//             "The genesis block cannot be transferred or decoded from transfer",
+//         );
+
+//         Block::new(
+//             t_block.header,
+//             t_block.body,
+//             t_block.appendix,
+//             BlockProof::SingleProof(t_block.proof),
+//         )
+//     }
+// }
+
 impl TryFrom<Block> for TransferBlock {
     type Error = anyhow::Error;
 

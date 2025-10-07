@@ -851,18 +851,10 @@ impl ArchivalState {
     /// Returns `None` if no block with this digest is known. Returns the
     /// genesis header if the block digest is that of the genesis block.
     pub(crate) async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
-        let mut ret = self
-            .block_index_db
-            .get(BlockIndexKey::Block(block_digest))
-            .await
-            .map(|x| x.as_block_record().block_header);
-
-        // If no block was found, check if digest is genesis digest
-        if ret.is_none() && block_digest == self.genesis_block.hash() {
-            ret = Some(*self.genesis_block.header());
-        }
-
-        ret
+        self.block_index_db.get(BlockIndexKey::Block(block_digest)).await.map(|x| x.as_block_record().block_header).or_else(|| {
+            // If no block was found, check if digest is genesis digest
+            if block_digest == self.genesis_block.hash() {Some(*self.genesis_block.header())} else {None}
+        })
     }
 
     /// Returns the block header with a witness to the block hash if that block
@@ -1019,19 +1011,15 @@ impl ArchivalState {
     /// Returns false if either the block is not known, or if it's known but
     /// has been orphaned.
     pub(crate) async fn block_belongs_to_canonical_chain(&self, block_digest: Digest) -> bool {
-        let Some(block_header) = self.get_block_header(block_digest).await else {
-            return false;
-        };
-
-        let block_height: u64 = block_header.height.into();
-
-        self.archival_block_mmr
+        if let Some(block_header) = self.get_block_header(block_digest).await {
+            self.archival_block_mmr
             .ammr()
-            .try_get_leaf(block_height)
+            .try_get_leaf(block_header.height.into())
             .await
             .is_some_and(|canonical_digest_at_this_height| {
                 canonical_digest_at_this_height == block_digest
             })
+        } else {false}
     }
 
     /// Return a list of digests of the ancestors to the requested digest. Does not include the input

@@ -256,9 +256,11 @@ impl RemovalRecord {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum RemovalRecordValidityError {
+    #[error("membership proof is missing")]
     AbsentAuthenticatedChunk,
+    #[error("membership proof for chunk index {chunk_index} is invalid")]
     InvalidSwbfiMmrMp { chunk_index: u64 },
 }
 

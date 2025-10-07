@@ -19,7 +19,7 @@ pub(crate) struct HandshakeData {
     pub tip_header: BlockHeader,
     pub listen_port: Option<u16>,
     pub network: Network,
-    pub instance_id: u128,
+    pub peer_id: libp2p::PeerId,
     pub version: VersionString,
     pub is_archival_node: bool,
 

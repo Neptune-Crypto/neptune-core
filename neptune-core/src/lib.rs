@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 // recursion limit for macros (e.g. triton_asm!)
 #![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
@@ -79,6 +80,7 @@ use crate::application::loops::channel::PeerTaskToMain;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::connect_to_peers::call_peer;
 use crate::application::loops::main_loop::MainLoopHandler;
+use crate::application::loops::main_loop::p2p::tmp_utils_multiaddr;
 use crate::application::rpc::server::RPC;
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_state::WalletState;
@@ -196,7 +198,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         own_handshake_data.tip_header.height
     );
     let mut task_join_handles = vec![];
-    for peer_address in global_state_lock.cli().peers.clone() {
+    for peer_address in global_state_lock.cli().peers.clone().iter_mut().filter_map(tmp_utils_multiaddr::try_from) {
         let peer_state_var = global_state_lock.clone(); // bump arc refcount
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
             main_to_peer_broadcast_tx.subscribe();

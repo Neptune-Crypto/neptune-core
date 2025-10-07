@@ -221,7 +221,7 @@ pub fn get_dummy_version() -> VersionString {
 /// Return a handshake object with a randomly set instance ID
 pub(crate) fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
-        instance_id: rand::random(),
+        peer_id: libp2p::PeerId::random(),
         tip_header: Block::genesis(network).header().to_owned(),
         listen_port: Some(8080),
         network,

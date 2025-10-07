@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use futures::channel::oneshot;
+use libp2p::PeerId;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
@@ -77,9 +78,11 @@ pub(crate) enum MinerToMain {
     Shutdown(i32),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MainToPeerTaskBatchBlockRequest {
     /// The peer to whom this request should be directed.
+    /// 
+    /// TODO #libp2p_reqresp_BatchBlock
     pub(crate) peer_addr_target: SocketAddr,
 
     /// Sorted list of most preferred blocks. The first digest is the block
@@ -109,62 +112,59 @@ impl From<&Block> for BlockProposalNotification {
     }
 }
 
-#[derive(Clone, Debug, strum::Display)]
+#[derive(Clone, Debug, strum::Display, PartialEq)]
 pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
+    #[deprecated(since = "switching to `libp2p`")]
     BlockProposalNotification(BlockProposalNotification),
+    BlockProposal(Block),
     RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
 
     /// sanction a peer for failing to respond to sync request
-    PeerSynchronizationTimeout(SocketAddr),
+    /// 
+    /// TODO #libp2p_reqresp_Sync
+    PeerSynchronizationTimeout(SocketAddr), 
 
     /// Request peer list from connected peers
     MakePeerDiscoveryRequest,
 
     /// Request peers from a specific peer to get peers further away
-    MakeSpecificPeerDiscoveryRequest(SocketAddr),
+    /// 
+    /// TODO #libp2p_reqresp_px
+    MakeSpecificPeerDiscoveryRequest(SocketAddr), 
 
     /// Publish knowledge of a transaction
+    /// 
+    #[deprecated(since = "switching to `libp2p`")]
     TransactionNotification(TransactionNotification),
 
+    NewTransaction(crate::protocol::peer::transfer_transaction::TransferTransaction),
+
     /// Disconnect from a specific peer
+    /// 
+    #[deprecated(since = "switching to `libp2p`")]
     Disconnect(SocketAddr),
 
     /// Disconnect from all peers
-    DisconnectAll(),
+    Quit
 }
 
 impl MainToPeerTask {
-    pub fn get_type(&self) -> String {
-        match self {
-            MainToPeerTask::Block(_) => "block",
-            MainToPeerTask::RequestBlockBatch(_) => "req block batch",
-            MainToPeerTask::PeerSynchronizationTimeout(_) => "peer sync timeout",
-            MainToPeerTask::MakePeerDiscoveryRequest => "make peer discovery req",
-            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => {
-                "make specific peer discovery req"
-            }
-            MainToPeerTask::TransactionNotification(_) => "transaction notification",
-            MainToPeerTask::Disconnect(_) => "disconnect",
-            MainToPeerTask::DisconnectAll() => "disconnect all",
-            MainToPeerTask::BlockProposalNotification(_) => "block proposal notification",
-        }
-        .to_string()
-    }
-
     /// Function to filter out messages that should be ignored when all state
     /// updates have been paused.
     pub(crate) fn ignore_on_freeze(&self) -> bool {
         match self {
             MainToPeerTask::Block(_) => true,
             MainToPeerTask::BlockProposalNotification(_) => true,
+            MainToPeerTask::BlockProposal(_) => true,
             MainToPeerTask::RequestBlockBatch(_) => true,
             MainToPeerTask::PeerSynchronizationTimeout(_) => true,
             MainToPeerTask::MakePeerDiscoveryRequest => false,
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => false,
             MainToPeerTask::TransactionNotification(_) => true,
+            MainToPeerTask::NewTransaction(_) => true,
             MainToPeerTask::Disconnect(_) => false,
-            MainToPeerTask::DisconnectAll() => false,
+            MainToPeerTask::Quit => false,
         }
     }
 }
@@ -184,32 +184,22 @@ pub(crate) enum PeerTaskToMain {
     RemovePeerMaxBlockHeight(SocketAddr),
 
     /// (\[(peer_listen_address)\], reported_by, distance)
-    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)),
+    /// 
+    /// TODO #libp2p_reqresp_px
+    PeerExchangeAnswer((Vec<(SocketAddr, PeerId)>, SocketAddr, u8)),
 
     Transaction(Box<PeerTaskToMainTransaction>),
     BlockProposal(Box<Block>),
+    /// #[deprecated(since = "switching to `libp2p`")]
     DisconnectFromLongestLivedPeer,
+
+    // Sanction(libp2p::PeerId, crate::protocol::peer::PeerSanction)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerTaskToMainTransaction {
     pub transaction: Transaction,
     pub confirmable_for_block: Digest,
-}
-
-impl PeerTaskToMain {
-    pub fn get_type(&self) -> String {
-        match self {
-            PeerTaskToMain::NewBlocks(_) => "new blocks",
-            PeerTaskToMain::AddPeerMaxBlockHeight { .. } => "add peer max block height",
-            PeerTaskToMain::RemovePeerMaxBlockHeight(_) => "remove peer max block height",
-            PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
-            PeerTaskToMain::Transaction(_) => "transaction",
-            PeerTaskToMain::BlockProposal(_) => "block proposal",
-            PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
-        }
-        .to_string()
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

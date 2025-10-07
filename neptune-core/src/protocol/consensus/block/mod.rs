@@ -680,10 +680,9 @@ impl Block {
         appendix: BlockAppendix,
         block_proof: BlockProof,
     ) -> Self {
-        let kernel = BlockKernel::new(header, body, appendix);
         Self {
             digest: OnceLock::default(), // calc'd in hash()
-            kernel,
+            kernel: BlockKernel::new(header, body, appendix),
             proof: block_proof,
         }
     }
@@ -692,7 +691,7 @@ impl Block {
     /// Note that this function does **not** check that the block has enough
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
-    pub async fn is_valid(&self, previous_block: &Block, now: Timestamp, network: Network) -> bool {
+    pub async fn is_valid(&self, previous_block: &Block, now: &Timestamp, network: Network) -> bool {
         match self.validate(previous_block, now, network).await {
             Ok(_) => true,
             Err(e) => {
@@ -707,12 +706,11 @@ impl Block {
     /// This method assumes that the previous block is valid.
     ///
     /// Note that this function does **not** check that the block has enough
-    /// proof of work; that must be done separately by the caller, for instance
-    /// by calling [`Self::has_proof_of_work`].
+    /// proof of work; that must be done separately by the caller, for instance by calling [`Self::has_proof_of_work`].
     pub async fn validate(
         &self,
         previous_block: &Block,
-        now: Timestamp,
+        now: &Timestamp,
         network: Network,
     ) -> Result<(), BlockValidationError> {
         // Note that there is a correspondence between the logic here and the
@@ -773,7 +771,7 @@ impl Block {
         }
 
         // 0.g)
-        let future_limit = now + FUTUREDATING_LIMIT;
+        let future_limit = *now + FUTUREDATING_LIMIT;
         if self.kernel.header.timestamp >= future_limit {
             return Err(BlockValidationError::FutureDating);
         }

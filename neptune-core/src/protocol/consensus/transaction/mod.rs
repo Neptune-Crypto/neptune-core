@@ -222,10 +222,8 @@ impl Transaction {
     /// removal records determine indices absent in the mutator set sliding
     /// window Bloom filter, and whether the MMR membership proofs are valid.
     ///
-    /// Why not testing AOCL MMR membership proofs? These are being verified in
-    /// PrimitiveWitness::validate and ProofCollection/RemovalRecordsIntegrity.
-    /// AOCL membership is a feature of *validity*, which is a pre-requisite to
-    /// confirmability.
+    /// Why not testing AOCL MMR membership proofs? These are being verified in [`PrimitiveWitness::validate`] and [`ProofCollection`]/`RemovalRecordsIntegrity`.
+    /// AOCL membership is a feature of *validity*, which is a pre-requisite to confirmability.
     pub fn is_confirmable_relative_to(
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,

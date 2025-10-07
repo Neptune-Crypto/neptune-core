@@ -9,16 +9,14 @@ use crate::protocol::consensus::transaction::validity::proof_collection::ProofCo
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 
-/// Enumerates the kind of transaction proof that can be shared without the risk
-/// of loss of funds.
+/// Enumerates the kind of transaction proof that can be shared without the risk of loss of funds.
 ///
-/// SingleProof is the highest quality, as they can be merged with the miner's
-/// coinbase transaction, which also is supported by a SingleProof.
-/// ProofCollection requires upgrade to a SingleProof before mining, so it is
-/// of lover quality.
+/// `SingleProof` is the highest quality, as they can be merged with the miner's
+/// coinbase transaction, which also is supported by `SingleProof`.
+/// `ProofCollection` requires upgrade to `SingleProof` before mining, so it is of lover quality.
 #[derive(Clone, Copy, EnumIter, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TransactionProofQuality {
-    // OnlyLockScripts, // TODO: Add this once Transaction has support
+    // OnlyLockScripts, // TODO: Add this once `Transaction` has support
     ProofCollection,
     SingleProof,
 }
@@ -30,15 +28,14 @@ pub(crate) enum TransactionProofQuality {
 /// peers, as this would leak secret key material.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum TransferTransactionProof {
-    //OnlyLockScripts(OnlyLockScriptWitness) TODO: Add when Transaction supports
+    //OnlyLockScripts(OnlyLockScriptWitness) TODO: Add when `Transaction` supports
     ProofCollection(Box<ProofCollection>),
     SingleProof(Proof),
 }
 
 /// For transferring proved transactions between peers.
 ///
-/// This type exists to ensure that a transaction supported by
-/// [TransactionProof::Witness] is never shared between peers, as this would
+/// This type exists to ensure that a transaction supported by [`TransactionProof::Witness`] is never shared between peers, as this would
 /// leak secret keys and lead to loss of funds.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct TransferTransaction {

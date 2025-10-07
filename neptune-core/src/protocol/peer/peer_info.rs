@@ -2,10 +2,10 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use libp2p::PeerId;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::InstanceId;
 use super::PeerStanding;
 use crate::HandshakeData;
 
@@ -55,8 +55,8 @@ impl rand::distr::Distribution<PeerConnectionInfo> for rand::distr::StandardUnif
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerInfo {
-    peer_connection_info: PeerConnectionInfo,
-    instance_id: InstanceId,
+    peer_connection_info: PeerConnectionInfo, // `ConnectedPoint` sadly isn't `serde`
+    peer_id: libp2p::PeerId,
     pub(crate) own_timestamp_connection_established: SystemTime,
     pub(crate) peer_timestamp_connection_established: SystemTime,
     pub(crate) standing: PeerStanding,
@@ -75,7 +75,7 @@ impl PeerInfo {
         let standing = PeerStanding::new(peer_tolerance);
         Self {
             peer_connection_info,
-            instance_id: peer_handshake.instance_id,
+            peer_id: peer_handshake.peer_id,
             own_timestamp_connection_established: connection_established,
             peer_timestamp_connection_established: peer_handshake.timestamp,
             standing,
@@ -115,9 +115,7 @@ impl PeerInfo {
         self
     }
 
-    pub(crate) fn instance_id(&self) -> u128 {
-        self.instance_id
-    }
+    pub(crate) fn instance_id(&self) -> PeerId {self.peer_id}
 
     pub fn standing(&self) -> PeerStanding {
         self.standing
@@ -152,7 +150,9 @@ impl PeerInfo {
 
     /// Return the socket address that the peer is expected to listen on. Returns `None` if peer does not accept
     /// incoming connections.
-    pub fn listen_address(&self) -> Option<SocketAddr> {
+    /* TODO if this will remain relevant, there are better ways to get this from `Swarm` 
+    (through `identify::` peer info, exposing `swarm_listeners` and relevant, ...) */
+    pub(crate) fn listen_address(&self) -> Option<SocketAddr> {
         self.peer_connection_info
             .port_for_incoming_connections
             .map(|port| SocketAddr::new(self.peer_connection_info.connected_address.ip(), port))
@@ -174,7 +174,7 @@ impl rand::distr::Distribution<PeerInfo> for rand::distr::StandardUniform {
         let local_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(rng.random());
         PeerInfo {
             peer_connection_info: rng.random(),
-            instance_id: rng.random(),
+            peer_id: todo!{"rng.random()"},
             own_timestamp_connection_established,
             peer_timestamp_connection_established,
             standing: rng.random(),

@@ -11,6 +11,7 @@ use std::time::SystemTime;
 
 use handshake_data::HandshakeData;
 use itertools::Itertools;
+use libp2p::PeerId;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use num_traits::Zero;
@@ -44,7 +45,7 @@ use crate::protocol::consensus::block::difficulty_control::max_cumulative_pow_af
 use crate::protocol::peer::transfer_block::TransferBlock;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 
-pub(crate) type InstanceId = u128;
+pub(crate) type InstanceId = PeerId;
 
 pub(crate) const SYNC_CHALLENGE_POW_WITNESS_LENGTH: usize = 10;
 pub(crate) const SYNC_CHALLENGE_NUM_BLOCK_PAIRS: usize = 10;
@@ -346,14 +347,12 @@ impl Sanction for PeerSanction {
     }
 }
 
-/// This is the object that gets stored in the database to record how well a
-/// peer has behaved so far.
-//
-// The most central methods are [PeerStanding::sanction] and
-// [PeerStanding::is_bad].
+/// This is the object that gets stored in the database to record how well a peer has behaved so far.
+///
+/// The most central methods are [`PeerStanding::sanction`] and [`PeerStanding::is_bad`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerStanding {
-    /// The actual standing. The higher, the better.
+    /// The actual standing. The higher -- the better.
     pub standing: i32,
     pub latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
     pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
@@ -550,6 +549,7 @@ pub(crate) enum PeerMessage {
     BlockResponseBatch(Vec<(TransferBlock, MmrMembershipProof)>), // TODO: Consider restricting this in size
     UnableToSatisfyBatchRequest,
 
+    // TODO a kind of challenge (just a proof of tiny work probably) from a *requestor* is also needed when adapt syncing to #libp2p_reqresp_sync to avoid malicious asking for a block just to annoy the node
     SyncChallenge(SyncChallenge),
     SyncChallengeResponse(Box<SyncChallengeResponse>),
 
@@ -570,7 +570,7 @@ pub(crate) enum PeerMessage {
     TransactionRequest(TransactionKernelId),
     PeerListRequest,
     /// (socket address, instance_id)
-    PeerListResponse(Vec<(SocketAddr, u128)>),
+    PeerListResponse(Vec<(SocketAddr, libp2p::PeerId)>),
     /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(TransferConnectionStatus),

@@ -94,10 +94,8 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
         },
     };
     if cli.restrict_peers_to_list {
-        let allowed_ips: Vec<std::net::IpAddr> = cli.peers.iter().map(|p| p.ip()).collect();
-        let is_allowed = allowed_ips.contains(&connecting_ip);
-        if !is_allowed {
-            debug!("Rejecting incoming connection from unlisted peer {connecting_ip} due to --restrict-peers-to-list",);
+        if crate::application::loops::main_loop::p2p::tmp_utils_multiaddr::mebmership::is_ipadr_in_madrs(connecting_ip, cli.peers.iter()) {
+            debug!("Rejecting incoming connection from unlisted peer {connecting_ip} due to `--restrict-peers-to-list`");
             return false;
         }
     }
@@ -149,7 +147,7 @@ async fn check_if_connection_is_allowed(
 
     if let Some(time) = global_state
         .net
-        .last_disconnection_time_of_peer(other_handshake.instance_id)
+        .last_disconnection_time_of_peer(other_handshake.peer_id)
     {
         if SystemTime::now()
             .duration_since(time)
@@ -183,7 +181,7 @@ async fn check_if_connection_is_allowed(
 
     // Disallow connection to already connected peer.
     if global_state.net.peer_map.values().any(|peer| {
-        peer.instance_id() == other_handshake.instance_id
+        peer.instance_id() == other_handshake.peer_id
             || *peer_address == peer.connected_address()
     }) {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
@@ -207,7 +205,7 @@ async fn check_if_connection_is_allowed(
     }
 
     // Disallow connection to self
-    if own_handshake.instance_id == other_handshake.instance_id {
+    if own_handshake.peer_id == other_handshake.peer_id {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect);
     }
 
@@ -795,7 +793,7 @@ mod tests {
             .lock(|s| s.net.peer_map.values().collect::<Vec<_>>()[0].clone())
             .await;
         let mut mutated_other_handshake = other_handshake;
-        mutated_other_handshake.instance_id = connected_peer.instance_id();
+        mutated_other_handshake.peer_id = connected_peer.instance_id();
         status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
@@ -893,7 +891,7 @@ mod tests {
             .lock_guard_mut()
             .await
             .net
-            .register_peer_disconnection(node_0_handshake.instance_id, SystemTime::now());
+            .register_peer_disconnection(node_0_handshake.peer_id, SystemTime::now());
 
         let handshake_request = PeerMessage::Handshake {
             magic_value: *MAGIC_STRING_REQUEST,
