@@ -1,2 +1,1 @@
-pub mod server;
-mod tests;
+pub mod http;
