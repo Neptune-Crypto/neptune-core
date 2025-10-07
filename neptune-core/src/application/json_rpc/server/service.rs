@@ -40,7 +40,6 @@ mod tests {
         state::wallet::wallet_entropy::WalletEntropy,
         tests::{shared::globalstate::mock_genesis_global_state, shared_tokio_runtime},
     };
-    use anyhow::Result;
     use macro_rules_attr::apply;
 
     async fn test_rpc_server() -> RpcServer {
@@ -55,16 +54,14 @@ mod tests {
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn test_network_is_consistent() -> Result<()> {
+    async fn network_is_consistent() {
         let rpc_server = test_rpc_server().await;
         assert_eq!("main", rpc_server.network().await.network);
-        Ok(())
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn test_height_is_correct() -> Result<()> {
+    async fn height_is_correct() {
         let rpc_server = test_rpc_server().await;
         assert_eq!(0, rpc_server.height().await.height);
-        Ok(())
     }
 }
