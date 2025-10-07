@@ -10,13 +10,16 @@ type HandlerFn = Box<
 >;
 
 #[allow(missing_debug_implementations)]
-pub struct RpcRouter {
+pub struct Router<A: ?Sized> {
     routes: HashMap<&'static str, HandlerFn>,
-    api: Arc<dyn RpcApi>,
+    api: Arc<A>,
 }
 
-impl RpcRouter {
-    pub fn new(api: Arc<dyn RpcApi>) -> Self {
+impl<A> Router<A>
+where
+    A: Send + Sync + 'static + ?Sized,
+{
+    pub fn new(api: Arc<A>) -> Self {
         Self {
             routes: HashMap::new(),
             api,
@@ -25,7 +28,7 @@ impl RpcRouter {
 
     pub fn insert<F, Fut>(&mut self, name: &'static str, f: F)
     where
-        F: Fn(Arc<dyn RpcApi>, serde_json::Value) -> Fut + Send + Sync + 'static,
+        F: Fn(Arc<A>, serde_json::Value) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = RpcResult<serde_json::Value>> + Send + 'static,
     {
         let api = self.api.clone();
@@ -45,5 +48,44 @@ impl RpcRouter {
         } else {
             Err(RpcError::MethodNotFound)
         }
+    }
+}
+
+pub type RpcRouter = Router<dyn RpcApi>;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use crate::tests::shared_tokio_runtime;
+
+    use super::*;
+    use macro_rules_attr::apply;
+    use serde_json::json;
+    use std::sync::Arc;
+
+    struct DummyApi;
+
+    #[apply(shared_tokio_runtime)]
+    async fn dispatch_known_method() {
+        let api = Arc::new(DummyApi);
+        let mut router = Router::new(api.clone());
+
+        router.insert("echo", |_api, params| async move {
+            Ok(json!({ "echo": params }))
+        });
+
+        let params = json!({ "message": "hello" });
+        let result = router.dispatch("echo", params.clone()).await.unwrap();
+
+        assert_eq!(result, json!({ "echo": params }));
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn dispatch_unknown_method() {
+        let api = Arc::new(DummyApi);
+        let router = Router::new(api);
+
+        let err = router.dispatch("nonexistent", json!({})).await.unwrap_err();
+        assert!(matches!(err, RpcError::MethodNotFound));
     }
 }
