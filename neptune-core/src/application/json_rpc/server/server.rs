@@ -33,7 +33,7 @@ impl RpcServer {
 
     pub async fn serve(&self, listener: TcpListener) {
         let api: Arc<dyn RpcApi> = Arc::new(self.clone());
-        let namespaces: HashSet<Namespace> = self.state.cli().rpc_modules.iter().cloned().collect();
+        let namespaces: HashSet<Namespace> = self.state.cli().rpc_modules.iter().copied().collect();
         let router = RpcMethods::new_router(api, namespaces);
 
         let app = Router::new()
@@ -67,8 +67,14 @@ impl RpcServer {
 
 #[async_trait]
 impl RpcApi for RpcServer {
-    async fn get_height_call(&self, _: GetHeightRequest) -> GetHeightResponse {
-        GetHeightResponse {
+    async fn network_call(&self, _: NetworkRequest) -> NetworkResponse {
+        NetworkResponse {
+            network: self.state.cli().network.to_string(),
+        }
+    }
+
+    async fn height_call(&self, _: HeightRequest) -> HeightResponse {
+        HeightResponse {
             height: self
                 .state
                 .lock_guard()

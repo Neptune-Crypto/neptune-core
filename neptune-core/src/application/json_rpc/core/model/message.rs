@@ -3,10 +3,20 @@ use serde_tuple::Deserialize_tuple; // Due a problem of serde_tuple we cant use 
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct GetHeightRequest {}
+pub struct NetworkRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkResponse {
+    pub network: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct HeightRequest {}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetHeightResponse {
+pub struct HeightResponse {
     pub height: u64, // This technically could exceed JavaScript's safe int limits but practically it would take thousand(?) years.
 }

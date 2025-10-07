@@ -25,9 +25,16 @@ mod tests {
     }
 
     #[apply(shared_tokio_runtime)]
+    async fn test_network_is_consistent() -> Result<()> {
+        let rpc_server = test_rpc_server().await;
+        assert_eq!("mainnet", rpc_server.network().await.network);
+        Ok(())
+    }
+
+    #[apply(shared_tokio_runtime)]
     async fn test_height_is_correct() -> Result<()> {
         let rpc_server = test_rpc_server().await;
-        assert_eq!(0, rpc_server.get_height().await.height);
+        assert_eq!(0, rpc_server.height().await.height);
         Ok(())
     }
 }

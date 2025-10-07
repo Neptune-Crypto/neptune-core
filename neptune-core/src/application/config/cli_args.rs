@@ -527,7 +527,7 @@ pub struct Args {
         long,
         value_parser = clap::value_parser!(Namespace),
         use_value_delimiter = true,
-        default_missing_value = "node,chain",
+        default_value = "Node,Chain",
         value_name = "NAMESPACES"
     )]
     pub rpc_modules: Vec<Namespace>,

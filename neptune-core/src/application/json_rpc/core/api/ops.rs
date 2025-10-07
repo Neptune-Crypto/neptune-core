@@ -12,7 +12,6 @@ pub const RPC_API_VERSION: u16 = 1;
 // TODO: Strum EnumString is too sensitive
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString)]
 #[serde(rename_all = "camelCase")]
-#[strum(serialize_all = "camelCase")]
 pub enum Namespace {
     Node,
     Networking,
@@ -26,6 +25,8 @@ pub enum Namespace {
 #[derive(Router, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RpcMethods {
+    #[namespace(Namespace::Node)]
+    Network,
     #[namespace(Namespace::Chain)]
-    GetHeight,
+    Height,
 }
