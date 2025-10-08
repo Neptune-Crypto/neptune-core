@@ -30,7 +30,7 @@ impl RpcApi for RpcServer {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub mod tests {
     use crate::{
         api::export::Network,
         application::{
@@ -42,7 +42,7 @@ mod tests {
     };
     use macro_rules_attr::apply;
 
-    async fn test_rpc_server() -> RpcServer {
+    pub async fn test_rpc_server() -> RpcServer {
         let global_state_lock = mock_genesis_global_state(
             2,
             WalletEntropy::new_random(),
