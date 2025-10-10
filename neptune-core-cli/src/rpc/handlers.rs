@@ -358,6 +358,9 @@ pub async fn handle_request(request: JsonRpcRequest, neptune_core_port: u16) -> 
             let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
 
+            // Debug: log the incoming params
+            debug!("send RPC params: {:?}", request.params);
+
             // Get network from client (for parsing addresses)
             let network = client.network(ctx).await??;
 

@@ -61,7 +61,7 @@ pub async fn start(config: crate::rpc::RpcConfig) -> Result<()> {
 
 /// Handle individual HTTP connection
 async fn handle_connection(mut stream: TcpStream, server_token: Token, neptune_core_port: u16) -> Result<()> {
-    let mut buffer = [0; 4096];
+    let mut buffer = [0; 8192]; // Increased to handle large bech32m addresses
 
     match stream.read(&mut buffer).await {
         Ok(0) => {
@@ -70,10 +70,12 @@ async fn handle_connection(mut stream: TcpStream, server_token: Token, neptune_c
         }
         Ok(n) => {
             let request_str = String::from_utf8_lossy(&buffer[..n]);
-            debug!("Received HTTP request ({} bytes)", n);
+            info!("Received HTTP request ({} bytes)", n);
+            debug!("Request content: {}", request_str);
 
             // Parse HTTP request
             let http_request = parse_http_request(&request_str)?;
+            info!("Parsed HTTP request, body present: {}", http_request.body.is_some());
 
             // Extract and validate cookie
             let cookie_valid = validate_cookie(&http_request, &server_token);
@@ -85,11 +87,13 @@ async fn handle_connection(mut stream: TcpStream, server_token: Token, neptune_c
 
             // Handle JSON-RPC request
             let response = if let Some(json_body) = http_request.body {
+                info!("Received JSON body: {}", json_body);
                 match serde_json::from_str::<JsonRpcRequest>(&json_body) {
                     Ok(req) => {
                         let method = req.method.clone();
                         let id = req.id.clone();
                         info!("RPC request: method='{}', id={}", method, id);
+                        debug!("RPC params: {:?}", req.params);
 
                         // Check if method requires authentication
                         if requires_auth(&method) && !cookie_valid {
