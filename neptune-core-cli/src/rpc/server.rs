@@ -40,13 +40,14 @@ pub async fn start(config: crate::rpc::RpcConfig) -> Result<()> {
     info!("Authentication cookie ready");
     info!("neptune-cli RPC server is ready to accept connections");
 
+    let neptune_core_port = config.neptune_core_port;
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
                 debug!("New connection from {}", addr);
                 let token = token.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, token).await {
+                    if let Err(e) = handle_connection(stream, token, neptune_core_port).await {
                         error!("Error handling connection from {}: {}", addr, e);
                     }
                 });
@@ -59,7 +60,7 @@ pub async fn start(config: crate::rpc::RpcConfig) -> Result<()> {
 }
 
 /// Handle individual HTTP connection
-async fn handle_connection(mut stream: TcpStream, server_token: Token) -> Result<()> {
+async fn handle_connection(mut stream: TcpStream, server_token: Token, neptune_core_port: u16) -> Result<()> {
     let mut buffer = [0; 4096];
 
     match stream.read(&mut buffer).await {
@@ -104,7 +105,7 @@ async fn handle_connection(mut stream: TcpStream, server_token: Token) -> Result
                             let response_body = serde_json::to_string(&error_response)?;
                             create_http_response(401, "Unauthorized", &response_body)
                         } else {
-                            match handle_request(req).await {
+                            match handle_request(req, neptune_core_port).await {
                                 Ok(rpc_response) => {
                                     debug!("RPC method '{}' completed successfully", method);
                                     let response_body = serde_json::to_string(&rpc_response)?;

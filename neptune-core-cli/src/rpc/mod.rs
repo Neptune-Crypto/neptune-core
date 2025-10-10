@@ -15,6 +15,8 @@ use std::path::PathBuf;
 pub struct RpcConfig {
     /// Port to bind the RPC server to
     pub port: u16,
+    /// Port to connect to neptune-core on
+    pub neptune_core_port: u16,
     /// Data directory for cookie storage
     pub data_dir: PathBuf,
     /// Whether to use shared cookie with neptune-core
@@ -23,9 +25,10 @@ pub struct RpcConfig {
 
 impl RpcConfig {
     /// Create new RPC configuration
-    pub fn new(port: u16, data_dir: PathBuf) -> Self {
+    pub fn new(port: u16, neptune_core_port: u16, data_dir: PathBuf) -> Self {
         Self {
             port,
+            neptune_core_port,
             data_dir,
             _use_shared_cookie: true, // Default to shared cookie
         }

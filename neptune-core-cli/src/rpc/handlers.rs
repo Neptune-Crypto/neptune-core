@@ -3,11 +3,18 @@
 //! Handles JSON-RPC requests and routes them to appropriate handlers.
 
 use anyhow::Result;
+use neptune_cash::api::export::{
+    AdditionRecord, BlockHeight, TxCreationArtifacts,
+};
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::application::rpc::server::error::RpcError;
 use neptune_cash::application::rpc::server::RPCClient;
+use neptune_cash::protocol::consensus::block::{
+    Block, block_header::BlockPow,
+};
+use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
 use neptune_cash::state::wallet::wallet_file::WalletFile;
 use neptune_cash::state::wallet::wallet_file::WalletFileContext;
 use serde::{Deserialize, Serialize};
@@ -141,7 +148,7 @@ async fn get_cookie_hint(
 }
 
 /// Handle JSON-RPC request
-pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> {
+pub async fn handle_request(request: JsonRpcRequest, neptune_core_port: u16) -> Result<JsonRpcResponse> {
     match request.method.as_str() {
         // Standalone Commands (No Server Required)
         "completions" => {
@@ -232,7 +239,7 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
 
         // Server-Dependent Methods (Require neptune-core connection)
         "block_height" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let height = client.block_height(ctx, token).await??;
             let result = serde_json::Value::String(height.to_string());
@@ -248,7 +255,7 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
         }
 
         "confirmed_available_balance" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let balance = client.confirmed_available_balance(ctx, token).await??;
             let result = serde_json::Value::String(balance.to_string());
@@ -256,7 +263,7 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
         }
 
         "dashboard_overview_data" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             match client.dashboard_overview_data(ctx, token).await {
                 Ok(Ok(dashboard_data)) => {
@@ -305,7 +312,7 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
 
         // Phase 1: Core Wallet Functionality
         "next_receiving_address" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let key_type = extract_string_param(&request.params, "key_type")
                 .unwrap_or_else(|| "Generation".to_string());
@@ -329,7 +336,7 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
         }
 
         "wallet_status" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let wallet_status = client.wallet_status(ctx, token).await??;
             let result = serde_json::to_value(wallet_status)?;
@@ -337,7 +344,7 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
         }
 
         "confirmations" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let confirmations = client.confirmations(ctx, token).await??;
             let result = match confirmations {
@@ -348,32 +355,65 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
         }
 
         "send" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
-            let outputs = extract_string_param(&request.params, "outputs")
-                .ok_or_else(|| anyhow::anyhow!("Missing outputs parameter"))?;
-            let change_policy = extract_string_param(&request.params, "change_policy")
-                .ok_or_else(|| anyhow::anyhow!("Missing change_policy parameter"))?;
-            let fee = extract_string_param(&request.params, "fee")
-                .ok_or_else(|| anyhow::anyhow!("Missing fee parameter"))?;
 
-            // Parse outputs from JSON string
-            let outputs_parsed: Vec<neptune_cash::api::export::OutputFormat> =
-                serde_json::from_str(&outputs)?;
-            let change_policy_parsed: neptune_cash::api::export::ChangePolicy =
-                serde_json::from_str(&change_policy)?;
-            let fee_parsed: neptune_cash::api::export::NativeCurrencyAmount =
-                serde_json::from_str(&fee)?;
+            // Get network from client (for parsing addresses)
+            let network = client.network(ctx).await??;
 
+            // Extract parameters as JSON values (not strings!)
+            let outputs_json = extract_param(&request.params, "outputs")?;
+            let fee_str = extract_param(&request.params, "fee")
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_else(|| "0".to_string());
+
+            // Parse outputs from wallet-friendly format: [{"address": "nolgam1...", "amount": "123"}]
+            // Convert to Neptune's OutputFormat enum with proper address parsing
+            let outputs_array = outputs_json.as_array()
+                .ok_or_else(|| anyhow::anyhow!("outputs must be an array"))?;
+
+            let mut outputs_parsed: Vec<neptune_cash::api::export::OutputFormat> = Vec::new();
+            for (idx, output) in outputs_array.iter().enumerate() {
+                let address_str = output.get("address")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("Missing or invalid 'address' in output {}", idx))?;
+                let amount_str = output.get("amount")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("Missing or invalid 'amount' in output {}", idx))?;
+
+                // Parse bech32m address to ReceivingAddress enum
+                let receiving_address = neptune_cash::api::export::ReceivingAddress::from_bech32m(address_str, network)?;
+
+                // Parse amount from decimal string (e.g. "0.1" or "123.456")
+                let amount = neptune_cash::api::export::NativeCurrencyAmount::coins_from_str(amount_str)?;
+
+                // Create OutputFormat::AddressAndAmount variant
+                outputs_parsed.push(neptune_cash::api::export::OutputFormat::AddressAndAmount(
+                    receiving_address,
+                    amount,
+                ));
+            }
+
+            // Use default change policy: RecoverToNextUnusedKey with Generation key and OnChain medium
+            let change_policy = neptune_cash::api::export::ChangePolicy::recover_to_next_unused_key(
+                neptune_cash::api::export::KeyType::Generation,
+                neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium::OnChain,
+            );
+
+            // Parse fee from decimal string
+            let fee = neptune_cash::api::export::NativeCurrencyAmount::coins_from_str(&fee_str)?;
+
+            // Send transaction
             let tx_artifacts = client
-                .send(ctx, token, outputs_parsed, change_policy_parsed, fee_parsed)
+                .send(ctx, token, outputs_parsed, change_policy, fee)
                 .await??;
             let result = serde_json::to_value(tx_artifacts)?;
             Ok(JsonRpcResponse::success(request.id, result))
         }
 
         "claim_utxo" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let utxo_transfer_encrypted =
                 extract_string_param(&request.params, "utxo_transfer_encrypted")
@@ -391,23 +431,42 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
 
         // Phase 2: Enhanced Features
         "list_own_coins" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let coins = client.list_own_coins(ctx, token).await??;
-            let result = serde_json::to_value(coins)?;
-            Ok(JsonRpcResponse::success(request.id, result))
+
+            // Manually construct JSON to avoid "number out of range" errors
+            let coins_json: Vec<serde_json::Value> = coins.into_iter().map(|coin| {
+                serde_json::json!({
+                    "amount": coin.amount.to_string(),
+                    "confirmed": coin.confirmed.to_string(),
+                    "release_date": coin.release_date.map(|d| d.to_string())
+                })
+            }).collect();
+
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::Array(coins_json)))
         }
 
         "history" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let history = client.history(ctx, token).await??;
-            let result = serde_json::to_value(history)?;
-            Ok(JsonRpcResponse::success(request.id, result))
+
+            // Manually construct JSON to avoid "number out of range" errors
+            let history_json: Vec<serde_json::Value> = history.into_iter().map(|(digest, height, timestamp, amount)| {
+                serde_json::json!({
+                    "digest": digest.to_hex(),
+                    "height": height.to_string(),
+                    "timestamp": timestamp.to_string(),
+                    "amount": amount.to_string()
+                })
+            }).collect();
+
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::Array(history_json)))
         }
 
         "validate_address" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let address = extract_string_param(&request.params, "address")
                 .ok_or_else(|| anyhow::anyhow!("Missing address parameter"))?;
@@ -427,7 +486,7 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
         }
 
         "validate_amount" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let amount = extract_string_param(&request.params, "amount")
                 .ok_or_else(|| anyhow::anyhow!("Missing amount parameter"))?;
@@ -436,16 +495,430 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
             Ok(JsonRpcResponse::success(request.id, result))
         }
 
-        "peer_info" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+        // ============================================================================
+        // WALLET-SPECIFIC WRAPPER ENDPOINTS
+        // ============================================================================
+
+        "get_balance" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
-            let peers = client.peer_info(ctx, token).await??;
-            let result = serde_json::to_value(peers)?;
+
+            // Get both balances in parallel
+            let (confirmed_result, unconfirmed_result) = tokio::try_join!(
+                client.confirmed_available_balance(ctx.clone(), token.clone()),
+                client.unconfirmed_available_balance(ctx, token)
+            )?;
+
+            let confirmed = confirmed_result?;
+            let unconfirmed = unconfirmed_result?;
+
+            // Transform to wallet format
+            let balance_info = serde_json::json!({
+                "confirmed": confirmed.to_string(),
+                "unconfirmed": unconfirmed.to_string(),
+                "lastUpdated": chrono::Utc::now().to_rfc3339()
+            });
+
+            Ok(JsonRpcResponse::success(request.id, balance_info))
+        }
+
+        "get_network_info" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Get network, block height, and tip digest in parallel
+            let (network_result, height_result, dashboard_result) = tokio::try_join!(
+                client.network(ctx.clone()),
+                client.block_height(ctx.clone(), token.clone()),
+                client.dashboard_overview_data(ctx, token)
+            )?;
+
+            let network = network_result?;
+            let height = height_result?;
+            let dashboard = dashboard_result?;
+
+            // Transform to wallet format
+            let network_info = serde_json::json!({
+                "network": network.to_string(),
+                "blockHeight": height.to_string(),
+                "tipDigest": dashboard.tip_digest.to_hex(),
+                "lastUpdated": chrono::Utc::now().to_rfc3339()
+            });
+
+            Ok(JsonRpcResponse::success(request.id, network_info))
+        }
+
+        "get_peer_info" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let peer_info = client.peer_info(ctx, token).await??;
+
+            // Transform complex peer info to simplified wallet format
+            let peers_json: Vec<serde_json::Value> = peer_info.into_iter().map(|peer| {
+                serde_json::json!({
+                    "address": peer.connected_address().to_string(),
+                    "connected": true, // If we got the peer info, it's connected
+                    "lastSeen": peer.connection_established().duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                })
+            }).collect();
+
+            let peer_info_wallet = serde_json::json!({
+                "peers": peers_json,
+                "connectedCount": peers_json.len(),
+                "lastUpdated": chrono::Utc::now().to_rfc3339()
+            });
+
+            Ok(JsonRpcResponse::success(request.id, peer_info_wallet))
+        }
+
+        "get_sync_status" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let dashboard = client.dashboard_overview_data(ctx, token).await??;
+
+            // Transform dashboard data to sync status format
+            let sync_status = serde_json::json!({
+                "isSynced": !dashboard.syncing,
+                "currentBlockHeight": dashboard.tip_header.height.to_string(),
+                "latestBlockHash": dashboard.tip_digest.to_hex(),
+                "connectedPeers": dashboard.peer_count.unwrap_or(0),
+                "pendingTransactions": dashboard.mempool_total_tx_count,
+                "lastSyncCheck": chrono::Utc::now().to_rfc3339()
+            });
+
+            Ok(JsonRpcResponse::success(request.id, sync_status))
+        }
+
+        // ============================================================================
+        // BATCH 1: ESSENTIAL WALLET OPERATIONS
+        // ============================================================================
+
+
+        "send_transparent" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let outputs = extract_param(&request.params, "outputs")?;
+            let _change_policy = extract_param(&request.params, "change_policy")
+                .unwrap_or_else(|_| serde_json::Value::String("default".to_string()));
+            let fee = extract_param(&request.params, "fee")?;
+
+            // Parse parameters
+            let outputs_vec: Vec<neptune_cash::api::export::OutputFormat> = serde_json::from_value(outputs)?;
+            let change_policy_enum = neptune_cash::api::export::ChangePolicy::default(); // Simplified
+            let fee_amount: neptune_cash::api::export::NativeCurrencyAmount = serde_json::from_value(fee)?;
+
+            let result = client.send_transparent(ctx, token, outputs_vec, change_policy_enum, fee_amount).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+
+        "mempool_overview" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters with defaults
+            let start_index = extract_param(&request.params, "start_index")
+                .ok()
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(0);
+            let number = extract_param(&request.params, "number")
+                .ok()
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(10);
+
+            let overview = client.mempool_overview(ctx, token, start_index, number).await??;
+            let result = serde_json::to_value(overview)?;
             Ok(JsonRpcResponse::success(request.id, result))
         }
 
+        "mempool_tx_ids" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let tx_ids = client.mempool_tx_ids(ctx, token).await??;
+            let result = serde_json::to_value(tx_ids)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "mempool_size" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let size = client.mempool_size(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::Number(serde_json::Number::from(size))))
+        }
+
+        "num_expected_utxos" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let count = client.num_expected_utxos(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String(count.to_string())))
+        }
+
+        "list_utxos" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let utxos = client.list_utxos(ctx, token).await??;
+
+            // Manually construct JSON to avoid "number out of range" errors
+            let utxos_json: Vec<serde_json::Value> = utxos.into_iter().map(|utxo| {
+                let received_json = match utxo.received {
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::Confirmed { block_height, timestamp } => {
+                        serde_json::json!({
+                            "type": "Confirmed",
+                            "block_height": block_height.to_string(),
+                            "timestamp": timestamp.to_string()
+                        })
+                    },
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::Pending => {
+                        serde_json::json!({"type": "Pending"})
+                    },
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::Expected => {
+                        serde_json::json!({"type": "Expected"})
+                    },
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::Abandoned => {
+                        serde_json::json!({"type": "Abandoned"})
+                    },
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::None => {
+                        serde_json::json!({"type": "None"})
+                    },
+                };
+
+                let spent_json = match utxo.spent {
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::Confirmed { block_height, timestamp } => {
+                        serde_json::json!({
+                            "type": "Confirmed",
+                            "block_height": block_height.to_string(),
+                            "timestamp": timestamp.to_string()
+                        })
+                    },
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::Pending => {
+                        serde_json::json!({"type": "Pending"})
+                    },
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::Expected => {
+                        serde_json::json!({"type": "Expected"})
+                    },
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::Abandoned => {
+                        serde_json::json!({"type": "Abandoned"})
+                    },
+                    neptune_cash::application::rpc::server::ui_utxo::UtxoStatusEvent::None => {
+                        serde_json::json!({"type": "None"})
+                    },
+                };
+
+                serde_json::json!({
+                    "received": received_json,
+                    "aocl_leaf_index": utxo.aocl_leaf_index.map(|i| i.to_string()),
+                    "spent": spent_json,
+                    "amount": {
+                        "value": utxo.amount.to_string()
+                    },
+                    "release_date": utxo.release_date.map(|d| d.to_string())
+                })
+            }).collect();
+
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::Array(utxos_json)))
+        }
+
+        // ============================================================================
+        // BATCH 2: MINING & PROOF OF WORK
+        // ============================================================================
+
+        "pow_puzzle_internal_key" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let puzzle = client.pow_puzzle_internal_key(ctx, token).await??;
+            let result = serde_json::to_value(puzzle)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "pow_puzzle_external_key" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let guesser_fee_address = extract_string_param(&request.params, "guesser_fee_address")
+                .ok_or_else(|| anyhow::anyhow!("Missing guesser_fee_address parameter"))?;
+            let network = neptune_cash::application::config::network::Network::Main; // Default to main network
+            let address = neptune_cash::api::export::ReceivingAddress::from_bech32m(&guesser_fee_address, network)?;
+
+            let puzzle = client.pow_puzzle_external_key(ctx, token, address).await??;
+            let result = serde_json::to_value(puzzle)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "full_pow_puzzle_external_key" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let guesser_fee_address = extract_string_param(&request.params, "guesser_fee_address")
+                .ok_or_else(|| anyhow::anyhow!("Missing guesser_fee_address parameter"))?;
+            let network = neptune_cash::application::config::network::Network::Main; // Default to main network
+            let address = neptune_cash::api::export::ReceivingAddress::from_bech32m(&guesser_fee_address, network)?;
+
+            let result = client.full_pow_puzzle_external_key(ctx, token, address).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "spendable_inputs" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let inputs = client.spendable_inputs(ctx, token).await??;
+            let result = serde_json::to_value(inputs)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "select_spendable_inputs" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let amount = extract_param(&request.params, "amount")?;
+            let amount_value: neptune_cash::api::export::NativeCurrencyAmount = serde_json::from_value(amount)?;
+            let policy = neptune_cash::api::export::InputSelectionPolicy::default(); // Use default policy
+
+            let inputs = client.select_spendable_inputs(ctx, token, policy, amount_value).await??;
+            let result = serde_json::to_value(inputs)?;
+            Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        "pause_miner" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            client.pause_miner(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("Miner paused".to_string())))
+        }
+
+        "restart_miner" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            client.restart_miner(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("Miner restarted".to_string())))
+        }
+
+        "mine_blocks_to_wallet" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let n_blocks = extract_param(&request.params, "n_blocks")?
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("Missing or invalid n_blocks parameter"))? as u32;
+
+            client.mine_blocks_to_wallet(ctx, token, n_blocks).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String(format!("Mined {} blocks to wallet", n_blocks))))
+        }
+
+        // ============================================================================
+        // BATCH 3: TRANSACTION ASSEMBLY
+        // ============================================================================
+
+        "generate_tx_outputs" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let outputs = extract_param(&request.params, "outputs")?;
+            let outputs_list: Vec<neptune_cash::api::export::OutputFormat> = serde_json::from_value(outputs)?;
+
+            let result = client.generate_tx_outputs(ctx, token, outputs_list).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "generate_tx_details" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let inputs = extract_param(&request.params, "inputs")?;
+            let outputs = extract_param(&request.params, "outputs")?;
+            let _change_policy = extract_param(&request.params, "change_policy")?;
+            let fee = extract_param(&request.params, "fee")?;
+
+            let inputs_list: neptune_cash::api::export::TxInputList = serde_json::from_value(inputs)?;
+            let outputs_list: neptune_cash::api::export::TxOutputList = serde_json::from_value(outputs)?;
+            let change_policy_value: neptune_cash::api::export::ChangePolicy = serde_json::from_value(_change_policy)?;
+            let fee_value: neptune_cash::api::export::NativeCurrencyAmount = serde_json::from_value(fee)?;
+
+            let result = client.generate_tx_details(ctx, token, inputs_list, outputs_list, change_policy_value, fee_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "generate_witness_proof" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let tx_details = extract_param(&request.params, "tx_details")?;
+            let tx_details_value: neptune_cash::api::export::TransactionDetails = serde_json::from_value(tx_details)?;
+
+            let result = client.generate_witness_proof(ctx, token, tx_details_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "assemble_transaction" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let tx_details = extract_param(&request.params, "tx_details")?;
+            let tx_proof = extract_param(&request.params, "tx_proof")?;
+
+            let tx_details_value: neptune_cash::api::export::TransactionDetails = serde_json::from_value(tx_details)?;
+            let tx_proof_value: neptune_cash::api::export::TransactionProof = serde_json::from_value(tx_proof)?;
+
+            let result = client.assemble_transaction(ctx, token, tx_details_value, tx_proof_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "assemble_transaction_artifacts" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            // Extract parameters
+            let tx_details = extract_param(&request.params, "tx_details")?;
+            let tx_proof = extract_param(&request.params, "tx_proof")?;
+
+            let tx_details_value: neptune_cash::api::export::TransactionDetails = serde_json::from_value(tx_details)?;
+            let tx_proof_value: neptune_cash::api::export::TransactionProof = serde_json::from_value(tx_proof)?;
+
+            let result = client.assemble_transaction_artifacts(ctx, token, tx_details_value, tx_proof_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "peer_info" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let peers = client.peer_info(ctx, token).await??;
+
+            // Manually construct JSON to avoid "number out of range" errors
+            let peers_json: Vec<serde_json::Value> = peers.into_iter().map(|peer| {
+                serde_json::json!({
+                    "address": peer.connected_address().to_string(),
+                    "connected": true,
+                    "lastSeen": peer.connection_established().duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                })
+            }).collect();
+
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::Array(peers_json)))
+        }
+
         "mempool_tx_count" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let count = client.mempool_tx_count(ctx, token).await??;
             let result = serde_json::Value::Number(serde_json::Number::from(count));
@@ -453,7 +926,7 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
         }
 
         "unconfirmed_available_balance" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let balance = client.unconfirmed_available_balance(ctx, token).await??;
             let result = serde_json::Value::String(balance.to_string());
@@ -461,32 +934,9 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
         }
 
         // Phase 3: Advanced Features
-        "send_transparent" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
-            let ctx = context::current();
-            let outputs = extract_string_param(&request.params, "outputs")
-                .ok_or_else(|| anyhow::anyhow!("Missing outputs parameter"))?;
-            let change_policy = extract_string_param(&request.params, "change_policy")
-                .ok_or_else(|| anyhow::anyhow!("Missing change_policy parameter"))?;
-            let fee = extract_string_param(&request.params, "fee")
-                .ok_or_else(|| anyhow::anyhow!("Missing fee parameter"))?;
-
-            let outputs_parsed: Vec<neptune_cash::api::export::OutputFormat> =
-                serde_json::from_str(&outputs)?;
-            let change_policy_parsed: neptune_cash::api::export::ChangePolicy =
-                serde_json::from_str(&change_policy)?;
-            let fee_parsed: neptune_cash::api::export::NativeCurrencyAmount =
-                serde_json::from_str(&fee)?;
-
-            let tx_artifacts = client
-                .send_transparent(ctx, token, outputs_parsed, change_policy_parsed, fee_parsed)
-                .await??;
-            let result = serde_json::to_value(tx_artifacts)?;
-            Ok(JsonRpcResponse::success(request.id, result))
-        }
 
         "upgrade" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let tx_kernel_id = extract_string_param(&request.params, "tx_kernel_id")
                 .ok_or_else(|| anyhow::anyhow!("Missing tx_kernel_id parameter"))?;
@@ -498,28 +948,447 @@ pub async fn handle_request(request: JsonRpcRequest) -> Result<JsonRpcResponse> 
             Ok(JsonRpcResponse::success(request.id, result))
         }
 
-        "pause_miner" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
-            let ctx = context::current();
-            client.pause_miner(ctx, token).await??;
-            let result = serde_json::Value::Null;
-            Ok(JsonRpcResponse::success(request.id, result))
-        }
-
-        "restart_miner" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
-            let ctx = context::current();
-            client.restart_miner(ctx, token).await??;
-            let result = serde_json::Value::Null;
-            Ok(JsonRpcResponse::success(request.id, result))
-        }
 
         "shutdown" => {
-            let (client, token) = connect_to_neptune_core(9799, None).await?;
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
             let ctx = context::current();
             let shutdown_result = client.shutdown(ctx, token).await??;
             let result = serde_json::Value::Bool(shutdown_result);
             Ok(JsonRpcResponse::success(request.id, result))
+        }
+
+        // ============================================================================
+        // REMAINING ENDPOINTS FOR FULL RPC TRAIT COVERAGE
+        // ============================================================================
+
+        // Blockchain Operations
+        "addition_record_indices_for_block" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let block_selector = extract_param(&request.params, "block_selector")?;
+            let block_selector_value: BlockSelector = serde_json::from_value(block_selector)?;
+
+            let result = client.addition_record_indices_for_block(ctx, token, block_selector_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "all_punished_peers" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let result = client.all_punished_peers(ctx, token).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "amount_leq_confirmed_available_balance" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let amount = extract_param(&request.params, "amount")?;
+            let amount_value: neptune_cash::api::export::NativeCurrencyAmount = serde_json::from_value(amount)?;
+
+            let result = client.amount_leq_confirmed_available_balance(ctx, token, amount_value).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::Bool(result)))
+        }
+
+        "announcements_in_block" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let block_selector = extract_param(&request.params, "block_selector")?;
+            let block_selector_value: BlockSelector = serde_json::from_value(block_selector)?;
+
+            let result = client.announcements_in_block(ctx, token, block_selector_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "best_proposal" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let result = client.best_proposal(ctx, token).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "block_difficulties" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let block_selector = extract_param(&request.params, "block_selector")?;
+            let block_selector_value: BlockSelector = serde_json::from_value(block_selector)?;
+            let max_num_blocks = extract_param(&request.params, "max_num_blocks")
+                .ok()
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
+
+            let result = client.block_difficulties(ctx, token, block_selector_value, max_num_blocks).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "block_digest" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let block_selector = extract_param(&request.params, "block_selector")?;
+            let block_selector_value: BlockSelector = serde_json::from_value(block_selector)?;
+
+            let result = client.block_digest(ctx, token, block_selector_value).await??;
+
+            // Manually construct JSON to avoid "number out of range" errors
+            let result_json = match result {
+                Some(digest) => serde_json::json!({
+                    "digest": digest.to_string(),
+                    "found": true,
+                    "lastUpdated": chrono::Utc::now().to_rfc3339()
+                }),
+                None => serde_json::json!({
+                    "digest": null,
+                    "found": false,
+                    "lastUpdated": chrono::Utc::now().to_rfc3339()
+                })
+            };
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "block_digests_by_height" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let height = extract_param(&request.params, "height")?
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("Missing or invalid height parameter"))? as u32;
+
+            let result = client.block_digests_by_height(ctx, token, BlockHeight::from(height as u64)).await??;
+
+            // Manually construct JSON to avoid "number out of range" errors
+            let digests: Vec<String> = result.iter().map(|d| d.to_string()).collect();
+            let result_json = serde_json::json!({
+                "digests": digests,
+                "height": height.to_string(),
+                "count": result.len(),
+                "lastUpdated": chrono::Utc::now().to_rfc3339()
+            });
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "block_info" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let block_selector = extract_param(&request.params, "block_selector")?;
+            let block_selector_value: BlockSelector = serde_json::from_value(block_selector)?;
+
+            let result = client.block_info(ctx, token, block_selector_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "block_intervals" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let block_selector = extract_param(&request.params, "block_selector")?;
+            let block_selector_value: BlockSelector = serde_json::from_value(block_selector)?;
+            let max_num_blocks = extract_param(&request.params, "max_num_blocks")
+                .ok()
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
+
+            let result = client.block_intervals(ctx, token, block_selector_value, max_num_blocks).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "block_kernel" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let block_selector = extract_param(&request.params, "block_selector")?;
+            let block_selector_value: BlockSelector = serde_json::from_value(block_selector)?;
+
+            let result = client.block_kernel(ctx, token, block_selector_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "broadcast_all_mempool_txs" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            client.broadcast_all_mempool_txs(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("All mempool transactions broadcasted".to_string())))
+        }
+
+        // Network Management
+        "broadcast_block_proposal" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            client.broadcast_block_proposal(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("Block proposal broadcasted".to_string())))
+        }
+
+        "clear_all_standings" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            client.clear_all_standings(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("All peer standings cleared".to_string())))
+        }
+
+        "clear_mempool" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            client.clear_mempool(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("Mempool cleared".to_string())))
+        }
+
+        "clear_standing_by_ip" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let ip_param = extract_param(&request.params, "ip")?;
+            let ip = ip_param.as_str()
+                .ok_or_else(|| anyhow::anyhow!("Missing or invalid ip parameter"))?;
+            let ip_addr: std::net::IpAddr = ip.parse()?;
+
+            client.clear_standing_by_ip(ctx, token, ip_addr).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("Peer standing cleared".to_string())))
+        }
+
+        // Advanced Operations
+        "cookie_hint" => {
+            let (client, _token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let result = client.cookie_hint(ctx).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "cpu_temp" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let result = client.cpu_temp(ctx, token).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "freeze" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            client.freeze(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("Node frozen".to_string())))
+        }
+
+        "unfreeze" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            client.unfreeze(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("Node unfrozen".to_string())))
+        }
+
+        "header" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let block_selector = extract_param(&request.params, "block_selector")?;
+            let block_selector_value: BlockSelector = serde_json::from_value(block_selector)?;
+
+            let result = client.header(ctx, token, block_selector_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "known_keys" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let result = client.known_keys(ctx, token).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "known_keys_by_keytype" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let key_type = extract_param(&request.params, "key_type")?;
+            let key_type_value: neptune_cash::api::export::KeyType = serde_json::from_value(key_type)?;
+
+            let result = client.known_keys_by_keytype(ctx, token, key_type_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "latest_tip_digests" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let n = extract_param(&request.params, "n")?
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("Missing or invalid n parameter"))? as usize;
+
+            let result = client.latest_tip_digests(ctx, token, n).await??;
+
+            // Manually construct JSON to avoid "number out of range" errors
+            let digests: Vec<String> = result.iter().map(|d| d.to_string()).collect();
+            let result_json = serde_json::json!({
+                "digests": digests,
+                "count": result.len(),
+                "requested": n,
+                "lastUpdated": chrono::Utc::now().to_rfc3339()
+            });
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        // UTXO & Transaction Management
+        "mempool_tx_kernel" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let tx_kernel_id = extract_param(&request.params, "tx_kernel_id")?;
+            let tx_kernel_id_value: neptune_cash::api::export::TransactionKernelId = serde_json::from_value(tx_kernel_id)?;
+
+            let result = client.mempool_tx_kernel(ctx, token, tx_kernel_id_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "own_instance_id" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let result = client.own_instance_id(ctx, token).await??;
+
+            // Manually construct JSON to avoid "number out of range" errors
+            let result_json = serde_json::json!({
+                "instance_id": result.to_string(),
+                "lastUpdated": chrono::Utc::now().to_rfc3339()
+            });
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "own_listen_address_for_peers" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let result = client.own_listen_address_for_peers(ctx, token).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "proof_type" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let txid = extract_param(&request.params, "txid")?;
+            let txid_value: neptune_cash::api::export::TransactionKernelId = serde_json::from_value(txid)?;
+
+            let result = client.proof_type(ctx, token, txid_value).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        // Advanced Blockchain
+        "provide_new_tip" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let pow = extract_param(&request.params, "pow")?;
+            let block_proposal = extract_param(&request.params, "block_proposal")?;
+
+            let pow_value: BlockPow = serde_json::from_value(pow)?;
+            let block_proposal_value: Block = serde_json::from_value(block_proposal)?;
+
+            let result = client.provide_new_tip(ctx, token, pow_value, block_proposal_value).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::Bool(result)))
+        }
+
+        "provide_pow_solution" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let pow = extract_param(&request.params, "pow")?;
+            let proposal_id = extract_param(&request.params, "proposal_id")?;
+
+            let pow_value: BlockPow = serde_json::from_value(pow)?;
+            let proposal_id_value: neptune_cash::api::export::Digest = serde_json::from_value(proposal_id)?;
+
+            let result = client.provide_pow_solution(ctx, token, pow_value, proposal_id_value).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::Bool(result)))
+        }
+
+        "prune_abandoned_monitored_utxos" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+            let result = client.prune_abandoned_monitored_utxos(ctx, token).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::Number(serde_json::Number::from(result))))
+        }
+
+        "record_and_broadcast_transaction" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let tx_artifacts = extract_param(&request.params, "tx_artifacts")?;
+            let tx_artifacts_value: TxCreationArtifacts = serde_json::from_value(tx_artifacts)?;
+
+            client.record_and_broadcast_transaction(ctx, token, tx_artifacts_value).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("Transaction recorded and broadcasted".to_string())))
+        }
+
+        // Utilities
+        "set_tip" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let indicated_tip = extract_param(&request.params, "indicated_tip")?;
+            let indicated_tip_value: neptune_cash::api::export::Digest = serde_json::from_value(indicated_tip)?;
+
+            client.set_tip(ctx, token, indicated_tip_value).await??;
+            Ok(JsonRpcResponse::success(request.id, serde_json::Value::String("Tip set".to_string())))
+        }
+
+        "utxo_digest" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let leaf_index = extract_param(&request.params, "leaf_index")?
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("Missing or invalid leaf_index parameter"))?;
+
+            let result = client.utxo_digest(ctx, token, leaf_index).await??;
+
+            // Manually construct JSON to avoid "number out of range" errors
+            let result_json = match result {
+                Some(digest) => serde_json::json!({
+                    "digest": digest.to_string(),
+                    "leaf_index": leaf_index.to_string(),
+                    "found": true,
+                    "lastUpdated": chrono::Utc::now().to_rfc3339()
+                }),
+                None => serde_json::json!({
+                    "digest": null,
+                    "leaf_index": leaf_index.to_string(),
+                    "found": false,
+                    "lastUpdated": chrono::Utc::now().to_rfc3339()
+                })
+            };
+            Ok(JsonRpcResponse::success(request.id, result_json))
+        }
+
+        "utxo_origin_block" => {
+            let (client, token) = connect_to_neptune_core(neptune_core_port, None).await?;
+            let ctx = context::current();
+
+            let addition_record = extract_param(&request.params, "addition_record")?;
+            let addition_record_value: AdditionRecord = serde_json::from_value(addition_record)?;
+            let max_search_depth = extract_param(&request.params, "max_search_depth")
+                .ok()
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u64);
+
+            let result = client.utxo_origin_block(ctx, token, addition_record_value, max_search_depth).await??;
+            let result_json = serde_json::to_value(result)?;
+            Ok(JsonRpcResponse::success(request.id, result_json))
         }
 
         _ => Ok(JsonRpcResponse::error(
@@ -539,6 +1408,18 @@ fn extract_string_param(params: &Option<serde_json::Value>, key: &str) -> Option
         .get(key)?
         .as_str()
         .map(|s| s.to_string())
+}
+
+fn extract_param(params: &Option<serde_json::Value>, key: &str) -> Result<serde_json::Value> {
+    let value = params
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Missing parameters"))?
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("Invalid parameters"))?
+        .get(key)
+        .ok_or_else(|| anyhow::anyhow!("Missing '{}' parameter", key))?
+        .clone();
+    Ok(value)
 }
 
 fn extract_u32_param(params: &Option<serde_json::Value>, key: &str) -> Result<u32> {

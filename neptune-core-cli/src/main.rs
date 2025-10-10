@@ -422,7 +422,7 @@ async fn main() -> Result<()> {
 
     // Handle get-cookie command
     if args.get_cookie {
-        get_cookie_command().await?;
+        get_cookie_command(args.port).await?;
         return Ok(());
     }
 
@@ -434,7 +434,7 @@ async fn main() -> Result<()> {
                 .root_dir_path()
         });
 
-        let rpc_config = rpc::RpcConfig::new(args.rpc_port, data_dir);
+        let rpc_config = rpc::RpcConfig::new(args.rpc_port, args.port, data_dir);
 
         println!("Starting neptune-cli RPC server on port {}", args.rpc_port);
         println!("Press Ctrl+C to stop the server");
@@ -1370,7 +1370,7 @@ async fn main() -> Result<()> {
 // Otherwise, we call cookie_hint() RPC to obtain data-dir.
 // But the API might be disabled, which we detect and fallback to the default data-dir.
 /// Get authentication cookie for RPC access
-async fn get_cookie_command() -> anyhow::Result<()> {
+async fn get_cookie_command(port: u16) -> anyhow::Result<()> {
     use neptune_cash::application::rpc::server::RPCClient;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tarpc::client;
@@ -1378,7 +1378,7 @@ async fn get_cookie_command() -> anyhow::Result<()> {
     use tarpc::tokio_serde::formats::Json;
 
     // Connect to neptune-core to get cookie hint
-    let server_socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9799);
+    let server_socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     let transport = tarpc::serde_transport::tcp::connect(server_socket, Json::default)
         .await
         .map_err(|e| {
