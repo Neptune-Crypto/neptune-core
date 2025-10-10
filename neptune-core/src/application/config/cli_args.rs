@@ -86,8 +86,8 @@ pub struct Args {
     pub(crate) ban: Vec<IpAddr>,
 
     /// The threshold at which a peer's standing is considered “bad”. Current
-    /// connections to peers in bad standing are terminated. Connection attempts (TODO requests)
-    /// from peers in bad standing are refused (TODO ignored).
+    /// connections to peers in bad standing are terminated. Connection attempts (TODO #punish requests)
+    /// from peers in bad standing are refused (TODO #punish ignored).
     ///
     /// For a list of reasons that cause bad standing, see
     /// [`NegativePeerSanction`](crate::protocol::peer::NegativePeerSanction).
@@ -99,7 +99,8 @@ pub struct Args {
     )]
     pub(crate) peer_tolerance: u16,
 
-    /// Only connect to the peers specified by --peer.
+    /// Only connect to the peers specified by `--peer`.
+    /// 
     /// When this flag is set, peer discovery is disabled and incoming
     /// connections from unlisted peers are rejected.
     /// 
@@ -239,10 +240,10 @@ pub struct Args {
     /// Example: `--whitelisted-composer=8.8.8.8 --whitelisted-composer=8.8.4.4`
     ///          `--whitelisted-composer=2001:db8:3333:4444:5555:6666:7777:8888`
     /// ```rust
-    /// todo!["update and test the examples"]
+    /// todo!["<https://github.com/Neptune-Crypto/neptune-core/pull/729#issuecomment-3385405210>; update and test the examples"]
     /// ```
     #[clap(long = "whitelisted-composer")]
-    pub(crate) whitelisted_composers: Vec<Multiaddr>,
+    pub(crate) whitelisted_composers: Vec<Multiaddr>, // Addresses
 
     /// If set, all composition from peers will be ignored.
     #[clap(long)]
@@ -342,7 +343,7 @@ pub struct Args {
     pub rpc_port: u16,
 
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
-    // TODO make this `Vec` (whitelisted is a good example)
+    // TODO #followUp make this `Vec` (whitelisted is a good example)
     #[clap(short, long, default_value = "::")]
     pub peer_listen_addr: IpAddr,
 
@@ -373,7 +374,7 @@ pub struct Args {
     /// todo!["update and test the examples"]
     /// ```
     #[structopt(long = "peer")]
-    pub peers: Vec<Multiaddr>,
+    pub peers: Vec<Multiaddr>, // Addresses
 
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "main", short)]
@@ -541,14 +542,22 @@ pub struct Args {
     /// Example: `neptune-core --scan-keys 42`
     #[clap(long)]
     pub(crate) scan_keys: Option<usize>,
+
+    /// Stops picking a random peer id for the node on each run.
+    /// 
+    /// Needed for well-known nodes which want to have trust in their peer id, or leverage the high score in the network, or been found by the peer id.
+    /// 
+    /// On first usage it creates the file <.peer_id> with the keypair used only for that reputation. If you need a new persistent id --- remove this file
+    /// from its location in your data dir. (For ephemeral new ids its enough just to remove the argument flag from invocation.) 
+    /// 
+    /// > Warning: *If you copy your node or restore from a back-up make sure to avoid peer id collision.* Change the id (by removing the file), or just 
+    /// > don't run them simultaneously, etc -- anything what fits your usecase.
+    // #[clap(num_args(0..=1))]
+    #[clap(long)]
+    pub(crate) persistent: bool
 }
 
-impl Default for Args {
-    fn default() -> Self {
-        let empty: Vec<String> = vec![];
-        Self::parse_from(empty)
-    }
-}
+impl Default for Args {fn default() -> Self {Self::parse_from(Vec::<String>::new())}}
 
 fn fraction_validator(s: &str) -> Result<f64, String> {
     let value = s

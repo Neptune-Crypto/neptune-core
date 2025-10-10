@@ -632,15 +632,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cbor4ii"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db05e2e8488783316fbab37891db4ab5b31124dab16bb2161da145c03dd0de70"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2963,7 +2954,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9f1cca83488b90102abac7b67d5c36fc65bc02ed47620228af7ed002e6a1478"
 dependencies = [
  "async-trait",
- "cbor4ii 0.3.3",
+ "cbor4ii",
  "futures",
  "futures-bounded",
  "libp2p-core",
@@ -3496,7 +3487,6 @@ dependencies = [
  "blake3",
  "bytes",
  "bytesize",
- "cbor4ii 1.1.1",
  "chrono",
  "clap",
  "clienter",

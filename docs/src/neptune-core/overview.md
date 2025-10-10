@@ -121,7 +121,7 @@ fn my_func(&self, inputarg1: u32, inputarg2: u32) -> u32 {
 }
 ```
 
-Prints the return value, but none of the args (default behaviour is to prints all arguments with std::fmt::Debug formatter). It creates a new key with a value that is the double of the `inputarg1` and prints that.
+Prints the return value, but none of the args (default behaviour is to prints all arguments with `std::fmt::Debug` formatter). It creates a new key with a value that is the double of the `inputarg1` and prints that.
 It then prints everything that is `debug` level or above, where `trace < debug < info < warn < error`, so here the `trace!()` is omitted.  You configure the lowest level you want to see with environment variable `RUST_LOG=debug`.
 
 ## RPC
@@ -134,8 +134,7 @@ XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ RUST_LOG=trace cargo ru
 
 Note that the client exists quickly, so here the `.pretty()` tracing subscriber is suitable, while `.compact()` is perhaps better for the server.
 
-# neptune-cli client
-
-`neptune-cli` is a separate program with a separate address space. This means the `state` object (see further down) is not available, and all data from Neptune Core must be received via RPC.
+# `neptune-cli` client...
+...is a separate program with a separate address space. This means the `state` object (see further down) is not available, and all data from Neptune Core must be received via RPC.
 
 `neptune-cli` does not have any long-lived tasks but rather receives individual commands via CLI, sends a query to neptune-core, presents the response, and exits.

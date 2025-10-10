@@ -1,4 +1,4 @@
-pub(crate) mod swarm;
+pub(crate) mod swarmutil;
 
 use std::time::Duration;
 
@@ -29,7 +29,7 @@ struct ComposedBehaviour {
     /// - but is still useful for
     ///   - DCUTR signalling
     ///   - Gossiping metadata about the messages
-    ///   - peer discovery (TODO account for this in peer exchange #reqresp )  
+    ///   - peer discovery (TODO account for this in peer exchange) #libp2p_reqresp_px  
     pub relay_server: libp2p::relay::Behaviour,
 }
 impl ComposedBehaviour {
@@ -92,8 +92,10 @@ impl ComposedBehaviour {
                             IdentTopic::new(crate::application::loops::main_loop::p2p::TOPIC_TX_PROOFCOL_).hash(), 
                             TX_SINGLEPROOF_SIZE
                         )
-                        // .set_topic_max_transmit_size(IdentTopic::new(TOPIC_TX_PROOFCOL_NOTIF).hash(), todo!["the default could be too small"])
-                        .build() {
+                        .set_topic_max_transmit_size(
+                            IdentTopic::new(TOPIC_TX_PROOFCOL_NOTIF).hash(), 
+                            (8 * 5 + 8 * 5 + 1 + 16 + 8 + 8) * 10 // `* 10` just to be on a safe side and account for overheads as it's so small
+                        ).build() {
                             Ok(conf) => conf,
                             Err(e) => {
                                 tracing::error!("couldn't `build` correct configuration |{e}");
@@ -106,8 +108,7 @@ impl ComposedBehaviour {
                     b.with_peer_score(Default::default(), Default::default()).expect("scoring is default; `gossipsub::Behaviour` is just instantiated");
                     b
                 },
-                /* TODO [10 MiB](https://docs.rs/libp2p/latest/libp2p/request_response/cbor/type.Behaviour.html#default-size-limits)
-                seems good even for a batch of the block */
+                /* ~~[10 MiB](https://docs.rs/libp2p/latest/libp2p/request_response/cbor/type.Behaviour.html#default-size-limits) seems good even for a batch of the block~~ */
                 // reqresp: request_response::cbor::Behaviour::<PeerMessage, PeerMessage>::new(
                 //     [(libp2p::StreamProtocol::new("/nept-reqresp"), request_response::ProtocolSupport::Full)],
                 //     request_response::Config::default().with_request_timeout(

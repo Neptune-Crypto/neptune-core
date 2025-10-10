@@ -18,8 +18,7 @@ use crate::tasm_lib::prelude::Digest;
 /// sender.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct TransactionNotification {
-    /// A unique identifier of the transaction. Matches keys in the [mempool]
-    /// data structure.
+    /// A unique identifier of the transaction. Matches keys in the [mempool] data structure.
     ///
     /// [mempool]: crate::state::mempool::Mempool
     pub(crate) txid: TransactionKernelId,

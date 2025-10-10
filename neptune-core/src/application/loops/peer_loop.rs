@@ -28,7 +28,6 @@ use tracing::warn;
 
 use crate::application::loops::channel::MainToPeerTask;
 use crate::application::loops::channel::PeerTaskToMain;
-use crate::application::loops::connect_to_peers::close_peer_connected_callback;
 use crate::application::loops::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
@@ -779,7 +778,7 @@ impl PeerLoopHandler {
 
                 match block {
                     None => {
-                        // TODO: Consider punishing here
+                        // Consider punishing here
                         warn!("Peer requested unknown block with hash {:x}", block_digest);
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
@@ -881,7 +880,7 @@ impl PeerLoopHandler {
                     self.peer_address
                 );
 
-                // TODO why do we have this constant?
+                // TODO why do we have this constant? #libp2p_reqresp_sync
                 if known_blocks.len() > MAX_NUM_DIGESTS_IN_BATCH_REQUEST {
                     self.punish(NegativePeerSanction::BatchBlocksRequestTooManyDigests)
                         .await?;
@@ -1020,7 +1019,7 @@ impl PeerLoopHandler {
                     Ok(KEEP_CONNECTION_ALIVE)
                 } else {
                     // Verify that we are in fact in syncing mode.
-                    // TODO: Separate peer messages into those allowed under syncing and those that are not.
+                    // Separate peer messages into those allowed under syncing and those that are not.
                     if self.global_state_lock.lock_guard().await.net.sync_anchor.is_none() {
                         warn!("Received a batch of blocks without being in syncing mode");
                         self.punish(NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync).await?;
@@ -1361,8 +1360,7 @@ impl PeerLoopHandler {
         }
     }
 
-    /// Loop for the peer tasks. Awaits either a message from the peer over TCP,
-    /// or a message from main over the main-to-peer-tasks broadcast channel.
+    /// Loop for the peer tasks. Awaits either a message from the peer over TCP, or a message from main over the main-to-peer-tasks broadcast channel.
     async fn run<S>(
         &mut self,
         mut peer: S,
@@ -1374,8 +1372,7 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
-        loop {
-            select! {
+        loop {select! {
                 // Handle peer messages
                 peer_message = peer.try_next() => {
                     let peer_address = self.peer_address;
@@ -1464,8 +1461,7 @@ impl PeerLoopHandler {
                         break;
                     }
                 }
-            }
-        }
+            }}
 
         Ok(())
     }
@@ -1477,7 +1473,7 @@ impl PeerLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for write
     pub(crate) async fn run_wrapper<S>(
-        &mut self,
+        mut self,
         mut peer: S,
         from_main_rx: broadcast::Receiver<MainToPeerTask>,
     ) -> Result<()>
@@ -1509,9 +1505,7 @@ impl PeerLoopHandler {
         // If timestamps are different, we currently just log a warning.
         let peer_clock_ahead_in_seconds = new_peer.time_difference_in_seconds();
         let own_clock_ahead_in_seconds = -peer_clock_ahead_in_seconds;
-        if peer_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
-            || own_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
-        {
+        if peer_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS || own_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS {
             let own_datetime_utc: DateTime<Utc> =
                 new_peer.own_timestamp_connection_established.into();
             let peer_datetime_utc: DateTime<Utc> =
@@ -1568,16 +1562,15 @@ impl PeerLoopHandler {
                 .header
                 .cumulative_proof_of_work
         {
-            // Send block notification request to catch up ASAP, in case we're
-            // behind the newly-connected peer.
+            // Send block notification request to catch up ASAP, in case we're behind the newly-connected peer.
             peer.send(PeerMessage::BlockNotificationRequest).await?;
         }
 
         let res = self.run(peer, from_main_rx, &mut peer_state).await;
         debug!("Exited peer loop for {}", self.peer_address);
 
-        close_peer_connected_callback(
-            self.global_state_lock.clone(),
+        crate::application::loops::connect_to_peers::close_peer_connected_callback(
+            self.global_state_lock,
             self.peer_address,
             &self.to_main_tx,
         )

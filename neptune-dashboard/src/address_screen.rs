@@ -187,7 +187,7 @@ impl AddressScreen {
                     match key.code {
                         KeyCode::Down => self.events.next(),
                         KeyCode::Up => self.events.previous(),
-                        // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
+                        // PgUp,PgDn.  (but how to determine page size?  fixed n?)
                         _ => {
                             escalate_event = Some(event);
                         }
@@ -256,7 +256,7 @@ impl Widget for AddressScreen {
 
         // chart
         // ?
-        // todo
+        // 
 
         // table
         let style = Style::default().fg(self.fg).bg(self.bg);

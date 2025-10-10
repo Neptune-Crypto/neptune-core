@@ -886,7 +886,7 @@ pub(crate) async fn mine(
 
                         if !new_block_found.block.has_proof_of_work(cli_args.network, latest_block.header()) {
                             error!("Own mined block did not have valid PoW Discarding.");
-                        } else if !new_block_found.block.is_valid(&latest_block, Timestamp::now(), global_state_lock.cli().network).await {
+                        } else if !new_block_found.block.is_valid(&latest_block, &Timestamp::now(), global_state_lock.cli().network).await {
                                 // Block could be invalid if for instance the proof and proof-of-work
                                 // took less time than the minimum block time.
                                 error!("Found block with valid proof-of-work but block is invalid.");

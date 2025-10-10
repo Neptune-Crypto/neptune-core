@@ -158,15 +158,13 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
     }
 }
 
-/// The reason for improving a peer's standing
+/// The reason for improving a peer's standing.
+/// 
+/// We only reward events that are unlikely to occur more frequently than the target block frequency. This should make it impossible for an attacker
+/// to quickly ramp up their standing with peers, provided that they are on the global tip.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[cfg_attr(any(test, feature = "mock-rpc"), derive(strum::EnumCount))]
 pub enum PositivePeerSanction {
-    // positive sanctions (standing-improving)
-    // We only reward events that are unlikely to occur more frequently than the
-    // target block frequency. This should make it impossible for an attacker
-    // to quickly ramp up their standing with peers, provided that they are on
-    // the global tip.
     ValidBlocks(usize),
     NewBlockProposal,
 }
@@ -253,9 +251,7 @@ impl Display for PositivePeerSanction {
     }
 }
 
-/// Used by main task to manage synchronizations/catch-up. Main task has
-/// a value of this type for each connected peer.
-
+/// Used by main task to manage synchronizations/catch-up. Main task has a value of this type for each connected peer.
 #[derive(Debug, Clone, Copy)]
 pub struct PeerSynchronizationState {
     pub claimed_max_height: BlockHeight,
@@ -341,8 +337,10 @@ impl Sanction for PositivePeerSanction {
 impl Sanction for PeerSanction {
     fn severity(self) -> i32 {
         match self {
-            PeerSanction::Positive(positive_peer_sanction) => positive_peer_sanction.severity(),
-            PeerSanction::Negative(negative_peer_sanction) => negative_peer_sanction.severity(),
+            PeerSanction::Positive(positive_peer_sanction) => 
+                positive_peer_sanction.severity(),
+            PeerSanction::Negative(negative_peer_sanction) => 
+                negative_peer_sanction.severity(),
         }
     }
 }
@@ -401,8 +399,7 @@ impl PeerStanding {
             PeerSanction::Positive(sanction) => self.latest_reward = Some((sanction, now)),
         }
 
-        self.is_good()
-            .then_some(())
+        self.is_good().then_some(())
             .ok_or(StandingExceedsBanThreshold)
     }
 
@@ -545,8 +542,8 @@ pub(crate) enum PeerMessage {
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
 
-    BlockRequestBatch(BlockRequestBatch), // TODO: Consider restricting this in size
-    BlockResponseBatch(Vec<(TransferBlock, MmrMembershipProof)>), // TODO: Consider restricting this in size
+    BlockRequestBatch(BlockRequestBatch), // Consider restricting this in size
+    BlockResponseBatch(Vec<(TransferBlock, MmrMembershipProof)>), // Consider restricting this in size
     UnableToSatisfyBatchRequest,
 
     // TODO a kind of challenge (just a proof of tiny work probably) from a *requestor* is also needed when adapt syncing to #libp2p_reqresp_sync to avoid malicious asking for a block just to annoy the node
@@ -876,45 +873,32 @@ impl SyncChallengeResponse {
         let Ok(tip) = Block::try_from(self.tip.clone()) else {
             return false;
         };
-        if !tip.is_valid(&tip_predecessor, now, network).await
-            || !tip.has_proof_of_work(network, tip_predecessor.header())
-        {
-            return false;
-        }
+        if !tip.is_valid(&tip_predecessor, &now, network).await || !tip.has_proof_of_work(network, tip_predecessor.header())
+        {return false;}
 
         let mut mmra_anchor = tip.body().block_mmr_accumulator.to_owned();
         mmra_anchor.append(tip.hash());
         for ((parent, child), membership_proof) in
             self.blocks.iter().zip(self.membership_proofs.iter())
         {
-            let Ok(child) = Block::try_from(child.clone()) else {
-                return false;
-            };
-            if !membership_proof.verify(
+            let Ok(child) = Block::try_from(child.clone()) else {return false};
+            if membership_proof.verify(
                 child.header().height.into(),
                 child.hash(),
                 &mmra_anchor.peaks(),
                 mmra_anchor.num_leafs(),
             ) {
-                return false;
-            }
-
-            let Ok(parent) = Block::try_from(parent.clone()) else {
-                return false;
-            };
-
-            if !child.is_valid(&parent, now, network).await
-                || !child.has_proof_of_work(network, parent.header())
-            {
-                return false;
-            }
+                if let Ok(parent) = Block::try_from(parent.clone()) {
+                    if !child.is_valid(&parent, &now, network).await || 
+                    !child.has_proof_of_work(network, parent.header()) {return false}
+                } else {return false}
+            } else {return false}
         }
 
         true
     }
 
-    /// Determine whether the claimed evolution of the cumulative proof-of-work
-    /// is a) possible, and b) likely, given the difficulties.
+    /// Determine whether the claimed evolution of the cumulative proof-of-work is a) possible, and b) likely, given the difficulties.
     pub(crate) fn check_pow(&self, network: Network, own_tip_height: BlockHeight) -> bool {
         let genesis_header = BlockHeader::genesis(network);
         let parent_triples = [(

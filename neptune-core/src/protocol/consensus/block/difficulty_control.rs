@@ -452,7 +452,7 @@ pub(crate) fn difficulty_control(
 /// Determine an upper bound for the maximum possible cumulative proof-of-work
 /// after n blocks given the start conditions.
 ///
-/// todo: this should accept target_block_interval and minimum_block_time params.
+/// this should accept target_block_interval and minimum_block_time params.
 pub(crate) fn max_cumulative_pow_after(
     cumulative_pow_start: ProofOfWork,
     difficulty_start: Difficulty,

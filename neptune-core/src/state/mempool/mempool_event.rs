@@ -11,8 +11,8 @@ use crate::protocol::proof_abstractions::mast_hash::MastHash;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MempoolEvent {
     /// a transaction was added to the mempool
-    // TODO: Consider adding proof type here in case any subscriber could use
-    // that.
+    /// 
+    /// Consider adding proof type here in case any subscriber could use that.
     AddTx(TransactionKernel),
 
     /// a transaction was removed from the mempool

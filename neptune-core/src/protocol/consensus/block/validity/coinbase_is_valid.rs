@@ -19,15 +19,15 @@ pub struct CoinbaseIsValidWitness {
 
 impl SecretWitness for CoinbaseIsValidWitness {
     fn standard_input(&self) -> PublicInput {
-        todo!()
+        unimplemented!()
     }
 
     fn program(&self) -> Program {
-        todo!()
+        unimplemented!()
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
-        todo!()
+        unimplemented!()
     }
 }
 
@@ -38,25 +38,12 @@ pub struct CoinbaseIsValid {
 
 impl ConsensusProgram for CoinbaseIsValid {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
-        todo!()
+        unimplemented!()
     }
 
     fn hash(&self) -> Digest {
         static HASH: OnceLock<Digest> = OnceLock::new();
 
         *HASH.get_or_init(|| self.program().hash())
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub mod tests {
-    use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
-
-    impl ConsensusProgramSpecification for CoinbaseIsValid {
-        fn source(&self) {
-            todo!()
-        }
     }
 }

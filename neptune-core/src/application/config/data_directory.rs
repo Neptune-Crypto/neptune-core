@@ -24,11 +24,9 @@ const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.
 const DB_MIGRATION_BACKUPS_DIR: &str = "migration_backups";
 
-// TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
+/// Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DataDirectory {
-    data_dir: PathBuf,
-}
+pub struct DataDirectory {data_dir: PathBuf}
 
 impl DataDirectory {
     ///////////////////////////////////////////////////////////////////////////
@@ -46,11 +44,10 @@ impl DataDirectory {
             .unwrap_or_else(|| ProjectDirs::from("org", "neptune", "neptune"))
             .context("Could not determine data directory")?;
 
-        let network_dir = network.to_string();
-        let network_path = Path::new(&network_dir);
-        let data_dir = project_dirs.data_dir().to_path_buf().join(network_path);
-
-        Ok(DataDirectory { data_dir })
+        Ok(DataDirectory { 
+            data_dir: project_dirs.data_dir().to_path_buf()
+            .join(Path::new(&network.to_string())) 
+        })
     }
 
     /// Create directory if it does not exist
@@ -79,19 +76,19 @@ impl DataDirectory {
 
     ///////////////////////////////////////////////////////////////////////////
     ///
-    /// The root data directory path
+    /// The root data directory path.
     pub fn root_dir_path(&self) -> PathBuf {
         self.data_dir.clone()
     }
 
     ///////////////////////////////////////////////////////////////////////////
     ///
-    /// The rpc (auth) cookie file path
+    /// The RPC (auth) cookie file path.
     pub fn rpc_cookie_file_path(&self) -> PathBuf {
         self.data_dir.join(Path::new(RPC_COOKIE_FILE_NAME))
     }
 
-    /// The block database directory path
+    /// The block database directory path.
     pub fn database_dir_path(&self) -> PathBuf {
         self.data_dir.join(Path::new(DATABASE_DIRECTORY_ROOT_NAME))
     }
@@ -133,8 +130,7 @@ impl DataDirectory {
 
     /// directory for storing database backups before migrating schema to newer version
     pub fn db_migration_backups_dir_path(&self) -> PathBuf {
-        self.database_dir_path()
-            .join(Path::new(DB_MIGRATION_BACKUPS_DIR))
+        self.database_dir_path().join(Path::new(DB_MIGRATION_BACKUPS_DIR))
     }
 
     /// returns next unused path for wallet database backup
@@ -156,7 +152,7 @@ impl DataDirectory {
         self.db_next_unused_migration_backup_path(WALLET_DB_NAME, schema_version)
     }
 
-    // internal fn. all DBs can be backed up into the same "migration_backups" dir.
+    /// Internal function. All DBs can be backed up into the same "migration_backups" dir.
     fn db_next_unused_migration_backup_path(
         &self,
         db_name: &str,
@@ -220,7 +216,7 @@ impl DataDirectory {
     ///
     /// Note that multiple blocks can be stored in one block file.
     ///
-    /// This directory lives within `DataDirectory::block_dir_path()`.
+    /// This directory lives within [`DataDirectory::block_dir_path()`].
     pub fn block_file_path(&self, file_index: u32) -> PathBuf {
         let prefix = BLOCK_FILENAME_PREFIX;
         let extension = BLOCK_FILENAME_EXTENSION;

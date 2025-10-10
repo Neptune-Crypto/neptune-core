@@ -31,7 +31,7 @@
 // Before making final decision(s), we should benchmark our
 // code with real data and try out different crates/options.
 //
-// todo: consider moving the serialization functions, or perhaps all
+// consider moving the serialization functions, or perhaps all
 // of rusty_value.rs to a top level module, eg twenty-first::serialization.
 
 use std::fmt::Debug;
@@ -102,9 +102,9 @@ impl RustyValue {
 /// At present `bincode` is used for de/serialization, but this could
 /// change in the future.  No guarantee is made as the to serialization format.
 ///
-// todo: consider compressing serialized bytes with zlib, or similar.
+// consider compressing serialized bytes with zlib, or similar.
 //       see comments at top of file.
-// todo: consider moving this fn, or perhaps all of rusty_value.rs
+// consider moving this fn, or perhaps all of rusty_value.rs
 //       to a top level module, eg twenty-first::serialization
 #[inline]
 pub fn serialize<T: Serialize>(value: &T) -> Vec<u8> {
@@ -120,9 +120,9 @@ pub fn serialize<T: Serialize>(value: &T) -> Vec<u8> {
 /// At present `bincode` is used for de/serialization, but this could
 /// change in the future.  No guarantee is made as the to serialization format.
 ///
-// todo: consider decompressing serialized bytes with zlib, or similar.
+// consider decompressing serialized bytes with zlib, or similar.
 //       see comments at top of file.
-// todo: consider moving this fn, or perhaps all of rusty_value.rs
+// consider moving this fn, or perhaps all of rusty_value.rs
 //       to a top level module, eg twenty-first::serialization
 #[inline]
 pub fn deserialize<T: DeserializeOwned>(bytes: &[u8]) -> T {

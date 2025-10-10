@@ -1,4 +1,5 @@
 #![feature(assert_matches)]
+#![feature(iter_collect_into)]
 // recursion limit for macros (e.g. triton_asm!)
 #![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
@@ -109,14 +110,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         tokio::spawn(fut);
     }
 
-    // see comment for Network::performs_automated_mining()
+    // see comment for `Network::performs_automated_mining()`
     if cli_args.mine() && !cli_args.network.performs_automated_mining() {
         anyhow::bail!("Automatic mining is not supported for network {}.  Try again without --compose or --guess flags.", cli_args.network);
     }
 
     info!("Starting neptune-core node on {}.", cli_args.network);
 
-    // Get data directory (wallet, block database), create one if none exists
+    // Get data directory (wallet, block database), create one if none exists.
     let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)?;
     DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path()).await?;
     info!("Data directory is {}", data_directory);
@@ -129,21 +130,16 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     let mut global_state_lock =
         GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
 
-    // Construct the broadcast channel to communicate from the main task to peer tasks
+    // Construct the broadcast channel to communicate from the main task to peer tasks.
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =
         broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
 
-    // Add the MPSC (multi-producer, single consumer) channel for peer-task-to-main communication
+    // Add the MPSC (multi-producer, single consumer) channel for peer-task-to-main communication.
     let (peer_task_to_main_tx, peer_task_to_main_rx) =
         mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
-    if let Some(block_import_directory) =
-        global_state_lock.cli().import_blocks_from_directory.clone()
-    {
-        info!(
-            "Importing blocks from directory \"{}\"",
-            block_import_directory.to_string_lossy()
-        );
+    if let Some(block_import_directory) = global_state_lock.cli().import_blocks_from_directory.clone() {
+        info!("Importing blocks from directory \"{}\"", block_import_directory.to_string_lossy());
 
         let flush_period = global_state_lock.cli().import_block_flush_period;
         let validate_blocks = !global_state_lock.cli().disable_validation_in_block_import;
@@ -171,14 +167,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
 
     // Check if we need to restore the wallet database, and if so, do it.
     info!("Checking if we need to restore UTXOs");
-    global_state_lock
-        .lock_guard_mut()
+    global_state_lock.lock_guard_mut()
         .await
         .restore_monitored_utxos_from_recovery_data()
         .await?;
     info!("UTXO restoration check complete");
 
-    // Bind socket to port on this machine, to handle incoming connections from peers
+    // Bind socket to port on this machine, to handle incoming connections from peers.
     let incoming_peer_listener = if let Some(incoming_peer_listener) = cli_args.own_listen_port() {
         let ret = TcpListener::bind((cli_args.peer_listen_addr, incoming_peer_listener))
            .await
@@ -190,13 +185,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         TcpListener::bind("127.0.0.1:0").await?
     };
 
-    // Connect to peers, and provide each peer task with a thread-safe copy of the state
-    let own_handshake_data: HandshakeData =
-        global_state_lock.lock_guard().await.get_own_handshakedata();
-    info!(
-        "Most known canonical block has height {}",
-        own_handshake_data.tip_header.height
-    );
+    // Connect to peers, and provide each peer task with a thread-safe copy of the state.
+    let own_handshake_data = global_state_lock.lock_guard().await.get_own_handshakedata();
+    info!("Most known canonical block has height {}", own_handshake_data.tip_header.height);
     let mut task_join_handles = vec![];
     for peer_address in global_state_lock.cli().peers.clone().iter_mut().filter_map(tmp_utils_multiaddr::try_from) {
         let peer_state_var = global_state_lock.clone(); // bump arc refcount
@@ -219,7 +210,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     debug!("Made outgoing connections to peers");
 
     // Start mining tasks if requested
-    let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
+    let (miner_to_main_tx, miner_to_main_rx) = 
+        mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
     let miner_state_lock = global_state_lock.clone(); // bump arc refcount.
     if global_state_lock.cli().mine() {
@@ -236,23 +228,19 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         info!("Started mining task");
     }
 
-    // Start RPC server for CLI request and more. It's important that this is done as late
-    // as possible, so requests do not hang while initialization code runs.
+    /* Start RPC server for CLI request and more. It's important that this is done as late
+    as possible, so requests do not hang while initialization code runs. */
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
         format!("127.0.0.1:{}", global_state_lock.cli().rpc_port),
         Json::default,
-    )
-    .await?;
+    ).await?;
     rpc_listener.config_mut().max_frame_length(usize::MAX);
 
     let rpc_state_lock = global_state_lock.clone();
 
     // each time we start neptune-core a new RPC cookie is generated.
-    let valid_tokens: Vec<application::rpc::auth::Token> = vec![
-        crate::application::rpc::auth::Cookie::try_new(&data_directory)
-            .await?
-            .into(),
-    ];
+    let valid_tokens: Vec<application::rpc::auth::Token> = 
+        vec![crate::application::rpc::auth::Cookie::try_new(&data_directory).await?.into()];
 
     let rpc_join_handle = tokio::spawn(async move {
         rpc_listener
@@ -261,8 +249,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
             .map(server::BaseChannel::with_defaults)
             // Limit channels to 5 per IP. 1 for dashboard and a few more for CLI interactions
             .max_channels_per_key(5, |t| t.transport().peer_addr().unwrap().ip())
-            // serve is generated by the service attribute. It takes as input any type implementing
-            // the generated RPC trait.
+            // `serve` is generated by the service attribute. It takes as input any type implementing the generated RPC trait.
             .map(move |channel| {
                 let server = application::rpc::server::NeptuneRPCServer::new(
                     rpc_state_lock.clone(),

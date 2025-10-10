@@ -16,7 +16,7 @@ use crate::protocol::consensus::transaction::TransactionProof;
 /// `ProofCollection` requires upgrade to `SingleProof` before mining, so it is of lover quality.
 #[derive(Clone, Copy, EnumIter, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TransactionProofQuality {
-    // OnlyLockScripts, // TODO: Add this once `Transaction` has support
+    // OnlyLockScripts, // Add this once `Transaction` has support
     ProofCollection,
     SingleProof,
 }
@@ -28,7 +28,7 @@ pub(crate) enum TransactionProofQuality {
 /// peers, as this would leak secret key material.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum TransferTransactionProof {
-    //OnlyLockScripts(OnlyLockScriptWitness) TODO: Add when `Transaction` supports
+    //OnlyLockScripts(OnlyLockScriptWitness) Add when `Transaction` supports
     ProofCollection(Box<ProofCollection>),
     SingleProof(Proof),
 }

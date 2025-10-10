@@ -10,6 +10,4 @@ const UTXO_SIZE_TOO_LARGE_ERROR: i128 = 1_000_401;
 const TOO_BIG_COIN_FIELD_SIZE_ERROR: i128 = 1_000_402;
 const STATE_LENGTH_FOR_TIME_LOCK_NOT_ONE_ERROR: i128 = 1_000_403;
 
-// Todo:
-//  - support hardcoded digests for non-native-currency amount-like type
-//    scripts.
+//  - support hardcoded digests for non-native-currency amount-like type scripts.

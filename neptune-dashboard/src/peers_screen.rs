@@ -199,10 +199,9 @@ impl PeersScreen {
         }
     }
 
-    /// handle a DashboardEvent
+    /// handle a `DashboardEvent`
     ///
-    /// In particular we handle Up/Down keypress for scrolling
-    /// the history table.
+    /// In particular we handle Up/Down keypress for scrolling the history table.
     pub fn handle(&mut self, event: DashboardEvent) -> Option<DashboardEvent> {
         let mut escalate_event = None;
 
@@ -212,7 +211,7 @@ impl PeersScreen {
                     match key.code {
                         KeyCode::Down => self.events.next(),
                         KeyCode::Up => self.events.previous(),
-                        // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
+                        // PgUp,PgDn.  (but how to determine page size?  fixed n?)
                         KeyCode::Char(c) => {
                             if self.set_sort_column(c) {
                                 return None;

@@ -141,9 +141,9 @@ impl PeerInfo {
         !self.connection_is_inbound()
     }
 
-    /// returns the neptune-core version-string reported by the peer.
+    /// `neptune-core`` version-string reported by the peer.
     ///
-    /// note: the peer might not be honest.
+    /// note: the peer might be not honest.
     pub fn version(&self) -> &str {
         &self.version
     }

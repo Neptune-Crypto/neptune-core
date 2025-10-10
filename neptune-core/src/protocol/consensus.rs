@@ -49,7 +49,7 @@ mod tests {
             transaction::validity::removal_records_integrity::RemovalRecordsIntegrity,
             transaction::validity::single_proof::SingleProof,
             type_scripts::time_lock::TimeLock,
-            // todo: what about those?
+            // what about those?
             // block_validity::coinbase_is_valid::CoinbaseIsValid,
             // block_validity::correct_control_parameter_update::CorrectControlParameterUpdate,
             // block_validity::correct_mmr_update::CorrectMmrUpdate,

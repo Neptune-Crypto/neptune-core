@@ -452,7 +452,8 @@ pub mod tests {
     /// If a proof was found, returns it along with the URL of the server
     /// serving the proof. The caller should validate the proof. Does
     /// not store the proof to disk.
-    /// TODO: Consider making this async.
+    /// 
+    /// Consider making this async.
     fn try_fetch_from_server_inner(filename: String) -> Option<(Proof, String)> {
         let (file_contents, server) = try_fetch_file_from_server(filename)?;
 

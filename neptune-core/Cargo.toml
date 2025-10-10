@@ -123,7 +123,7 @@ humantime = "2.1.0"
 libp2p = {version = "*", features = ["full"]}
 
 # align `version` with `libp2p::request_response::cbor::Behaviour`
-cbor4ii = {version = "1", features = ["serde1"]}
+# cbor4ii = {version = "1", features = ["serde1"]}
 
 # ~~will be needed for an onion-addr~~
 multiaddr = "*"

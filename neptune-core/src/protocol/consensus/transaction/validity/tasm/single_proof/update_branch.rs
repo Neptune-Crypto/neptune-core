@@ -966,7 +966,7 @@ pub(crate) mod tests {
         num_pub_announcements: usize,
         consensus_rule_set: ConsensusRuleSet,
     ) -> UpdateWitness {
-        // TODO: Currently only tests a new mutator set with more AOCL leafs.
+        // Currently only tests a new mutator set with more AOCL leafs.
         // Should also test for removed records in the new mutator set
         // accumulator.
         let mut test_runner = TestRunner::deterministic();

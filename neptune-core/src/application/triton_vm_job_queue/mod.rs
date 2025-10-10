@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::job_queue::JobQueue;
 
-// todo: maybe we want to have more levels or just make it an integer eg u8.
+// maybe we want to have more levels or just make it an integer eg u8.
 // or maybe name the levels by type/usage of job/proof.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum TritonVmJobPriority {

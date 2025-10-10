@@ -28,7 +28,7 @@ pub(crate) async fn the(
                 /* Lock needs to be held here because race conditions: otherwise the block proposal 
                 that was validated might not match with the one whose favorability is being computed. */
                 let state = global_state_lock.lock_guard().await;
-                if proposal.is_valid(state.chain.light_state(), Timestamp::now(), global_state_lock.cli().network).await {
+                if proposal.is_valid(state.chain.light_state(), &Timestamp::now(), global_state_lock.cli().network).await {
                     // Is block proposal favorable?
                     let is_favorable = 
                         state.favor_incoming_block_proposal(proposal.header().prev_block_digest, incoming_guesser_fee);

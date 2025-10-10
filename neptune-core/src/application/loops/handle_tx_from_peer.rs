@@ -5,7 +5,7 @@ use crate::{api::export::Timestamp, application::loops::channel::{self, PeerTask
 /// Return the depth of the problem.
 /// - `None`: the `transaction` was sent to the main loop
 /// - `Some(None)`: it's not good enough to be shared further
-/// - `_`: it deserves a `.punish`
+/// - `_`: it deserves `.punish`
 pub(crate) async fn the(
     global_state_lock: crate::state::GlobalStateLock,
     to_main: tokio::sync::mpsc::Sender<channel::PeerTaskToMain>,
@@ -55,16 +55,14 @@ pub(crate) async fn the(
                     transaction.kernel.inputs.clone(),
                     transaction.kernel.outputs.clone(),
                 ).apply_to_accumulator(&mut mutator_set_accumulator_after.clone()).is_ok() {
-                    // TODO can add few `millis` to `now` already, but to @skaunov this seems not an issue
+                    // TODO #followUp can add few `millis` to `now` already, but to @skaunov this seems not an issue
 
                     // 6. Ignore if transaction is too old
                     if transaction.kernel.timestamp < now - Timestamp::seconds(crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
-                        // TODO: Consider punishing here
                         warn!("Received too old tx");
                         Some(None)
                     } else if transaction.kernel.timestamp >= now + crate::protocol::consensus::block::FUTUREDATING_LIMIT {
                         // 7. Ignore if transaction is too far into the future
-                        // TODO: Consider punishing here
                         warn!("Received tx too far into the future. Got timestamp: {:?}", transaction.kernel.timestamp);
                         Some(None)
                     } else {
@@ -93,7 +91,7 @@ pub(crate) async fn the(
                         debug!("invalid because {}", transaction.kernel.inputs[invalid].validate_inner(&mutator_set_accumulator_after).err().unwrap());
                         NegativePeerSanction::UnconfirmableTransaction
                     }
-                    // TODO fold these into `thiserror` as with `RemovalRecordValidityError`
+                    // TODO #followUp fold these into `thiserror` as with `RemovalRecordValidityError`
                     TransactionConfirmabilityError::DuplicateInputs => {
                         warn!("duplicate inputs");
                         NegativePeerSanction::DoubleSpendingTransaction

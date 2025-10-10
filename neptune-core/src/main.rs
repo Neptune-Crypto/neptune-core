@@ -9,9 +9,7 @@ use tracing_subscriber::FmtSubscriber;
 pub fn main() -> Result<()> {
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
-        .enable_time()
-        .build()
-        .expect("Could not create tokio runtime");
+        .enable_time().build().expect("Could not create tokio runtime");
 
     let run_result = tokio_runtime.block_on(async {
         // Fetch the CLI arguments
@@ -39,17 +37,12 @@ pub fn main() -> Result<()> {
             set_up_logger();
         }
 
-        let mut main_loop_handler = neptune_cash::initialize(args).await?;
-        main_loop_handler.run().await
+        neptune_cash::initialize(args).await?.run().await
     });
 
     tokio_runtime.shutdown_timeout(tokio::time::Duration::from_secs(10));
 
-    if let Ok(exit_code) = run_result {
-        process::exit(exit_code)
-    } else {
-        run_result.map(|_| ())
-    }
+    process::exit(run_result?)
 }
 
 /// Configure logger to use ISO-8601, of which rfc3339 is a subset. Install

@@ -68,7 +68,7 @@ impl ReceiveScreen {
             let escalatable_event = self.escalatable_event.clone();
 
             tokio::spawn(async move {
-                // TODO: change to receive most recent wallet
+                // change to receive most recent wallet
                 let receiving_address = rpc_client
                     .next_receiving_address(context::current(), token, KeyType::Generation)
                     .await

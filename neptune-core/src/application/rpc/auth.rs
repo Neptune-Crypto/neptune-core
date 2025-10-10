@@ -68,25 +68,18 @@ type CookieBytes = [u8; 32];
 
 /// represents an RPC authentication cookie
 ///
-/// a cookie file is created each time neptune-core is started.
+/// a cookie file is created each time `neptune-core` is started.
 ///
 /// local (same-device) RPC clients with read access to the cookie
-/// file can read it and provide the cookie as an auth [Token]
-/// when calling RPC methods.
+/// file can read it and provide the cookie as an auth [Token] when calling RPC methods.
 ///
-/// The cookie serves a couple purposes:
-///   1. proves to neptune-core that the client is on the same device and
-///      has read access for files written by neptune-core.
-///   2. enables automated authentication without requiring user to
-///      manually set a password somewhere.
+/// The cookie serves a couple purposes.
+///   1. Proves to `neptune-core` that the client is on the same device and has read access for files written by `neptune-core`.
+///   2. Enables automated authentication without requiring user to manually set a password somewhere.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Cookie(CookieBytes);
 
-impl From<CookieBytes> for Cookie {
-    fn from(bytes: CookieBytes) -> Self {
-        Self(bytes)
-    }
-}
+impl From<CookieBytes> for Cookie {fn from(bytes: CookieBytes) -> Self {Self(bytes)}}
 
 impl Cookie {
     /// try loading cookie from a file

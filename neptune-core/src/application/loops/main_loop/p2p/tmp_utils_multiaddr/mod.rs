@@ -7,7 +7,7 @@ use multiaddr::Protocol;
 
 use crate::application::loops::MSG_CONDIT;
 
-pub mod mebmership;
+pub mod membership;
 
 /// if ends with `PeerId` that will be popped separately
 pub fn peerid_split(couldendwith_peerid: &mut Multiaddr) -> (Option<libp2p::PeerId>, &mut Multiaddr) {if couldendwith_peerid.is_empty() {(None, couldendwith_peerid)} else {

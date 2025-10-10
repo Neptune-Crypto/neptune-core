@@ -298,7 +298,7 @@ impl PrimitiveWitness {
             .zip_eq(&self.input_membership_proofs)
         {
             let item = Tip5::hash(input_utxo);
-            // TODO: write these functions in tasm
+            // write these functions in tasm
             if !self.mutator_set_accumulator.verify(item, membership_proof) {
                 let error = WitnessValidationError::InvalidMembershipProof {
                     witness_mutator_set_accumulator_hash: self.mutator_set_accumulator.hash(),

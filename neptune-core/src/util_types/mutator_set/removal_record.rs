@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn removal_record_serialization_test() {
-        // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
+        // You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
 

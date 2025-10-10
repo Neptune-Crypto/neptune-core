@@ -109,7 +109,7 @@ pub enum Action<Item> {
     /// Simulates an error when reading the peer's message. Consider adding an
     /// error type here to better simulate e.g. a deserialization error.
     ReadError,
-    // Todo: Some tests with these things
+    // Some tests with these things
     // Wait(Duration),
     // ReadError(Option<Arc<io::Error>>),
     // WriteError(Option<Arc<io::Error>>),

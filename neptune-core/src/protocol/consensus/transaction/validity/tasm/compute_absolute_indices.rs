@@ -268,8 +268,7 @@ mod tests {
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
         ) {
-            // TODO: Use this function from `tasm-lib` once upgraded to latest
-            // version. And delete this locally declared function.
+            /// Use this function from `tasm-lib` once upgraded to latest version. And delete this locally declared function.
             fn pop_encodable<T: BFieldCodec>(stack: &mut Vec<BFieldElement>) -> T {
                 let len = T::static_length().unwrap();
                 let limbs = (0..len).map(|_| stack.pop().unwrap()).collect_vec();

@@ -404,7 +404,7 @@ fn stay_in_sync_mode(
 }
 
 impl MainLoopHandler {
-    // todo: find a way to avoid triggering lint
+    // find a way to avoid triggering lint
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         incoming_peer_listener: TcpListener,
@@ -773,7 +773,7 @@ impl MainLoopHandler {
                 if !block
                     .is_valid(
                         &current_tip,
-                        block.header().timestamp,
+                        &block.header().timestamp,
                         self.global_state_lock.cli().network,
                     )
                     .await
@@ -923,14 +923,15 @@ impl MainLoopHandler {
                 }
 
                 // Spawn task to handle mempool tx-updating after new blocks.
-                // TODO: Do clever trick to collapse all jobs relating to the same transaction,
+                // Do clever trick to collapse all jobs relating to the same transaction,
                 //       identified by transaction-ID, into *one* update job.
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
                 // Inform miner about new block.
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);
             }
-            /* TODO as this is the only entry-point into syncing mode it needs adaptation to take these from the block topic now, but it's not straight-forward #libp2p_reqresp_Sync */
+            /* TODO as this is the only entry-point into syncing mode it needs adaptation to take these from 
+            the block topic now, but it's not straight-forward #libp2p_reqresp_Sync */
             PeerTaskToMain::AddPeerMaxBlockHeight {
                 peer_address,
                 claimed_height,
@@ -984,12 +985,11 @@ impl MainLoopHandler {
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                 if global_state_mut.net.sync_anchor.is_some() {
-                    let stay_in_sync_mode = stay_in_sync_mode(
+                    if !stay_in_sync_mode(
                         global_state_mut.chain.light_state().header(),
                         &main_loop_state.sync_state,
                         sync_mode_threshold,
-                    );
-                    if !stay_in_sync_mode {
+                    ) {
                         info!("Exiting sync mode");
                         global_state_mut.net.sync_anchor = None;
                     }
@@ -1100,7 +1100,7 @@ impl MainLoopHandler {
 
                 // filter out CLI peers
                 let disconnect_candidates = global_state.net.peer_map.iter().filter(
-                    |p| !tmp_utils_multiaddr::mebmership::does_madrs_cover_socketadr(
+                    |p| !tmp_utils_multiaddr::membership::does_madrs_cover_socketadr(
                         p.0, global_state.cli().peers.clone().iter_mut()
                     )
                 );
@@ -1202,7 +1202,7 @@ impl MainLoopHandler {
                 Ok(())
             } else {
                 let num_peers_to_disconnect = num_peers - max_num_peers;
-                let peers_to_disconnect = connected_peers.into_iter().filter(|peer| !tmp_utils_multiaddr::mebmership::does_madrs_cover_socketadr(
+                let peers_to_disconnect = connected_peers.into_iter().filter(|peer| !tmp_utils_multiaddr::membership::does_madrs_cover_socketadr(
                         &peer.connected_address(), cli_args.peers.clone().iter_mut()
                     )).choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
                 match peers_to_disconnect.len() {
@@ -1675,7 +1675,9 @@ impl MainLoopHandler {
         #[cfg(not(unix))]
         drop((tx_term, tx_int, tx_quit));
 
-        main_loop_state.task_handles.push(tokio::task::spawn(p2p::swarm::run(self.global_state_lock.clone(), self.main_to_peer_broadcast_tx.subscribe(), self.peer_task_to_main_tx.clone())));
+        main_loop_state.task_handles.push(tokio::task::spawn(p2p::swarm::run(
+            self.global_state_lock.clone(), self.main_to_peer_broadcast_tx.subscribe(), self.peer_task_to_main_tx.clone()
+        )));
         
         let exit_code: i32 = loop {
             select! {

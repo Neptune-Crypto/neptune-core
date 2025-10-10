@@ -94,7 +94,7 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
         },
     };
     if cli.restrict_peers_to_list {
-        if crate::application::loops::main_loop::p2p::tmp_utils_multiaddr::mebmership::is_ipadr_in_madrs(connecting_ip, cli.peers.iter()) {
+        if crate::application::loops::main_loop::p2p::tmp_utils_multiaddr::membership::is_ipadr_in_madrs(connecting_ip, cli.peers.iter()) {
             debug!("Rejecting incoming connection from unlisted peer {connecting_ip} due to `--restrict-peers-to-list`");
             return false;
         }
@@ -160,7 +160,7 @@ async fn check_if_connection_is_allowed(
             );
 
             // A “wrong” reason is given because of backwards compatibility.
-            // todo: Use next breaking release to give a more accurate reason here.
+            // Use next breaking release to give a more accurate reason here.
             let reason = ConnectionRefusedReason::MaxPeerNumberExceeded;
             return InternalConnectionStatus::Refused(reason);
         }
@@ -566,8 +566,7 @@ pub(crate) async fn close_peer_connected_callback(
     let mut global_state_mut = global_state_lock.lock_guard_mut().await;
 
     // Store any new peer-standing to database
-    let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_address);
-    let new_standing = if let Some(new) = peer_info_writeback {
+    let new_standing = if let Some(new) = global_state_mut.net.peer_map.remove(&peer_address) {
         new.standing()
     } else {
         error!("Could not find peer standing for {peer_address}");
@@ -590,7 +589,7 @@ pub(crate) async fn close_peer_connected_callback(
     drop(global_state_mut); // avoid holding across mpsc::Sender::send()
     debug!("Stored peer info standing {new_standing} for peer {peer_address}");
 
-    // This message is used to determine if we are to exit synchronization mode
+    // This message is used to determine if we are to exit synchronization mode.
     to_main_tx
         .send(PeerTaskToMain::RemovePeerMaxBlockHeight(peer_address))
         .await

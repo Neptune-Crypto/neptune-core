@@ -245,8 +245,7 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         leaf_index: u64,
         num_leafs: u64,
     ) -> MmrMembershipProof {
-        // TODO: Replace this local function with the one in `twenty_first` once
-        // available through never version.
+        // Replace this local function with the one in `twenty_first` once available through never version.
         fn auth_path_node_indices(num_leafs: u64, leaf_index: u64) -> Vec<u64> {
             assert!(
                 leaf_index < num_leafs,
@@ -358,7 +357,7 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         let index_of_last_removal = leaf_index_to_node_index(num_leafs);
 
         while self.digests.len().await > index_of_last_removal {
-            // TODO: It would be faster to be able to prune here,
+            // It would be faster to be able to prune here,
             self.digests.pop().await.unwrap();
         }
     }
