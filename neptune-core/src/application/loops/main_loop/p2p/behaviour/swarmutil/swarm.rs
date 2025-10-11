@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, collections::{HashMap, HashSet}};
+use std::collections::{HashMap, HashSet};
 
 use futures::StreamExt;
 use itertools::{Either, Itertools};
@@ -115,7 +115,7 @@ pub(crate) async fn run(
         debug!["{l:?}"];
         false
     } else {true}).map(|l| l.expect(MSG_CONDIT)).collect::<std::collections::HashSet<_>>();
-    let mut swarm_listener_multiaddrs_autonat = HashMap::<Multiaddr, Option<bool>>::new();
+    let mut multiaddrs_autonat = HashMap::<Multiaddr, Option<bool>>::new();
 
     /* TODO #followUp purge `libp2p::kad::store::MemoryStore` when a new tip received or published as that invalidates any proof collection backed tx
 
@@ -326,15 +326,20 @@ pub(crate) async fn run(
                     _ => warn!("{error}")
                 },
                 SwarmEvent::Behaviour(ComposedBehaviourEvent::AutonatClient(libp2p::autonat::v2::client::Event{ tested_addr, bytes_sent, server, result })) => {
-                    if swarm_listener_multiaddrs_autonat.keys().into_iter().contains(&tested_addr) {
-                        *swarm_listener_multiaddrs_autonat.get_mut(&tested_addr).expect(MSG_CONDIT) = match result {
-                            Ok(()) => Some(true),
-                            Err(_) => Some(false),
-                            // TODO https://github.com/libp2p/rust-libp2p/pull/6168
-                            Err(_) => None
-                        };
-                        relay_connect_ifneeded(&mut swarm_listener_multiaddrs_autonat, &peer_infos, &peer_pings, &mut swarm_listeners, &mut swarm)
-                    } else {trace!["`autonat` probed `FromSwarm::NewExternalAddrCandidate` which we never listened to"]}
+                    dbg![&multiaddrs_autonat];
+                    debug_assert![multiaddrs_autonat.keys().into_iter().contains(&tested_addr)];
+                    *multiaddrs_autonat.entry(tested_addr).or_default() = match result {
+                        Ok(()) => {
+                            // is there any reason not to? privacy maybe?
+                            if let Ok(lid) = swarm.listen_on(tested_addr.clone()) {swarm_listeners.insert(lid);} 
+                            
+                            Some(true)
+                        }
+                        Err(_) => Some(false),
+                        // TODO https://github.com/libp2p/rust-libp2p/pull/6168
+                        Err(_) => None
+                    };
+                    relay_connect_ifneeded(&mut multiaddrs_autonat, &peer_infos, &peer_pings, &mut swarm_listeners, &mut swarm)
                 }
                 SwarmEvent::Behaviour(ComposedBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated{ 
                     peer, is_new_peer, addresses, bucket_range, old_peer 
@@ -461,7 +466,6 @@ pub(crate) async fn run(
                 SwarmEvent::NewListenAddr { listener_id, mut address } => { //  TODO check/test that `identify` catches this 
                     info!["{address}| One of our listeners has reported a new local listening address."];
                     debug_assert!(swarm_listeners.contains(&listener_id));
-                    swarm_listener_multiaddrs_autonat.insert(address.clone(), None);
                     if address.protocol_stack().contains(&Protocol::P2pCircuit.tag()) {
                         trace!["We started new listener on a relay. So let's `.dial` all the addresses which also listen on this relay to enhance a connection upgrade chance."];
                         let relay_id = {
@@ -492,14 +496,14 @@ pub(crate) async fn run(
                         "only IPv6 can expire: can it be done without new listen call, can it do this auto and just report the IPv6 change?"];
                     
                     if address.iter().contains(&Protocol::P2pCircuit) {relay_connect_ifneeded(
-                        &mut swarm_listener_multiaddrs_autonat, &peer_infos, &peer_pings, &mut swarm_listeners, &mut swarm
+                        &mut multiaddrs_autonat, &peer_infos, &peer_pings, &mut swarm_listeners, &mut swarm
                     )} 
                     else {match swarm.listen_on(address.replace(
                         address.iter().position(|el| matches!(el, Protocol::Ip6(_))).unwrap(), 
                         |_| Some(Protocol::Ip6(std::net::Ipv6Addr::UNSPECIFIED))
                     ).unwrap()) {
                         Ok(lid) => {swarm_listeners.insert(lid);}
-                        Err(_) => relay_connect_ifneeded(&mut swarm_listener_multiaddrs_autonat, &peer_infos, &peer_pings, &mut swarm_listeners, &mut swarm),
+                        Err(_) => relay_connect_ifneeded(&mut multiaddrs_autonat, &peer_infos, &peer_pings, &mut swarm_listeners, &mut swarm),
                     }}
                 }
                 SwarmEvent::ListenerClosed { listener_id, addresses, reason } => {
@@ -511,7 +515,8 @@ pub(crate) async fn run(
                     // quite strange `kad` requires the call and Gossip picks up the event itself; chances are @skaunov just don't get this right yet
                     // indeed, that's why @skaunov added putting that into Gossip on new routable peer event which is even better than here
                     swarm.behaviour_mut().kad.add_address(&peer_id, address);
-                } 
+                }
+                SwarmEvent::NewExternalAddrCandidate { address } => {multiaddrs_autonat.insert(address, None);}
                 /* __________________________________________________________________________________________________________________
                 events which doesn't carry an interesting thing are commented here yet to be in front of the eyes at this early stage
                  */
@@ -524,7 +529,6 @@ pub(crate) async fn run(
                 SwarmEvent::IncomingConnectionError { connection_id, local_addr, send_back_addr, error, peer_id } => {}
                 SwarmEvent::OutgoingConnectionError { connection_id, peer_id, error } => {}
                 SwarmEvent::Dialing { peer_id, connection_id } => {}
-                SwarmEvent::NewExternalAddrCandidate { address } => {}
                 SwarmEvent::ExternalAddrExpired { address } => {}
 
                 ev => {dbg![ev];}

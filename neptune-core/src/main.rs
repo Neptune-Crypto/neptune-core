@@ -49,14 +49,13 @@ pub fn main() -> Result<()> {
 /// global collector configured based on RUST_LOG env var. Accepted `RUST_LOG`
 /// values are `trace`, `debug`, `info`, `warn`, and `error`.
 fn set_up_logger() {
-    let info_env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn"));
-    let subscriber = FmtSubscriber::builder()
+    tracing::subscriber::set_global_default(
+        FmtSubscriber::builder()
         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_env_filter(info_env_filter)
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn")))
         .with_thread_ids(true)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .map_err(|_err| eprintln!("Unable to set global default subscriber"))
-        .expect("Failed to set trace subscriber");
+        .finish()
+    )
+    .map_err(|_err| eprintln!("Unable to set global default subscriber"))
+    .expect("Failed to set trace subscriber");
 }

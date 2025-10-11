@@ -26,7 +26,7 @@ fn relay_connect_ifneeded(
     dbg!["TODO check the order is from `None` to the smallest", &relays];
     let mut listener_added = false;
     while !listener_added && !relays.is_empty() {for addr in relays.pop().expect(crate::application::loops::MSG_CONDIT).1.listen_addrs.iter()
-    .filter(|a| relay_maybe(a)) {match swarm.listen_on(addr.clone()) { 
+    .filter(|a| relay_maybe(a)) {match dbg!(swarm.listen_on(addr.clone())) { 
         Ok(value) => {
             swarm_listeners.insert(value);
             swarm_listener_multiaddrs_autonat.insert(addr.to_owned(), None);

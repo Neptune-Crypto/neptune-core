@@ -45,6 +45,7 @@ impl ComposedBehaviour {
         .with_behaviour(|kp, relay_behaviour| {
             let local_id = kp.public().into();
             ComposedBehaviour {
+                relay_server: libp2p::relay::Behaviour::new(local_id, Default::default()),
                 relay_client: relay_behaviour,
                 dcutr: libp2p::dcutr::Behaviour::new(local_id),
                 
@@ -118,7 +119,6 @@ impl ComposedBehaviour {
                 //     )
                 // ),
                 autonat_server: Default::default(),
-                relay_server: libp2p::relay::Behaviour::new(local_id, Default::default()),
             }
         }).unwrap()
         .build()
