@@ -323,7 +323,7 @@ pub(crate) async fn run(
                 SwarmEvent::Behaviour(ComposedBehaviourEvent::Identify(identify::Event::Received{ connection_id, peer_id, info })) => {
                     swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                     for a in info.listen_addrs.clone() {swarm.behaviour_mut().kad.add_address(&peer_id, a);}
-                    peer_infos.insert(peer_id, info);
+                    peer_infos.insert(peer_id, dbg![info]);
                 }
                 SwarmEvent::Behaviour(ComposedBehaviourEvent::Identify(identify::Event::Error{ connection_id, peer_id, error })) => match error {
                     libp2p::swarm::StreamUpgradeError::Timeout => {swarm.close_connection(connection_id);}
