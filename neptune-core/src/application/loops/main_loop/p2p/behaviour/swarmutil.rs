@@ -25,16 +25,21 @@ fn relay_connect_ifneeded(
     let mut relays = relays.1;
     dbg!["TODO check the order is from `None` to the smallest", &relays];
     let mut listener_added = false;
-    while !listener_added && !relays.is_empty() {for addr in relays.pop().expect(crate::application::loops::MSG_CONDIT).1.listen_addrs.iter()
-    .filter(|a| relay_maybe(a)) {match dbg!(swarm.listen_on(addr.clone())) { 
-        Ok(value) => {
-            swarm_listeners.insert(value);
-            swarm_listener_multiaddrs_autonat.insert(addr.to_owned(), None);
-            listener_added = true;
-            break
-        }
-        Err(e) => tracing::debug!("{e}")
-    }}}
+    while !listener_added && !relays.is_empty() {
+        let (relay_id, addrs, _) = relays.pop().expect(crate::application::loops::MSG_CONDIT);
+        for addr in addrs.listen_addrs.iter().filter(|a| relay_maybe(a)) {match dbg!(swarm.listen_on(dbg!(
+            addr.clone().with_p2p(relay_id.clone()).unwrap()
+            .with(multiaddr::Protocol::P2pCircuit).with_p2p(swarm.local_peer_id().to_owned()).expect("just added `P2pCircuit` as the ending")
+        ))) { 
+            Ok(value) => {
+                swarm_listeners.insert(value);
+                swarm_listener_multiaddrs_autonat.insert(addr.to_owned(), None);
+                listener_added = true;
+                break
+            }
+            Err(e) => tracing::debug!("{e}")
+        }}
+    }
     if listener_added {
         // TODO #punish punish the peers who has `None` for their ping for not following the protocol and adding the complexity here
     } else {
