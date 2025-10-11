@@ -60,6 +60,8 @@ use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::GlobalStateLock;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
+const MSG_PANIC: &str = "Error in mining task";
+
 /// Information related to guessing.
 #[derive(Debug, Clone)]
 pub(crate) struct GuessingConfiguration {
@@ -604,7 +606,7 @@ pub(crate) async fn create_block_transaction_from(
     ))
 }
 
-///
+/// Panics.
 ///
 /// Locking:
 ///   * acquires `global_state_lock` for write
@@ -612,14 +614,13 @@ pub(crate) async fn mine(
     mut from_main: mpsc::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut global_state_lock: GlobalStateLock,
-) -> Result<()> {
-    // Set PoW guessing to restart every N seconds, if it has been started. Only
-    // the guesser task may set this to actually resolve, as this will otherwise
-    // abort e.g. the composer. Since preprocessing is expensive, don't do this
-    // very often!
+) {
+    /* Set PoW guessing to restart every N seconds, if it has been started. Only
+    the guesser task may set this to actually resolve, as this will otherwise
+    abort e.g. the composer. Since preprocessing is expensive, don't do this very often! */
     const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 1800;
 
-    // we disable the initial sleep when invoked for unit tests.
+    // We disable the initial sleep when invoked for unit tests.
     //
     // note: it can take an arbitrary amount of time to obtain latest-block info
     // from peers.  If that is important, we should be listening on a channel
@@ -794,7 +795,7 @@ pub(crate) async fn mine(
                         // Ensure graceful shutdown in case of error during composition.
                         stop_composing = true;
                         error!("Composition failed: {}", e);
-                        to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
+                        to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await.expect(MSG_PANIC);
                     }
                 }
             },
@@ -861,7 +862,7 @@ pub(crate) async fn mine(
 
                 match new_composition {
                     Ok((new_block_proposal, composer_utxos)) => {
-                        to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
+                        to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await.expect(MSG_PANIC);
                         wait_for_confirmation = true;
                     },
                     Err(e) => warn!("composing task was cancelled prematurely. Got: {}", e),
@@ -891,10 +892,9 @@ pub(crate) async fn mine(
                                 // took less time than the minimum block time.
                                 error!("Found block with valid proof-of-work but block is invalid.");
                         } else {
-
                             info!("Found new {} block with block height {}. Hash: {:x}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
 
-                            to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
+                            to_main.send(MinerToMain::NewBlockFound(new_block_found)).await.expect(MSG_PANIC);
 
                             wait_for_confirmation = true;
                         }
@@ -919,7 +919,7 @@ pub(crate) async fn mine(
         }
         if stop_composing {
             if !composer_task.is_finished() {
-                cancel_compose_tx.send(())?;
+                cancel_compose_tx.send(()).expect(MSG_PANIC);
                 debug!("Cancel signal sent to composer worker.");
             }
             // avoid duplicate call if stop_guessing is also true.
@@ -928,12 +928,9 @@ pub(crate) async fn mine(
             }
         }
 
-        if stop_looping {
-            break;
-        }
+        if stop_looping {break}
     }
     debug!("Miner shut down gracefully.");
-    Ok(())
 }
 
 #[cfg(test)]
@@ -1334,7 +1331,7 @@ pub(crate) mod tests {
             .unwrap();
             assert!(
                 block_1_empty_mempool
-                    .is_valid(&genesis_block, now, network)
+                    .is_valid(&genesis_block, &now, network)
                     .await,
                 "Block template created by miner with empty mempool must be valid"
             );
@@ -1384,7 +1381,7 @@ pub(crate) mod tests {
             .unwrap();
             assert!(
                 block_1_nonempty_mempool
-                    .is_valid(&genesis_block, now + Timestamp::seconds(2), network)
+                    .is_valid(&genesis_block, &(now + Timestamp::seconds(2)), network)
                     .await,
                 "Block template created by miner with non-empty mempool must be valid"
             );
@@ -1426,7 +1423,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_1, _) = receiver_1.await.unwrap();
-        let validation_result = block_1.validate(&genesis_block, mocked_now, network).await;
+        let validation_result = block_1.validate(&genesis_block, &mocked_now, network).await;
         assert!(validation_result.is_ok(), "{:?}", validation_result);
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
@@ -1441,7 +1438,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_2, _) = receiver_2.await.unwrap();
-        assert!(block_2.is_valid(&block_1, mocked_now, network).await);
+        assert!(block_2.is_valid(&block_1, &mocked_now, network).await);
     }
 
     #[apply(shared_tokio_runtime)]
@@ -1492,7 +1489,7 @@ pub(crate) mod tests {
         let (block_1, _) = receiver_1.await.unwrap();
         assert!(
             block_1
-                .is_valid(&genesis_block, block1_timestamp, network)
+                .is_valid(&genesis_block, &block1_timestamp, network)
                 .await
         );
     }
@@ -2440,7 +2437,7 @@ pub(crate) mod tests {
 
             // verify mined block validates
             assert!(block
-                .validate(&prev_block, block_time, network)
+                .validate(&prev_block, &block_time, network)
                 .await
                 .is_ok());
 

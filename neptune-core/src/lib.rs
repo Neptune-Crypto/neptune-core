@@ -205,22 +205,16 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     }
     debug!("Made outgoing connections to peers");
 
-    // Start mining tasks if requested
-    let (miner_to_main_tx, miner_to_main_rx) = 
-        mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
+    // Start mining tasks if requested.
+    let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
-    let miner_state_lock = global_state_lock.clone(); // bump arc refcount.
+    let miner_state_lock = global_state_lock.clone(); // Bump arc refcount.
     if global_state_lock.cli().mine() {
-        let miner_join_handle = tokio::task::spawn(async move {
-            application::loops::mine_loop::mine(
-                main_to_miner_rx,
-                miner_to_main_tx,
-                miner_state_lock,
-            )
-            .await
-            .expect("Error in mining task");
-        });
-        task_join_handles.push(miner_join_handle);
+        task_join_handles.push(tokio::task::spawn(application::loops::mine_loop::mine(
+            main_to_miner_rx,
+            miner_to_main_tx,
+            miner_state_lock,
+        )));
         info!("Started mining task");
     }
 

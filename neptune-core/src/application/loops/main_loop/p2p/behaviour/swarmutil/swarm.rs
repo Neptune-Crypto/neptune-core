@@ -30,11 +30,12 @@ pub(crate) async fn run(
         (as feeding in a trivial seed won't possible). */
         /* @skaunov struggle to grasp the (type) system. Initially I made that as the method of `DataDirectory` returing 
         `Either<Keypair, std::io::Result<tokio::fs::File>>` but then I discovered that it will be callable only from 
-        an archival node (deep in `global_state_lock`). 
+        an archival node (deep in `global_state_lock`). \
         I guess `.cli().data_dir` means basically the same; but there's significant chance that non archival node will 
-        need some storage and it will be ubiquitous. 
+        need some storage and it will be ubiquitous. \
         Am still disappointed there's no roster for paths; `DataDirectory` seemed a fine candidate. */
-        // wallet?
+        /*      just a great illustration (of @skaunov not grasping this): why a most suitable path (no pun intended) to get `Path` was via `wallet_state`? 
+        Why can't I just get that `root_dir_path`? (I was too naive to use `global_state_lock.cli().data_dir` initially, which is `None` at this point already.) */
         let mut kf = None;
             
         let file_path = global_state_lock.lock(|gs| gs.wallet_state.configuration.data_directory().root_dir_path()).await.join(std::path::Path::new(FILE_NODEIDPERSISTANCE));
@@ -333,8 +334,8 @@ pub(crate) async fn run(
                     debug_assert![multiaddrs_autonat.keys().into_iter().contains(&tested_addr)];
                     *multiaddrs_autonat.entry(tested_addr).or_default() = match result {
                         Ok(()) => {
-                            // is there any reason not to? privacy maybe?
-                            if let Ok(lid) = swarm.listen_on(tested_addr.clone()) {swarm_listeners.insert(lid);} 
+                            // TODO #followUp do the same with `identify` observations from the several sources (as it's easy to lie there) in case `autonat` isn't around. @skaunov bet there ready solutions for this not hard to find.
+                            swarm.add_external_address(tested_addr.clone());
                             
                             Some(true)
                         }
@@ -344,14 +345,12 @@ pub(crate) async fn run(
                     };
                     relay_connect_ifneeded(&mut multiaddrs_autonat, &peer_infos, &peer_pings, &mut swarm_listeners, &mut swarm)
                 }
-                SwarmEvent::Behaviour(ComposedBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated{ 
-                    peer, is_new_peer, addresses, bucket_range, old_peer 
-                })) => {
+                SwarmEvent::Behaviour(ComposedBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated{ peer, is_new_peer, addresses, bucket_range, old_peer })) => {
                     swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                     if let Some(peer_id) = old_peer {swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer)}
                 }
                 SwarmEvent::Behaviour(ComposedBehaviourEvent::Kad(libp2p::kad::Event::OutboundQueryProgressed{ 
-                    id, result: libp2p::kad::QueryResult::Bootstrap(result), stats, step 
+                    result: libp2p::kad::QueryResult::Bootstrap(result), id, stats, step 
                 })) => 
                     if result.is_ok() {
                         let mut actual = peer_infos.keys().cloned().collect::<HashSet<_>>();
@@ -369,12 +368,12 @@ pub(crate) async fn run(
                         actual.difference(&gossip).for_each(|peer_id| swarm.behaviour_mut().gossipsub.add_explicit_peer(peer_id));
                     } else {
                         debug!["Kademlia bootstrap timeouted"];
-                        let mut works = false;
+                        let mut stillworks = false;
                         for b in swarm.behaviour_mut().kad.kbuckets() {if b.iter().next().is_some() {
-                            works = true;
+                            stillworks = true;
                             break
                         }}
-                        if !works {warn!("Kademlia has no peers.")}
+                        if !stillworks {warn!("Kademlia has no peers.")}
                     },
                 // TODO #followUp apply returned `PeerSanction` when #DB will be here?
                 SwarmEvent::Behaviour(ComposedBehaviourEvent::Gossipsub(libp2p::gossipsub::Event::Message { propagation_source, message_id, message })) => 
@@ -466,7 +465,14 @@ pub(crate) async fn run(
                         }
                     }
                 }
-                SwarmEvent::NewListenAddr { listener_id, mut address } => { //  TODO check/test that `identify` catches this 
+                /* So, @skaunov current mental model is following. The listen addresses and the external addresses are coupled loosely. *External* are more important to us
+                as these are what other nodes actually use to communicate with us (even if these addresses aren't callable/dialabe but only "where we come from"). *Listen* 
+                are what we advertise (mainly when `identify` info) with all the consequences (nodes probably would try those and it become confirmed when success; some 
+                could be relevant only for a local net; etc).
+                
+                        actually a test how `identify` shares the listen addrs would still be a nice thing */
+                // TODO ~~check~~/test that `identify` catches this 
+                SwarmEvent::NewListenAddr { listener_id, mut address } => { 
                     info!["{address}| One of our listeners has reported a new local listening address."];
                     debug_assert!(swarm_listeners.contains(&listener_id));
                     if address.protocol_stack().contains(&Protocol::P2pCircuit.tag()) {
@@ -520,18 +526,23 @@ pub(crate) async fn run(
                     swarm.behaviour_mut().kad.add_address(&peer_id, address);
                 }
                 SwarmEvent::NewExternalAddrCandidate { address } => {multiaddrs_autonat.insert(address, None);}
+                SwarmEvent::ExternalAddrConfirmed { address } => if !swarm.listeners().contains(&address) {
+                    match swarm.listen_on(address) {
+                        Ok(lid) => {swarm_listeners.insert(lid);} // is there any reason not to? privacy maybe?
+                        Err(er) => debug!("{er}"),
+                    } 
+                },
                 /* __________________________________________________________________________________________________________________
                 events which doesn't carry an interesting thing are commented here yet to be in front of the eyes at this early stage
                  */
-                SwarmEvent::ExternalAddrConfirmed { address } => {/* `autonat` does this job now; without it @skaunov would `.listen_on(address)` the (in fact observed by `identify`) address to keep the listeners healthy */}
-                SwarmEvent::IncomingConnection { connection_id, local_addr, send_back_addr } => {}
+                ev @ SwarmEvent::IncomingConnection { .. } => {dbg![ev];}
                 SwarmEvent::ConnectionEstablished { peer_id, connection_id, endpoint, num_established, concurrent_dial_errors, established_in } => {}
                 /* ~~why does this says 'a non-fatal'?~~
                         fatal will be the `reason` in `ListenerClosed` */
                 ev @ SwarmEvent::ListenerError { .. } => debug![?ev],
                 SwarmEvent::IncomingConnectionError { connection_id, local_addr, send_back_addr, error, peer_id } => {}
                 SwarmEvent::OutgoingConnectionError { connection_id, peer_id, error } => {}
-                SwarmEvent::Dialing { peer_id, connection_id } => {}
+                ev @ SwarmEvent::Dialing { .. } => {dbg![ev];}
                 SwarmEvent::ExternalAddrExpired { address } => {}
 
                 ev => {dbg![ev];}
