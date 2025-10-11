@@ -106,9 +106,7 @@ const _MIN_PTR_WIDTH: () = {
 };
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
-    async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
-        tokio::spawn(fut);
-    }
+    async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {tokio::spawn(fut);}
 
     // see comment for `Network::performs_automated_mining()`
     if cli_args.mine() && !cli_args.network.performs_automated_mining() {
@@ -119,16 +117,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
 
     // Get data directory (wallet, block database), create one if none exists.
     let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)?;
-    DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path()).await?;
+    dbg![DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path()).await]?;
     info!("Data directory is {}", data_directory);
 
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let genesis = Block::genesis(cli_args.network);
-    let global_state =
-        GlobalState::try_new(data_directory.clone(), genesis, cli_args.clone()).await?;
-    let mut global_state_lock =
-        GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
+    let global_state = GlobalState::try_new(data_directory.clone(), genesis, cli_args.clone()).await?;
+    let mut global_state_lock = GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
 
     // Construct the broadcast channel to communicate from the main task to peer tasks.
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =

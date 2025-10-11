@@ -27,10 +27,12 @@ fn relay_connect_ifneeded(
     let mut listener_added = false;
     while !listener_added && !relays.is_empty() {
         let (relay_id, addrs, _) = relays.pop().expect(crate::application::loops::MSG_CONDIT);
-        for addr in addrs.listen_addrs.iter().filter(|a| relay_maybe(a)) {match dbg!(swarm.listen_on(dbg!(
-            addr.clone().with_p2p(relay_id.clone()).unwrap()
-            .with(multiaddr::Protocol::P2pCircuit).with_p2p(swarm.local_peer_id().to_owned()).expect("just added `P2pCircuit` as the ending")
-        ))) { 
+        for addr in addrs.listen_addrs.iter().filter(|a| relay_maybe(a)) {match swarm.listen_on(
+            match addr.clone().with_p2p(relay_id.clone()) {
+                Ok(inner) => inner,
+                Err(inner) => inner
+            }.with(multiaddr::Protocol::P2pCircuit).with_p2p(swarm.local_peer_id().to_owned()).expect("just added `P2pCircuit` as the ending")
+        ) { 
             Ok(value) => {
                 swarm_listeners.insert(value);
                 swarm_listener_multiaddrs_autonat.insert(addr.to_owned(), None);

@@ -29,31 +29,34 @@ pub(crate) async fn run(
         to get the key or generate it from a seed are questionable and I believe it's better to have this direct and simple which also ensure good random `PeerId`
         (as feeding in a trivial seed won't possible). */
         /* @skaunov struggle to grasp the (type) system. Initially I made that as the method of `DataDirectory` returing 
-        `Either<Keypair, std::io::Result<tokio::fs::File>>` but then I discovered that it will be callable only from an archival node (deep in `global_state_lock`). 
-        I guess `.cli().data_dir` means basically the same; but there's significant chance that non archival node will need some storage and it will be ubiquitous. 
+        `Either<Keypair, std::io::Result<tokio::fs::File>>` but then I discovered that it will be callable only from 
+        an archival node (deep in `global_state_lock`). 
+        I guess `.cli().data_dir` means basically the same; but there's significant chance that non archival node will 
+        need some storage and it will be ubiquitous. 
         Am still disappointed there's no roster for paths; `DataDirectory` seemed a fine candidate. */
+        // wallet?
         let mut kf = None;
             
-        if global_state_lock.cli().persistent {
-            if let Some(dd) = global_state_lock.cli().data_dir.as_ref() {
-                if let Ok(mut f) = File::open(dd.join(std::path::Path::new(FILE_NODEIDPERSISTANCE))).await {
-                    let mut buf: [u8; 64] = [0; 64];
-                    if tokio::io::AsyncReadExt::read_exact(&mut f, &mut buf).await.is_ok() {
-                        if let Ok(k) = Keypair::try_from_bytes(&mut buf) {kf = Some(Either::Left(k))}
-                    }
+        let file_path = global_state_lock.lock(|gs| gs.wallet_state.configuration.data_directory().root_dir_path()).await.join(std::path::Path::new(FILE_NODEIDPERSISTANCE));
+        if dbg![global_state_lock.cli().persistent] {
+            if let Ok(mut f) = File::open(&file_path).await {
+                let mut buf: [u8; 64] = [0; 64];
+                if tokio::io::AsyncReadExt::read_exact(&mut f, &mut buf).await.is_ok() {
+                    if let Ok(k) = Keypair::try_from_bytes(&mut buf) {kf = Some(Either::Left(k))}
                 }
-                if kf.is_none() {match File::create(FILE_NODEIDPERSISTANCE).await {
-                    Ok(f) => {kf = Some(Either::Right(f))}
-                    Err(e) => warn!["{e}"]
-                }}
             }
+            dbg![&kf];
+            if kf.is_none() {match dbg![File::create(file_path).await] {
+                Ok(f) => {kf = Some(Either::Right(f))}
+                Err(e) => warn!["{e}"]
+            }}
         }
         match kf {
             Some(Either::Left(k)) => k,
             f => {
                 let key = Keypair::generate();
                 if let Some(Either::Right(mut file)) = f {
-                    file.write_all(&key.to_bytes()).await.unwrap_or_else(|e| warn!["{e}"])
+                    dbg![file.write_all(&key.to_bytes()).await].unwrap_or_else(|e| warn!["{e}"])
                 }
                 key
             }
