@@ -1010,7 +1010,7 @@ impl Block {
     }
 
     /// Verify that block digest is less than threshold and integral.
-    fn pow_verify(&self, target: Digest, consensus_rule_set: ConsensusRuleSet) -> bool {
+    pub(crate) fn pow_verify(&self, target: Digest, consensus_rule_set: ConsensusRuleSet) -> bool {
         let auth_paths = self.pow_mast_paths();
         self.header()
             .pow

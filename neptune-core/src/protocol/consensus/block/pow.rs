@@ -428,7 +428,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         };
 
         if consensus_rule_set != ConsensusRuleSet::Reboot {
-            // The index swapping can be done here, or in each guess. Since
+            // The index swapping could be done here, or in each guess. Since
             // we're optimizing for fast guessing, the index swapping is done
             // here.
             let swap_indices = Self::swap_indices(leafs.len());

@@ -3,6 +3,11 @@ use strum_macros::EnumIter;
 use crate::api::export::BlockHeight;
 use crate::api::export::Network;
 use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
+use crate::BFieldElement;
+
+/// Height of 1st block that follows the alpha consensus ruleset
+pub const BLOCK_HEIGHT_HARDFORK_ALPHA: BlockHeight =
+    BlockHeight::new(BFieldElement::new(15_000u64));
 
 /// Enumerates all possible sets of consensus rules.
 ///
@@ -41,7 +46,7 @@ impl ConsensusRuleSet {
     pub(crate) fn infer_from(network: Network, block_height: BlockHeight) -> Self {
         match network {
             Network::Main => {
-                if block_height < 12_000u64.into() {
+                if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA {
                     ConsensusRuleSet::Reboot
                 } else {
                     ConsensusRuleSet::HardforkAlpha
@@ -85,6 +90,7 @@ impl ConsensusRuleSet {
 #[cfg(test)]
 pub(crate) mod tests {
 
+    use futures::channel::oneshot;
     use itertools::Itertools;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -97,6 +103,7 @@ pub(crate) mod tests {
     use crate::api::export::KeyType;
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::OutputFormat;
+    use crate::api::export::ReceivingAddress;
     use crate::api::export::StateLock;
     use crate::api::export::Timestamp;
     use crate::api::export::Transaction;
@@ -108,10 +115,14 @@ pub(crate) mod tests {
     use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
     use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
     use crate::application::config::cli_args;
+    use crate::application::loops::channel::NewBlockFound;
     use crate::application::loops::mine_loop::compose_block_helper;
     use crate::application::loops::mine_loop::create_block_transaction_from;
+    use crate::application::loops::mine_loop::guess_nonce;
+    use crate::application::loops::mine_loop::GuessingConfiguration;
     use crate::application::loops::mine_loop::TxMergeOrigin;
     use crate::application::triton_vm_job_queue::vm_job_queue;
+    use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -319,6 +330,222 @@ pub(crate) mod tests {
             assert!(next_block.is_valid(&predecessor, now, network).await);
             bob.set_new_tip(next_block.clone()).await.unwrap();
             predecessor = next_block;
+        }
+    }
+
+    #[traced_test]
+    #[test]
+    fn hard_fork_alpha() {
+        // Start at hard fork block height minus 2
+        let init_block_heigth = BlockHeight::from(14998u64);
+        let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
+            init_block_heigth,
+            Difficulty::MINIMUM,
+        );
+
+        tokio_runtime().block_on(new_blocks_hardfork_alpha(bpw));
+
+        async fn new_blocks_hardfork_alpha(block_primitive_witness: BlockPrimitiveWitness) {
+            async fn get_child_with_pow(
+                parent: &Block,
+                guesser_address: ReceivingAddress,
+                global_state_lock: GlobalStateLock,
+            ) -> Block {
+                let network = global_state_lock.cli().network;
+                let (child_no_pow, _) = compose_block_helper(
+                    parent.clone(),
+                    global_state_lock.clone(),
+                    parent.header().timestamp,
+                    TritonVmProofJobOptions::default(),
+                )
+                .await
+                .unwrap();
+
+                let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
+
+                let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
+                guess_nonce(
+                    network,
+                    child_no_pow,
+                    *parent.header(),
+                    guesser_tx,
+                    GuessingConfiguration {
+                        num_guesser_threads: global_state_lock.cli().guesser_threads,
+                        address: guesser_address,
+                        rng: Some(deterministic_guesser_rng),
+                    },
+                )
+                .await;
+                let child = *guesser_rx.await.unwrap().block;
+
+                child
+            }
+
+            // 1. generate state synced to height
+            let mut rng = StdRng::seed_from_u64(55512345);
+            let network = Network::Main;
+            let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
+            let cli = cli_args::Args {
+                network,
+                compose: true,
+                guess: true,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                ..Default::default()
+            };
+
+            let (block_a, block_b_no_pow) =
+                Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
+                    .await;
+
+            assert!(
+                block_b_no_pow
+                    .is_valid(&block_a, block_b_no_pow.header().timestamp, network)
+                    .await
+            );
+            let mut bob =
+                mock_genesis_global_state_with_block(2, bob_wallet, cli.clone(), block_a.clone())
+                    .await;
+
+            // Solve PoW for block_b
+            let guesser_key = bob
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_entropy
+                .guesser_fee_key();
+            let (guesser_tx_b, guesser_rx_b) = oneshot::channel::<NewBlockFound>();
+            guess_nonce(
+                network,
+                block_b_no_pow,
+                *block_a.header(),
+                guesser_tx_b,
+                GuessingConfiguration {
+                    num_guesser_threads: cli.guesser_threads,
+                    address: guesser_key.to_address().into(),
+                    rng: Some(rng),
+                },
+            )
+            .await;
+
+            let block_b = *guesser_rx_b.await.unwrap().block;
+
+            assert!(block_b.has_proof_of_work(network, block_a.header()));
+            assert!(block_b.pow_verify(
+                block_a.header().difficulty.target(),
+                ConsensusRuleSet::Reboot
+            ));
+            assert!(!block_b.pow_verify(
+                block_a.header().difficulty.target(),
+                ConsensusRuleSet::HardforkAlpha
+            ));
+
+            bob.set_new_tip(block_b.clone()).await.unwrap();
+            assert_eq!(
+                14998u64,
+                bob.lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+                    .value()
+            );
+
+            // hard fork minus 1
+            let block_c =
+                get_child_with_pow(&block_b, guesser_key.to_address().into(), bob.clone()).await;
+            assert!(block_c.has_proof_of_work(network, block_b.header()));
+            assert!(block_c.pow_verify(
+                block_b.header().difficulty.target(),
+                ConsensusRuleSet::Reboot
+            ));
+            assert!(!block_c.pow_verify(
+                block_b.header().difficulty.target(),
+                ConsensusRuleSet::HardforkAlpha
+            ));
+            bob.set_new_tip(block_c.clone()).await.unwrap();
+            assert_eq!(
+                14999u64,
+                bob.lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+                    .value()
+            );
+
+            // 1st block after hard fork!
+            let block_d =
+                get_child_with_pow(&block_c, guesser_key.to_address().into(), bob.clone()).await;
+            assert!(block_d.has_proof_of_work(network, block_c.header()));
+            assert!(!block_d.pow_verify(
+                block_c.header().difficulty.target(),
+                ConsensusRuleSet::Reboot
+            ));
+            assert!(block_d.pow_verify(
+                block_c.header().difficulty.target(),
+                ConsensusRuleSet::HardforkAlpha
+            ));
+            bob.set_new_tip(block_d.clone()).await.unwrap();
+            assert_eq!(
+                15000u64,
+                bob.lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+                    .value()
+            );
+
+            // 2nd block after hard fork
+            let block_e =
+                get_child_with_pow(&block_d, guesser_key.to_address().into(), bob.clone()).await;
+            assert!(block_e.has_proof_of_work(network, block_d.header()));
+            assert!(!block_e.pow_verify(
+                block_d.header().difficulty.target(),
+                ConsensusRuleSet::Reboot
+            ));
+            assert!(block_e.pow_verify(
+                block_d.header().difficulty.target(),
+                ConsensusRuleSet::HardforkAlpha
+            ));
+            bob.set_new_tip(block_e.clone()).await.unwrap();
+            assert_eq!(
+                15001u64,
+                bob.lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+                    .value()
+            );
+
+            // 3rd block after hard fork
+            let block_f =
+                get_child_with_pow(&block_e, guesser_key.to_address().into(), bob.clone()).await;
+            assert!(block_f.has_proof_of_work(network, block_e.header()));
+            assert!(!block_f.pow_verify(
+                block_e.header().difficulty.target(),
+                ConsensusRuleSet::Reboot
+            ));
+            assert!(block_f.pow_verify(
+                block_e.header().difficulty.target(),
+                ConsensusRuleSet::HardforkAlpha
+            ));
+            bob.set_new_tip(block_f.clone()).await.unwrap();
+            assert_eq!(
+                15002u64,
+                bob.lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+                    .value()
+            );
         }
     }
 }

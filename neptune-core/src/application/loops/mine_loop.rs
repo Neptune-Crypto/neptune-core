@@ -66,6 +66,7 @@ use crate::COMPOSITION_FAILED_EXIT_CODE;
 pub(crate) struct GuessingConfiguration {
     pub(crate) num_guesser_threads: Option<usize>,
     pub(crate) address: ReceivingAddress,
+    pub(crate) rng: Option<StdRng>,
 }
 
 /// Creates a block transaction and composes a block from it. Returns the block
@@ -160,6 +161,12 @@ pub(crate) async fn guess_nonce(
     .unwrap()
 }
 
+fn std_rng_from_thread_rng() -> StdRng {
+    let mut thread_rng = rand::rng();
+    let seed: [u8; 32] = thread_rng.random();
+    StdRng::from_seed(seed)
+}
+
 /// Guess the nonce in parallel until success.
 fn guess_worker(
     network: Network,
@@ -173,6 +180,7 @@ fn guess_worker(
     let GuessingConfiguration {
         num_guesser_threads,
         address: guesser_address,
+        rng,
     } = guessing_configuration;
 
     info!(
@@ -244,11 +252,21 @@ fn guess_worker(
         .num_threads(threads_to_use)
         .build()
         .unwrap();
+
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
-            .map_init(rand::rng, |rng, _i| {
-                guess_nonce_iteration(&guesser_buffer, &mast_auth_paths, threshold, rng, &sender)
-            })
+            .map_init(
+                || rng.clone().unwrap_or(std_rng_from_thread_rng()),
+                |rng, _i| {
+                    guess_nonce_iteration(
+                        &guesser_buffer,
+                        &mast_auth_paths,
+                        threshold,
+                        rng,
+                        &sender,
+                    )
+                },
+            )
             .find_any(|r| !r.block_not_found())
             .unwrap()
     });
@@ -312,7 +330,7 @@ fn guess_nonce_iteration(
     guesser_buffer: &GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }>,
     mast_auth_paths: &PowMastPaths,
     threshold: Digest,
-    rng: &mut rand::rngs::ThreadRng,
+    rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
     let nonce: Digest = rng.random();
@@ -713,6 +731,7 @@ pub(crate) async fn mine(
                 GuessingConfiguration {
                     num_guesser_threads: cli_args.guesser_threads,
                     address: guesser_key.to_address().into(),
+                    rng: None,
                 },
             );
 
@@ -1080,7 +1099,7 @@ pub(crate) mod tests {
             block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
-                .map_init(rand::rng, |prng, _i| {
+                .map_init(std_rng_from_thread_rng, |prng, _i| {
                     guess_nonce_iteration(
                         &guesser_buffer,
                         &mast_auth_paths,
@@ -1576,6 +1595,7 @@ pub(crate) mod tests {
             GuessingConfiguration {
                 num_guesser_threads,
                 address: guesser_key.to_address().into(),
+                rng: None,
             },
             Timestamp::now(),
             None,
@@ -1659,6 +1679,7 @@ pub(crate) mod tests {
             GuessingConfiguration {
                 num_guesser_threads,
                 address: guesser_key.to_address().into(),
+                rng: None,
             },
             Timestamp::now(),
             None,
@@ -1810,6 +1831,7 @@ pub(crate) mod tests {
                 GuessingConfiguration {
                     num_guesser_threads,
                     address: guesser_key.to_address().into(),
+                    rng: None,
                 },
                 Timestamp::now(),
                 Some(target_block_interval),
@@ -2439,6 +2461,7 @@ pub(crate) mod tests {
                 GuessingConfiguration {
                     num_guesser_threads,
                     address: guesser_key.to_address().into(),
+                    rng: None,
                 },
                 block_time,
                 None,
