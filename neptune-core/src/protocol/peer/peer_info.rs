@@ -174,7 +174,7 @@ impl rand::distr::Distribution<PeerInfo> for rand::distr::StandardUniform {
         let local_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(rng.random());
         PeerInfo {
             peer_connection_info: rng.random(),
-            peer_id: todo!{"rng.random()"},
+            peer_id: PeerId::random(),
             own_timestamp_connection_established,
             peer_timestamp_connection_established,
             standing: rng.random(),

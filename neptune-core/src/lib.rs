@@ -185,7 +185,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     let own_handshake_data = global_state_lock.lock_guard().await.get_own_handshakedata();
     info!("Most known canonical block has height {}", own_handshake_data.tip_header.height);
     let mut task_join_handles = vec![];
-    for peer_address in global_state_lock.cli().peers.clone().iter_mut().filter_map(tmp_utils_multiaddr::try_from) {
+    for peer_address in global_state_lock.cli().peers.clone().iter_mut().filter_map(tmp_utils_multiaddr::socketaddr_tryfrom) {
         let peer_state_var = global_state_lock.clone(); // bump arc refcount
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
             main_to_peer_broadcast_tx.subscribe();

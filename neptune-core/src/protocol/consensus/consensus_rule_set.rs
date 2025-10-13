@@ -247,7 +247,7 @@ pub(crate) mod tests {
         let (fake_genesis, block_10_000) =
             Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness).await;
         let mut now = block_10_000.header().timestamp;
-        assert!(block_10_000.is_valid(&fake_genesis, now, network).await);
+        assert!(block_10_000.is_valid(&fake_genesis, &now, network).await);
 
         let mut bob = mock_genesis_global_state_with_block(0, bob_wallet, cli, fake_genesis).await;
         bob.set_new_tip(block_10_000.clone()).await.unwrap();
@@ -261,7 +261,7 @@ pub(crate) mod tests {
         for _ in 0..blocks_to_mine {
             now += Timestamp::hours(1);
             let (next_block, expected_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
-            assert!(next_block.is_valid(&predecessor, now, network).await);
+            assert!(next_block.is_valid(&predecessor, &now, network).await);
             bob.set_new_self_composed_tip(next_block.clone(), expected_composer_utxos)
                 .await
                 .unwrap();
@@ -292,7 +292,7 @@ pub(crate) mod tests {
         for _ in 0..num_blocks_with_many_outputs {
             now += Timestamp::hours(1);
             let next_block = block_with_n_outputs(bob.clone(), 24, now).await;
-            assert!(next_block.is_valid(&predecessor, now, network).await);
+            assert!(next_block.is_valid(&predecessor, &now, network).await);
             bob.set_new_tip(next_block.clone()).await.unwrap();
             predecessor = next_block;
         }

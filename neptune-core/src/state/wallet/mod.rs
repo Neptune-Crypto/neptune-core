@@ -915,7 +915,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            block_3_b.is_valid(&block_2_b, timestamp, network).await,
+            block_3_b.is_valid(&block_2_b, &timestamp, network).await,
             "Block must be valid after accumulating txs"
         );
         let expected_utxos_for_alice_cb = expected_composer_utxos
@@ -1130,7 +1130,7 @@ mod tests {
         // be valid in other respects. We don't care about PoW, though.
         assert!(
             block_1
-                .is_valid(&genesis_block, in_seven_months, network)
+                .is_valid(&genesis_block, &in_seven_months, network)
                 .await
         );
 

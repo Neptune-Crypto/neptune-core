@@ -13,6 +13,7 @@ use neptune_cash::api::export::Network;
 use neptune_cash::api::export::TransactionKernelId;
 use neptune_cash::application::config::cli_args::Args;
 use neptune_cash::application::config::data_directory::DataDirectory;
+use neptune_cash::application::loops::main_loop::p2p::tmp_utils_multiaddr::multiaddr_from;
 use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
 use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
@@ -184,7 +185,7 @@ impl GenesisNode {
                 .into_iter()
                 .enumerate()
                 .filter(|(x, _)| *x != usize::from(i))
-                .map(|(_, s)| s)
+                .map(|(_, s)| multiaddr_from(&s))
                 .collect();
             args.peer_port = base_args.peer_port + u16::from(i);
             args.rpc_port = base_args.rpc_port + u16::from(i);

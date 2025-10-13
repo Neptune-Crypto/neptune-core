@@ -403,14 +403,13 @@ impl PeerLoopHandler {
 
             // If parent is not known (but not genesis) request it.
             if let Some(parent_block) = parent_block {
-                // We want to treat the received fork reconciliation blocks (plus the
-                // received block) in reverse order, from oldest to newest, because
-                // they were requested from high to low block height.
+                /* We want to treat the received fork reconciliation blocks (plus the
+                received block) in reverse order, from oldest to newest, because
+                they were requested from high to low block height. */
                 let mut new_blocks = peer_state.fork_reconciliation_blocks.clone();
                 new_blocks.reverse();
 
-                // Reset the fork resolution state since we got all the way back to a
-                // block that we have.
+                // Reset the fork resolution state since we got all the way back to a block that we have.
                 let fork_reconciliation_event = !peer_state.fork_reconciliation_blocks.is_empty();
                 peer_state.fork_reconciliation_blocks.clear();
 
@@ -423,7 +422,8 @@ impl PeerLoopHandler {
                     &self.now(),
                     new_blocks, &parent_block
                 ).await {
-                    // If `BlockNotification` was received during a block reconciliation event, then the peer might have one (or more (unlikely)) blocks that we do not have. We should thus request those blocks.
+                    /* If `BlockNotification` was received during a block reconciliation event, 
+                    then the peer might have one (or more (unlikely)) blocks that we do not have. We should thus request those blocks. */
                     if fork_reconciliation_event 
                     && peer_state.highest_shared_block_height > new_block_height {
                         // TODO #libp2p_reqresp_BlockRequestByHeight
@@ -435,20 +435,18 @@ impl PeerLoopHandler {
                             self.reward(reward_the).await,
                         Some(PeerSanction::Negative(punishment)) => 
                             self.punish(punishment).await,
-                        None => unimplemented!("current implementation always `Some` when `new_block_height`"),
+                        None => unreachable!("current implementation always `Some` when `new_block_height`"),
                     }
                 } else {Ok(())}
             } else if parent_height.is_genesis() {
                 peer_state.fork_reconciliation_blocks.clear();
-                self.punish(NegativePeerSanction::DifferentGenesis).await?;
-                Ok(())
+                self.punish(NegativePeerSanction::DifferentGenesis).await
             } else {
                 debug!("Parent not known: Requesting previous block with height {} from peer", parent_height);
 
                 // TODO #libp2p_reqresp_BlockRequestByHash
-                peer.send(PeerMessage::BlockRequestByHash(received_block_header.prev_block_digest)).await?;
-
-                Ok(())
+                peer.send(PeerMessage::BlockRequestByHash(received_block_header.prev_block_digest)).await
+                .map_err(anyhow::Error::from)
             }
         }
     }
@@ -1228,22 +1226,8 @@ impl PeerLoopHandler {
         }
     }
 
-    // TODO this used inconsistentenly: is that ok, or that needs repairing?
-    /// send msg to main via mpsc channel `to_main_tx` and logs if slow.
-    ///
-    /// the channel could potentially fill up in which case the send() will
-    /// block until there is capacity.  we wrap the send() so we can log if
-    /// that ever happens to the extent it passes slow-scope threshold.
-    async fn send_to_main(
-        &self,
-        msg: PeerTaskToMain,
-        line: u32,
-    ) -> Result<(), tokio::sync::mpsc::error::SendError<PeerTaskToMain>> {
-        // we measure across the send() in case the channel ever fills up.
-        log_slow_scope!(fn_name!() + &format!("peer_loop.rs:{}", line));
-
-        self.to_main_tx.send(msg).await
-    }
+    // this used inconsistentenly: is that ok, or that needs repairing?
+    //      was
 
     /// Handle message from main task. The boolean return value indicates if
     /// the connection should be closed.
@@ -1961,37 +1945,42 @@ mod tests {
             let (block_without_any_pow, block_with_valid_mock_pow, block_with_valid_pow) =
                 pow_related_blocks(network, &genesis).await;
             assert!(
-                peer_loop_handler
-                    .handle_blocks(vec![block_without_any_pow], genesis.clone())
-                    .await
-                    .unwrap()
-                    .is_none(),
-                "Must return None on invalid Pow"
+                PeerLoopHandler::handle_blocks(
+                    peer_loop_handler.global_state_lock.clone(), peer_loop_handler.to_main_tx.clone(), &peer_loop_handler.now(),
+                    vec![block_without_any_pow], &genesis.clone()
+                )
+                .await
+                .0
+                .is_none(),
+                "Must return `None` on invalid Pow"
             );
             assert!(
-                peer_loop_handler
-                    .handle_blocks(vec![block_with_valid_mock_pow], genesis.clone())
-                    .await
-                    .unwrap()
-                    .is_none(),
-                "Must return None on valid mock Pow and invalid Pow"
+                PeerLoopHandler::handle_blocks(
+                    peer_loop_handler.global_state_lock.clone(), peer_loop_handler.to_main_tx.clone(), &peer_loop_handler.now(),
+                    vec![block_with_valid_mock_pow], &genesis.clone(), 
+                )
+                .await
+                .0
+                .is_none(),
+                "Must return `None` on valid mock Pow and invalid Pow"
             );
             assert_eq!(
                 BlockHeight::genesis().next(),
-                peer_loop_handler
-                    .handle_blocks(vec![block_with_valid_pow], genesis.clone())
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                "Must return Some(1) on valid Pow"
+                PeerLoopHandler::handle_blocks(
+                    peer_loop_handler.global_state_lock.clone(), peer_loop_handler.to_main_tx.clone(), &peer_loop_handler.now(),
+                    vec![block_with_valid_pow], &genesis.clone()
+                )
+                .await
+                .0
+                .unwrap(),
+                "Must return `Some(1)` on valid Pow"
             );
         }
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn block_without_valid_pow_test() -> Result<()> {
-            // In this scenario, a block without a valid PoW is received. This block should be rejected
-            // by the peer loop and a notification should never reach the main loop.
+            /* In this scenario, a block without a valid PoW is received. This block should be rejected by the peer loop and a notification should never reach the main loop. */
 
             let network = Network::Main;
             let (
@@ -2004,11 +1993,14 @@ mod tests {
             ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
             let peer_address = get_dummy_socket_address(0);
 
+            let peer_address_cloned = peer_address.clone();
+            // dbg![state_lock.lock_async(|sl| futures::FutureExt::boxed(async move {sl.net.peer_databases.peer_standings.get(peer_address_cloned.ip()).await})).await.unwrap().standing];
+            
             let (block_without_any_pow, block_with_valid_mock_pow, _) =
                 pow_related_blocks(network, &Block::genesis(network)).await;
             for block_without_valid_pow in [block_without_any_pow, block_with_valid_mock_pow] {
-                // Sending an invalid block will not necessarily result in a ban. This depends on the peer
-                // tolerance that is set in the client. For this reason, we include a "Bye" here.
+                /* Sending an invalid block will not necessarily result in a ban. This depends on the peer
+                tolerance that is set in the client. For this reason, we include `Bye` here. */
                 let mock = Mock::new(vec![
                     Action::Read(PeerMessage::Block(Box::new(
                         block_without_valid_pow.clone().try_into().unwrap(),
@@ -2018,7 +2010,7 @@ mod tests {
 
                 let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-                let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                PeerLoopHandler::with_mocked_time(
                     to_main_tx.clone(),
                     state_lock.clone(),
                     peer_address,
@@ -2026,11 +2018,9 @@ mod tests {
                     true,
                     1,
                     block_without_valid_pow.header().timestamp,
-                );
-                peer_loop_handler
-                    .run_wrapper(mock, from_main_rx_clone)
-                    .await
-                    .expect("sending (one) invalid block should not result in closed connection");
+                ).run_wrapper(mock, from_main_rx_clone)
+                .await
+                .expect("sending (one) invalid block should not result in closed connection");
 
                 match to_main_rx1.recv().await {
                     Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
@@ -2041,16 +2031,14 @@ mod tests {
                 match to_main_rx1.try_recv() {
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
                     _ => bail!("Block notification must not be sent for block with invalid PoW"),
-                };
+                }
             }
 
-            // We need to have the transmitter in scope until we have received from it
-            // otherwise the receiver will report the disconnected error when we attempt
-            // to read from it. And the purpose is to verify that the channel is empty,
-            // not that it has been closed.
+            /* We need to have the transmitter in scope until we have received from it otherwise the receiver will report the disconnected error when we attempt
+            to read from it. And the purpose is to verify that the channel is empty, not that it has been closed. */
             drop(to_main_tx);
 
-            // Verify that peer standing was stored in database
+            // Verify that peer standing was stored in database.
             let standing = state_lock
                 .lock_guard()
                 .await
@@ -2061,8 +2049,8 @@ mod tests {
                 .await
                 .unwrap();
             assert!(
-                standing.standing < 0,
-                "Peer must be sanctioned for sending a bad block"
+                dbg![standing.standing] < 0,
+                "Should the condition be **leq** zero? @skaunov feel the test does what it should to the edge (case). \n> Peer must be sanctioned for sending a bad block"
             );
 
             Ok(())
@@ -2091,7 +2079,7 @@ mod tests {
             let block_1 =
                 fake_valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).random()).await;
             assert!(
-                block_1.is_valid(&genesis_block, now, network).await,
+                block_1.is_valid(&genesis_block, &now, network).await,
                 "Block must be valid for this test to make sense"
             );
             alice.set_new_tip(block_1.clone()).await?;
@@ -2669,7 +2657,7 @@ mod tests {
                 Action::Read(PeerMessage::Bye),
             ]);
 
-            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+            PeerLoopHandler::with_mocked_time(
                 to_main_tx.clone(),
                 state_lock.clone(),
                 peer_address,
@@ -2677,10 +2665,8 @@ mod tests {
                 false,
                 1,
                 block_1.header().timestamp,
-            );
-            peer_loop_handler
-                .run_wrapper(mock, from_main_rx_clone)
-                .await?;
+            ).run_wrapper(mock, from_main_rx_clone)
+            .await?;
 
             // Verify that a block was sent to `main_loop`
             match to_main_rx1.recv().await {
@@ -2742,7 +2728,7 @@ mod tests {
                 Action::Read(PeerMessage::Bye),
             ]);
 
-            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+            PeerLoopHandler::with_mocked_time(
                 to_main_tx.clone(),
                 state_lock.clone(),
                 peer_address,
@@ -2750,10 +2736,7 @@ mod tests {
                 true,
                 1,
                 block_2.header().timestamp,
-            );
-            peer_loop_handler
-                .run_wrapper(mock, from_main_rx_clone)
-                .await?;
+            ).run_wrapper(mock, from_main_rx_clone).await?;
 
             match to_main_rx1.recv().await {
                 Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -2905,7 +2888,7 @@ mod tests {
                 Action::Read(PeerMessage::Bye),
             ]);
 
-            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+            PeerLoopHandler::with_mocked_time(
                 to_main_tx.clone(),
                 state_lock.clone(),
                 peer_address,
@@ -2913,11 +2896,9 @@ mod tests {
                 true,
                 1,
                 block_4.header().timestamp,
-            );
-            peer_loop_handler
-                .run_wrapper(mock, from_main_rx_clone)
-                .await
-                .unwrap();
+            ).run_wrapper(mock, from_main_rx_clone)
+            .await
+            .unwrap();
 
             let Some(PeerTaskToMain::NewBlocks(blocks)) = to_main_rx1.recv().await else {
                 panic!("Did not find msg sent to main task");
@@ -2977,7 +2958,7 @@ mod tests {
                 Action::Read(PeerMessage::Bye),
             ]);
 
-            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+            PeerLoopHandler::with_mocked_time(
                 to_main_tx.clone(),
                 state_lock.clone(),
                 peer_address,
@@ -2985,10 +2966,7 @@ mod tests {
                 true,
                 1,
                 block_3.header().timestamp,
-            );
-            peer_loop_handler
-                .run_wrapper(mock, from_main_rx_clone)
-                .await?;
+            ).run_wrapper(mock, from_main_rx_clone).await?;
 
             match to_main_rx1.recv().await {
                 Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -3082,7 +3060,7 @@ mod tests {
                 Action::Read(PeerMessage::Bye),
             ]);
 
-            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+            PeerLoopHandler::with_mocked_time(
                 to_main_tx.clone(),
                 state_lock.clone(),
                 peer_socket_address,
@@ -3090,10 +3068,8 @@ mod tests {
                 false,
                 1,
                 block_5.header().timestamp,
-            );
-            peer_loop_handler
-                .run_wrapper(mock, from_main_rx_clone)
-                .await?;
+            ).run_wrapper(mock, from_main_rx_clone)
+            .await?;
 
             match to_main_rx1.recv().await {
                 Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -3190,7 +3166,7 @@ mod tests {
                 Action::Read(PeerMessage::Bye),
             ]);
 
-            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+            let peer_loop_handler = PeerLoopHandler::with_mocked_time(
                 to_main_tx,
                 state_lock.clone(),
                 sa_1,
@@ -3231,9 +3207,11 @@ mod tests {
 
     mod transactions {
         use super::*;
+        use crate::api::export::Transaction;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
         use crate::application::triton_vm_job_queue::vm_job_queue;
+        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
         use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
         use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
@@ -3321,8 +3299,9 @@ mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(spending_key.into())
                 .with_prover_capability(TxProvingCapability::ProofCollection);
-            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
-            let transaction_1: Transaction = state_lock
+            let consensus_rule_set = 
+                crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
+            let transaction_1: crate::api::export::Transaction = state_lock
                 .api()
                 .tx_initiator_internal()
                 .create_transaction(
@@ -3657,9 +3636,8 @@ mod tests {
                 network,
                 ..Default::default()
             };
-            let other_ip: IpAddr = "255.254.253.252".parse().unwrap();
             let not_whitelisted = cli_args::Args {
-                whitelisted_composers: vec![other_ip],
+                whitelisted_composers: ["/ip4/255.254.253.252".parse().unwrap()].into(),
                 network,
                 ..Default::default()
             };
@@ -3828,7 +3806,7 @@ mod tests {
                 .recover_change_off_chain(alice_key.into())
                 .with_prover_capability(prover_capability);
             let block_height = genesis_block.header().height;
-            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+            let consensus_rule_set = crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet::infer_from(network, block_height);
             alice_gsl
                 .api()
                 .tx_initiator_internal()
@@ -3993,7 +3971,7 @@ mod tests {
             ]);
 
             let peer_address = get_dummy_socket_address(0);
-            let mut alice_peer_loop_handler = PeerLoopHandler::new(
+            let alice_peer_loop_handler = PeerLoopHandler::new(
                 alice_peer_to_main_tx.clone(),
                 alice.clone(),
                 peer_address,
@@ -4054,18 +4032,16 @@ mod tests {
             ]);
 
             let peer_address = get_dummy_socket_address(0);
-            let mut alice_peer_loop_handler = PeerLoopHandler::new(
+            PeerLoopHandler::new(
                 alice_peer_to_main_tx.clone(),
                 alice.clone(),
                 peer_address,
                 alice_hsd,
                 false,
                 1,
-            );
-            alice_peer_loop_handler
-                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
-                .await
-                .unwrap();
+            ).run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+            .await
+            .unwrap();
 
             drop(alice_peer_to_main_rx);
 
@@ -4124,7 +4100,7 @@ mod tests {
             let now = genesis_block.header().timestamp + Timestamp::hours(1);
             let block_1 = fake_valid_block_for_tests(&alice, rng.random()).await;
             assert!(
-                block_1.is_valid(&genesis_block, now, network).await,
+                block_1.is_valid(&genesis_block, &now, network).await,
                 "Block must be valid for this test to make sense"
             );
             let alice_tip = &block_1;

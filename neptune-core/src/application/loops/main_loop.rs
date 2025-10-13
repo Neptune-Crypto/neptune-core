@@ -46,6 +46,7 @@ use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProo
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::loops::main_loop::p2p::tmp_utils_multiaddr;
+use crate::application::loops::MSG_CONDIT;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
@@ -60,7 +61,6 @@ use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::transaction_notification::TransactionNotification;
-use crate::protocol::peer::PeerSanction;
 use crate::protocol::peer::PeerSynchronizationState;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
@@ -617,16 +617,14 @@ impl MainLoopHandler {
         }
 
         // Then notify all peers about shareable transactions.
-        update_results.into_iter()
-        .filter_map(|updated| 
+        update_results.into_iter().filter_map(|updated| 
             if let MempoolUpdateJobResult::Success {new_transaction, ..} = updated {
                 Some(new_transaction)
             } else {None}
-        )
-        .for_each(|new_transaction| {
-            self.main_to_peer_broadcast(MainToPeerTask::TransactionNotification(new_transaction.as_ref().try_into().unwrap()));
-            self.main_to_peer_broadcast(MainToPeerTask::NewTransaction(new_transaction.as_ref().try_into().unwrap()));
-        });
+        ).for_each(|new_transaction| {if let Ok(newtx_transfer) = new_transaction.as_ref().try_into() {
+            self.main_to_peer_broadcast(MainToPeerTask::NewTransaction(newtx_transfer));
+            self.main_to_peer_broadcast(MainToPeerTask::TransactionNotification(new_transaction.as_ref().try_into().expect(MSG_CONDIT)));
+        }});
 
         // Tell miner that it can now continue either composing or guessing.
         self.main_to_miner_tx.send(MainToMiner::Continue);
@@ -1235,7 +1233,7 @@ impl MainLoopHandler {
             .copied()
             .collect_vec();
         
-        for peer_with_lost_connection in self.global_state_lock.cli().peers.clone().iter_mut().filter_map(tmp_utils_multiaddr::try_from)
+        for peer_with_lost_connection in self.global_state_lock.cli().peers.clone().iter_mut().filter_map(tmp_utils_multiaddr::socketaddr_tryfrom)
         .filter(|peer| !connected_peers.contains(peer)) {
             // Disallow reconnection if peer is in bad standing
             let peer_standing = self
@@ -2336,10 +2334,11 @@ mod tests {
                 );
 
                 if tx_proving_capability != TxProvingCapability::PrimitiveWitness {
+                    //account for the one sent to `Swarm`
+                    main_to_peer_rx.recv().await;
+
                     let peer_msg = main_to_peer_rx.recv().await.unwrap();
-                    let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {
-                        panic!("Outgoing peer message must be tx notification");
-                    };
+                    let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {panic!("Outgoing peer message must be tx notification")};
                     assert_eq!(txid, tx_notification.txid);
                     assert_eq!(block1_msa.hash(), tx_notification.mutator_set_hash);
                 }

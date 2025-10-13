@@ -546,7 +546,7 @@ pub(crate) enum PeerMessage {
     BlockResponseBatch(Vec<(TransferBlock, MmrMembershipProof)>), // Consider restricting this in size
     UnableToSatisfyBatchRequest,
 
-    // TODO a kind of challenge (just a proof of tiny work probably) from a *requestor* is also needed when adapt syncing to #libp2p_reqresp_sync to avoid malicious asking for a block just to annoy the node
+    // TODO #libp2p_reqresp_Sync a kind of challenge (just a proof of tiny work probably) from a *requestor* is also needed when adapt syncing to #libp2p_reqresp_sync to avoid malicious asking for a block just to annoy the node
     SyncChallenge(SyncChallenge),
     SyncChallengeResponse(Box<SyncChallengeResponse>),
 

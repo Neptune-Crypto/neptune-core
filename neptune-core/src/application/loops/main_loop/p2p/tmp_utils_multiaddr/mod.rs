@@ -21,10 +21,14 @@ pub fn peerid_split(couldendwith_peerid: &mut Multiaddr) -> (Option<libp2p::Peer
 }}
 
 /// *strips the `PeerId` endings from `madrs`, and pops one or two `Protocol`*
-pub fn try_from(madr: &mut Multiaddr) -> Option<SocketAddr> {if let Some(Protocol::Tcp(port)) = peerid_split(madr).1.pop() {
+pub fn socketaddr_tryfrom(madr: &mut Multiaddr) -> Option<SocketAddr> {if let Some(Protocol::Tcp(port)) = peerid_split(madr).1.pop() {
     Some(SocketAddr::new(match madr.pop() {
         Some(Protocol::Ip4(ip)) => ip.into(),
         Some(Protocol::Ip6(ip)) => ip.into(),
         _ => return None,
     }, port))
 } else {None}}
+
+pub fn multiaddr_from(sadr: &SocketAddr) -> Multiaddr {
+    Multiaddr::empty().with(sadr.ip().into()).with(multiaddr::Protocol::Tcp(sadr.port()))
+}

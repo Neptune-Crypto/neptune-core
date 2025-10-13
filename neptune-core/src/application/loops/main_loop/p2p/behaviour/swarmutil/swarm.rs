@@ -6,7 +6,7 @@ use libp2p::{gossipsub::{IdentTopic, MessageAcceptance, PublishError}, identify,
 use tokio::{fs::File, io::AsyncWriteExt, sync::broadcast::error::RecvError};
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{application::loops::{channel::MainToPeerTask, main_loop::p2p::{behaviour::{swarmutil::relay_connect_ifneeded, ComposedBehaviourEvent}, relay_maybe, TOPIC_TX_PROOFCOL_, TOPIC_TX_PROOFCOL_NOTIF, TOPIC_TX_SINGLEPROOF}, MSG_CONDIT}, protocol::{consensus::block::Block, peer::{transaction_notification::TransactionNotification, PeerSanction}}, state::mining::mining_status::MiningStatus};
+use crate::{application::loops::{channel::MainToPeerTask, main_loop::p2p::{behaviour::{swarmutil::relay_connect_ifneeded, ComposedBehaviourEvent}, MSG_NOTALLOWED, TOPIC_TX_PROOFCOL_, TOPIC_TX_PROOFCOL_NOTIF, TOPIC_TX_SINGLEPROOF}, MSG_CONDIT}, protocol::{consensus::block::Block, peer::{transaction_notification::TransactionNotification, PeerSanction}}, state::mining::mining_status::MiningStatus};
 
 pub const FILE_NODEIDPERSISTANCE: &str = ".peer_sk";
 
@@ -92,7 +92,7 @@ pub(crate) async fn run(
 
     tracing::trace!("every node subscribes to the 'block' topic");
     let topic_block = IdentTopic::new(crate::application::loops::main_loop::p2p::TOPIC_BLOCK);
-    swarm.behaviour_mut().gossipsub.subscribe(&topic_block);
+    swarm.behaviour_mut().gossipsub.subscribe(&topic_block).expect(MSG_NOTALLOWED);
     let topic_tx_singleproof = IdentTopic::new(TOPIC_TX_SINGLEPROOF);
     let topic_tx_proofcollection_notif = IdentTopic::new(TOPIC_TX_PROOFCOL_NOTIF);
     let topic_tx_proofcollection = IdentTopic::new(TOPIC_TX_PROOFCOL_);
@@ -180,7 +180,7 @@ pub(crate) async fn run(
                     None
                 },
                 Ok(MainToPeerTask::RequestBlockBatch(main_to_peer_task_batch_block_request)) => None, /* TODO #libp2p_reqresp_BatchBlock */
-                Ok(MainToPeerTask::MakePeerDiscoveryRequest) => None, /* TODO #libp2p_reqresp_Sync */
+                Ok(MainToPeerTask::MakePeerDiscoveryRequest) => None, // TODO #libp2p_reqresp_Sync
                 Ok(MainToPeerTask::MakeSpecificPeerDiscoveryRequest(socket_addr)) => None, /* TODO #libp2p_reqresp_Sync */
                 Ok(MainToPeerTask::NewTransaction(transfer_transaction)) => {
                     let estimation = 16+45*4+8+16+4+4; // terrible, but still an estimation. TODO #followUp It's not that hard to make a method for a tx estimation.
@@ -258,9 +258,7 @@ pub(crate) async fn run(
                     MiningStatus::Guessing(_) => vec![&topic_proposal],
                     MiningStatus::Composing(_) => topics_tx.to_vec(),
                     MiningStatus::Inactive => unreachable!["{MSG_CONDIT}"]
-                } {if !swarm.behaviour().gossipsub.topics().contains(&interest.hash()) {
-                    swarm.behaviour_mut().gossipsub.subscribe(interest).err().into_iter().for_each(|_| unreachable!("currently it's only for filtered subscription"))
-                }}
+                } {if !swarm.behaviour().gossipsub.topics().contains(&interest.hash()) {swarm.behaviour_mut().gossipsub.subscribe(interest).expect(MSG_NOTALLOWED);}}
             } else {
                 let excessive = swarm.behaviour().gossipsub.topics().filter_map(|t| if *t != topic_block.hash() {Some(t.to_owned())} else {None}).collect::<Vec<_>>();
                 excessive.into_iter().for_each(|t| {swarm.behaviour_mut().gossipsub.unsubscribe(&IdentTopic::new(t.into_string()));})
@@ -536,7 +534,7 @@ pub(crate) async fn run(
                 events which doesn't carry an interesting thing are commented here yet to be in front of the eyes at this early stage
                  */
                 ev @ SwarmEvent::IncomingConnection { .. } => {dbg![ev];}
-                SwarmEvent::ConnectionEstablished { peer_id, connection_id, endpoint, num_established, concurrent_dial_errors, established_in } => {}
+                ev @ SwarmEvent::ConnectionEstablished { .. } => {dbg![ev];}
                 /* ~~why does this says 'a non-fatal'?~~
                         fatal will be the `reason` in `ListenerClosed` */
                 ev @ SwarmEvent::ListenerError { .. } => debug![?ev],
@@ -545,6 +543,10 @@ pub(crate) async fn run(
                 ev @ SwarmEvent::Dialing { .. } => {dbg![ev];}
                 SwarmEvent::ExternalAddrExpired { address } => {}
 
+                SwarmEvent::Behaviour(ComposedBehaviourEvent::Dcutr(ev @ libp2p::dcutr::Event{ .. })) => {
+                    println!["**************PUNCHIN************************"];
+                    dbg![ev];
+                }
                 ev => {dbg![ev];}
             }
         }
@@ -553,7 +555,7 @@ pub(crate) async fn run(
             maybe send a "big" amount of this data once in awhile but only when all the other queues are exhausted */
     }}
     swarm_listeners.into_iter().for_each(|l| {swarm.remove_listener(l);});
-    swarm.connected_peers().cloned().collect_vec().into_iter().for_each(|p| {swarm.disconnect_peer_id(p);});
+    swarm.connected_peers().cloned().collect_vec().into_iter().for_each(|p| {let _ = swarm.disconnect_peer_id(p);});
     tokio::spawn(async move {
         trace!("started the task to drive `swarm` to close everything it had");
         while 0 != swarm.connected_peers().count() + swarm.listeners().count() {match swarm.select_next_some().await {

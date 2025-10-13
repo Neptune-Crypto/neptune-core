@@ -2,14 +2,14 @@ pub(crate) mod swarmutil;
 
 use std::time::Duration;
 
-use libp2p::{gossipsub::{self, IdentTopic}, identify, kad::{self, store::MemoryStore}, multiaddr::Protocol, noise, ping, request_response::{self, cbor}, swarm::{NetworkBehaviour, SwarmEvent}, yamux, Multiaddr, Swarm};
+use libp2p::{gossipsub::{self, IdentTopic}, identify, kad::{self, store::MemoryStore}, noise, ping, yamux, Swarm};
 
 use crate::application::loops::main_loop::p2p::{BLOCK_SIZE, TOPIC_BLOCK, TOPIC_PROPOSAL, TOPIC_TX_PROOFCOL_NOTIF, TOPIC_TX_SINGLEPROOF, TX_SINGLEPROOF_SIZE};
 
 #[derive(libp2p::swarm::NetworkBehaviour)]
 struct ComposedBehaviour {
-    pub relay_client: libp2p::relay::client::Behaviour,
     pub dcutr: libp2p::dcutr::Behaviour,
+    pub relay_client: libp2p::relay::client::Behaviour,
     
     // TODO `connection_limits`? Actually some settings for bootstrapping (archival?) nodes would be better. #beefyConfig
     

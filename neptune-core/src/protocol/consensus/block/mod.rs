@@ -1541,7 +1541,7 @@ pub(crate) mod tests {
             fake_valid_successor_for_tests(&genesis_block, now, rng.random(), network).await;
 
         let timestamp = block1.kernel.header.timestamp;
-        assert!(block1.is_valid(&genesis_block, timestamp, network).await);
+        assert!(block1.is_valid(&genesis_block, &timestamp, network).await);
 
         let mut mutated_leaf = genesis_block.body().block_mmr_accumulator.clone();
         let mp = mutated_leaf.append(genesis_block.hash());
@@ -1558,7 +1558,7 @@ pub(crate) mod tests {
 
         for bad_new_mmr in bad_new_mmrs {
             block1.kernel.body.block_mmr_accumulator = bad_new_mmr;
-            assert!(!block1.is_valid(&genesis_block, timestamp, network).await);
+            assert!(!block1.is_valid(&genesis_block, &timestamp, network).await);
         }
     }
 
@@ -1711,7 +1711,7 @@ pub(crate) mod tests {
         #[apply(shared_tokio_runtime)]
         async fn block_with_valid_proof_passes() {
             let (predecesor, time, network, block) = deterministic_empty_block1_proposal().await;
-            assert!(block.validate(&predecesor, time, network).await.is_ok());
+            assert!(block.validate(&predecesor, &time, network).await.is_ok());
         }
 
         #[traced_test]
@@ -1733,7 +1733,7 @@ pub(crate) mod tests {
             assert_eq!(
                 BlockValidationError::ProofValidity,
                 block
-                    .validate(&predecesor, time, network)
+                    .validate(&predecesor, &time, network)
                     .await
                     .unwrap_err()
             );
@@ -1750,7 +1750,7 @@ pub(crate) mod tests {
             assert_eq!(
                 BlockValidationError::ProofValidity,
                 block
-                    .validate(&predecesor, time, network)
+                    .validate(&predecesor, &time, network)
                     .await
                     .unwrap_err()
             );
@@ -1865,7 +1865,7 @@ pub(crate) mod tests {
 
                 assert!(
                     block2_without_valid_pow
-                        .is_valid(&block1, plus_eight_months, network)
+                        .is_valid(&block1, &plus_eight_months, network)
                         .await,
                     "Block with {i} inputs must be valid"
                 );
@@ -1927,7 +1927,7 @@ pub(crate) mod tests {
 
                 assert!(
                     block3_without_valid_pow
-                        .is_valid(&block2_without_valid_pow, plus_nine_months, network)
+                        .is_valid(&block2_without_valid_pow, &plus_nine_months, network)
                         .await,
                     "Block of height 3 after block 2 with {i} inputs must be valid"
                 );
@@ -1948,29 +1948,29 @@ pub(crate) mod tests {
             // Set block timestamp 4 minutes in the future.  (is valid)
             let future_time1 = now + Timestamp::minutes(4);
             block1.kernel.header.timestamp = future_time1;
-            assert!(block1.is_valid(&genesis_block, now, network).await);
+            assert!(block1.is_valid(&genesis_block, &now, network).await);
 
             now = block1.kernel.header.timestamp;
 
             // Set block timestamp 5 minutes - 1 sec in the future.  (is valid)
             let future_time2 = now + Timestamp::minutes(5) - Timestamp::seconds(1);
             block1.kernel.header.timestamp = future_time2;
-            assert!(block1.is_valid(&genesis_block, now, network).await);
+            assert!(block1.is_valid(&genesis_block, &now, network).await);
 
             // Set block timestamp 5 minutes in the future. (not valid)
             let future_time3 = now + Timestamp::minutes(5);
             block1.kernel.header.timestamp = future_time3;
-            assert!(!block1.is_valid(&genesis_block, now, network).await);
+            assert!(!block1.is_valid(&genesis_block, &now, network).await);
 
             // Set block timestamp 5 minutes + 1 sec in the future. (not valid)
             let future_time4 = now + Timestamp::minutes(5) + Timestamp::seconds(1);
             block1.kernel.header.timestamp = future_time4;
-            assert!(!block1.is_valid(&genesis_block, now, network).await);
+            assert!(!block1.is_valid(&genesis_block, &now, network).await);
 
             // Set block timestamp 2 days in the future. (not valid)
             let future_time5 = now + Timestamp::seconds(86400 * 2);
             block1.kernel.header.timestamp = future_time5;
-            assert!(!block1.is_valid(&genesis_block, now, network).await);
+            assert!(!block1.is_valid(&genesis_block, &now, network).await);
         }
     }
 
@@ -2402,7 +2402,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-            let block_is_valid = block.validate(blocks.last().unwrap(), now, network).await;
+            let block_is_valid = block.validate(blocks.last().unwrap(), &now, network).await;
             println!("block is valid? {:?}", block_is_valid.map(|_| "yes"));
             println!();
             assert!(block_is_valid.is_ok());

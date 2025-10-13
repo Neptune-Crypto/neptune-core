@@ -1,12 +1,12 @@
 use libp2p::Multiaddr;
 use tracing::warn;
 
-use crate::{api::export::Timestamp, application::loops::channel::PeerTaskToMain, protocol::peer::{NegativePeerSanction, PeerSanction}};
+use crate::{application::loops::channel::PeerTaskToMain, protocol::peer::{NegativePeerSanction, PeerSanction}};
 
 pub(crate) async fn the(
     global_state_lock: crate::state::GlobalStateLock,
     to_main: tokio::sync::mpsc::Sender<PeerTaskToMain>,
-    now: Timestamp,
+    now: crate::api::export::Timestamp,
     peer_address: Multiaddr,
     proposal: crate::protocol::consensus::block::Block
 ) -> Option<PeerSanction> {
@@ -28,7 +28,7 @@ pub(crate) async fn the(
                 /* Lock needs to be held here because race conditions: otherwise the block proposal 
                 that was validated might not match with the one whose favorability is being computed. */
                 let state = global_state_lock.lock_guard().await;
-                if proposal.is_valid(state.chain.light_state(), &Timestamp::now(), global_state_lock.cli().network).await {
+                if proposal.is_valid(state.chain.light_state(), &now, global_state_lock.cli().network).await {
                     // Is block proposal favorable?
                     let is_favorable = 
                         state.favor_incoming_block_proposal(proposal.header().prev_block_digest, incoming_guesser_fee);

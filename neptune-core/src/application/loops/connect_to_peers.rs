@@ -358,18 +358,16 @@ where
     }
 
     let peer_distance = 1; // All incoming connections have distance 1
-    let mut peer_loop_handler = PeerLoopHandler::new(
+
+    PeerLoopHandler::new(
         peer_task_to_main_tx,
         state,
         peer_address,
         *peer_handshake_data,
         true,
         peer_distance,
-    );
-
-    peer_loop_handler
-        .run_wrapper(peer, main_to_peer_task_rx)
-        .await?;
+    ).run_wrapper(peer, main_to_peer_task_rx)
+    .await?;
 
     Ok(())
 }
@@ -509,9 +507,9 @@ where
         }
     }
 
-    // Peer accepted us. Check if we accept the peer. Note that the protocol does not stipulate
-    // that we answer with a connection status here, so if the connection is *not* accepted, we
-    // simply hang up but log the reason for the refusal.
+    /* Peer accepted us. Check if we accept the peer. Note that the protocol does not stipulate
+    that we answer with a connection status here, so if the connection is *not* accepted, we
+    simply hang up but log the reason for the refusal. */
     let connection_status = check_if_connection_is_allowed(
         state.clone(),
         own_handshake,
@@ -534,19 +532,15 @@ where
     // fails.
     peer.send(PeerMessage::PeerListRequest).await?;
 
-    let mut peer_loop_handler = PeerLoopHandler::new(
+    info!("Established outgoing connection to {peer_address}");
+    PeerLoopHandler::new(
         peer_task_to_main_tx,
         state,
         peer_address,
         *other_handshake,
         false,
         peer_distance,
-    );
-
-    info!("Established outgoing connection to {peer_address}");
-    peer_loop_handler
-        .run_wrapper(peer, main_to_peer_task_rx)
-        .await?;
+    ).run_wrapper(peer, main_to_peer_task_rx).await?;
 
     Ok(())
 }
@@ -709,7 +703,9 @@ mod tests {
             "Default behavior: connection allowed"
         );
 
-        cli.peers.push(socket_address);
+        cli.peers.push(crate::application::loops::main_loop::p2p::tmp_utils_multiaddr::multiaddr_from(
+            &socket_address
+        ));
         assert!(
             precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
             "Incoming allowed when incoming is specified peer"
@@ -1073,12 +1069,11 @@ mod tests {
             .unwrap()
             .clone_into(&mut other_handshake.version);
 
-        let peer_address = get_dummy_socket_address(55);
         let connection_status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
             &other_handshake,
-            &peer_address,
+            &get_dummy_socket_address(55)
         )
         .await;
         assert_eq!(

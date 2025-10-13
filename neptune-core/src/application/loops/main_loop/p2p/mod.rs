@@ -5,6 +5,8 @@ pub(super) use behaviour::swarmutil::swarm;
 use itertools::Itertools;
 use multiaddr::Protocol;
 
+const MSG_NOTALLOWED: &str = "currently it's only for filtered subscription";
+
 // would be cool to `const` actual `IdentTopic` and `::hash()` but it's not possible (yet?)
 const TOPIC_BLOCK: &str = "block";
 const TOPIC_TX_SINGLEPROOF: &str = "tx_singleproof";

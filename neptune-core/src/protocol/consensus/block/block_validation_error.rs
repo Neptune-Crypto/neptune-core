@@ -159,7 +159,7 @@ mod tests {
             b_new
                 .validate(
                     &b_prev,
-                    b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
+                    &(b_prev.kernel.header.timestamp + Timestamp(bfe![60])),
                     Network::Main
                 )
                 .await
@@ -179,7 +179,7 @@ mod tests {
             b_new
                 .validate(
                     &b_prev,
-                    b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
+                    &(b_prev.kernel.header.timestamp + Timestamp(bfe![60])),
                     Network::Main
                 )
                 .await
@@ -200,7 +200,7 @@ mod tests {
             b_new
                 .validate(
                     &b_prev,
-                    b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
+                    &(b_prev.kernel.header.timestamp + Timestamp(bfe![60])),
                     Network::Main
                 )
                 .await
@@ -224,7 +224,7 @@ mod tests {
                 b_prev.kernel.header.timestamp + Timestamp(bfe![ts_small]),
                 network,
             )
-            .validate(&b_prev, ts, network)
+            .validate(&b_prev, &ts, network)
             .await
             .err()
             .unwrap()
@@ -246,7 +246,7 @@ mod tests {
 
         prop_assert_eq!(
             BlockValidationError::Difficulty,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -263,7 +263,7 @@ mod tests {
         b_new.kernel.header.cumulative_proof_of_work = cumul;
         prop_assert_eq!(
             BlockValidationError::CumulativeProofOfWork,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -286,7 +286,7 @@ mod tests {
         );
         prop_assert_eq!(
             BlockValidationError::FutureDating,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -300,7 +300,7 @@ mod tests {
         prop_assert_eq!(
             BlockValidationError::AppendixMissingClaim,
             invalid_empty_block(&b_prev, network)
-                .validate(&b_prev, ts, network)
+                .validate(&b_prev, &ts, network)
                 .await
                 .err()
                 .unwrap()
@@ -323,7 +323,7 @@ mod tests {
 
         prop_assert_eq!(
             BlockValidationError::AppendixTooLarge,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -339,7 +339,7 @@ mod tests {
 
         prop_assert_eq!(
             BlockValidationError::ProofQuality,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -359,7 +359,7 @@ mod tests {
 
         prop_assert_eq!(
             BlockValidationError::MaxSize,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -384,7 +384,7 @@ mod tests {
 
         prop_assert_eq!(
             BlockValidationError::MutatorSetUpdateIntegrity,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -410,7 +410,7 @@ mod tests {
 
         prop_assert_eq!(
             BlockValidationError::TransactionTimestamp,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -437,7 +437,7 @@ mod tests {
 
         prop_assert_eq!(
             BlockValidationError::CoinbaseTooBig,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -463,7 +463,7 @@ mod tests {
 
         prop_assert_eq!(
             BlockValidationError::NegativeCoinbase,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 
@@ -488,7 +488,7 @@ mod tests {
 
         prop_assert_eq!(
             BlockValidationError::NegativeFee,
-            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+            b_new.validate(&b_prev, &ts, network).await.err().unwrap()
         );
     }
 }
