@@ -449,6 +449,13 @@ impl ArchivalState {
             .len()
             .try_into()
             .expect("Num addition records cannot exceed u64::MAX");
+        let num_removals: u64 = new_block
+            .mutator_set_update()
+            .expect("MS update for new block must exist")
+            .removals
+            .len()
+            .try_into()
+            .expect("Num removals records cannot exceed u64::MAX");
         let block_record_value: BlockIndexValue = BlockIndexValue::Block(Box::new(BlockRecord {
             block_header: *new_block.header(),
             file_location: BlockFileLocation {
@@ -463,6 +470,7 @@ impl ArchivalState {
                 .num_leafs()
                 - num_additions,
             num_additions,
+            num_removals,
             block_hash_witness: HeaderToBlockHashWitness::from(new_block),
         }));
 
