@@ -59,6 +59,7 @@ const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
 
 #[derive(Debug, Clone, Parser)]
+#[command(version)]
 enum Command {
     /// Dump shell completions.
     Completions,
