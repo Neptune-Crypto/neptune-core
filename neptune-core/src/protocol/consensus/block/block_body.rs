@@ -23,6 +23,8 @@ use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
+use super::mutator_set_update_error::MutatorSetUpdateError;
+
 #[derive(Debug, Copy, Clone, EnumCount)]
 pub enum BlockBodyField {
     TransactionKernel,
@@ -150,7 +152,9 @@ impl BlockBody {
     ) -> Result<NativeCurrencyAmount, BlockValidationError> {
         let r = self.transaction_kernel.fee;
         if r.is_negative() {
-            Err(BlockValidationError::NegativeFee)
+            Err(BlockValidationError::MutatorSetUpdateImpossible(
+                MutatorSetUpdateError::NegativeFee,
+            ))
         } else {
             Ok(r)
         }

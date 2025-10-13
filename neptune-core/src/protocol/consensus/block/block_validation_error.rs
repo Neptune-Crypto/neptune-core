@@ -1,5 +1,7 @@
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 
+use super::mutator_set_update_error::MutatorSetUpdateError;
+
 /// The reasons why a [`Block`](crate::protocol::consensus::block::Block) can be
 /// invalid.
 ///
@@ -61,8 +63,8 @@ pub enum BlockValidationError {
     RemovalRecordsUniqueness,
     ///   2.d) Verify that the mutator set update induced by the block
     ///        is possible
-    #[error("mutator set update must be possible")]
-    MutatorSetUpdateImpossible,
+    #[error("mutator set update must be possible: {0}")]
+    MutatorSetUpdateImpossible(#[source] MutatorSetUpdateError),
     ///   2.e) Verify that the mutator set update induced by the block sends
     ///      the old mutator set accumulator to the new one.
     #[error("mutator set must evolve in accordance with transaction")]
@@ -76,9 +78,6 @@ pub enum BlockValidationError {
     ///   2.h) transaction coinbase <= block subsidy, and not negative.
     #[error("coinbase cannot be negative")]
     NegativeCoinbase,
-    ///   2.i) 0 <= transaction fee (also checked in block program).
-    #[error("fee must be non-negative")]
-    NegativeFee,
     ///   2.j) restrict number of inputs.
     #[error("number of inputs may not be too large")]
     TooManyInputs,

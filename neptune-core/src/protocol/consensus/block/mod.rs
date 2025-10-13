@@ -11,6 +11,7 @@ pub mod difficulty_control;
 pub(crate) mod guesser_receiver_data;
 pub mod mock_block_generator;
 pub mod mutator_set_update;
+pub mod mutator_set_update_error;
 pub mod pow;
 pub mod validity;
 
@@ -28,6 +29,7 @@ use difficulty_control::Difficulty;
 use get_size2::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
+use mutator_set_update_error::MutatorSetUpdateError;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use rand::rngs::StdRng;
@@ -840,7 +842,9 @@ impl Block {
 
         // 2.d)
         if ms_update_result.is_err() {
-            return Err(BlockValidationError::MutatorSetUpdateImpossible);
+            return Err(BlockValidationError::MutatorSetUpdateImpossible(
+                MutatorSetUpdateError::NegativeFee,
+            ));
         };
 
         // 2.e)
@@ -870,7 +874,7 @@ impl Block {
         // 2.i)
         let fee = self.kernel.body.transaction_kernel.fee;
         if fee.is_negative() {
-            return Err(BlockValidationError::NegativeFee);
+            return Err(BlockValidationError::MutatorSetUpdateImpossible(MutatorSetUpdateError::NegativeFee));
         }
 
         // 2.j)
