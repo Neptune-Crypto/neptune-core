@@ -3,6 +3,10 @@ use strum_macros::EnumIter;
 use crate::api::export::BlockHeight;
 use crate::api::export::Network;
 use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
+use crate::BFieldElement;
+
+pub const BLOCK_HEIGHT_HARDFORK_ALPHA: BlockHeight =
+    BlockHeight::new(BFieldElement::new(15_000u64));
 
 /// Enumerates all possible sets of consensus rules.
 ///
@@ -89,6 +93,7 @@ pub(crate) mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use tasm_lib::twenty_first::bfe;
     use tracing_test::traced_test;
 
     use super::*;
@@ -320,5 +325,46 @@ pub(crate) mod tests {
             bob.set_new_tip(next_block.clone()).await.unwrap();
             predecessor = next_block;
         }
+    }
+
+    #[traced_test]
+    #[test]
+    fn hard_fork_alpha() {
+        // Start at hard fork block height minus 2
+        let init_block_heigth = BLOCK_HEIGHT_HARDFORK_ALPHA
+            .previous()
+            .unwrap()
+            .previous()
+            .unwrap();
+        let bpw = BlockPrimitiveWitness::deterministic_with_block_height(init_block_heigth);
+
+        tokio_runtime().block_on(new_blocks_hardfork_alpha(bpw));
+    }
+
+    async fn new_blocks_hardfork_alpha(block_primitive_witness: BlockPrimitiveWitness) {
+        // 1. generate state synced to height
+        let mut rng = StdRng::seed_from_u64(55512345);
+        let network = Network::Main;
+        let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
+        let cli = cli_args::Args {
+            network,
+            compose: true,
+            guess: true,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
+
+        let (fake_genesis, block_b) =
+            Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness).await;
+        let mut now = block_b.header().timestamp;
+        assert!(block_b.is_valid(&fake_genesis, now, network).await);
+
+        // Solve PoW for block_b
+
+        let mut bob = mock_genesis_global_state_with_block(0, bob_wallet, cli, fake_genesis).await;
+        bob.set_new_tip(block_b.clone()).await.unwrap();
+
+        let observed_block_height = bob.lock_guard().await.chain.light_state().header().height;
+        assert_eq!(BlockHeight::from(10_000u64), observed_block_height,);
     }
 }
