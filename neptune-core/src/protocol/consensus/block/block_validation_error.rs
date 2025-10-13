@@ -486,7 +486,7 @@ mod tests {
         cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
 
         prop_assert_eq!(
-            BlockValidationError::NegativeFee,
+            BlockValidationError::MutatorSetUpdateImpossible(MutatorSetUpdateError::NegativeFee),
             b_new.validate(&b_prev, ts, network).await.err().unwrap()
         );
     }
