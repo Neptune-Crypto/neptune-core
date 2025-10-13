@@ -78,13 +78,13 @@ pub enum BlockValidationError {
     ///   2.h) transaction coinbase <= block subsidy, and not negative.
     #[error("coinbase cannot be negative")]
     NegativeCoinbase,
-    ///   2.j) restrict number of inputs.
+    ///   2.i) restrict number of inputs.
     #[error("number of inputs may not be too large")]
     TooManyInputs,
-    ///   2.k) restrict number of outputs.
+    ///   2.j) restrict number of outputs.
     #[error("number of outputs may not be too large")]
     TooManyOutputs,
-    ///   2.l) restrict number of announcements.
+    ///   2.k) restrict number of announcements.
     #[error("number of announcements may not be too large")]
     TooManyAnnouncements,
 }
