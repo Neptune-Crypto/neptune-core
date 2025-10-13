@@ -2053,9 +2053,9 @@ dependencies = [
 
 [[package]]
 name = "multi-rpc"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f30b857d55f8b229ae1b985b54123c5a943924286ceff613b157d24e55b61abe"
+checksum = "c9238ee07aadfab9986aed5e1e7b759e51ec6d7ca7c709164c9fe16e50ae5746"
 dependencies = [
  "axum 0.7.9",
  "futures",
@@ -2071,9 +2071,9 @@ dependencies = [
 
 [[package]]
 name = "multi-rpc-macros"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bd9cff1cdb03885d829fb7a7ec6b2408f03880f788c25e97ceca1473c7fe9b5"
+checksum = "a068b374d61903dcccdc8042e4631992ee1ec16998b7dd64238c2f05e88264c0"
 dependencies = [
  "proc-macro2",
  "quote",

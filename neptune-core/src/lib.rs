@@ -72,7 +72,7 @@ use crate::application::loops::channel::PeerTaskToMain;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::connect_to_peers::call_peer;
 use crate::application::loops::main_loop::MainLoopHandler;
-use crate::application::rpc::server::rpc_impls as rpc;
+use crate::application::rpc::server as rpc;
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalStateLock;
