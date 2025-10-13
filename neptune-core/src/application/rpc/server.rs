@@ -24,13 +24,13 @@
 //! let client = RPCClient::new(client::Config::default(), transport).spawn();
 //!
 //! // query neptune-core server how to find the cookie file
-//! let cookie_hint = client.cookie_hint(context::current()).await.unwrap().unwrap();
+//! let cookie_hint = client.cookie_hint().await.unwrap().unwrap();
 //!
 //! // load the cookie file from disk and assign it to a token.
 //! let token: auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
 //!
 //! // query any RPC API, passing the auth token.  here we query block_height.
-//! let block_height = client.block_height(context::current(), token).await??;
+//! let block_height = client.block_height( token).await??;
 //! # Ok(())
 //! # }
 //! ```
@@ -165,7 +165,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// // query neptune-core server how to find the cookie file
-    /// let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// let cookie_hint = client.cookie_hint().await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -196,7 +196,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// // query neptune-core server the network it is running on.
-    /// let network = client.network(context::current()).await??;
+    /// let network = client.network().await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -224,13 +224,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get local socket used for incoming peer-connections.
-    /// let own_listen_address = client.own_listen_address_for_peers(context::current(), token).await??;
+    /// let own_listen_address = client.own_listen_address_for_peers( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -262,13 +262,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get own instance ID.
-    /// let own_instance_id = client.own_instance_id(context::current(), token).await??;
+    /// let own_instance_id = client.own_instance_id( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -295,13 +295,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the block height.
-    /// let block_height = client.block_height(context::current(), token).await??;
+    /// let block_height = client.block_height( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -337,13 +337,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the blocks since wallet balance changed.
-    /// let block_height = client.confirmations(context::current(), token).await??;
+    /// let block_height = client.confirmations( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -381,13 +381,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the info about the peers we are connected to
-    /// let peers = client.peer_info(context::current(), token).await??;
+    /// let peers = client.peer_info( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -416,13 +416,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the info about the peers that are negatively sanctioned
-    /// let punished_peers = client.all_punished_peers(context::current(), token).await??;
+    /// let punished_peers = client.all_punished_peers( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -452,7 +452,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -461,7 +461,7 @@ trait RPC {
     /// let n : usize = 10;
     ///
     /// // query neptune-core server to get the digests of the n latest blocks
-    /// let latest_tip_digests = client.latest_tip_digests(context::current(), token, n).await??;
+    /// let latest_tip_digests = client.latest_tip_digests( token, n).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -489,7 +489,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -498,7 +498,7 @@ trait RPC {
     /// let block_selector : BlockSelector = BlockSelector::Genesis;
     ///
     /// // query neptune-core server to get block info
-    /// let latest_tip_digests = client.block_info(context::current(), token, block_selector).await??;
+    /// let latest_tip_digests = client.block_info( token, block_selector).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -570,7 +570,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -579,7 +579,7 @@ trait RPC {
     /// let height : BlockHeight = BlockHeight::genesis();
     ///
     /// // query neptune-core server to block digests by height
-    /// let block_digests_by_height = client.block_digests_by_height(context::current(), token, height).await??;
+    /// let block_digests_by_height = client.block_digests_by_height( token, height).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -611,7 +611,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -620,7 +620,7 @@ trait RPC {
     /// let block_selector : BlockSelector = BlockSelector::Tip;
     ///
     /// // query neptune-core server to get block digest
-    /// let block_digest = client.block_digest(context::current(), token, block_selector).await??;
+    /// let block_digest = client.block_digest( token, block_selector).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -652,7 +652,7 @@ trait RPC {
     /// let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -661,7 +661,7 @@ trait RPC {
     /// let leaf_index : u64 = 5;
     ///
     /// // query neptune-core server to get utxo digest
-    /// let block_digest = client.utxo_digest(context::current(), token, leaf_index).await??;
+    /// let block_digest = client.utxo_digest( token, leaf_index).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -697,7 +697,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -706,7 +706,7 @@ trait RPC {
     /// let block_selector : BlockSelector = BlockSelector::Genesis;
     ///
     /// // query neptune-core server to get block header
-    /// let block_header = client.header(context::current(), token, block_selector).await??;
+    /// let block_header = client.header( token, block_selector).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -737,13 +737,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get sum of confirmed unspent UTXO
-    /// let confirmed_available_balance = client.confirmed_available_balance(context::current(), token).await??;
+    /// let confirmed_available_balance = client.confirmed_available_balance( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -773,13 +773,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get sum of unconfirmed unspent UTXOs
-    /// let unconfirmed_available_balance = client.unconfirmed_available_balance(context::current(), token).await??;
+    /// let unconfirmed_available_balance = client.unconfirmed_available_balance( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -809,13 +809,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get history of transactions, a vec containing digest, block height, timestamp and neptune coins tuples.
-    /// let history_transactions = client.history(context::current(), token).await??;
+    /// let history_transactions = client.history( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -845,13 +845,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the funds in the wallet
-    /// let wallet_status = client.wallet_status(context::current(), token).await??;
+    /// let wallet_status = client.wallet_status( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -878,13 +878,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the number of expected utxos including already received ones.
-    /// let wallet_status = client.num_expected_utxos(context::current(), token).await??;
+    /// let wallet_status = client.num_expected_utxos( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -936,7 +936,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -945,7 +945,7 @@ trait RPC {
     /// let key_type = KeyType::Generation;
     ///
     /// // query neptune-core server to get a receiving address
-    /// let wallet_status = client.next_receiving_address(context::current(), token, key_type).await??;
+    /// let wallet_status = client.next_receiving_address( token, key_type).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -976,13 +976,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get all known keys for every [KeyType]
-    /// let known_keys = client.known_keys(context::current(), token ).await??;
+    /// let known_keys = client.known_keys( token ).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1010,7 +1010,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -1019,7 +1019,7 @@ trait RPC {
     /// let key_type = KeyType::Symmetric;
     ///
     /// // query neptune-core server to get all known keys by [KeyType]
-    /// let known_keys_by_keytype = client.known_keys_by_keytype(context::current(), token, key_type ).await??;
+    /// let known_keys_by_keytype = client.known_keys_by_keytype( token, key_type ).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1050,13 +1050,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the number of transactions in the mempool
-    /// let mempool_tx_count = client.mempool_tx_count(context::current(), token ).await??;
+    /// let mempool_tx_count = client.mempool_tx_count( token ).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1088,7 +1088,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -1100,7 +1100,7 @@ trait RPC {
     /// let number : usize = 8;
     ///
     /// // query neptune-core server to get the info of transactions in the mempool
-    /// let mempool_overview = client.mempool_overview(context::current(), token, start_index, number ).await??;
+    /// let mempool_overview = client.mempool_overview( token, start_index, number ).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1139,13 +1139,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the info used on dashboard overview tab
-    /// let dashboard_data = client.dashboard_overview_data(context::current(), token).await??;
+    /// let dashboard_data = client.dashboard_overview_data( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1173,7 +1173,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -1185,7 +1185,7 @@ trait RPC {
     /// let network : Network = Network::Main;
     ///
     /// // query neptune-core server to check if the supplied address is valid
-    /// let is_valid_address = client.validate_address(context::current(), token, address, network).await??;
+    /// let is_valid_address = client.validate_address( token, address, network).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1217,7 +1217,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -1226,7 +1226,7 @@ trait RPC {
     /// let amount : String = "132".to_string();
     ///
     /// // query neptune-core server to determine if the amount is valid
-    /// let is_valid_address = client.validate_amount(context::current(), token, amount ).await??;
+    /// let is_valid_address = client.validate_amount( token, amount ).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1258,7 +1258,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -1267,7 +1267,7 @@ trait RPC {
     /// let amount : NativeCurrencyAmount = NativeCurrencyAmount::coins(47);
     ///
     /// // query neptune-core server to determine if the amount is less than or equal to the balance
-    /// let amount_less_or_equals_balance = client.amount_leq_confirmed_available_balance(context::current(), token, amount ).await??;
+    /// let amount_less_or_equals_balance = client.amount_leq_confirmed_available_balance( token, amount ).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1298,13 +1298,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the list of owned and unspent coins
-    /// let own_coins = client.list_own_coins(context::current(), token ).await??;
+    /// let own_coins = client.list_own_coins( token ).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1343,13 +1343,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the list of UTXOs
-    /// let own_coins = client.list_utxos(context::current(), token ).await??;
+    /// let own_coins = client.list_utxos( token ).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1376,13 +1376,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server instance to get its CPU temperature
-    /// let cpu_temperature = client.cpu_temp(context::current(), token ).await??;
+    /// let cpu_temperature = client.cpu_temp( token ).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1555,7 +1555,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -1567,7 +1567,7 @@ trait RPC {
     /// let max_num_blocks : Option<usize> = Some(5);
     ///
     /// // query neptune-core server to get difficulties of a range of blocks
-    /// let block_difficulties = client.block_difficulties(context::current(), token, last_block, max_num_blocks).await??;
+    /// let block_difficulties = client.block_difficulties( token, last_block, max_num_blocks).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1611,13 +1611,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // neptune-core server clears standing for all peers that are connected or not
-    /// let _ = client.clear_all_standings(context::current(), token).await??;
+    /// let _ = client.clear_all_standings( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1645,7 +1645,7 @@ trait RPC {
     /// let client = RPCClient::new(client::Config::default(), transport).spawn();
     ///
     /// // Defines cookie hint
-    /// let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// let cookie_hint = client.cookie_hint().await??;
     ///
     /// // load the cookie file from disk and assign it to a token
     /// let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -1654,7 +1654,7 @@ trait RPC {
     /// let ip = IpAddr::V4(Ipv4Addr::new(87, 23, 90, 12));
     ///
     /// // neptune-core server clears standing for all peers that are connected or not
-    /// let _ = client.clear_standing_by_ip(context::current(), token, ip).await??;
+    /// let _ = client.clear_standing_by_ip( token, ip).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1716,7 +1716,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -1735,7 +1735,7 @@ trait RPC {
     /// let fee : NativeCurrencyAmount = NativeCurrencyAmount::coins(10);
     /// #
     /// // neptune-core server sends token to a single recipient
-    /// let send_result = client.send(context::current(), token, outputs, change_policy, fee).await??;
+    /// let send_result = client.send( token, outputs, change_policy, fee).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1810,7 +1810,7 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
@@ -1822,7 +1822,7 @@ trait RPC {
     /// let max_search_depth : Option<u64> = Some(3);
     ///
     /// // claim utxo
-    /// let utxo_claimed = client.claim_utxo(context::current(), token, utxo_transfer_encrypted, max_search_depth).await??;
+    /// let utxo_claimed = client.claim_utxo( token, utxo_transfer_encrypted, max_search_depth).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1873,13 +1873,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     ///  // stops miner if running
-    /// let _ = client.pause_miner(context::current(), token).await??;
+    /// let _ = client.pause_miner( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1906,13 +1906,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     ///  // start miner if not running
-    /// let _ = client.restart_miner(context::current(), token).await??;
+    /// let _ = client.restart_miner( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -2007,13 +2007,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     ///  // marks mutxos as abandoned
-    /// let abandoned_monitored_utxos = client.prune_abandoned_monitored_utxos(context::current(), token).await??;
+    /// let abandoned_monitored_utxos = client.prune_abandoned_monitored_utxos( token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -2045,13 +2045,13 @@ trait RPC {
     /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
     /// #
     /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// # let cookie_hint = client.cookie_hint().await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     ///  // shutdowns the node
-    /// let is_shutdown = client.shutdown(context::current(), token).await??;
+    /// let is_shutdown = client.shutdown( token).await??;
     /// # Ok(())
     /// # }
     async fn shutdown(&self, token: auth::Token) -> RpcResult<bool>;
@@ -4265,7 +4265,7 @@ mod tests {
                 cli_args::Args::default_with_network(network),
             )
             .await;
-            assert_eq!(network, rpc_server.network(context::current()).await?);
+            assert_eq!(network, rpc_server.network().await?);
         }
 
         Ok(())
@@ -4287,56 +4287,52 @@ mod tests {
         )
         .await;
         let token = cookie_token(&rpc_server).await;
-        let ctx = context::current();
-        let _ = rpc_server.clone().network(ctx).await;
+
+        let _ = rpc_server.clone().network().await;
+        let _ = rpc_server.clone().own_listen_address_for_peers(token).await;
+        let _ = rpc_server.clone().own_instance_id(token).await;
+        let _ = rpc_server.clone().block_height(token).await;
+        let _ = rpc_server.clone().best_proposal(token).await;
         let _ = rpc_server
             .clone()
-            .own_listen_address_for_peers(ctx, token)
-            .await;
-        let _ = rpc_server.clone().own_instance_id(ctx, token).await;
-        let _ = rpc_server.clone().block_height(ctx, token).await;
-        let _ = rpc_server.clone().best_proposal(ctx, token).await;
-        let _ = rpc_server
-            .clone()
-            .latest_address(ctx, token, KeyType::Generation)
+            .latest_address(token, KeyType::Generation)
             .await
             .unwrap();
         let _ = rpc_server
             .clone()
-            .latest_address(ctx, token, KeyType::Symmetric)
+            .latest_address(token, KeyType::Symmetric)
             .await
             .unwrap();
-        let _ = rpc_server.clone().peer_info(ctx, token).await;
+        let _ = rpc_server.clone().peer_info(token).await;
         let _ = rpc_server
             .clone()
-            .block_digests_by_height(ctx, token, 42u64.into())
+            .block_digests_by_height(token, 42u64.into())
             .await;
         let _ = rpc_server
             .clone()
-            .block_digests_by_height(ctx, token, 0u64.into())
+            .block_digests_by_height(token, 0u64.into())
             .await;
-        let _ = rpc_server.clone().all_punished_peers(ctx, token).await;
-        let _ = rpc_server.clone().latest_tip_digests(ctx, token, 2).await;
+        let _ = rpc_server.clone().all_punished_peers(token).await;
+        let _ = rpc_server.clone().latest_tip_digests(token, 2).await;
         let _ = rpc_server
             .clone()
-            .header(ctx, token, BlockSelector::Digest(Digest::default()))
-            .await;
-        let _ = rpc_server
-            .clone()
-            .block_info(ctx, token, BlockSelector::Digest(Digest::default()))
+            .header(token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server
             .clone()
-            .block_kernel(ctx, token, BlockSelector::Digest(Digest::default()))
+            .block_info(token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server
             .clone()
-            .addition_record_indices_for_block(ctx, token, BlockSelector::Digest(Digest::default()))
+            .block_kernel(token, BlockSelector::Digest(Digest::default()))
+            .await;
+        let _ = rpc_server
+            .clone()
+            .addition_record_indices_for_block(token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server
             .clone()
             .restore_membership_proof_privacy_preserving(
-                ctx,
                 token,
                 vec![AbsoluteIndexSet::compute(
                     Digest::default(),
@@ -4348,58 +4344,45 @@ mod tests {
             .await;
         let _ = rpc_server
             .clone()
-            .announcements_in_block(ctx, token, BlockSelector::Digest(Digest::default()))
+            .announcements_in_block(token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server
             .clone()
-            .block_digest(ctx, token, BlockSelector::Digest(Digest::default()))
+            .block_digest(token, BlockSelector::Digest(Digest::default()))
             .await;
-        let _ = rpc_server.clone().utxo_digest(ctx, token, 0).await;
-        let _ = rpc_server
-            .clone()
-            .confirmed_available_balance(ctx, token)
-            .await;
-        let _ = rpc_server.clone().history(ctx, token).await;
-        let _ = rpc_server.clone().wallet_status(ctx, token).await;
+        let _ = rpc_server.clone().utxo_digest(token, 0).await;
+        let _ = rpc_server.clone().confirmed_available_balance(token).await;
+        let _ = rpc_server.clone().history(token).await;
+        let _ = rpc_server.clone().wallet_status(token).await;
         let own_receiving_address = rpc_server
             .clone()
-            .next_receiving_address(ctx, token, KeyType::Generation)
+            .next_receiving_address(token, KeyType::Generation)
             .await?;
-        let _ = rpc_server.clone().mempool_tx_count(ctx, token).await;
-        let _ = rpc_server.clone().mempool_size(ctx, token).await;
-        let _ = rpc_server.clone().dashboard_overview_data(ctx, token).await;
+        let _ = rpc_server.clone().mempool_tx_count(token).await;
+        let _ = rpc_server.clone().mempool_size(token).await;
+        let _ = rpc_server.clone().dashboard_overview_data(token).await;
         let _ = rpc_server
             .clone()
-            .validate_address(
-                ctx,
-                token,
-                "Not a valid address".to_owned(),
-                Network::Testnet(0),
-            )
+            .validate_address(token, "Not a valid address".to_owned(), Network::Testnet(0))
             .await;
-        let _ = rpc_server.clone().pow_puzzle_internal_key(ctx, token).await;
+        let _ = rpc_server.clone().pow_puzzle_internal_key(token).await;
         let _ = rpc_server
             .clone()
-            .pow_puzzle_external_key(ctx, token, own_receiving_address.clone())
+            .pow_puzzle_external_key(token, own_receiving_address.clone())
             .await;
         let _ = rpc_server
             .clone()
-            .provide_pow_solution(ctx, token, rng.random(), rng.random())
+            .provide_pow_solution(token, rng.random(), rng.random())
             .await;
         let _ = rpc_server
             .clone()
-            .full_pow_puzzle_external_key(ctx, token, own_receiving_address.clone())
+            .full_pow_puzzle_external_key(token, own_receiving_address.clone())
             .await
             .unwrap();
-        let _ = rpc_server
-            .clone()
-            .spendable_inputs(ctx, token)
-            .await
-            .unwrap();
+        let _ = rpc_server.clone().spendable_inputs(token).await.unwrap();
         let _ = rpc_server
             .clone()
             .select_spendable_inputs(
-                ctx,
                 token,
                 InputSelectionPolicy::Random,
                 NativeCurrencyAmount::coins(5),
@@ -4407,13 +4390,12 @@ mod tests {
             .await;
         let _ = rpc_server
             .clone()
-            .generate_tx_outputs(ctx, token, vec![])
+            .generate_tx_outputs(token, vec![])
             .await
             .unwrap();
         let tx_details = rpc_server
             .clone()
             .generate_tx_details(
-                ctx,
                 token,
                 TxInputList::default(),
                 TxOutputList::default(),
@@ -4424,40 +4406,37 @@ mod tests {
             .unwrap();
         let tx_proof = rpc_server
             .clone()
-            .generate_witness_proof(ctx, token, tx_details.clone())
+            .generate_witness_proof(token, tx_details.clone())
             .await
             .unwrap();
         let _ = rpc_server
             .clone()
-            .assemble_transaction(ctx, token, tx_details, tx_proof)
+            .assemble_transaction(token, tx_details, tx_proof)
             .await
             .unwrap();
         let _ = rpc_server
             .clone()
-            .provide_new_tip(ctx, token, rng.random(), Block::genesis(network))
+            .provide_new_tip(token, rng.random(), Block::genesis(network))
             .await
             .unwrap();
         let _ = rpc_server
             .clone()
-            .block_intervals(ctx, token, BlockSelector::Tip, None)
+            .block_intervals(token, BlockSelector::Tip, None)
             .await;
         let _ = rpc_server
             .clone()
-            .block_difficulties(ctx, token, BlockSelector::Tip, None)
+            .block_difficulties(token, BlockSelector::Tip, None)
             .await;
+        let _ = rpc_server.clone().broadcast_all_mempool_txs(token).await;
+        let _ = rpc_server.clone().mempool_overview(token, 0, 20).await;
         let _ = rpc_server
             .clone()
-            .broadcast_all_mempool_txs(ctx, token)
+            .mempool_tx_kernel(token, Default::default())
             .await;
-        let _ = rpc_server.clone().mempool_overview(ctx, token, 0, 20).await;
+        let _ = rpc_server.clone().clear_all_standings(token).await;
         let _ = rpc_server
             .clone()
-            .mempool_tx_kernel(ctx, token, Default::default())
-            .await;
-        let _ = rpc_server.clone().clear_all_standings(ctx, token).await;
-        let _ = rpc_server
-            .clone()
-            .clear_standing_by_ip(ctx, token, "127.0.0.1".parse().unwrap())
+            .clear_standing_by_ip(token, "127.0.0.1".parse().unwrap())
             .await;
         let output: OutputFormat = (
             own_receiving_address.clone(),
@@ -4467,7 +4446,6 @@ mod tests {
         let _ = rpc_server
             .clone()
             .send(
-                ctx,
                 token,
                 vec![output],
                 ChangePolicy::ExactChange,
@@ -4476,16 +4454,15 @@ mod tests {
             .await;
         let _ = rpc_server
             .clone()
-            .upgrade(ctx, token, TransactionKernelId::default())
+            .upgrade(token, TransactionKernelId::default())
             .await;
-        let _ = rpc_server.clone().mempool_tx_ids(ctx, token).await;
+        let _ = rpc_server.clone().mempool_tx_ids(token).await;
 
         let my_output: OutputFormat =
             (own_receiving_address, NativeCurrencyAmount::one_nau()).into();
         let _ = rpc_server
             .clone()
             .send(
-                ctx,
                 token,
                 vec![my_output],
                 ChangePolicy::ExactChange,
@@ -4493,21 +4470,18 @@ mod tests {
             )
             .await;
 
-        let _ = rpc_server.clone().pause_miner(ctx, token).await;
-        let _ = rpc_server.clone().restart_miner(ctx, token).await;
+        let _ = rpc_server.clone().pause_miner(token).await;
+        let _ = rpc_server.clone().restart_miner(token).await;
         let _ = rpc_server
             .clone()
-            .set_coinbase_distribution(ctx, token, vec![])
+            .set_coinbase_distribution(token, vec![])
             .await;
+        let _ = rpc_server.clone().unset_coinbase_distribution(token).await;
         let _ = rpc_server
             .clone()
-            .unset_coinbase_distribution(ctx, token)
+            .prune_abandoned_monitored_utxos(token)
             .await;
-        let _ = rpc_server
-            .clone()
-            .prune_abandoned_monitored_utxos(ctx, token)
-            .await;
-        let _ = rpc_server.shutdown(ctx, token).await;
+        let _ = rpc_server.shutdown(token).await;
 
         Ok(())
     }
@@ -4525,31 +4499,31 @@ mod tests {
         for key_type in KeyType::iter() {
             let addr0 = rpc_server
                 .clone()
-                .latest_address(context::current(), token, key_type)
+                .latest_address(token, key_type)
                 .await
                 .unwrap();
             let addr1 = rpc_server
                 .clone()
-                .next_receiving_address(context::current(), token, key_type)
+                .next_receiving_address(token, key_type)
                 .await
                 .unwrap();
             assert_ne!(addr0, addr1);
 
             let addr1_again = rpc_server
                 .clone()
-                .latest_address(context::current(), token, key_type)
+                .latest_address(token, key_type)
                 .await
                 .unwrap();
             assert_eq!(addr1, addr1_again);
 
             let addr2 = rpc_server
                 .clone()
-                .next_receiving_address(context::current(), token, key_type)
+                .next_receiving_address(token, key_type)
                 .await
                 .unwrap();
             let addr2_again = rpc_server
                 .clone()
-                .latest_address(context::current(), token, key_type)
+                .latest_address(token, key_type)
                 .await
                 .unwrap();
             assert_eq!(addr2, addr2_again);
@@ -4557,7 +4531,7 @@ mod tests {
             // Ensure endpoint is idempotent
             let addr2_again_again = rpc_server
                 .clone()
-                .latest_address(context::current(), token, key_type)
+                .latest_address(token, key_type)
                 .await
                 .unwrap();
             assert_eq!(addr2, addr2_again_again);
@@ -4575,9 +4549,7 @@ mod tests {
         )
         .await;
         let token = cookie_token(&rpc_server).await;
-        let balance = rpc_server
-            .confirmed_available_balance(context::current(), token)
-            .await?;
+        let balance = rpc_server.confirmed_available_balance(token).await?;
         assert!(balance.is_zero());
 
         Ok(())
@@ -4596,12 +4568,8 @@ mod tests {
         )
         .await;
         let token = cookie_token(&rpc_server).await;
-        let ctx = context::current();
-        let spendable_inputs = rpc_server
-            .clone()
-            .spendable_inputs(ctx, token)
-            .await
-            .unwrap();
+
+        let spendable_inputs = rpc_server.clone().spendable_inputs(token).await.unwrap();
         assert_eq!(
             1,
             spendable_inputs.len(),
@@ -4612,7 +4580,6 @@ mod tests {
         let inputs = rpc_server
             .clone()
             .select_spendable_inputs(
-                ctx,
                 token,
                 InputSelectionPolicy::Random,
                 NativeCurrencyAmount::coins(19),
@@ -4624,7 +4591,6 @@ mod tests {
         let outputs = rpc_server
             .clone()
             .generate_tx_outputs(
-                ctx,
                 token,
                 vec![OutputFormat::AddressAndAmount(
                     third_party_address.into(),
@@ -4636,7 +4602,7 @@ mod tests {
         let fee = NativeCurrencyAmount::coins(2);
         let tx_details = rpc_server
             .clone()
-            .generate_tx_details(ctx, token, inputs, outputs, ChangePolicy::default(), fee)
+            .generate_tx_details(token, inputs, outputs, ChangePolicy::default(), fee)
             .await
             .unwrap();
         assert_eq!(1, tx_details.tx_inputs.len());
@@ -4653,12 +4619,12 @@ mod tests {
 
         let tx_proof = rpc_server
             .clone()
-            .generate_witness_proof(ctx, token, tx_details.clone())
+            .generate_witness_proof(token, tx_details.clone())
             .await
             .unwrap();
         let tx = rpc_server
             .clone()
-            .assemble_transaction(ctx, token, tx_details.clone(), tx_proof.clone())
+            .assemble_transaction(token, tx_details.clone(), tx_proof.clone())
             .await
             .unwrap();
 
@@ -4674,7 +4640,7 @@ mod tests {
 
         let tx_artifacts = rpc_server
             .clone()
-            .assemble_transaction_artifacts(ctx, token, tx_details.clone(), tx_proof.clone())
+            .assemble_transaction_artifacts(token, tx_details.clone(), tx_proof.clone())
             .await
             .unwrap();
         let output_amount = tx_artifacts.details.tx_outputs.total_native_coins();
@@ -4688,7 +4654,7 @@ mod tests {
         assert_eq!(0, rpc_server.state.lock_guard().await.mempool.len());
         rpc_server
             .clone()
-            .record_and_broadcast_transaction(ctx, token, tx_artifacts)
+            .record_and_broadcast_transaction(token, tx_artifacts)
             .await
             .unwrap();
         assert_eq!(1, rpc_server.state.lock_guard().await.mempool.len());
@@ -4700,7 +4666,7 @@ mod tests {
             .contains(tx.txid()));
 
         // Ensure `proof_type` endpoint finds the transaction in the mempool
-        rpc_server.proof_type(ctx, token, tx.txid()).await.unwrap();
+        rpc_server.proof_type(token, tx.txid()).await.unwrap();
     }
 
     #[expect(clippy::shadow_unrelated)]
@@ -4714,7 +4680,6 @@ mod tests {
         )
         .await;
         let token = cookie_token(&rpc_server).await;
-        let rpc_request_context = context::current();
         let (peer_address0, peer_address1) = {
             let global_state = rpc_server.state.lock_guard().await;
 
@@ -4725,10 +4690,7 @@ mod tests {
         };
 
         // Verify that sanctions list is empty
-        let punished_peers_startup = rpc_server
-            .clone()
-            .all_punished_peers(rpc_request_context, token)
-            .await?;
+        let punished_peers_startup = rpc_server.clone().all_punished_peers(token).await?;
         assert!(
             punished_peers_startup.is_empty(),
             "Sanctions list must be empty at startup"
@@ -4766,10 +4728,7 @@ mod tests {
         };
 
         // Verify expected sanctions reading
-        let punished_peers_from_memory = rpc_server
-            .clone()
-            .all_punished_peers(rpc_request_context, token)
-            .await?;
+        let punished_peers_from_memory = rpc_server.clone().all_punished_peers(token).await?;
         assert_eq!(
             2,
             punished_peers_from_memory.len(),
@@ -4790,10 +4749,8 @@ mod tests {
         }
 
         // Verify expected sanctions reading, after DB-write
-        let punished_peers_from_memory_and_db = rpc_server
-            .clone()
-            .all_punished_peers(rpc_request_context, token)
-            .await?;
+        let punished_peers_from_memory_and_db =
+            rpc_server.clone().all_punished_peers(token).await?;
         assert_eq!(
             2,
             punished_peers_from_memory_and_db.len(),
@@ -4820,7 +4777,7 @@ mod tests {
             // Clear standing of #0
             rpc_server
                 .clone()
-                .clear_standing_by_ip(rpc_request_context, token, peer_address0.ip())
+                .clear_standing_by_ip(token, peer_address0.ip())
                 .await?;
         }
 
@@ -4848,10 +4805,7 @@ mod tests {
         }
 
         // Verify expected sanctions reading, after one forgiveness
-        let punished_list_after_one_clear = rpc_server
-            .clone()
-            .all_punished_peers(rpc_request_context, token)
-            .await?;
+        let punished_list_after_one_clear = rpc_server.clone().all_punished_peers(token).await?;
         assert!(
             punished_list_after_one_clear.len().is_one(),
             "Punished list must have to elements after sanctionings and after DB write"
@@ -4935,18 +4889,11 @@ mod tests {
         }
 
         // Verify expected reading through an RPC call
-        let rpc_request_context = context::current();
-        let after_two_sanctions = rpc_server
-            .clone()
-            .all_punished_peers(rpc_request_context, token)
-            .await?;
+        let after_two_sanctions = rpc_server.clone().all_punished_peers(token).await?;
         assert_eq!(2, after_two_sanctions.len());
 
         // Clear standing of both by clearing all standings
-        rpc_server
-            .clone()
-            .clear_all_standings(rpc_request_context, token)
-            .await?;
+        rpc_server.clone().clear_all_standings(token).await?;
 
         let state = rpc_server.state.lock_guard().await;
 
@@ -4981,10 +4928,7 @@ mod tests {
         }
 
         // Verify expected reading through an RPC call
-        let after_global_forgiveness = rpc_server
-            .clone()
-            .all_punished_peers(rpc_request_context, token)
-            .await?;
+        let after_global_forgiveness = rpc_server.clone().all_punished_peers(token).await?;
         assert!(after_global_forgiveness.is_empty());
 
         Ok(())
@@ -5016,13 +4960,13 @@ mod tests {
 
         assert!(rpc_server
             .clone()
-            .utxo_digest(context::current(), token, aocl_leaves - 1)
+            .utxo_digest(token, aocl_leaves - 1)
             .await
             .unwrap()
             .is_some());
 
         assert!(rpc_server
-            .utxo_digest(context::current(), token, aocl_leaves)
+            .utxo_digest(token, aocl_leaves)
             .await
             .unwrap()
             .is_none());
@@ -5053,7 +4997,7 @@ mod tests {
         let token = cookie_token(&rpc_server).await;
         let output = block.body().transaction_kernel().outputs[0];
         let origin_block = rpc_server
-            .utxo_origin_block(context::current(), token, output, None)
+            .utxo_origin_block(token, output, None)
             .await
             .unwrap();
 
@@ -5079,12 +5023,11 @@ mod tests {
         )
         .await;
         let token = cookie_token(&rpc_server).await;
-        let ctx = context::current();
 
         assert!(
             rpc_server
                 .clone()
-                .block_kernel(ctx, token, BlockSelector::Digest(Digest::default()))
+                .block_kernel(token, BlockSelector::Digest(Digest::default()))
                 .await
                 .unwrap()
                 .is_none(),
@@ -5093,7 +5036,7 @@ mod tests {
         assert_eq!(
             Block::genesis(network).kernel.mast_hash(),
             rpc_server
-                .block_kernel(ctx, token, BlockSelector::Genesis)
+                .block_kernel(token, BlockSelector::Genesis)
                 .await
                 .expect("RPC call must pass")
                 .expect("Must find genesis block")
@@ -5114,7 +5057,6 @@ mod tests {
         .await;
         let token = cookie_token(&rpc_server).await;
         let global_state = rpc_server.state.lock_guard().await;
-        let ctx = context::current();
 
         let genesis_hash = global_state.chain.archival_state().genesis_block().hash();
         let tip_hash = global_state.chain.light_state().hash();
@@ -5153,7 +5095,7 @@ mod tests {
             genesis_block_info,
             rpc_server
                 .clone()
-                .block_info(ctx, token, BlockSelector::Genesis)
+                .block_info(token, BlockSelector::Genesis)
                 .await
                 .unwrap()
                 .unwrap()
@@ -5164,7 +5106,7 @@ mod tests {
             tip_block_info,
             rpc_server
                 .clone()
-                .block_info(ctx, token, BlockSelector::Tip)
+                .block_info(token, BlockSelector::Tip)
                 .await
                 .unwrap()
                 .unwrap()
@@ -5175,7 +5117,7 @@ mod tests {
             genesis_block_info,
             rpc_server
                 .clone()
-                .block_info(ctx, token, BlockSelector::Height(BlockHeight::from(0u64)))
+                .block_info(token, BlockSelector::Height(BlockHeight::from(0u64)))
                 .await
                 .unwrap()
                 .unwrap()
@@ -5186,7 +5128,7 @@ mod tests {
             genesis_block_info,
             rpc_server
                 .clone()
-                .block_info(ctx, token, BlockSelector::Digest(genesis_hash))
+                .block_info(token, BlockSelector::Digest(genesis_hash))
                 .await
                 .unwrap()
                 .unwrap()
@@ -5195,11 +5137,7 @@ mod tests {
         // should not find any block when Height selector is u64::Max
         assert!(rpc_server
             .clone()
-            .block_info(
-                ctx,
-                token,
-                BlockSelector::Height(BlockHeight::from(u64::MAX))
-            )
+            .block_info(token, BlockSelector::Height(BlockHeight::from(u64::MAX)))
             .await
             .unwrap()
             .is_none());
@@ -5207,7 +5145,7 @@ mod tests {
         // should not find any block when Digest selector is Digest::default()
         assert!(rpc_server
             .clone()
-            .block_info(ctx, token, BlockSelector::Digest(Digest::default()))
+            .block_info(token, BlockSelector::Digest(Digest::default()))
             .await
             .unwrap()
             .is_none());
@@ -5236,11 +5174,10 @@ mod tests {
         assert!(fee.is_negative() == set_new_tip_result.is_err());
 
         let token = cookie_token(&rpc_server).await;
-        let ctx = context::current();
 
         let Some(block1_announcements) = rpc_server
             .clone()
-            .announcements_in_block(ctx, token, BlockSelector::Height(1u64.into()))
+            .announcements_in_block(token, BlockSelector::Height(1u64.into()))
             .await
             .unwrap()
         else {
@@ -5265,7 +5202,7 @@ mod tests {
 
         let genesis_block_announcements = rpc_server
             .clone()
-            .announcements_in_block(ctx, token, BlockSelector::Height(0u64.into()))
+            .announcements_in_block(token, BlockSelector::Height(0u64.into()))
             .await
             .unwrap()
             .unwrap();
@@ -5276,7 +5213,7 @@ mod tests {
 
         assert!(
             rpc_server
-                .announcements_in_block(ctx, token, BlockSelector::Height(2u64.into()))
+                .announcements_in_block(token, BlockSelector::Height(2u64.into()))
                 .await
                 .unwrap()
                 .is_none(),
@@ -5296,7 +5233,6 @@ mod tests {
         .await;
         let token = cookie_token(&rpc_server).await;
         let global_state = rpc_server.state.lock_guard().await;
-        let ctx = context::current();
 
         let genesis_hash = Block::genesis(network).hash();
 
@@ -5305,7 +5241,7 @@ mod tests {
             genesis_hash,
             rpc_server
                 .clone()
-                .block_digest(ctx, token, BlockSelector::Genesis)
+                .block_digest(token, BlockSelector::Genesis)
                 .await
                 .unwrap()
                 .unwrap()
@@ -5316,7 +5252,7 @@ mod tests {
             global_state.chain.light_state().hash(),
             rpc_server
                 .clone()
-                .block_digest(ctx, token, BlockSelector::Tip)
+                .block_digest(token, BlockSelector::Tip)
                 .await
                 .unwrap()
                 .unwrap()
@@ -5327,7 +5263,7 @@ mod tests {
             genesis_hash,
             rpc_server
                 .clone()
-                .block_digest(ctx, token, BlockSelector::Height(BlockHeight::from(0u64)))
+                .block_digest(token, BlockSelector::Height(BlockHeight::from(0u64)))
                 .await
                 .unwrap()
                 .unwrap()
@@ -5338,7 +5274,7 @@ mod tests {
             genesis_hash,
             rpc_server
                 .clone()
-                .block_digest(ctx, token, BlockSelector::Digest(genesis_hash))
+                .block_digest(token, BlockSelector::Digest(genesis_hash))
                 .await
                 .unwrap()
                 .unwrap()
@@ -5347,11 +5283,7 @@ mod tests {
         // should not find any block when Height selector is u64::Max
         assert!(rpc_server
             .clone()
-            .block_digest(
-                ctx,
-                token,
-                BlockSelector::Height(BlockHeight::from(u64::MAX))
-            )
+            .block_digest(token, BlockSelector::Height(BlockHeight::from(u64::MAX)))
             .await
             .unwrap()
             .is_none());
@@ -5359,7 +5291,7 @@ mod tests {
         // should not find any block when Digest selector is Digest::default()
         assert!(rpc_server
             .clone()
-            .block_digest(ctx, token, BlockSelector::Digest(Digest::default()))
+            .block_digest(token, BlockSelector::Digest(Digest::default()))
             .await
             .unwrap()
             .is_none());
@@ -5378,17 +5310,14 @@ mod tests {
         )
         .await;
         let token = cookie_token(&rpc_server).await;
-        let _current_server_temperature = rpc_server
-            .cpu_temp(context::current(), token)
-            .await
-            .unwrap();
+        let _current_server_temperature = rpc_server.cpu_temp(token).await.unwrap();
     }
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn cannot_initiate_transaction_if_notx_flag_is_set() {
         let network = Network::Main;
-        let ctx = context::current();
+
         let mut rng = rand::rng();
         let address = GenerationSpendingKey::derive_from_seed(rng.random()).to_address();
         let amount = NativeCurrencyAmount::coins(rng.random_range(0..10));
@@ -5407,7 +5336,6 @@ mod tests {
         assert!(rpc_server
             .clone()
             .send(
-                ctx,
                 token,
                 vec![output],
                 ChangePolicy::ExactChange,
@@ -5420,7 +5348,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn coinbase_distribution_happy_path() {
         let network = Network::Main;
-        let ctx = context::current();
+
         let mut rng = rand::rng();
         let address0 = GenerationSpendingKey::derive_from_seed(rng.random()).to_address();
         let output0 = CoinbaseOutputReadable::new(205, address0.to_bech32m(network).unwrap(), true);
@@ -5448,7 +5376,7 @@ mod tests {
             .is_none());
         assert!(rpc_server
             .clone()
-            .set_coinbase_distribution(ctx, token, vec![output0, output1, output2])
+            .set_coinbase_distribution(token, vec![output0, output1, output2])
             .await
             .is_ok());
         assert!(rpc_server
@@ -5460,7 +5388,7 @@ mod tests {
             .is_some());
         assert!(rpc_server
             .clone()
-            .unset_coinbase_distribution(ctx, token)
+            .unset_coinbase_distribution(token)
             .await
             .is_ok());
         assert!(rpc_server
@@ -5475,7 +5403,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn restore_membership_proof_privacy_preserving_devnet_wallet() {
         let network = Network::Main;
-        let ctx = context::current();
+
         let rpc_server =
             test_rpc_server(WalletEntropy::devnet_wallet(), 2, cli_args::Args::default()).await;
         let token = cookie_token(&rpc_server).await;
@@ -5494,7 +5422,6 @@ mod tests {
         let resp = rpc_server
             .clone()
             .restore_membership_proof_privacy_preserving(
-                ctx,
                 token,
                 vec![msmp.compute_indices(Tip5::hash(&utxo.utxo))],
             )
@@ -5524,7 +5451,6 @@ mod tests {
         // Ensure no crash on future AOCL items
         assert!(rpc_server
             .restore_membership_proof_privacy_preserving(
-                ctx,
                 token,
                 vec![AbsoluteIndexSet::compute(
                     Digest::default(),
@@ -5590,7 +5516,7 @@ mod tests {
             );
             let accepted = bob
                 .clone()
-                .provide_pow_solution(context::current(), bob_token, random(), random())
+                .provide_pow_solution(bob_token, random(), random())
                 .await
                 .unwrap();
             assert!(
@@ -5630,19 +5556,14 @@ mod tests {
 
             let (proposal, puzzle) = bob
                 .clone()
-                .full_pow_puzzle_external_key(context::current(), bob_token, guesser_address)
+                .full_pow_puzzle_external_key(bob_token, guesser_address)
                 .await
                 .unwrap()
                 .unwrap();
 
             assert!(
                 !bob.clone()
-                    .provide_new_tip(
-                        context::current(),
-                        bob_token,
-                        Default::default(),
-                        proposal.clone()
-                    )
+                    .provide_new_tip(bob_token, Default::default(), proposal.clone())
                     .await
                     .unwrap(),
                 "Node must reject new tip with invalid PoW solution."
@@ -5651,7 +5572,7 @@ mod tests {
             let solution = puzzle.solve();
             assert!(
                 bob.clone()
-                    .provide_new_tip(context::current(), bob_token, solution, proposal.clone())
+                    .provide_new_tip(bob_token, solution, proposal.clone())
                     .await
                     .unwrap(),
                 "Node must accept valid new tip."
@@ -5661,12 +5582,7 @@ mod tests {
             bad_proposal.set_proof(BlockProof::SingleProof(NeptuneProof::invalid()));
             assert!(
                 !bob.clone()
-                    .provide_new_tip(
-                        context::current(),
-                        bob_token,
-                        Default::default(),
-                        bad_proposal
-                    )
+                    .provide_new_tip(bob_token, Default::default(), bad_proposal)
                     .await
                     .unwrap(),
                 "Node must reject new tip with invalid proof."
@@ -5713,7 +5629,7 @@ mod tests {
             for guesser_address in addresses.clone() {
                 let pow_puzzle = bob
                     .clone()
-                    .pow_puzzle_external_key(context::current(), bob_token, guesser_address)
+                    .pow_puzzle_external_key(bob_token, guesser_address)
                     .await
                     .unwrap()
                     .unwrap();
@@ -5734,7 +5650,7 @@ mod tests {
             // Verify that the same exported puzzle is not added twice.
             for guesser_address in addresses {
                 bob.clone()
-                    .pow_puzzle_external_key(context::current(), bob_token, guesser_address)
+                    .pow_puzzle_external_key(bob_token, guesser_address)
                     .await
                     .unwrap()
                     .unwrap();
@@ -5785,17 +5701,13 @@ mod tests {
                 println!("use_internal_key: {use_internal_key}");
                 let pow_puzzle = if use_internal_key {
                     bob.clone()
-                        .pow_puzzle_internal_key(context::current(), bob_token)
+                        .pow_puzzle_internal_key(bob_token)
                         .await
                         .unwrap()
                         .unwrap()
                 } else {
                     bob.clone()
-                        .pow_puzzle_external_key(
-                            context::current(),
-                            bob_token,
-                            external_guesser_address.into(),
-                        )
+                        .pow_puzzle_external_key(bob_token, external_guesser_address.into())
                         .await
                         .unwrap()
                         .unwrap()
@@ -5840,7 +5752,7 @@ mod tests {
                 block1.set_header_pow(valid_pow);
                 let good_is_accepted = bob
                     .clone()
-                    .provide_pow_solution(context::current(), bob_token, valid_pow, pow_puzzle.id)
+                    .provide_pow_solution(bob_token, valid_pow, pow_puzzle.id)
                     .await
                     .unwrap();
                 assert!(
@@ -5852,7 +5764,7 @@ mod tests {
                 let bad_pow: BlockPow = random();
                 let bad_is_accepted = bob
                     .clone()
-                    .provide_pow_solution(context::current(), bob_token, bad_pow, pow_puzzle.id)
+                    .provide_pow_solution(bob_token, bad_pow, pow_puzzle.id)
                     .await
                     .unwrap();
                 assert!(
@@ -5919,11 +5831,11 @@ mod tests {
 
                     let receiving_address_generation = rpc_server
                         .clone()
-                        .next_receiving_address(context::current(), token, KeyType::Generation)
+                        .next_receiving_address(token, KeyType::Generation)
                         .await?;
                     let receiving_address_symmetric = rpc_server
                         .clone()
-                        .next_receiving_address(context::current(), token, KeyType::Symmetric)
+                        .next_receiving_address(token, KeyType::Symmetric)
                         .await?;
 
                     let pay_to_bob_outputs: Vec<OutputFormat> = [
@@ -5982,7 +5894,6 @@ mod tests {
                     let tx_artifacts = rpc_server
                         .clone()
                         .send(
-                            context::current(),
                             token,
                             pay_to_bob_outputs,
                             ChangePolicy::recover_to_next_unused_key(
@@ -6032,23 +5943,13 @@ mod tests {
                         // change the balance.
                         let claim_was_new0 = bob_rpc_server
                             .clone()
-                            .claim_utxo(
-                                context::current(),
-                                bob_token,
-                                utxo_notification.ciphertext.clone(),
-                                None,
-                            )
+                            .claim_utxo(bob_token, utxo_notification.ciphertext.clone(), None)
                             .await
                             .unwrap();
                         assert!(claim_was_new0);
                         let claim_was_new1 = bob_rpc_server
                             .clone()
-                            .claim_utxo(
-                                context::current(),
-                                bob_token,
-                                utxo_notification.ciphertext,
-                                None,
-                            )
+                            .claim_utxo(bob_token, utxo_notification.ciphertext, None)
                             .await
                             .unwrap();
                         assert!(!claim_was_new1);
@@ -6077,7 +5978,7 @@ mod tests {
                             NativeCurrencyAmount::zero(),
                             bob_rpc_server
                                 .clone()
-                                .confirmed_available_balance(context::current(), bob_token)
+                                .confirmed_available_balance(bob_token)
                                 .await?,
                         );
                         state.set_new_tip(blocks[1].clone()).await?;
@@ -6087,7 +5988,7 @@ mod tests {
                     assert_eq!(
                         bob_amount,
                         bob_rpc_server
-                            .confirmed_available_balance(context::current(), bob_token)
+                            .confirmed_available_balance(bob_token)
                             .await?,
                     );
                 }
@@ -6126,11 +6027,11 @@ mod tests {
 
                 let bob_gen_addr = bob
                     .clone()
-                    .next_receiving_address(context::current(), bob_token, KeyType::Generation)
+                    .next_receiving_address(bob_token, KeyType::Generation)
                     .await?;
                 let bob_sym_addr = bob
                     .clone()
-                    .next_receiving_address(context::current(), bob_token, KeyType::Symmetric)
+                    .next_receiving_address(bob_token, KeyType::Symmetric)
                     .await?;
 
                 let pay_to_self_outputs: Vec<OutputFormat> = [
@@ -6153,7 +6054,6 @@ mod tests {
                 let tx_artifacts = bob
                     .clone()
                     .send(
-                        context::current(),
                         bob_token,
                         pay_to_self_outputs.clone(),
                         ChangePolicy::recover_to_next_unused_key(
@@ -6191,7 +6091,6 @@ mod tests {
                         let spending_tx_artifacts = bob
                             .clone()
                             .send(
-                                context::current(),
                                 bob_token,
                                 vec![output],
                                 ChangePolicy::exact_change(),
@@ -6209,12 +6108,7 @@ mod tests {
 
                 for offchain_notification in tx_artifacts.owned_offchain_notifications() {
                     bob.clone()
-                        .claim_utxo(
-                            context::current(),
-                            bob_token,
-                            offchain_notification.ciphertext,
-                            None,
-                        )
+                        .claim_utxo(bob_token, offchain_notification.ciphertext, None)
                         .await?;
                 }
 
@@ -6244,9 +6138,7 @@ mod tests {
                     // bob hasn't applied blocks 2,3. liquid balance should be 64
                     assert_eq!(
                         NativeCurrencyAmount::coins(64),
-                        bob.clone()
-                            .confirmed_available_balance(context::current(), bob_token)
-                            .await?,
+                        bob.clone().confirmed_available_balance(bob_token).await?,
                     );
                     // bob applies the blocks after claiming utxos.
                     bob.state.set_new_tip(block2).await?;
@@ -6254,10 +6146,7 @@ mod tests {
                 }
 
                 if spent {
-                    assert!(bob
-                        .confirmed_available_balance(context::current(), bob_token)
-                        .await?
-                        .is_zero(),);
+                    assert!(bob.confirmed_available_balance(bob_token).await?.is_zero(),);
                 } else {
                     // final liquid balance should be 62.
                     // +64 composer liquid
@@ -6268,8 +6157,7 @@ mod tests {
                     // +51   change (less fee == 2)
                     assert_eq!(
                         NativeCurrencyAmount::coins(62),
-                        bob.confirmed_available_balance(context::current(), bob_token)
-                            .await?,
+                        bob.confirmed_available_balance(bob_token).await?,
                     );
                 }
                 Ok(())
@@ -6297,11 +6185,10 @@ mod tests {
                 test_rpc_server(WalletEntropy::new_pseudorandom(rng.random()), 2, cli_args).await;
             let token = cookie_token(&rpc_server).await;
 
-            let ctx = context::current();
             // let timestamp = network.launch_date() + Timestamp::days(1);
             let own_address = rpc_server
                 .clone()
-                .next_receiving_address(ctx, token, KeyType::Generation)
+                .next_receiving_address(token, KeyType::Generation)
                 .await
                 .unwrap();
             let elem: OutputFormat = (
@@ -6318,7 +6205,6 @@ mod tests {
                 let result = rpc_server
                     .clone()
                     .send(
-                        ctx,
                         token,
                         outputs.clone().take(i).collect(),
                         ChangePolicy::ExactChange,
@@ -6354,7 +6240,6 @@ mod tests {
             };
             let mut rpc_server = test_rpc_server(WalletEntropy::devnet_wallet(), 2, cli_args).await;
 
-            let ctx = context::current();
             let token = cookie_token(&rpc_server).await;
             let timestamp = network.launch_date() + Timestamp::months(7);
 
@@ -6374,7 +6259,7 @@ mod tests {
             for i in 0..10 {
                 let result = rpc_server
                     .clone()
-                    .send(ctx, token, outputs.clone(), ChangePolicy::Burn, fee)
+                    .send(token, outputs.clone(), ChangePolicy::Burn, fee)
                     .await;
 
                 // any attempts after the 2nd send should result in RateLimit error.
@@ -6530,7 +6415,6 @@ mod tests {
                 let result = rpc_server
                     .clone()
                     .send(
-                        context::current(),
                         token,
                         outputs,
                         ChangePolicy::recover_to_next_unused_key(
