@@ -26,6 +26,70 @@ impl RpcApi for RpcServer {
                 .into(),
         }
     }
+
+    async fn block_proof_call(&self, _: BlockProofRequest) -> BlockProofResponse {
+        BlockProofResponse {
+            proof: self
+                .state
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .proof
+                .clone()
+                .into(),
+        }
+    }
+
+    async fn block_header_call(&self, _: BlockHeaderRequest) -> BlockHeaderResponse {
+        BlockHeaderResponse {
+            header: self
+                .state
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .header()
+                .into(),
+        }
+    }
+
+    async fn block_transaction_kernel_call(
+        &self,
+        _: BlockTransactionKernelRequest,
+    ) -> BlockTransactionKernelResponse {
+        BlockTransactionKernelResponse {
+            kernel: self
+                .state
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .body()
+                .transaction_kernel()
+                .into(),
+        }
+    }
+
+    async fn block_announcements_call(
+        &self,
+        _: BlockAnnouncementsRequest,
+    ) -> BlockAnnouncementsResponse {
+        BlockAnnouncementsResponse {
+            announcements: self
+                .state
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .body()
+                .transaction_kernel()
+                .announcements
+                .iter()
+                .map(|a| a.message.clone().into())
+                .collect(),
+        }
+    }
 }
 
 #[cfg(test)]

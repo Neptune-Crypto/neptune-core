@@ -27,6 +27,19 @@ pub enum Namespace {
 pub enum RpcMethods {
     #[namespace(Namespace::Node)]
     Network,
+
     #[namespace(Namespace::Chain)]
     Height,
+
+    #[namespace(Namespace::Chain)]
+    BlockProof,
+
+    #[namespace(Namespace::Chain)]
+    BlockHeader,
+
+    #[namespace(Namespace::Chain)]
+    BlockTransactionKernel,
+
+    #[namespace(Namespace::Chain)]
+    BlockAnnouncements,
 }

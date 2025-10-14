@@ -1916,6 +1916,7 @@ dependencies = [
  "field_count",
  "futures",
  "get-size2",
+ "hex",
  "humantime",
  "itertools 0.11.0",
  "leveldb-sys",
