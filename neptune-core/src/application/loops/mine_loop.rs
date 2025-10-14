@@ -169,29 +169,23 @@ fn guess_worker(
     now: Timestamp,
     override_target_block_interval: Option<Timestamp>,
 ) {
-    let target_block_interval =
-        override_target_block_interval.unwrap_or(network.target_block_interval());
-
     let GuessingConfiguration {
         num_guesser_threads,
         address: guesser_address,
     } = guessing_configuration;
-
-    // Following code must match the rules in `[Block::has_proof_of_work]`.
-
-    // a difficulty reset (to min difficulty) occurs on testnet(s)
-    // when the elapsed time between two blocks is greater than a
-    // max interval, defined by the network.  It never occurs for
-    // mainnet.
-    let should_reset_difficulty =
-        Block::should_reset_difficulty(network, now, previous_block_header.timestamp);
 
     info!(
         "prev block height: {}, prev block time: {}, now: {}",
         previous_block_header.height, previous_block_header.timestamp, now
     );
 
-    let prev_difficulty = previous_block_header.difficulty;
+    // Following code must match the rules in `[Block::has_proof_of_work]`.
+    // a difficulty reset (to min difficulty) occurs on testnet(s)
+    // when the elapsed time between two blocks is greater than a
+    // max interval, defined by the network.  It never occurs for
+    // mainnet.
+    let should_reset_difficulty =
+        Block::should_reset_difficulty(network, now, previous_block_header.timestamp);
     let new_difficulty = if should_reset_difficulty {
         let new_difficulty = network.genesis_difficulty();
         info!(
@@ -201,6 +195,8 @@ fn guess_worker(
         );
         new_difficulty
     } else {
+        let target_block_interval =
+            override_target_block_interval.unwrap_or(network.target_block_interval());
         difficulty_control(
             now,
             previous_block_header.timestamp,
@@ -210,6 +206,7 @@ fn guess_worker(
         )
     };
 
+    let prev_difficulty = previous_block_header.difficulty;
     let threshold = prev_difficulty.target();
     let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     let new_block_height = block.header().height;
