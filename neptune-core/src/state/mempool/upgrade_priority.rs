@@ -17,7 +17,8 @@ pub enum UpgradePriority {
     /// There's a certain amount of interest.
     ///
     /// For example, wallets can use the sum of the outputs the transaction
-    /// sends to them.
+    /// sends to them. Should also be used when this node has upgraded the
+    /// transaction.
     Interested(NativeCurrencyAmount),
 
     /// The transaction in question is of the highest possible priority. Wallets

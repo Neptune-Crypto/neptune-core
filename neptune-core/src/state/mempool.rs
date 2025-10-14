@@ -1038,12 +1038,19 @@ impl Mempool {
                 // mempool in the expectation that someone will update them to
                 // be valid under a new mutator set.
                 //
-                // If the transaction was initiated locally, *and* node can
-                // produce single-proofs, transaction should be updated
-                // immediately (and be kept in mempool).
+                // If (the transaction was initiated locally, i.e. deemed
+                // critical), *and* node can produce single-proofs, transaction
+                // should be updated immediately (and be kept in mempool).
+                //
+                // Note: Do not check for the presence of a primitive witness.
+                // This information is irrelevant for Update tasks and moreover
+                // not always present for critical transactions. For instance:
+                // the edge case in which the transaction was merged (the
+                // primitive witness is dropped) but the merge-sibling was mined
+                // (the current transaction is retrieved from cache).
                 TransactionProof::SingleProof(sp) => {
                     if self.tx_proving_capability == TxProvingCapability::SingleProof
-                        && tx.primitive_witness.is_some()
+                        && tx.upgrade_priority == UpgradePriority::Critical
                     {
                         // Node initiated transaction and can update.
                         let update_sp = MempoolUpdateJob::SingleProof {
