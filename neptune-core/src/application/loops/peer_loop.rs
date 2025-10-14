@@ -5,8 +5,6 @@ use std::time::SystemTime;
 
 use anyhow::bail;
 use anyhow::Result;
-use chrono::DateTime;
-use chrono::Utc;
 use futures::sink::Sink;
 use futures::sink::SinkExt;
 use futures::stream::TryStream;
@@ -1862,8 +1860,6 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
-        const TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS: i128 = 120;
-
         let cli_args = self.global_state_lock.cli().clone();
 
         let standing = self
@@ -1890,23 +1886,6 @@ impl PeerLoopHandler {
             cli_args.peer_tolerance,
         )
         .with_standing(standing);
-
-        // If timestamps are different, we currently just log a warning.
-        let peer_clock_ahead_in_seconds = new_peer.time_difference_in_seconds();
-        let own_clock_ahead_in_seconds = -peer_clock_ahead_in_seconds;
-        if peer_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
-            || own_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
-        {
-            let own_datetime_utc: DateTime<Utc> =
-                new_peer.own_timestamp_connection_established.into();
-            let peer_datetime_utc: DateTime<Utc> =
-                new_peer.peer_timestamp_connection_established.into();
-            warn!(
-                "New peer {} disagrees with us about time. Peer reports time {} but our clock at handshake was {}.",
-                new_peer.connected_address(),
-                peer_datetime_utc.format("%Y-%m-%d %H:%M:%S"),
-                own_datetime_utc.format("%Y-%m-%d %H:%M:%S"));
-        }
 
         // Multiple tasks might attempt to set up a connection concurrently. So
         // even though we've checked that this connection is allowed, this check

@@ -2,10 +2,13 @@ use std::fmt::Debug;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
+use chrono::DateTime;
+use chrono::Utc;
 use futures::FutureExt;
 use futures::SinkExt;
 use futures::TryStreamExt;
@@ -43,6 +46,10 @@ use crate::MAGIC_STRING_RESPONSE;
 // block batch-response.
 pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 500 * 1024 * 1024;
 
+/// Only accept connections where peer's reported timestamp deviates from our
+/// by less than this value.
+const PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS: u128 = 90;
+
 /// Use this function to ensure that the same rules apply for both
 /// ingoing and outgoing connections. This limits the size of messages
 /// peers can send.
@@ -78,6 +85,21 @@ fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
     }
 
     true
+}
+
+/// Infallible absolute difference between two timestamps, in seconds.
+fn system_time_diff_seconds(peer: SystemTime, own: SystemTime) -> u128 {
+    let peer = peer
+        .duration_since(UNIX_EPOCH)
+        .map(|d| i128::from(d.as_secs()))
+        .unwrap_or_else(|e| -i128::from(e.duration().as_secs()));
+
+    let own = own
+        .duration_since(UNIX_EPOCH)
+        .map(|d| i128::from(d.as_secs()))
+        .unwrap_or_else(|e| -i128::from(e.duration().as_secs()));
+
+    (own - peer).unsigned_abs()
 }
 
 /// Initial check if incoming connection is allowed. Performed prior to the
@@ -133,6 +155,20 @@ async fn check_if_connection_is_allowed(
         let ip = peer_address.ip();
         debug!("Peer {ip}, banned via CLI argument, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
+    }
+
+    // Disallow connection if we disagree about time.
+    if system_time_diff_seconds(other_handshake.timestamp, own_handshake.timestamp)
+        > PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS
+    {
+        let own_datetime_utc: DateTime<Utc> = own_handshake.timestamp.into();
+        let peer_datetime_utc: DateTime<Utc> = other_handshake.timestamp.into();
+        warn!(
+                "New peer {} disagrees with us about time. Peer reports time {} but our clock at handshake was {}.",
+                peer_address,
+                peer_datetime_utc.format("%Y-%m-%d %H:%M:%S"),
+                own_datetime_utc.format("%Y-%m-%d %H:%M:%S"));
+        return InternalConnectionStatus::Refused(ConnectionRefusedReason::bad_timestamp());
     }
 
     // Disallow connection if peer is in bad standing
@@ -610,6 +646,7 @@ mod tests {
     use anyhow::Result;
     use macro_rules_attr::apply;
     use tasm_lib::twenty_first::tip5::digest::Digest;
+    use test_strategy::proptest;
     use tokio_test::io::Builder;
     use tracing_test::traced_test;
 
@@ -631,6 +668,18 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::MAGIC_STRING_REQUEST;
     use crate::MAGIC_STRING_RESPONSE;
+
+    #[test]
+    fn time_difference_in_seconds_simple() {
+        let now = SystemTime::now();
+        let and_now = SystemTime::now();
+        assert!(system_time_diff_seconds(now, and_now) < 10);
+    }
+
+    #[proptest]
+    fn time_difference_doesnt_crash(now: SystemTime, and_now: SystemTime) {
+        system_time_diff_seconds(now, and_now);
+    }
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
@@ -870,6 +919,48 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn refuse_connection_bad_timestamp() {
+        let network = Network::Main;
+        let (_, _, _, _, state_lock, own_handshake) =
+            get_test_genesis_setup(network, 1, cli_args::Args::default())
+                .await
+                .unwrap();
+
+        let max_time_diff_secs: u64 = PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS
+            .try_into()
+            .unwrap();
+
+        let (mut other_handshake, peer_sa) = get_dummy_peer_connection_data_genesis(network, 1);
+        other_handshake.timestamp =
+            own_handshake.timestamp + Duration::from_secs(max_time_diff_secs);
+
+        assert_eq!(
+            InternalConnectionStatus::Accepted,
+            check_if_connection_is_allowed(
+                state_lock.clone(),
+                &own_handshake,
+                &other_handshake,
+                &peer_sa,
+            )
+            .await
+        );
+
+        other_handshake.timestamp =
+            own_handshake.timestamp + Duration::from_secs(max_time_diff_secs + 1);
+        assert_eq!(
+            InternalConnectionStatus::Refused(ConnectionRefusedReason::bad_timestamp()),
+            check_if_connection_is_allowed(
+                state_lock.clone(),
+                &own_handshake,
+                &other_handshake,
+                &peer_sa,
+            )
+            .await
+        );
     }
 
     #[traced_test]
