@@ -2337,6 +2337,7 @@ impl NeptuneRPCServer {
 #[multi_rpc_impl]
 impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/node/cookie/hint")]
     async fn cookie_hint(&self) -> RpcResult<auth::CookieHint> {
         log_slow_scope!(fn_name!());
 
@@ -2351,6 +2352,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/node/network")]
     async fn network(&self) -> RpcResult<Network> {
         log_slow_scope!(fn_name!());
 
@@ -2358,6 +2360,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/node/address", query(token))]
     async fn own_listen_address_for_peers(
         &self,
         token: auth::Token,
@@ -2371,6 +2374,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/node/instance/id", query(token))]
     async fn own_instance_id(&self, token: auth::Token) -> RpcResult<InstanceId> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2379,6 +2383,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/blocks/height", query(token))]
     async fn block_height(&self, token: auth::Token) -> RpcResult<BlockHeight> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2395,6 +2400,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/proposals/best", query(token))]
     async fn best_proposal(&self, token: auth::Token) -> RpcResult<Option<BlockInfo>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2417,6 +2423,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/confirmations", query(token))]
     async fn confirmations(&self, token: auth::Token) -> RpcResult<Option<BlockHeight>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2426,6 +2433,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/addresses/{key_type}/latest", query(token))]
     async fn latest_address(
         &self,
         token: auth::Token,
@@ -2449,6 +2457,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/utxo/{leaf_index}/digest", query(token))]
     async fn utxo_digest(&self, token: auth::Token, leaf_index: u64) -> RpcResult<Option<Digest>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2465,6 +2474,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/utxo/{addition_record}/block", query(token, max_search_depth))]
     async fn utxo_origin_block(
         &self,
         token: auth::Token,
@@ -2485,6 +2495,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/block/{block_selector}/digest", query(token))]
     async fn block_digest(
         &self,
         token: auth::Token,
@@ -2506,6 +2517,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/block/{block_selector}/info", query(token))]
     async fn block_info(
         &self,
         token: auth::Token,
@@ -2546,6 +2558,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/block/{block_selector}/kernel", query(token))]
     async fn block_kernel(
         &self,
         token: auth::Token,
@@ -2571,6 +2584,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/block/{block_selector}/addition_record/indices/", query(token))]
     async fn addition_record_indices_for_block(
         &self,
         token: auth::Token,
@@ -2597,6 +2611,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/membership_proof/restore/privacy_preserving", query(token), body(requests))]
     async fn restore_membership_proof_privacy_preserving(
         &self,
         token: auth::Token,
@@ -2647,6 +2662,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/block/{block_selector}/announcements", query(token))]
     async fn announcements_in_block(
         &self,
         token: auth::Token,
@@ -2668,6 +2684,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/block/{height}/digests", query(token))]
     async fn block_digests_by_height(
         &self,
         token: auth::Token,
@@ -2687,6 +2704,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/blocks/tip/digests/{n}", query(token))]
     async fn latest_tip_digests(&self, token: auth::Token, n: usize) -> RpcResult<Vec<Digest>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2703,6 +2721,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/peers/info", query(token))]
     async fn peer_info(&self, token: auth::Token) -> RpcResult<Vec<PeerInfo>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2719,6 +2738,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/peers/punished", query(token))]
     async fn all_punished_peers(
         &self,
         token: auth::Token,
@@ -2752,6 +2772,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/address/validate", query(token), body(address_string, network))]
     async fn validate_address(
         &self,
         token: auth::Token,
@@ -2770,6 +2791,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/amount/{amount_string}/validate", query(token))]
     async fn validate_amount(
         &self,
         token: auth::Token,
@@ -2787,6 +2809,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/balance/confirmed/available/leq/{amount}", query(token))]
     async fn amount_leq_confirmed_available_balance(
         &self,
         token: auth::Token,
@@ -2805,6 +2828,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/balance/confirmed/available", query(token))]
     async fn confirmed_available_balance(
         &self,
         token: auth::Token,
@@ -2821,6 +2845,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/balance/unconfirmed/available", query(token))]
     async fn unconfirmed_available_balance(
         &self,
         token: auth::Token,
@@ -2837,6 +2862,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/status", query(token))]
     async fn wallet_status(&self, token: auth::Token) -> RpcResult<WalletStatus> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2850,6 +2876,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/utxos/expected", query(token))]
     async fn num_expected_utxos(&self, token: auth::Token) -> RpcResult<u64> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2864,6 +2891,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/block/{block_selector}/header", query(token))]
     async fn header(
         &self,
         token: auth::Token,
@@ -2884,6 +2912,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/wallet/addresses/{key_type}/next", query(token))]
     async fn next_receiving_address(
         &mut self,
         token: auth::Token,
@@ -2901,6 +2930,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/keys/known", query(token))]
     async fn known_keys(&self, token: auth::Token) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2915,6 +2945,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/keys/{key_type}/known", query(token))]
     async fn known_keys_by_keytype(
         &self,
         token: auth::Token,
@@ -2933,6 +2964,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/mempool/transactions/count", query(token))]
     async fn mempool_tx_count(&self, token: auth::Token) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2941,6 +2973,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/mempool/size", query(token))]
     async fn mempool_size(&self, token: auth::Token) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2949,6 +2982,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/mempool/transactions/ids", query(token))]
     async fn mempool_tx_ids(&self, token: auth::Token) -> RpcResult<Vec<TransactionKernelId>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2965,6 +2999,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/history", query(token))]
     async fn history(
         &self,
         token: auth::Token,
@@ -2987,6 +3022,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/dashboard", query(token))]
     async fn dashboard_overview_data(&self, token: auth::Token) -> RpcResult<OverviewData> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3073,6 +3109,7 @@ impl RPC for NeptuneRPCServer {
     //   * acquires `global_state_lock` for write
     //
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/peers/all/standing/clear", query(token))]
     async fn clear_all_standings(&mut self, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3093,6 +3130,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/peer/{ip}/standing/clear", query(token))]
     async fn clear_standing_by_ip(&mut self, token: auth::Token, ip: IpAddr) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3115,6 +3153,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/transaction/record/and/broadcast", query(token), body(tx_artifacts))]
     async fn record_and_broadcast_transaction(
         &mut self,
         token: auth::Token,
@@ -3132,6 +3171,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/transaction/send", query(token), body(outputs, change_policy, fee))]
     async fn send(
         &mut self,
         token: auth::Token,
@@ -3151,6 +3191,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-commtn.
+    #[rest(method = POST, path = "/send/transparent", query(token), body(outputs, change_policy, fee))]
     async fn send_transparent(
         &mut self,
         token: auth::Token,
@@ -3170,6 +3211,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/transaction/{tx_kernel_id}/upgrade", query(token))]
     async fn upgrade(
         &mut self,
         token: auth::Token,
@@ -3254,7 +3296,8 @@ impl RPC for NeptuneRPCServer {
         Ok(true)
     }
 
-    // // documented in trait. do not add doc-comment.
+    // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/utxo/claim", query(token), body(encrypted_utxo_notification, max_search_depth))]
     async fn claim_utxo(
         &mut self,
         token: auth::Token,
@@ -3287,6 +3330,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/node/shutdown", query(token))]
     async fn shutdown(&self, token: auth::Token) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3302,6 +3346,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/mempool/clear", query(token))]
     async fn clear_mempool(&self, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3314,6 +3359,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/node/freeze", query(token))]
     async fn freeze(&mut self, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3331,6 +3377,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/node/unfreeze", query(token))]
     async fn unfreeze(&mut self, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3341,6 +3388,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/node/mining/pause", query(token))]
     async fn pause_miner(&self, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3357,6 +3405,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/node/mining/restart", query(token))]
     async fn restart_miner(&self, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3373,6 +3422,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/proposals/coinbase/distribution/set", query(token), body(coinbase_distribution_readable))]
     async fn set_coinbase_distribution(
         &mut self,
         token: auth::Token,
@@ -3410,6 +3460,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/proposals/coinbase/distribution/unset", query(token))]
     async fn unset_coinbase_distribution(&mut self, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3425,6 +3476,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/wallet/mine/blocks/{n_blocks}", query(token))]
     async fn mine_blocks_to_wallet(&mut self, token: auth::Token, n_blocks: u32) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3439,6 +3491,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/mining/pow/solution/{proposal_id}", query(token), body(pow))]
     async fn provide_pow_solution(
         &self,
         token: auth::Token,
@@ -3469,6 +3522,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/mining/tip/provide", query(token), body(pow, proposal))]
     async fn provide_new_tip(
         &self,
         token: auth::Token,
@@ -3492,6 +3546,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/utxos/monitored/prune", query(token))]
     async fn prune_abandoned_monitored_utxos(&mut self, token: auth::Token) -> RpcResult<usize> {
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
@@ -3522,6 +3577,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/block/{indicated_tip}/set/tip", query(token))]
     async fn set_tip(&self, token: auth::Token, indicated_tip: Digest) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3536,6 +3592,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/coins", query(token))]
     async fn list_own_coins(&self, token: auth::Token) -> RpcResult<Vec<CoinWithPossibleTimeLock>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3554,6 +3611,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/utxos", query(token))]
     async fn list_utxos(&self, token: auth::Token) -> RpcResult<Vec<UiUtxo>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3647,6 +3705,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/node/cpu/temp", query(token))]
     async fn cpu_temp(&self, token: auth::Token) -> RpcResult<Option<f32>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3655,6 +3714,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/mining/pow/puzzle/key/internal", query(token))]
     async fn pow_puzzle_internal_key(
         &mut self,
         token: auth::Token,
@@ -3686,6 +3746,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/mining/pow/puzzle/key/external", query(token), body(guesser_fee_address))]
     async fn pow_puzzle_external_key(
         &mut self,
         token: auth::Token,
@@ -3709,6 +3770,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/mining/pow/puzzle/key/external/full", query(token), body(guesser_fee_address))]
     async fn full_pow_puzzle_external_key(
         &mut self,
         token: auth::Token,
@@ -3738,6 +3800,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/transaction/inputs/spendable", query(token))]
     async fn spendable_inputs(&self, token: auth::Token) -> RpcResult<TxInputList> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3751,6 +3814,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/wallet/transaction/inputs/spendable/{policy}/spend/{spend_amount}", query(token))]
     async fn select_spendable_inputs(
         &self,
         token: auth::Token,
@@ -3770,6 +3834,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/wallet/transaction/generate/outputs", query(token), body(outputs))]
     async fn generate_tx_outputs(
         &self,
         token: auth::Token,
@@ -3787,6 +3852,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/wallet/transaction/generate/details", query(token), body(tx_inputs, tx_outputs, change_policy, fee))]
     async fn generate_tx_details(
         &self,
         token: auth::Token,
@@ -3807,6 +3873,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/wallet/transaction/generate/proof/witness", query(token), body(tx_details))]
     async fn generate_witness_proof(
         &self,
         token: auth::Token,
@@ -3823,6 +3890,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/wallet/transaction/assemble", query(token), body(transaction_details, transaction_proof))]
     async fn assemble_transaction(
         &self,
         token: auth::Token,
@@ -3840,6 +3908,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/wallet/transaction/assemble/artifacts", query(token), body(transaction_details, transaction_proof))]
     async fn assemble_transaction_artifacts(
         &self,
         token: auth::Token,
@@ -3857,6 +3926,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/mempool/transaction/{txid}/proof/type", query(token))]
     async fn proof_type(
         &self,
         token: auth::Token,
@@ -3869,6 +3939,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/blocks/{last_block}/intervals", query(token, max_num_blocks))]
     async fn block_intervals(
         &self,
         token: auth::Token,
@@ -3917,6 +3988,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/blocks/{last_block}/difficulties", query(token, max_num_blocks))]
     async fn block_difficulties(
         &self,
         token: auth::Token,
@@ -3956,6 +4028,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/mempool/transactions/all/broadcast", query(token))]
     async fn broadcast_all_mempool_txs(&self, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3971,6 +4044,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = POST, path = "/proposal/broadcast", query(token))]
     async fn broadcast_block_proposal(&self, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3984,6 +4058,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/mempool/start/{start_index}/max/{number}", query(token))]
     async fn mempool_overview(
         &self,
         token: auth::Token,
@@ -4046,6 +4121,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    #[rest(method = GET, path = "/mempool/transaction/{tx_kernel_id}", query(token))]
     async fn mempool_tx_kernel(
         &self,
         token: auth::Token,
