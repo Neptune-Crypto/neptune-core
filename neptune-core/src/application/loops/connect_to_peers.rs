@@ -308,7 +308,7 @@ where
         data: peer_handshake_data,
     }) = peer.try_next().await?
     else {
-        bail!("Didn't get handshake on connection attempt");
+        bail!("Didn't get handshake on connection attempt, from {peer_address}");
     };
     ensure!(
         magic_value == *MAGIC_STRING_REQUEST,
