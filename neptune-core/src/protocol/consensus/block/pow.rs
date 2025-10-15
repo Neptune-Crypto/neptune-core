@@ -278,9 +278,6 @@ pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
 
     hash: Digest,
 
-    /// Authentication paths for all fields but the PoW field
-    mast_auth_paths: PowMastPaths,
-
     /// The hash of the parent block of this guesser buffer.
     prev_block_digest: Digest,
 }
@@ -290,7 +287,6 @@ impl<const MERKLE_TREE_HEIGHT: usize> Default for GuesserBuffer<MERKLE_TREE_HEIG
         Self {
             merkle_tree: MTree::default(),
             hash: Default::default(),
-            mast_auth_paths: Default::default(),
             prev_block_digest: Default::default(),
         }
     }
@@ -401,7 +397,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         // iterate log-many times over the buffer to compute leafs from buds
         let mut outs = ins.clone();
         let mut buds = &mut ins;
-        let mut leafs = &mut outs;
+        let mut resulting_leafs = &mut outs;
         let mut num_swaps = 0;
         for i in 0..NUM_BUD_LAYERS {
             for j in 0..num_checkpoints {
@@ -409,7 +405,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                 range
                     .clone()
                     .into_par_iter()
-                    .zip(leafs[range].par_iter_mut())
+                    .zip(resulting_leafs[range].par_iter_mut())
                     .for_each(|(k, leaf)| {
                         *leaf = Tip5::hash_pair(buds[k], buds[(k + (1 << i)) % Self::NUM_LEAFS]);
                     });
@@ -418,11 +414,11 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                     return Default::default();
                 }
             }
-            std::mem::swap(&mut leafs, &mut buds);
+            std::mem::swap(&mut resulting_leafs, &mut buds);
             num_swaps += 1;
         }
 
-        std::mem::swap(&mut leafs, &mut buds);
+        std::mem::swap(&mut resulting_leafs, &mut buds);
         num_swaps += 1;
 
         let (mut leafs, internal_nodes) = if num_swaps & 1 == 1 {
@@ -450,13 +446,13 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         GuesserBuffer::<MERKLE_TREE_HEIGHT> {
             merkle_tree,
             hash,
-            mast_auth_paths,
             prev_block_digest,
         }
     }
 
     pub fn guess(
         buffer: &GuesserBuffer<MERKLE_TREE_HEIGHT>,
+        mast_auth_paths: &PowMastPaths,
         nonce: Digest,
         target: Digest,
     ) -> Option<Self> {
@@ -483,7 +479,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             path_b,
         };
 
-        let pow_digest = buffer.mast_auth_paths.fast_mast_hash(pow);
+        let pow_digest = mast_auth_paths.fast_mast_hash(pow);
         if pow_digest > target {
             None
         } else {
@@ -511,12 +507,14 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                 Self::leaf(leaf_prefix, index_b),
             )
         } else {
-            let index_a =
-                Self::bitreverse(index_a.try_into().unwrap(), Self::MERKLE_TREE_HEIGHT as u32)
-                    as u64;
-            let index_b =
-                Self::bitreverse(index_b.try_into().unwrap(), Self::MERKLE_TREE_HEIGHT as u32)
-                    as u64;
+            let index_a = u64::from(Self::bitreverse(
+                index_a.try_into().unwrap(),
+                Self::MERKLE_TREE_HEIGHT as u32,
+            ));
+            let index_b = u64::from(Self::bitreverse(
+                index_b.try_into().unwrap(),
+                Self::MERKLE_TREE_HEIGHT as u32,
+            ));
             (
                 Self::leaf(leaf_prefix, index_a),
                 Self::leaf(leaf_prefix, index_b),
@@ -691,7 +689,7 @@ pub(crate) mod tests {
                 let mut successful_guess = None;
                 'inner_loop: for _ in 0..120 {
                     let nonce = rng.random();
-                    if let Some(solution) = Pow::guess(&buffer, nonce, target) {
+                    if let Some(solution) = Pow::guess(&buffer, &auth_paths, nonce, target) {
                         successful_guess = Some(solution);
                         break 'inner_loop;
                     }

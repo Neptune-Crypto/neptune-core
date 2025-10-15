@@ -18,7 +18,7 @@ use crate::Block;
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct ProofOfWorkPuzzle {
     // All fields public since used downstream by mining pool software.
-    pub auth_paths: PowMastPaths,
+    pub pow_mast_paths: PowMastPaths,
 
     /// The threshold digest that defines when a PoW solution is valid. The
     /// block's hash must be less than or equal to this value.
@@ -53,7 +53,7 @@ impl ProofOfWorkPuzzle {
         let id = Tip5::hash(&auth_paths);
 
         Self {
-            auth_paths,
+            pow_mast_paths: auth_paths,
             threshold,
             total_guesser_reward: guesser_reward,
             id,
@@ -67,8 +67,12 @@ impl ProofOfWorkPuzzle {
     pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> BlockPow {
         use rayon::prelude::*;
         info!("Starting PoW preprocessing");
-        let guesser_buffer =
-            BlockPow::preprocess(self.auth_paths, None, consensus_rule_set, self.prev_block);
+        let guesser_buffer = BlockPow::preprocess(
+            self.pow_mast_paths,
+            None,
+            consensus_rule_set,
+            self.prev_block,
+        );
         info!("Done with PoW preprocessing");
 
         info!("Now attempting to find valid nonce");
@@ -76,7 +80,7 @@ impl ProofOfWorkPuzzle {
             .into_par_iter()
             .map(|i| {
                 let nonce = Digest(bfe_array![0, 0, 0, 0, i]);
-                BlockPow::guess(&guesser_buffer, nonce, self.threshold)
+                BlockPow::guess(&guesser_buffer, &self.pow_mast_paths, nonce, self.threshold)
             })
             .find_map_any(|x| x)
             .expect("Should find solution within 2^{64} attempts");

@@ -5951,7 +5951,7 @@ mod tests {
                 );
 
                 let pow: BlockPow = random();
-                let resulting_block_hash = pow_puzzle.auth_paths.fast_mast_hash(pow);
+                let resulting_block_hash = pow_puzzle.pow_mast_paths.fast_mast_hash(pow);
 
                 block1.set_header_pow(pow);
                 block1.set_header_guesser_address(guesser_address.into());
@@ -5964,9 +5964,12 @@ mod tests {
                 // Check that succesful guess is accepted by endpoint.
                 let consensus_rule_set = ConsensusRuleSet::Reboot;
                 let guesser_buffer = block1.guess_preprocess(None, None, consensus_rule_set);
+                let mast_auth_paths = block1.pow_mast_paths();
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
-                    if let Some(valid_pow) = Pow::guess(&guesser_buffer, random(), target) {
+                    if let Some(valid_pow) =
+                        Pow::guess(&guesser_buffer, &mast_auth_paths, random(), target)
+                    {
                         break valid_pow;
                     }
                 };
