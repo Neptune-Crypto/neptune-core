@@ -4,7 +4,7 @@ members = ["cargo:."]
 # Config for 'dist'
 [dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.29.0"
+cargo-dist-version = "0.30.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
@@ -18,12 +18,5 @@ install-updater = true
 # Whether to enable GitHub Attestations
 github-attestations = true
 github-build-setup = "build-workaround"
-
-
-[dist.github-custom-runners]
-# The “global” steps include `plan`, `build-global-artifacts`, `host`, and `announce`. None of these
-# actually rely on the specific Linux version.
-global = "ubuntu-latest"
-
-# Don't use `ubuntu-latest` here in order to support somewhat older linux systems.
-x86_64-unknown-linux-gnu = "ubuntu-22.04"
+# Which actions to run on pull requests
+pr-run-mode = "upload"
