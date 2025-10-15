@@ -2,18 +2,24 @@ pub(crate) mod swarmutil;
 
 use std::time::Duration;
 
-use libp2p::{gossipsub::{self, IdentTopic}, identify, kad::{self, store::MemoryStore}, noise, ping, yamux, Swarm};
+use libp2p::gossipsub::{self, IdentTopic};
+use libp2p::identify;
+use libp2p::kad::{self, store::MemoryStore};
+use libp2p::{noise, ping, yamux, Swarm};
 
-use crate::application::loops::main_loop::p2p::{BLOCK_SIZE, TOPIC_BLOCK, TOPIC_PROPOSAL, TOPIC_TX_PROOFCOL_NOTIF, TOPIC_TX_SINGLEPROOF, TX_SINGLEPROOF_SIZE};
+use crate::application::loops::main_loop::p2p::TOPIC_TX_PROOFCOL_NOTIF;
+use crate::application::loops::main_loop::p2p::TOPIC_TX_SINGLEPROOF;
+use crate::application::loops::main_loop::p2p::TX_SINGLEPROOF_SIZE;
+use crate::application::loops::main_loop::p2p::{BLOCK_SIZE, TOPIC_BLOCK, TOPIC_PROPOSAL};
 
 #[derive(libp2p::swarm::NetworkBehaviour)]
 struct ComposedBehaviour {
-    pub dcutr: libp2p::dcutr::Behaviour,
     pub relay_client: libp2p::relay::client::Behaviour,
-    
-    // TODO `connection_limits`? Actually some settings for bootstrapping (archival?) nodes would be better. #beefyConfig
-    
-    /* @skaunov don't understand why the <doc/libp2p/swarm/behaviour/trait.NetworkBehaviour.html#custom-networkbehaviour-with-the-derive-macro> 
+    pub dcutr: libp2p::dcutr::Behaviour,
+
+    // TODO #followUp `connection_limits`? Actually some settings for bootstrapping (archival?) nodes would be better; buts it's quite hard to craft until the other components aren't added.
+
+    /* @skaunov don't understand why the <doc/libp2p/swarm/behaviour/trait.NetworkBehaviour.html#custom-networkbehaviour-with-the-derive-macro>
     example puts `identify` before `ping` as I only can see how it can use the others result in the reversed order. */
     pub ping: ping::Behaviour,
     pub identify: identify::Behaviour,
@@ -22,7 +28,7 @@ struct ComposedBehaviour {
     pub kad: kad::Behaviour<kad::store::MemoryStore>,
     pub gossipsub: gossipsub::Behaviour,
     // pub reqresp: request_response::cbor::Behaviour<PeerMessage, PeerMessage>,
-    
+    //
     pub autonat_server: libp2p::autonat::v2::server::Behaviour,
     /// - the `Default` is so measle that it's ok to add to every node
     /// - hence it is incapable to transfer any Neptune message
@@ -34,7 +40,7 @@ struct ComposedBehaviour {
 }
 impl ComposedBehaviour {
     pub const PROTOCOL_VERSION: &str = "/neptune/0.0.1";
-    
+
     pub fn new_swarm(local_keypair: libp2p::identity::Keypair) -> Swarm<ComposedBehaviour> {
         libp2p::SwarmBuilder::with_existing_identity(local_keypair).with_tokio()
         .with_tcp(
@@ -47,13 +53,13 @@ impl ComposedBehaviour {
             ComposedBehaviour {
                 relay_client: relay_behaviour,
                 dcutr: libp2p::dcutr::Behaviour::new(local_id),
-                
+
                 // black list
                 // connection limit
 
                 ping: ping::Behaviour::new(Default::default()),
                 identify: identify::Behaviour::new(identify::Config::new_with_signed_peer_record(
-                    Self::PROTOCOL_VERSION.to_owned(), 
+                    Self::PROTOCOL_VERSION.to_owned(),
                     kp // we don't want someone to impose punishment on another peer
                 )),
                 autonat_client: Default::default(),
@@ -77,7 +83,7 @@ impl ComposedBehaviour {
                         /* The primary reason for this choice is that we will need to hide a tx author anyway. A secondary reason is that 
                         until we don't get back to the signer for anything on the message the sig isn't useful as it's as good as signing
                         with an ephemeral key. */
-                        gossipsub::MessageAuthenticity::RandomAuthor, 
+                        gossipsub::MessageAuthenticity::RandomAuthor,
 
                         match gossipsub::ConfigBuilder::default().validate_messages().validation_mode(gossipsub::ValidationMode::Permissive)
                         .idontwant_on_publish(true)
@@ -89,12 +95,12 @@ impl ComposedBehaviour {
                         casual if not frequent; and that might make a lot of difference.
                                 @skaunov just remembered proposals: so not so rare. Still significantly infrequent than txs. */
                         .set_topic_max_transmit_size(
-                            IdentTopic::new(crate::application::loops::main_loop::p2p::TOPIC_TX_PROOFCOL_).hash(), 
+                            IdentTopic::new(crate::application::loops::main_loop::p2p::TOPIC_TX_PROOFCOL_).hash(),
                             TX_SINGLEPROOF_SIZE
                         )
                         .set_topic_max_transmit_size(
-                            IdentTopic::new(TOPIC_TX_PROOFCOL_NOTIF).hash(), 
-                            (8 * 5 + 8 * 5 + 1 + 16 + 8 + 8) * 10 // `* 10` just to be on a safe side and account for overheads as it's so small
+                            IdentTopic::new(TOPIC_TX_PROOFCOL_NOTIF).hash(),
+                            (8 * 5 + 8 * 5 + 1 + 16 + 8 + 8) * 10 // `* 10` is just to be on a safe side and account for overheads as it's so small
                         ).build() {
                             Ok(conf) => conf,
                             Err(e) => {
@@ -108,12 +114,12 @@ impl ComposedBehaviour {
                     b.with_peer_score(Default::default(), Default::default()).expect("scoring is default; `gossipsub::Behaviour` is just instantiated");
                     b
                 },
-                /* ~~[10 MiB](https://docs.rs/libp2p/latest/libp2p/request_response/cbor/type.Behaviour.html#default-size-limits) seems good even for a batch of the block~~ */
+                /* #libp2p_reqresp_ ~~[10 MiB](https://docs.rs/libp2p/latest/libp2p/request_response/cbor/type.Behaviour.html#default-size-limits) seems good even for a batch of the block~~ */
                 // reqresp: request_response::cbor::Behaviour::<PeerMessage, PeerMessage>::new(
                 //     [(libp2p::StreamProtocol::new("/nept-reqresp"), request_response::ProtocolSupport::Full)],
                 //     request_response::Config::default().with_request_timeout(
                 //         /* probably a bad choice; yet relies just because a challenge request is valid for 45 secs; 
-                //         TODO also needs to carry the block (10 of them?) */
+                //         ~~also needs to carry the block (10 of them?)~~ */
                 //         Duration::from_mins(1)
                 //     )
                 // ),

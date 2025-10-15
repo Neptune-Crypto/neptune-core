@@ -365,7 +365,8 @@ impl ArchivalState {
         let mut block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path).await?;
 
         // Check if we should use the last file, or we need a new one.
-        if crate::state::shared::new_block_file_is_needed(&block_file, serialized_block_size).await {
+        if crate::state::shared::new_block_file_is_needed(&block_file, serialized_block_size).await
+        {
             last_rec = LastFileRecord {
                 last_file: last_rec.last_file + 1,
             };
@@ -419,7 +420,11 @@ impl ArchivalState {
         // Write to file with `mmap`, only map relevant part of file into memory we use `spawn_blocking` to make the blocking `mmap` async-friendly.
         tokio::task::spawn_blocking(move || {
             let mmap = unsafe {
-                MmapOptions::new().offset(pos).len(serialized_block_size as usize).map(&block_file).unwrap()
+                MmapOptions::new()
+                    .offset(pos)
+                    .len(serialized_block_size as usize)
+                    .map(&block_file)
+                    .unwrap()
             };
             let mut mmap: memmap2::MmapMut = mmap.make_mut().unwrap();
             mmap.deref_mut()[..].copy_from_slice(&serialized_block);
@@ -428,13 +433,15 @@ impl ArchivalState {
             This ensures block data is written to the <blkXX.dat> file before updating the DB. Otherwise we can have situations where the DB
             references a block that does not exist on disk. */
             mmap.flush().unwrap();
-        }).await?;
+        })
+        .await?;
 
         // Update block index database with newly stored block
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
         let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
         let num_additions: u64 = new_block
-            .mutator_set_update().expect("MS update for new block must exist")
+            .mutator_set_update()
+            .expect("MS update for new block must exist")
             .additions
             .len()
             .try_into()
@@ -841,10 +848,18 @@ impl ArchivalState {
     /// Returns `None` if no block with this digest is known. Returns the
     /// genesis header if the block digest is that of the genesis block.
     pub(crate) async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
-        self.block_index_db.get(BlockIndexKey::Block(block_digest)).await.map(|x| x.as_block_record().block_header).or_else(|| {
-            // If no block was found, check if digest is genesis digest
-            if block_digest == self.genesis_block.hash() {Some(*self.genesis_block.header())} else {None}
-        })
+        self.block_index_db
+            .get(BlockIndexKey::Block(block_digest))
+            .await
+            .map(|x| x.as_block_record().block_header)
+            .or_else(|| {
+                // If no block was found, check if digest is genesis digest
+                if block_digest == self.genesis_block.hash() {
+                    Some(*self.genesis_block.header())
+                } else {
+                    None
+                }
+            })
     }
 
     /// Returns the block header with a witness to the block hash if that block
@@ -1003,13 +1018,15 @@ impl ArchivalState {
     pub(crate) async fn block_belongs_to_canonical_chain(&self, block_digest: Digest) -> bool {
         if let Some(block_header) = self.get_block_header(block_digest).await {
             self.archival_block_mmr
-            .ammr()
-            .try_get_leaf(block_header.height.into())
-            .await
-            .is_some_and(|canonical_digest_at_this_height| {
-                canonical_digest_at_this_height == block_digest
-            })
-        } else {false}
+                .ammr()
+                .try_get_leaf(block_header.height.into())
+                .await
+                .is_some_and(|canonical_digest_at_this_height| {
+                    canonical_digest_at_this_height == block_digest
+                })
+        } else {
+            false
+        }
     }
 
     /// Return a list of digests of the ancestors to the requested digest. Does not include the input

@@ -115,7 +115,9 @@ impl PeerInfo {
         self
     }
 
-    pub(crate) fn instance_id(&self) -> PeerId {self.peer_id}
+    pub(crate) fn instance_id(&self) -> PeerId {
+        self.peer_id
+    }
 
     pub fn standing(&self) -> PeerStanding {
         self.standing
@@ -150,8 +152,8 @@ impl PeerInfo {
 
     /// Return the socket address that the peer is expected to listen on. Returns `None` if peer does not accept
     /// incoming connections.
-    /* TODO if this will remain relevant, there are better ways to get this from `Swarm` 
-    (through `identify::` peer info, exposing `swarm_listeners` and relevant, ...) */
+    ///
+    /// #[deprecated = "With `pub(crate)` visibility it's not needed anymore -- `Swarm` can return the data better if needed. (Also distincting the binded addresses and the observed from outside.)"]
     pub(crate) fn listen_address(&self) -> Option<SocketAddr> {
         self.peer_connection_info
             .port_for_incoming_connections

@@ -9,7 +9,9 @@ use tracing_subscriber::FmtSubscriber;
 pub fn main() -> Result<()> {
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
-        .enable_time().build().expect("Could not create tokio runtime");
+        .enable_time()
+        .build()
+        .expect("Could not create tokio runtime");
 
     let run_result = tokio_runtime.block_on(async {
         // Fetch the CLI arguments
@@ -51,10 +53,13 @@ pub fn main() -> Result<()> {
 fn set_up_logger() {
     tracing::subscriber::set_global_default(
         FmtSubscriber::builder()
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn")))
-        .with_thread_ids(true)
-        .finish()
+            .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+            .with_env_filter(
+                EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn")),
+            )
+            .with_thread_ids(true)
+            .finish(),
     )
     .map_err(|_err| eprintln!("Unable to set global default subscriber"))
     .expect("Failed to set trace subscriber");

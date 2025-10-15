@@ -67,21 +67,18 @@ Windows should just work out-of-the-box with cargo build etc.
 ## Running & Connecting
 
 - Generate a wallet file: `neptune-cli generate-wallet`
-- Run neptune-core daemon: `neptune-core` with flags
-    - `--peer [ip_address:port]` to connect to a given peer, for instance
-      `--peer 51.15.139.238:9798` or `--peer 139.162.193.206:9798` or
-      `--peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798`.
+- Run Nepture Core daemon: `neptune-core` with flags
+    - `--peer [multiaddress]` to connect to a given peer, for instance
+      `--peer /ip4/51.15.139.238/tcp/9798` or `--peer /ip4/139.162.193.206/tcp/9798` or
+      `--peer /ip6/2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9/tcp/9798`.
     - `--compose --guess` to mine — if you want to generate coins
     - `--help` to get a list of available command-line arguments
 
-If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience
-that you will then be able to open and receive connections to other nodes through Nepture Core's
-built-in peer-discovery process.
+If you don't have a static IPv4 address, then try connecting to other nodes via IPv6. It's our experience that you will then be able to open and receive connections to other nodes through Nepture Core's built-in peer-discovery process.
 
 ## Documentation
 
-Documentation uses [https://rust-lang.github.io/mdBook/](mdBook). To run a local copy:
-
+Documentation uses [https://rust-lang.github.io/mdBook/](mdBook). To run a local copy.
 - install mdBook: `cargo install mdbook`
 - enter into the `docs/` directory: `cd docs`
 - run server: `mdbook serve --open`

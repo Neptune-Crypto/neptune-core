@@ -86,31 +86,30 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
     cli: &cli_args::Args,
     connecting_ip: IpAddr,
 ) -> bool {
-    let connecting_ip = match connecting_ip {
-        IpAddr::V4(_) => connecting_ip,
-        IpAddr::V6(v6) => match v6.to_ipv4() {
-            Some(v4) => std::net::IpAddr::V4(v4),
-            None => connecting_ip,
-        },
-    };
-    if cli.restrict_peers_to_list {
-        if crate::application::loops::main_loop::p2p::tmp_utils_multiaddr::membership::is_ipadr_in_madrs(connecting_ip, cli.peers.iter()) {
-            debug!("Rejecting incoming connection from unlisted peer {connecting_ip} due to `--restrict-peers-to-list`");
-            return false;
-        }
-    }
-
-    if cli.ban.contains(&connecting_ip) {
-        debug!("Rejecting incoming connection because it's explicitly banned");
-        return false;
-    }
-
     if cli.disallow_all_incoming_peer_connections() {
         debug!("Rejecting incoming connection because all incoming connections are disallowed");
-        return false;
-    }
+        false
+    } else {
+        let connecting_ip = match connecting_ip {
+            IpAddr::V4(_) => connecting_ip,
+            IpAddr::V6(v6) => match v6.to_ipv4() {
+                Some(v4) => std::net::IpAddr::V4(v4),
+                None => connecting_ip,
+            },
+        };
+        if cli.restrict_peers_to_list
+            && !crate::application::loops::main_loop::p2p::tmp_utils_multiaddr::membership::
+            is_ipadr_in_madrs(connecting_ip, cli.peers.iter()) {
+                debug!("Rejecting incoming connection from unlisted peer {connecting_ip} due to `--restrict-peers-to-list`");
+                false
+            }
+        else if cli.ban.contains(&connecting_ip) {
+            debug!("Rejecting incoming connection because it's explicitly banned");
+            false
+        }
 
-    true
+        else {true}
+    }
 }
 
 /// Check if connection is allowed. Used for both ingoing and outgoing connections.
@@ -181,8 +180,7 @@ async fn check_if_connection_is_allowed(
 
     // Disallow connection to already connected peer.
     if global_state.net.peer_map.values().any(|peer| {
-        peer.instance_id() == other_handshake.peer_id
-            || *peer_address == peer.connected_address()
+        peer.instance_id() == other_handshake.peer_id || *peer_address == peer.connected_address()
     }) {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
     }
@@ -366,7 +364,8 @@ where
         *peer_handshake_data,
         true,
         peer_distance,
-    ).run_wrapper(peer, main_to_peer_task_rx)
+    )
+    .run_wrapper(peer, main_to_peer_task_rx)
     .await?;
 
     Ok(())
@@ -540,7 +539,9 @@ where
         *other_handshake,
         false,
         peer_distance,
-    ).run_wrapper(peer, main_to_peer_task_rx).await?;
+    )
+    .run_wrapper(peer, main_to_peer_task_rx)
+    .await?;
 
     Ok(())
 }
@@ -703,9 +704,11 @@ mod tests {
             "Default behavior: connection allowed"
         );
 
-        cli.peers.push(crate::application::loops::main_loop::p2p::tmp_utils_multiaddr::multiaddr_from(
-            &socket_address
-        ));
+        cli.peers.push(
+            crate::application::loops::main_loop::p2p::tmp_utils_multiaddr::multiaddr_from(
+                &socket_address,
+            ),
+        );
         assert!(
             precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
             "Incoming allowed when incoming is specified peer"
@@ -1073,7 +1076,7 @@ mod tests {
             state_lock.clone(),
             &own_handshake,
             &other_handshake,
-            &get_dummy_socket_address(55)
+            &get_dummy_socket_address(55),
         )
         .await;
         assert_eq!(

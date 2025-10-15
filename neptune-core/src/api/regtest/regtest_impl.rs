@@ -212,7 +212,7 @@ impl RegTestPrivate {
         let block_hash = block.hash();
 
         /* inform main-loop.  to add to mempool and broadcast.
-        
+
         ideally we would pass a listener here to wait on, so that once the block is added we get notified, rather than polling. */
         self.global_state_lock.rpc_server_to_main_tx()
             .send(RPCServerToMain::ProofOfWorkSolution(Box::new(block)))

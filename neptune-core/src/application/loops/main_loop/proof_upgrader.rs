@@ -522,14 +522,22 @@ impl UpgradeJob {
                     // Inform all peers about our hard work
 
                     if [
-                        main_to_peer_channel.send(MainToPeerTask::TransactionNotification((&upgraded).try_into().unwrap())),
-                        main_to_peer_channel.send(MainToPeerTask::NewTransaction((&upgraded).try_into().unwrap())),
-                    ].into_iter().any(|r| r.is_err()) {
-                        // panic only if receiver_count is non-zero.
-                        let receiver_count = main_to_peer_channel.receiver_count();
+                        main_to_peer_channel.send(MainToPeerTask::TransactionNotification(
+                            (&upgraded).try_into().unwrap(),
+                        )),
+                        main_to_peer_channel.send(MainToPeerTask::NewTransaction(
+                            (&upgraded).try_into().unwrap(),
+                        )),
+                    ]
+                    .into_iter()
+                    .any(|r| r.is_err())
+                    {
+                        // panic only if `receiver_count` is non-zero.
                         assert_eq!(
-                            receiver_count, 0,
-                            "failed to broadcast a message from main to {} peers", receiver_count, // e
+                            main_to_peer_channel.receiver_count(),
+                            0,
+                            "failed to broadcast a message from main to peers",
+                            // receiver_count, e
                         );
                     }
 

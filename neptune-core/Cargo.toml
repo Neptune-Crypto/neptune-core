@@ -119,8 +119,27 @@ thread-priority = "1.2.0"
 rayon = "1.10"
 humantime = "2.1.0"
 
-# TODO leave just the relevant features
-libp2p = {version = "*", features = ["full"]}
+libp2p = {version = "*", features = [
+    # "full"
+    "autonat",
+    # "cbor",
+    "dcutr",
+    "dns",
+    "ed25519",
+    "gossipsub",
+    "identify",
+    "kad",
+    "macros",
+    "noise",
+    "ping",
+    "quic",
+    "relay",
+    "tcp",
+    "tls",
+    "tokio",
+    "yamux",
+    "serde",
+]}
 
 # align `version` with `libp2p::request_response::cbor::Behaviour`
 # cbor4ii = {version = "1", features = ["serde1"]}

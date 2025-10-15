@@ -127,10 +127,13 @@ impl NetworkingState {
     pub async fn initialize_peer_databases(data_dir: &DataDirectory) -> Result<PeerDatabases> {
         DataDirectory::create_dir_if_not_exists(&data_dir.database_dir_path()).await?;
 
-        Ok(PeerDatabases { peer_standings: NeptuneLevelDb::<IpAddr, PeerStanding>::new(
-            &data_dir.banned_ips_database_dir_path(),
-            &create_db_if_missing(),
-        ).await? })
+        Ok(PeerDatabases {
+            peer_standings: NeptuneLevelDb::<IpAddr, PeerStanding>::new(
+                &data_dir.banned_ips_database_dir_path(),
+                &create_db_if_missing(),
+            )
+            .await?,
+        })
     }
 
     /// Return a list of peer sanctions stored in the database.

@@ -26,7 +26,9 @@ const DB_MIGRATION_BACKUPS_DIR: &str = "migration_backups";
 
 /// Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DataDirectory {data_dir: PathBuf}
+pub struct DataDirectory {
+    data_dir: PathBuf,
+}
 
 impl DataDirectory {
     ///////////////////////////////////////////////////////////////////////////
@@ -44,9 +46,11 @@ impl DataDirectory {
             .unwrap_or_else(|| ProjectDirs::from("org", "neptune", "neptune"))
             .context("Could not determine data directory")?;
 
-        Ok(DataDirectory { 
-            data_dir: project_dirs.data_dir().to_path_buf()
-            .join(Path::new(&network.to_string())) 
+        Ok(DataDirectory {
+            data_dir: project_dirs
+                .data_dir()
+                .to_path_buf()
+                .join(Path::new(&network.to_string())),
         })
     }
 
@@ -130,7 +134,8 @@ impl DataDirectory {
 
     /// directory for storing database backups before migrating schema to newer version
     pub fn db_migration_backups_dir_path(&self) -> PathBuf {
-        self.database_dir_path().join(Path::new(DB_MIGRATION_BACKUPS_DIR))
+        self.database_dir_path()
+            .join(Path::new(DB_MIGRATION_BACKUPS_DIR))
     }
 
     /// returns next unused path for wallet database backup

@@ -81,7 +81,7 @@ pub(crate) enum MinerToMain {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MainToPeerTaskBatchBlockRequest {
     /// The peer to whom this request should be directed.
-    /// 
+    ///
     /// TODO #libp2p_reqresp_BatchBlock
     pub(crate) peer_addr_target: SocketAddr,
 
@@ -115,38 +115,38 @@ impl From<&Block> for BlockProposalNotification {
 #[derive(Clone, Debug, strum::Display, PartialEq)]
 pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
-    #[deprecated(since = "switching to `libp2p`")]
+    /// #[deprecated(since = "switching to `libp2p`")]
     BlockProposalNotification(BlockProposalNotification),
-    BlockProposal(Block),
+    BlockProposal(Box<Block>),
     RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
 
     /// sanction a peer for failing to respond to sync request
-    /// 
+    ///
     /// TODO #libp2p_reqresp_Sync
-    PeerSynchronizationTimeout(SocketAddr), 
+    PeerSynchronizationTimeout(SocketAddr),
 
     /// Request peer list from connected peers
     MakePeerDiscoveryRequest,
 
     /// Request peers from a specific peer to get peers further away
-    /// 
+    ///
     /// TODO #libp2p_reqresp_px
-    MakeSpecificPeerDiscoveryRequest(SocketAddr), 
+    MakeSpecificPeerDiscoveryRequest(SocketAddr),
 
     /// Publish knowledge of a transaction
-    /// 
-    #[deprecated(since = "switching to `libp2p`")]
+    ///
+    /// #[deprecated(since = "switching to `libp2p`")]
     TransactionNotification(TransactionNotification),
 
     NewTransaction(crate::protocol::peer::transfer_transaction::TransferTransaction),
 
     /// Disconnect from a specific peer
-    /// 
-    #[deprecated(since = "switching to `libp2p`")]
+    ///
+    /// #[deprecated(since = "switching to `libp2p`")]
     Disconnect(SocketAddr),
 
     /// Disconnect from all peers
-    Quit
+    Quit,
 }
 
 impl MainToPeerTask {
@@ -184,7 +184,7 @@ pub(crate) enum PeerTaskToMain {
     RemovePeerMaxBlockHeight(SocketAddr),
 
     /// (\[(peer_listen_address)\], reported_by, distance)
-    /// 
+    ///
     /// TODO #libp2p_reqresp_px
     PeerExchangeAnswer((Vec<(SocketAddr, PeerId)>, SocketAddr, u8)),
 
@@ -192,7 +192,6 @@ pub(crate) enum PeerTaskToMain {
     BlockProposal(Box<Block>),
     /// #[deprecated(since = "switching to `libp2p`")]
     DisconnectFromLongestLivedPeer,
-
     // Sanction(libp2p::PeerId, crate::protocol::peer::PeerSanction)
 }
 

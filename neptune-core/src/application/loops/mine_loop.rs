@@ -928,7 +928,9 @@ pub(crate) async fn mine(
             }
         }
 
-        if stop_looping {break}
+        if stop_looping {
+            break;
+        }
     }
     debug!("Miner shut down gracefully.");
 }

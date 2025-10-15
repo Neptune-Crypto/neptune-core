@@ -118,15 +118,32 @@ impl TransactionKernel {
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> Result<(), TransactionConfirmabilityError> {
-        // check validity of removal records
-        //       ^^^^^^^^
+        // check __validity__ of removal records
 
         // meaning: a) all required membership proofs exist; and b) are valid.
-        if let Some(index ) = self.inputs.iter().position(|rr| !rr.validate(mutator_set_accumulator)) {
+        if let Some(index) = self
+            .inputs
+            .iter()
+            .position(|rr| !rr.validate(mutator_set_accumulator))
+        {
             Err(TransactionConfirmabilityError::InvalidRemovalRecord(index))
-        } else if self.inputs.iter().duplicates_by(|rr| rr.absolute_indices).next().is_some() {Err(TransactionConfirmabilityError::DuplicateInputs)} 
-        else if let Some(index) = self.inputs.iter().position(|rr| !mutator_set_accumulator.can_remove(rr)) 
-        {Err(TransactionConfirmabilityError::AlreadySpentInput(index))} else {Ok(())}
+        } else if self
+            .inputs
+            .iter()
+            .duplicates_by(|rr| rr.absolute_indices)
+            .next()
+            .is_some()
+        {
+            Err(TransactionConfirmabilityError::DuplicateInputs)
+        } else if let Some(index) = self
+            .inputs
+            .iter()
+            .position(|rr| !mutator_set_accumulator.can_remove(rr))
+        {
+            Err(TransactionConfirmabilityError::AlreadySpentInput(index))
+        } else {
+            Ok(())
+        }
     }
 
     /// Returns `true` iff the "output" transaction kernel is a merged

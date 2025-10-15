@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::time::SystemTime;
 
-use libp2p::Multiaddr;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 

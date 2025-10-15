@@ -866,18 +866,25 @@ impl GlobalState {
                 received: incoming_proposal_prev_block_digest,
                 expected: current_tip_digest,
             })
-        } else if self.mining_state.block_proposal.has_own() {Err(BlockProposalRejectError::HasOwnBlockProposal)} 
-        else {
+        } else if self.mining_state.block_proposal.has_own() {
+            Err(BlockProposalRejectError::HasOwnBlockProposal)
+        } else {
             let maybe_existing_fee = self.mining_state.block_proposal.map(|x| {
-                x.body().total_guesser_reward().expect("block in state must be valid")
+                x.body()
+                    .total_guesser_reward()
+                    .expect("block in state must be valid")
             });
-            if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee) || 
-            incoming_guesser_fee.is_zero() {
+            if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
+                || incoming_guesser_fee.is_zero()
+            {
+                // TODO that condition repeats and it feels like `incoming_guesser_fee.is_zero()` should be separated from `InsufficientFee` variant
                 Err(BlockProposalRejectError::InsufficientFee {
                     current: maybe_existing_fee,
                     received: incoming_guesser_fee,
                 })
-            } else {Ok(())}
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -2289,7 +2296,9 @@ impl GlobalState {
                     };
 
                     ensure!(
-                        block.is_valid(&predecessor, &Timestamp::now(), self.cli.network).await,
+                        block
+                            .is_valid(&predecessor, &Timestamp::now(), self.cli.network)
+                            .await,
                         "Attempted to process a block from {} \
                         which is invalid. Block height: {block_height}.",
                         block_file_path.to_string_lossy()

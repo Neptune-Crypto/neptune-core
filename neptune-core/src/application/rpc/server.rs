@@ -3492,12 +3492,16 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // Since block comes from external source, we need to check validity.
-        if proposal.is_valid(
-            &self.state.lock_guard().await.chain.light_state().clone(), 
-            &Timestamp::now(), 
-            self.state.cli().network
-        ).await {self.pow_solution_inner(proposal, pow).await} 
-        else {
+        if proposal
+            .is_valid(
+                &self.state.lock_guard().await.chain.light_state().clone(),
+                &Timestamp::now(),
+                self.state.cli().network,
+            )
+            .await
+        {
+            self.pow_solution_inner(proposal, pow).await
+        } else {
             warn!("Got claimed new block that was not valid");
             Ok(false)
         }

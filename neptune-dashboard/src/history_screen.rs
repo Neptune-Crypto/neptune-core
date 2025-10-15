@@ -266,7 +266,6 @@ impl Widget for HistoryScreen {
 
         // chart
         // ?
-        // 
 
         // table
         let style = Style::default().fg(self.fg).bg(self.bg);

@@ -79,15 +79,13 @@ pub struct Args {
     ///
     /// To do this, see `--peer`.
     ///
-    /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8
-    /// 
-    /// TODO #libp2p_adapt
+    /// E.g.: `--ban 1.2.3.4 --ban 5.6.7.8`.
     #[clap(long, value_name = "IP")]
-    pub(crate) ban: Vec<IpAddr>,
+    pub(crate) ban: Vec<IpAddr>, // #libp2p_adapt @skaunov fell this need a reason/example/case to be preserved & adapted to `libp2p`
 
     /// The threshold at which a peer's standing is considered “bad”. Current
-    /// connections to peers in bad standing are terminated. Connection attempts (TODO #punish requests)
-    /// from peers in bad standing are refused (TODO #punish ignored).
+    /// connections to peers in bad standing are terminated. Connection attempts (requests)
+    /// from peers in bad standing are refused (ignored).
     ///
     /// For a list of reasons that cause bad standing, see
     /// [`NegativePeerSanction`](crate::protocol::peer::NegativePeerSanction).
@@ -100,23 +98,19 @@ pub struct Args {
     pub(crate) peer_tolerance: u16,
 
     /// Only connect to the peers specified by `--peer`.
-    /// 
+    ///
     /// When this flag is set, peer discovery is disabled and incoming
     /// connections from unlisted peers are rejected.
-    /// 
-    /// TODO #libp2p_adapt
     #[arg(long)]
-    pub restrict_peers_to_list: bool,
+    pub restrict_peers_to_list: bool, // #libp2p_adapt Won't Gossip-sub handle the cases where this is needed now? And the other relevant `Swarm` components aren't added yet.
 
     /// Maximum number of peers to accept connections from.
     ///
     /// Will not prevent outgoing connections made with `--peer`.
     /// Set this value to 0 to refuse all incoming connections.
-    /// 
-    /// #[deprecated(
-    ///     note = "if this is just about the topology: Gossip-sub has a similar settings but it's 1) a range, 2) further nuanced to interrelated parameters (like 'mesh' peers), 3) changing this requires restarting `Swarm`", 
-    ///     since = "switching to `libp2p`"
-    /// )]
+    ///
+    // #[deprecated =
+    // "if this is just about the topology: Gossip-sub has a similar settings but it's 1) a range, 2) further nuanced to interrelated parameters (like 'mesh' peers), 3) changing this requires restarting `Swarm`"]
     #[clap(
         long,
         default_value = "10",
@@ -230,8 +224,7 @@ pub struct Args {
 
     /// If set, node will only accept block proposals from these IP addresses.
     ///
-    /// Multiple IP address can be set in which case the node will accept
-    /// block proposals from any node connected from an IP in this list. Apart
+    /// Multiple IP address can be set in which case the node will accept block proposals from any node connected from an IP in this list. Apart
     /// from ignoring all other block proposals, this argument does not change
     /// the proposal-selection behavior, meaning that the node will still pick
     /// the most favorable block proposal in terms of guesser rewards, as long
@@ -239,9 +232,7 @@ pub struct Args {
     ///
     /// Example: `--whitelisted-composer=8.8.8.8 --whitelisted-composer=8.8.4.4`
     ///          `--whitelisted-composer=2001:db8:3333:4444:5555:6666:7777:8888`
-    /// ```rust
-    /// todo!["<https://github.com/Neptune-Crypto/neptune-core/pull/729#issuecomment-3385405210>; update and test the examples"]
-    /// ```
+    /// #[deprecated = "resolve <https://github.com/Neptune-Crypto/neptune-core/pull/729#issuecomment-3385405210> then update (`Multiaddr`) and test the examples accordingly"]
     #[clap(long = "whitelisted-composer")]
     pub(crate) whitelisted_composers: Vec<Multiaddr>, // Addresses
 
@@ -352,29 +343,24 @@ pub struct Args {
     ///
     /// Default: 1000.
     ///
-    /// The process running this program should have access to enough RAM: at
-    /// least the number of blocks set by this argument multiplied with the max
-    /// block size (around 2 MB). Probably 1.5 to 2 times that amount for good
-    /// margin.
+    /// The process running this program should have access to enough RAM: at least the number of blocks set by this argument multiplied with the max
+    /// block size (around 2 MB). Probably 1.5 to 2 times that amount for good margin.
     // Notice that the minimum value here may not be less than
-    // [SYNC_CHALLENGE_POW_WITNESS_LENGTH](crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH)
+    // [`SYNC_CHALLENGE_POW_WITNESS_LENGTH`](crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH)
     // as that would prevent going into sync mode.
     #[clap(long, default_value = "1000", value_parser(RangedI64ValueParser::<usize>::new().range(10..100000)))]
     pub(crate) sync_mode_threshold: usize,
 
-    /// IPs of nodes to connect to, e.g.: --peer 8.8.8.8:9798 --peer 8.8.4.4:1337.
-    /// 
+    /// IPs of nodes to connect to, e.g.: `--peer /ip4/8.8.8.8 --peer /ip4/8.8.4.4/udp/1337/quic-v1`.
+    ///
     /// It's easier to connect without `/p2p/...` in the end of the address.
-    /// 
+    ///
     /// The trust assumptions are interpreted in spirit of multiaddress.
     /// - without `/p2p/...` it will be adding any peer found on the endpoint
     /// - with `/p2p/...` connections to the given endpoint will fail if the peer id there had changed
-    /// - with only `/p2p/...` it will be trying to reach the peer (if the node will ever find how to connect to the network)
-    /// ```rust
-    /// todo!["update and test the examples"]
-    /// ```
+    /// - with only `/p2p/...` it will be trying to reach this peer (if the node will ever find how to connect to the network)
     #[structopt(long = "peer")]
-    pub peers: Vec<Multiaddr>, // Addresses
+    pub peers: Vec<Multiaddr>,
 
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "main", short)]
@@ -448,11 +434,9 @@ pub struct Args {
     /// Does not affect abnormally closed connections. For example, if a connection
     /// is dropped due to networking issues, an immediate reconnection attempt is
     /// not affected by this cooldown.
-    /// 
-    /// #[deprecated(
-    ///     note = "Gossip-sub has a similar settings ('backoff'), but this doesn't seem to be good for straightforward adapting", 
-    ///     since = "switching to `libp2p`"
-    /// )]
+    ///
+    // #[deprecated =
+    // "Gossip-sub has a similar settings ('backoff'), but this doesn't seem to be good for straightforward adapting"]
     //
     // The default should be larger than the default interval between peer discovery
     // to meaningfully suppress rapid reconnection attempts.
@@ -544,20 +528,24 @@ pub struct Args {
     pub(crate) scan_keys: Option<usize>,
 
     /// Stops picking a random peer id for the node on each run.
-    /// 
+    ///
     /// Needed for well-known nodes which want to have trust in their peer id, or leverage the high score in the network, or been found by the peer id.
-    /// 
+    ///
     /// On first usage it creates the file <.peer_id> with the keypair used only for that reputation. If you need a new persistent id --- remove this file
-    /// from its location in your data dir. (For ephemeral new ids its enough just to remove the argument flag from invocation.) 
-    /// 
-    /// > Warning: *If you copy your node or restore from a back-up make sure to avoid peer id collision.* Change the id (by removing the file), or just 
+    /// from its location in your data dir. (For ephemeral new ids its enough just to remove the argument flag from invocation.)
+    ///
+    /// > Warning: *If you copy your node or restore from a back-up make sure to avoid peer id collision.* Change the id (by removing the file), or just
     /// > don't run them simultaneously, etc -- anything what fits your usecase.
     // #[clap(num_args(0..=1))]
     #[clap(long)]
-    pub(crate) persistent: bool
+    pub(crate) persistent: bool,
 }
 
-impl Default for Args {fn default() -> Self {Self::parse_from(Vec::<String>::new())}}
+impl Default for Args {
+    fn default() -> Self {
+        Self::parse_from(Vec::<String>::new())
+    }
+}
 
 fn fraction_validator(s: &str) -> Result<f64, String> {
     let value = s
@@ -630,22 +618,16 @@ fn parse_range(unparsed_range: &str) -> Result<RangeInclusive<u64>, String> {
 
 impl Args {
     /// Indicates if all incoming peer connections are disallowed.
-    /// 
-    /// #[deprecated(
-    ///     note = "if this remains to be a feature it needs another implementation", 
-    ///     since = "switching to `libp2p`"
-    /// )]
+    ///
+    /// #[deprecated = "if this remains to be a feature it needs another implementation"]
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
         self.max_num_peers.is_zero()
     }
 
     /// Return the port that peer can connect on. None if incoming connections
     /// are disallowed.
-    /// 
-    /// #[deprecated(
-    ///     note = "change this to `Vec` of multiadr because of relays", 
-    ///     since = "switching to `libp2p`"
-    /// )]
+    ///
+    /// #[deprecated = "change this to `Vec` of multiadr because of relays"]
     pub(crate) fn own_listen_port(&self) -> Option<u16> {
         if self.disallow_all_incoming_peer_connections() {
             None
@@ -684,37 +666,46 @@ impl Args {
         })
     }
 
-    /// Check if block proposal should be accepted from this address. 
+    /// Check if block proposal should be accepted from this address.
     pub(crate) fn accept_block_proposal_from(
         &self,
-        mut peer: Multiaddr
+        mut peer: Multiaddr,
     ) -> Result<(), BlockProposalRejectError> {
         if self.ignore_foreign_compositions {
             Err(BlockProposalRejectError::IgnoreAllForeign)
+        } else if self.whitelisted_composers.is_empty() {
+            Ok(())
         } else {
-            if self.whitelisted_composers.is_empty() {Ok(())} else {
-                // if let Some(peer_id) = peer.pop() {
-                //     debug_assert!(
-                //         matches!(peer_id, libp2p::multiaddr::Protocol::P2p(_)), 
-                //         r#"@skaunov can't find a case when it can come without `PeerId` ending, but if there is one this can be remade as `if let id @  = peer.iter().last()`"#
-                //     );
-                //     let peer_id = peer_id.into();
-                //     if self.whitelisted_composers.iter().any(|w| w.ends_with(&peer_id) || w.ends_with(&peer)) {Ok(())}
-                //     else {Err(BlockProposalRejectError::NotWhiteListed)}
-                // } else {
-                //     tracing::debug!("something is wrong -- this Multiaddr must not be empty; hence rejecting the operation");
-                //     // ~~seems like going with `anyhow` here to bubble up a deeper internal error which isn't critical~~
-                //     Err(BlockProposalRejectError::NotWhiteListed)
-                // }
-                let (peer_id, peer) = super::super::loops::main_loop::p2p::tmp_utils_multiaddr::peerid_split(&mut peer);
-                if self.whitelisted_composers.iter().any(|w| w.ends_with(&peer)) {Ok(())} else {
-                    if let Some(peer_id) = peer_id {
-                        let peer_id = multiaddr::Protocol::P2p(peer_id).into();
-                        if self.whitelisted_composers.iter().any(|w| w.ends_with(&peer_id)) {return Ok(());}
+            // if let Some(peer_id) = peer.pop() {
+            //     debug_assert!(
+            //         matches!(peer_id, libp2p::multiaddr::Protocol::P2p(_)),
+            //         r#"@skaunov can't find a case when it can come without `PeerId` ending, but if there is one this can be remade as `if let id @  = peer.iter().last()`"#
+            //     );
+            //     let peer_id = peer_id.into();
+            //     if self.whitelisted_composers.iter().any(|w| w.ends_with(&peer_id) || w.ends_with(&peer)) {Ok(())}
+            //     else {Err(BlockProposalRejectError::NotWhiteListed)}
+            // } else {
+            //     tracing::debug!("something is wrong -- this Multiaddr must not be empty; hence rejecting the operation");
+            //     // ~~seems like going with `anyhow` here to bubble up a deeper internal error which isn't critical~~
+            //     Err(BlockProposalRejectError::NotWhiteListed)
+            // }
+            let (peer_id, peer) =
+                super::super::loops::main_loop::p2p::tmp_utils_multiaddr::peerid_split(&mut peer);
+            if self.whitelisted_composers.iter().any(|w| w.ends_with(peer)) {
+                Ok(())
+            } else {
+                if let Some(peer_id) = peer_id {
+                    let peer_id = multiaddr::Protocol::P2p(peer_id).into();
+                    if self
+                        .whitelisted_composers
+                        .iter()
+                        .any(|w| w.ends_with(&peer_id))
+                    {
+                        return Ok(());
                     }
-                    Err(BlockProposalRejectError::NotWhiteListed)
                 }
-            } 
+                Err(BlockProposalRejectError::NotWhiteListed)
+            }
         }
     }
 

@@ -240,7 +240,6 @@ impl Widget for UtxosScreen {
 
         // chart
         // ?
-        // 
 
         // table
         let style = Style::default().fg(self.fg).bg(self.bg);

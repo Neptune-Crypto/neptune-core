@@ -159,7 +159,7 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
 }
 
 /// The reason for improving a peer's standing.
-/// 
+///
 /// We only reward events that are unlikely to occur more frequently than the target block frequency. This should make it impossible for an attacker
 /// to quickly ramp up their standing with peers, provided that they are on the global tip.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -313,6 +313,8 @@ impl Sanction for NegativePeerSanction {
     }
 }
 
+// TODO `PeerSanction` looks much more like the trait which would predate `Sanction` than `enum`
+
 /// The reason for changing a peer's standing.
 ///
 /// Sanctions can be positive (rewards) or negative (punishments).
@@ -337,10 +339,8 @@ impl Sanction for PositivePeerSanction {
 impl Sanction for PeerSanction {
     fn severity(self) -> i32 {
         match self {
-            PeerSanction::Positive(positive_peer_sanction) => 
-                positive_peer_sanction.severity(),
-            PeerSanction::Negative(negative_peer_sanction) => 
-                negative_peer_sanction.severity(),
+            PeerSanction::Positive(positive_peer_sanction) => positive_peer_sanction.severity(),
+            PeerSanction::Negative(negative_peer_sanction) => negative_peer_sanction.severity(),
         }
     }
 }
@@ -399,7 +399,8 @@ impl PeerStanding {
             PeerSanction::Positive(sanction) => self.latest_reward = Some((sanction, now)),
         }
 
-        self.is_good().then_some(())
+        self.is_good()
+            .then_some(())
             .ok_or(StandingExceedsBanThreshold)
     }
 
@@ -873,15 +874,20 @@ impl SyncChallengeResponse {
         let Ok(tip) = Block::try_from(self.tip.clone()) else {
             return false;
         };
-        if !tip.is_valid(&tip_predecessor, &now, network).await || !tip.has_proof_of_work(network, tip_predecessor.header())
-        {return false;}
+        if !tip.is_valid(&tip_predecessor, &now, network).await
+            || !tip.has_proof_of_work(network, tip_predecessor.header())
+        {
+            return false;
+        }
 
         let mut mmra_anchor = tip.body().block_mmr_accumulator.to_owned();
         mmra_anchor.append(tip.hash());
         for ((parent, child), membership_proof) in
             self.blocks.iter().zip(self.membership_proofs.iter())
         {
-            let Ok(child) = Block::try_from(child.clone()) else {return false};
+            let Ok(child) = Block::try_from(child.clone()) else {
+                return false;
+            };
             if membership_proof.verify(
                 child.header().height.into(),
                 child.hash(),
@@ -889,10 +895,17 @@ impl SyncChallengeResponse {
                 mmra_anchor.num_leafs(),
             ) {
                 if let Ok(parent) = Block::try_from(parent.clone()) {
-                    if !child.is_valid(&parent, &now, network).await || 
-                    !child.has_proof_of_work(network, parent.header()) {return false}
-                } else {return false}
-            } else {return false}
+                    if !child.is_valid(&parent, &now, network).await
+                        || !child.has_proof_of_work(network, parent.header())
+                    {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
         }
 
         true

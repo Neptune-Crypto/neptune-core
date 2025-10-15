@@ -15,12 +15,12 @@ const TOPIC_TX_PROOFCOL_: &str = "tx_proofcollection_";
 const TOPIC_TX_PROOFCOL_NOTIF: &str = "tx_proofcollection_notification";
 
 // https://t.me/neptune_dev/526
-const BLOCK_SIZE: usize = 8 * 1 << 20;
-const TX_SINGLEPROOF_SIZE: usize = 3 * 1 << 19;
-const TX_PROOFCOL_SIZE: usize = 65 * 1 << 20;
+const BLOCK_SIZE: usize = 8 << 20;
+const TX_SINGLEPROOF_SIZE: usize = 3 << 19;
+const TX_PROOFCOL_SIZE: usize = 65 << 20;
 
 /// `false` when the m-addr is on a relay itself or doesn't have `Protocol::Tcp`
 fn relay_maybe(adr: &libp2p::Multiaddr) -> bool {
     !adr.protocol_stack().contains(&Protocol::P2pCircuit.tag()) // a relay *client* m-addr differs basically with this part from a relay
     && adr.protocol_stack().contains(&Protocol::Tcp(0).tag())
-} 
+}

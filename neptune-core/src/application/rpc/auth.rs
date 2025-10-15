@@ -79,7 +79,11 @@ type CookieBytes = [u8; 32];
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Cookie(CookieBytes);
 
-impl From<CookieBytes> for Cookie {fn from(bytes: CookieBytes) -> Self {Self(bytes)}}
+impl From<CookieBytes> for Cookie {
+    fn from(bytes: CookieBytes) -> Self {
+        Self(bytes)
+    }
+}
 
 impl Cookie {
     /// try loading cookie from a file
