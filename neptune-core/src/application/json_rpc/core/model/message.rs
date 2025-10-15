@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_tuple::Deserialize_tuple;
 
 use crate::application::json_rpc::core::model::{
-    block::{header::RpcBlockHeader, transaction_kernel::RpcTransactionKernel, RpcBlockProof},
+    block::{
+        body::RpcBlockBody, header::RpcBlockHeader, transaction_kernel::RpcTransactionKernel,
+        RpcBlock, RpcBlockKernel, RpcBlockProof,
+    },
     common::RpcBFieldElements,
 };
 
@@ -28,6 +31,16 @@ pub struct HeightResponse {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
+pub struct BlockRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockResponse {
+    pub block: RpcBlock,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockProofRequest {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -38,12 +51,32 @@ pub struct BlockProofResponse {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
+pub struct BlockKernelRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockKernelResponse {
+    pub kernel: RpcBlockKernel,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockHeaderRequest {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockHeaderResponse {
     pub header: RpcBlockHeader,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockBodyRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockBodyResponse {
+    pub body: RpcBlockBody,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]

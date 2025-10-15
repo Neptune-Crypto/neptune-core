@@ -32,10 +32,19 @@ pub enum RpcMethods {
     Height,
 
     #[namespace(Namespace::Chain)]
+    Block,
+
+    #[namespace(Namespace::Chain)]
     BlockProof,
 
     #[namespace(Namespace::Chain)]
+    BlockKernel,
+
+    #[namespace(Namespace::Chain)]
     BlockHeader,
+
+    #[namespace(Namespace::Chain)]
+    BlockBody,
 
     #[namespace(Namespace::Chain)]
     BlockTransactionKernel,

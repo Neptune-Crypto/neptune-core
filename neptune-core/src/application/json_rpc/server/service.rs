@@ -13,44 +13,53 @@ impl RpcApi for RpcServer {
     }
 
     async fn height_call(&self, _: HeightRequest) -> HeightResponse {
+        let state = self.state.lock_guard().await;
+
         HeightResponse {
-            height: self
-                .state
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .kernel
-                .header
-                .height
-                .into(),
+            height: state.chain.light_state().kernel.header.height.into(),
+        }
+    }
+
+    async fn block_call(&self, _: BlockRequest) -> BlockResponse {
+        let state = self.state.lock_guard().await;
+        let block = state.chain.light_state();
+
+        BlockResponse {
+            block: block.into(),
         }
     }
 
     async fn block_proof_call(&self, _: BlockProofRequest) -> BlockProofResponse {
+        let state = self.state.lock_guard().await;
+        let proof = &state.chain.light_state().proof;
+
         BlockProofResponse {
-            proof: self
-                .state
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .proof
-                .clone()
-                .into(),
+            proof: proof.into(),
+        }
+    }
+
+    async fn block_kernel_call(&self, _: BlockKernelRequest) -> BlockKernelResponse {
+        let state = self.state.lock_guard().await;
+        let kernel = &state.chain.light_state().kernel;
+
+        BlockKernelResponse {
+            kernel: kernel.into(),
         }
     }
 
     async fn block_header_call(&self, _: BlockHeaderRequest) -> BlockHeaderResponse {
+        let state = self.state.lock_guard().await;
+
         BlockHeaderResponse {
-            header: self
-                .state
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .header()
-                .into(),
+            header: state.chain.light_state().header().into(),
+        }
+    }
+
+    async fn block_body_call(&self, _: BlockBodyRequest) -> BlockBodyResponse {
+        let state = self.state.lock_guard().await;
+
+        BlockBodyResponse {
+            body: state.chain.light_state().body().into(),
         }
     }
 
@@ -58,16 +67,10 @@ impl RpcApi for RpcServer {
         &self,
         _: BlockTransactionKernelRequest,
     ) -> BlockTransactionKernelResponse {
+        let state = self.state.lock_guard().await;
+
         BlockTransactionKernelResponse {
-            kernel: self
-                .state
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .body()
-                .transaction_kernel()
-                .into(),
+            kernel: state.chain.light_state().body().transaction_kernel().into(),
         }
     }
 
@@ -75,11 +78,10 @@ impl RpcApi for RpcServer {
         &self,
         _: BlockAnnouncementsRequest,
     ) -> BlockAnnouncementsResponse {
+        let state = self.state.lock_guard().await;
+
         BlockAnnouncementsResponse {
-            announcements: self
-                .state
-                .lock_guard()
-                .await
+            announcements: state
                 .chain
                 .light_state()
                 .body()

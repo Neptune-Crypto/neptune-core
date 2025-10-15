@@ -71,7 +71,7 @@ pub struct BlockBody {
     /// broadcasted transactions that the miner decided to confirm. The inputs
     /// to this transaction kernel must be packed if the consensus rule dictate
     /// that.
-    pub(crate) transaction_kernel: TransactionKernel,
+    pub transaction_kernel: TransactionKernel,
 
     /// The mutator set accumulator represents the UTXO set. It is simultaneously an
     /// accumulator (=> compact representation and membership proofs) and an anonymity
@@ -80,15 +80,15 @@ pub struct BlockBody {
     /// This field represents the state of the MS *after* applying the update
     /// induced by the transaction, but *before* applying the update induced by
     /// guesser fees (and perhaps later composer fees).
-    pub(super) mutator_set_accumulator: MutatorSetAccumulator,
+    pub mutator_set_accumulator: MutatorSetAccumulator,
 
     /// Lock-free UTXOs do not come with lock scripts and do not live in the mutator set.
-    pub(crate) lock_free_mmr_accumulator: MmrAccumulator,
+    pub lock_free_mmr_accumulator: MmrAccumulator,
 
     /// All blocks live in an MMR, so that we can efficiently prove that a given block
     /// lives on the line between the tip and genesis. This MMRA does not contain the
     /// current block.
-    pub(crate) block_mmr_accumulator: MmrAccumulator,
+    pub block_mmr_accumulator: MmrAccumulator,
 
     // This caching ensures that the hash rate is independent of the size of
     // the block's transaction.

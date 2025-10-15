@@ -14,15 +14,30 @@ pub trait RpcApi: Sync + Send {
     }
     async fn height_call(&self, request: HeightRequest) -> HeightResponse;
 
+    async fn block(&self) -> BlockResponse {
+        self.block_call(BlockRequest {}).await
+    }
+    async fn block_call(&self, request: BlockRequest) -> BlockResponse;
+
     async fn block_proof(&self) -> BlockProofResponse {
         self.block_proof_call(BlockProofRequest {}).await
     }
     async fn block_proof_call(&self, request: BlockProofRequest) -> BlockProofResponse;
 
+    async fn block_kernel(&self) -> BlockKernelResponse {
+        self.block_kernel_call(BlockKernelRequest {}).await
+    }
+    async fn block_kernel_call(&self, request: BlockKernelRequest) -> BlockKernelResponse;
+
     async fn block_header(&self) -> BlockHeaderResponse {
         self.block_header_call(BlockHeaderRequest {}).await
     }
     async fn block_header_call(&self, request: BlockHeaderRequest) -> BlockHeaderResponse;
+
+    async fn block_body(&self) -> BlockBodyResponse {
+        self.block_body_call(BlockBodyRequest {}).await
+    }
+    async fn block_body_call(&self, request: BlockBodyRequest) -> BlockBodyResponse;
 
     async fn block_transaction_kernel(&self) -> BlockTransactionKernelResponse {
         self.block_transaction_kernel_call(BlockTransactionKernelRequest {})
