@@ -962,11 +962,14 @@ impl Block {
     }
 
     /// Preprocess block for PoW guessing
-    pub fn guess_preprocess(
+    ///
+    /// This function is reserved for consensus rule set Reboot. For the
+    /// equivalent on Alpha and later, see
+    /// [crate::application::loops::mine_loop::preprocess_task::preprocess_alpha].
+    pub fn guess_preprocess_reboot(
         &self,
         maybe_cancel_channel: Option<&dyn Cancelable>,
         num_guesser_threads: Option<usize>,
-        consensus_rule_set: ConsensusRuleSet,
     ) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
         // build a rayon thread pool that respects the limitation on the number
         // of threads
@@ -977,22 +980,13 @@ impl Block {
             .unwrap();
 
         let prev_block_digest = self.header().prev_block_digest;
-        if consensus_rule_set == ConsensusRuleSet::Reboot {
-            thread_pool.install(|| {
-                Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess_reboot(
-                    self.pow_mast_paths(),
-                    maybe_cancel_channel,
-                    prev_block_digest,
-                )
-            })
-        } else {
-            thread_pool.install(|| {
-                Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess_alpha(
-                    maybe_cancel_channel,
-                    prev_block_digest,
-                )
-            })
-        }
+        thread_pool.install(|| {
+            Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess_reboot(
+                self.pow_mast_paths(),
+                maybe_cancel_channel,
+                prev_block_digest,
+            )
+        })
     }
 
     /// Mock verification of Pow. Use only on networks that allow for PoW
@@ -1315,7 +1309,7 @@ pub(crate) mod tests {
         let mast_auth_paths = invalid_block.pow_mast_paths();
 
         for consensus_rule_set in ConsensusRuleSet::iter() {
-            let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);
+            let guesser_buffer = invalid_block.guess_preprocess_reboot(None, None);
             let target = Difficulty::from(2u32).target();
             let mut rng = rng();
 

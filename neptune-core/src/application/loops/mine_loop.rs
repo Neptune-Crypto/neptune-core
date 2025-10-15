@@ -1,5 +1,6 @@
 pub mod coinbase_distribution;
 pub(crate) mod composer_parameters;
+pub(crate) mod preprocess_task;
 use std::cmp::max;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,6 +37,7 @@ use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::job_queue::errors::JobHandleError;
 use crate::application::loops::channel::*;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::loops::mine_loop::preprocess_task::preprocess_alpha;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
@@ -231,12 +233,27 @@ fn guess_worker(
 
     info!("Start: guess preprocessing.");
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block_height);
-    let guesser_buffer =
-        block.guess_preprocess(Some(&sender), Some(threads_to_use), consensus_rule_set);
-    if sender.is_canceled() {
-        info!("Guess preprocessing canceled. Stopping guessing task.");
-        return;
-    }
+    let guesser_buffer = match consensus_rule_set {
+        ConsensusRuleSet::Reboot => {
+            let gb = block.guess_preprocess_reboot(Some(&sender), Some(threads_to_use));
+            if sender.is_canceled() {
+                info!("Guess preprocessing canceled. Stopping guessing task.");
+                return;
+            }
+            gb
+        }
+        ConsensusRuleSet::HardforkAlpha => {
+            let Some(gb) = preprocess_alpha(
+                block.header().prev_block_digest,
+                Some(threads_to_use),
+                Some(&sender),
+            ) else {
+                info!("Guess preprocessing canceled. Stopping guessing task.");
+                return;
+            };
+            gb
+        }
+    };
     info!("Completed: guess preprocessing.");
 
     let mast_auth_paths = block.pow_mast_paths();
@@ -967,6 +984,7 @@ pub(crate) mod tests {
     use crate::application::job_queue::errors::JobHandleError;
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
+    use crate::application::loops::mine_loop::preprocess_task::preprocess_alpha;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::mock_block_generator::MockBlockGenerator;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
@@ -1076,8 +1094,7 @@ pub(crate) mod tests {
         let tick = std::time::SystemTime::now();
 
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
-        let guesser_buffer =
-            block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::Reboot);
+        let guesser_buffer = block.guess_preprocess_reboot(Some(&worker_task_tx), None);
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(rand::rng, |prng, _i| {
@@ -2150,7 +2167,16 @@ pub(crate) mod tests {
 
         let network = Network::Main;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, predecessor_header.height);
-        let guesser_buffer = successor_block.guess_preprocess(None, None, consensus_rule_set);
+        let guesser_buffer =
+            match consensus_rule_set {
+                ConsensusRuleSet::Reboot => successor_block.guess_preprocess_reboot(None, None),
+                ConsensusRuleSet::HardforkAlpha => preprocess_alpha::<
+                    { BlockPow::MERKLE_TREE_HEIGHT },
+                >(
+                    successor_header.prev_block_digest, None, None
+                )
+                .unwrap(),
+            };
         let mast_auth_paths = successor_block.pow_mast_paths();
         let target = predecessor_block.header().difficulty.target();
         loop {

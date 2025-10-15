@@ -5928,8 +5928,7 @@ mod tests {
                 );
 
                 // Check that succesful guess is accepted by endpoint.
-                let consensus_rule_set = ConsensusRuleSet::Reboot;
-                let guesser_buffer = block1.guess_preprocess(None, None, consensus_rule_set);
+                let guesser_buffer = block1.guess_preprocess_reboot(None, None);
                 let mast_auth_paths = block1.pow_mast_paths();
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
