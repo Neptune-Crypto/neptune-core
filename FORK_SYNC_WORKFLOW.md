@@ -3,12 +3,14 @@
 ## Repository Setup
 
 ### Remotes Configuration
+
 ```bash
 origin      https://github.com/seaoffreedom/neptune-core.git (your fork)
 upstream    https://github.com/Neptune-Crypto/neptune-core.git (official repo)
 ```
 
 ### Branches
+
 - `master` - stays in sync with upstream
 - `feature/rpc-server-wallet-integration` - your custom RPC server changes
 
@@ -17,6 +19,7 @@ upstream    https://github.com/Neptune-Crypto/neptune-core.git (official repo)
 All custom changes are isolated to `neptune-core-cli/` directory:
 
 ### Added Files
+
 - `COMMANDS_REFERENCE.md` - CLI command documentation
 - `JSON_RPC_USAGE.md` - JSON-RPC usage guide
 - `MANUAL_TESTING_GUIDE.md` - Testing procedures
@@ -30,10 +33,12 @@ All custom changes are isolated to `neptune-core-cli/` directory:
 - `src/rpc/server_old.rs` - Legacy server implementation
 
 ### Modified Files
+
 - `Cargo.toml` - Added HTTP dependencies
 - `src/main.rs` - Integrated RPC server, added get-cookie command
 
 ### Key Features
+
 1. HTTP JSON-RPC server for wallet integration
 2. Cookie-based authentication (compatible with neptune-core)
 3. Wallet-friendly RPC endpoints (send, receive, balance, etc.)
@@ -42,6 +47,7 @@ All custom changes are isolated to `neptune-core-cli/` directory:
 ## Staying in Sync with Upstream
 
 ### 1. Fetch Latest Upstream Changes
+
 ```bash
 cd /home/anon/Documents/GitHub/neptune-core
 git fetch upstream
@@ -49,6 +55,7 @@ git fetch origin
 ```
 
 ### 2. Update Master Branch
+
 ```bash
 git checkout master
 git merge upstream/master
@@ -56,6 +63,7 @@ git push origin master
 ```
 
 ### 3. Rebase Feature Branch on Latest Master
+
 ```bash
 git checkout feature/rpc-server-wallet-integration
 git rebase master
@@ -71,6 +79,7 @@ git push origin feature/rpc-server-wallet-integration --force-with-lease
 ## Cherry-Picking Upstream Changes
 
 ### Identify Useful Upstream Commits
+
 ```bash
 # View new commits in upstream
 git log master..upstream/master --oneline
@@ -80,6 +89,7 @@ git log master..upstream/master --oneline -- neptune-core-cli/
 ```
 
 ### Cherry-Pick Specific Commits
+
 ```bash
 git checkout feature/rpc-server-wallet-integration
 git cherry-pick <commit-hash>
@@ -91,12 +101,14 @@ git cherry-pick <start-hash>^..<end-hash>
 ## Merging Upstream Branches
 
 ### For Non-Conflicting Changes
+
 ```bash
 git checkout feature/rpc-server-wallet-integration
 git merge upstream/<branch-name>
 ```
 
 ### For Specific Features
+
 ```bash
 # Merge only files that don't conflict with your changes
 git checkout feature/rpc-server-wallet-integration
@@ -115,6 +127,7 @@ git commit
 ## Testing After Sync
 
 ### Build and Test
+
 ```bash
 cargo build --release
 cargo test
@@ -125,6 +138,7 @@ cd neptune-core-cli
 ```
 
 ### Verify Custom Functionality
+
 1. Start neptune-core daemon
 2. Start neptune-cli RPC server: `neptune-cli --rpc-mode`
 3. Test wallet integration endpoints
@@ -133,6 +147,7 @@ cd neptune-core-cli
 ## Conflict Resolution Strategy
 
 ### neptune-core-cli Conflicts
+
 - **Always keep your custom RPC implementation**
 - Review upstream changes for:
   - Bug fixes → integrate if applicable
@@ -140,12 +155,14 @@ cd neptune-core-cli
   - Security updates → prioritize integration
 
 ### Other Conflicts
+
 - Upstream changes outside neptune-core-cli should be accepted
 - Only modify if it breaks your RPC server integration
 
 ## Regular Maintenance
 
 ### Weekly
+
 ```bash
 # Update master
 git checkout master
@@ -155,6 +172,7 @@ git push origin master
 ```
 
 ### Monthly
+
 ```bash
 # Rebase feature branch
 git checkout feature/rpc-server-wallet-integration
@@ -189,4 +207,3 @@ git push origin feature/rpc-server-wallet-integration-new
 - Upstream rarely modifies neptune-cli, minimizing conflicts
 - When conflicts occur, they're usually in Cargo.toml or main.rs
 - Always test RPC functionality after any upstream merge
-
