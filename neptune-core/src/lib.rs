@@ -5,7 +5,7 @@
 // enables nightly feature async_fn_track_caller for crate feature log-slow-write-lock.
 // log-slow-write-lock logs warning when a write-lock is held longer than 100 millis.
 // to enable: cargo +nightly build --features log-slow-write-lock
-#![cfg_attr(feature = "track-lock-location", feature(async_fn_track_caller))]
+// #![cfg_attr(feature = "track-lock-location", feature(async_fn_track_caller))]
 //
 // If code coverage tool `cargo-llvm-cov` is running with the nightly toolchain,
 // enable the unstable “coverage” attribute. This allows using the annotation

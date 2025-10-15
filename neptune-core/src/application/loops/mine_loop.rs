@@ -46,6 +46,7 @@ use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::difficulty_control::difficulty_control;
 use crate::protocol::consensus::block::pow::GuesserBuffer;
 use crate::protocol::consensus::block::pow::Pow;
+use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::block::*;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
@@ -238,6 +239,7 @@ fn guess_worker(
     }
     info!("Completed: guess preprocessing.");
 
+    let mast_auth_paths = block.pow_mast_paths();
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads_to_use)
         .build()
@@ -245,7 +247,7 @@ fn guess_worker(
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(rand::rng, |rng, _i| {
-                guess_nonce_iteration(&guesser_buffer, threshold, rng, &sender)
+                guess_nonce_iteration(&guesser_buffer, &mast_auth_paths, threshold, rng, &sender)
             })
             .find_any(|r| !r.block_not_found())
             .unwrap()
@@ -308,6 +310,7 @@ impl GuessNonceResult {
 #[inline]
 fn guess_nonce_iteration(
     guesser_buffer: &GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }>,
+    mast_auth_paths: &PowMastPaths,
     threshold: Digest,
     rng: &mut rand::rngs::ThreadRng,
     sender: &oneshot::Sender<NewBlockFound>,
@@ -320,7 +323,7 @@ fn guess_nonce_iteration(
         return GuessNonceResult::Cancelled;
     }
 
-    let result = Pow::guess(guesser_buffer, nonce, threshold);
+    let result = Pow::guess(guesser_buffer, mast_auth_paths, nonce, threshold);
 
     match result {
         Some(pow) => GuessNonceResult::NonceFound { pow: Box::new(pow) },
@@ -1067,6 +1070,7 @@ pub(crate) mod tests {
             Some(target_block_interval),
             network,
         );
+        let mast_auth_paths = block.pow_mast_paths();
         let threshold = previous_block.header().difficulty.target();
         let num_iterations_launched = 1_000_000;
         let tick = std::time::SystemTime::now();
@@ -1077,7 +1081,13 @@ pub(crate) mod tests {
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(rand::rng, |prng, _i| {
-                    guess_nonce_iteration(&guesser_buffer, threshold, prng, &worker_task_tx);
+                    guess_nonce_iteration(
+                        &guesser_buffer,
+                        &mast_auth_paths,
+                        threshold,
+                        prng,
+                        &worker_task_tx,
+                    );
                 })
                 .count();
         drop(worker_task_rx);
@@ -2140,9 +2150,10 @@ pub(crate) mod tests {
 
         let guesser_buffer =
             successor_block.guess_preprocess(None, None, ConsensusRuleSet::default());
+        let mast_auth_paths = successor_block.pow_mast_paths();
         let target = predecessor_block.header().difficulty.target();
         loop {
-            if BlockPow::guess(&guesser_buffer, rng.random(), target).is_some() {
+            if BlockPow::guess(&guesser_buffer, &mast_auth_paths, rng.random(), target).is_some() {
                 println!("found solution after {counter} guesses.");
                 break;
             }

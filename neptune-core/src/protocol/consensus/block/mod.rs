@@ -1305,6 +1305,7 @@ pub(crate) mod tests {
         let network = Network::Main;
         let genesis = Block::genesis(network);
         let mut invalid_block = invalid_empty_block(&genesis, network);
+        let mast_auth_paths = invalid_block.pow_mast_paths();
 
         for consensus_rule_set in ConsensusRuleSet::iter() {
             let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);
@@ -1312,7 +1313,9 @@ pub(crate) mod tests {
             let mut rng = rng();
 
             let valid_pow = loop {
-                if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
+                if let Some(valid_pow) =
+                    Pow::guess(&guesser_buffer, &mast_auth_paths, rng.random(), target)
+                {
                     break valid_pow;
                 }
             };

@@ -93,7 +93,6 @@ pub(crate) mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
-    use tasm_lib::twenty_first::bfe;
     use tracing_test::traced_test;
 
     use super::*;
