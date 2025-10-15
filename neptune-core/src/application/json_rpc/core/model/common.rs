@@ -66,3 +66,34 @@ impl<'de> Deserialize<'de> for RpcBFieldElements {
         Ok(RpcBFieldElements(bytes_to_bfes(&bytes)))
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    #[test]
+    fn rpc_native_currency_amount_serde_roundtrip() {
+        let amount = NativeCurrencyAmount::from_nau(123i128);
+        let rpc_amount: RpcNativeCurrencyAmount = amount.into();
+
+        let json_amount = serde_json::to_string(&rpc_amount).unwrap();
+        assert_eq!(json_amount, "\"123\"");
+
+        let deserialized_amount: RpcNativeCurrencyAmount =
+            serde_json::from_str(&json_amount).unwrap();
+        assert_eq!(rpc_amount, deserialized_amount);
+    }
+
+    #[test]
+    fn rpc_bfield_elements_serde_roundtrip() {
+        let bytes = vec![1u8, 2, 3, 4];
+        let bfes = bytes_to_bfes(&bytes);
+
+        let rpc_bfes: RpcBFieldElements = bfes.into();
+        let json_bfes = serde_json::to_string(&rpc_bfes).unwrap();
+        let deserialized: RpcBFieldElements = serde_json::from_str(&json_bfes).unwrap();
+        assert_eq!(rpc_bfes, deserialized);
+    }
+}
