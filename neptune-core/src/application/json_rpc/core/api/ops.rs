@@ -43,3 +43,24 @@ pub enum RpcMethods {
     #[namespace(Namespace::Chain)]
     BlockAnnouncements,
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use crate::application::json_rpc::core::api::ops::Namespace;
+
+    #[test]
+    fn namespace_parses_case_insensitively() {
+        use std::str::FromStr;
+
+        assert_eq!(Namespace::from_str("node").unwrap(), Namespace::Node);
+        assert_eq!(Namespace::from_str("Node").unwrap(), Namespace::Node);
+        assert_eq!(Namespace::from_str("NODE").unwrap(), Namespace::Node);
+        assert_eq!(Namespace::from_str("NoDe").unwrap(), Namespace::Node);
+
+        assert!(
+            Namespace::from_str("nodewallet").is_err(),
+            "Expected parse error for invalid namespace"
+        );
+    }
+}
