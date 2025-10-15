@@ -1708,7 +1708,15 @@ impl MainLoopHandler {
 
                 // Handle incoming connections from peer
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
-                    if !precheck_incoming_connection_is_allowed(self.global_state_lock.cli(), peer_address.ip()) {
+                    let ip = peer_address.ip();
+                    if !precheck_incoming_connection_is_allowed(self.global_state_lock.cli(), ip) {
+                        continue;
+                    }
+
+                    // Is this IP banned through database entry?
+                    let peer_banned = self.global_state_lock.lock_guard().await.net.peer_databases.peer_standings.get(ip).await.is_some_and(|x| x.is_bad());
+                    if peer_banned {
+                        debug!("Banned peer {ip} attempted incoming connection. Hanging up.");
                         continue;
                     }
 
