@@ -32,6 +32,7 @@ fn relay_connect_ifneeded(
         relays.0.sort_unstable_by(|a, b| b.2.cmp(a.2));
         relays.1.extend(relays.0);
         let mut relays = relays.1;
+        #[cfg(test)]
         dbg![
             "TODO check the order is from `None` to the smallest",
             &relays

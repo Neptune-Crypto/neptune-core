@@ -119,7 +119,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
 
     // Get data directory (wallet, block database), create one if none exists.
     let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)?;
-    dbg![DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path()).await]?;
+    DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path()).await?;
     info!("Data directory is {}", data_directory);
 
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =

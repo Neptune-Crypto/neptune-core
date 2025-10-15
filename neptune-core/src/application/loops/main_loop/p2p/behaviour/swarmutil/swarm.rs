@@ -77,7 +77,7 @@ pub(crate) async fn run(
                 }
             }
             if kf.is_none() {
-                match dbg![File::create(file_path).await] {
+                match File::create(file_path).await {
                     Ok(f) => kf = Some(Either::Right(f)),
                     Err(e) => warn!["{e}"],
                 }
@@ -88,7 +88,9 @@ pub(crate) async fn run(
             f => {
                 let key = Keypair::generate();
                 if let Some(Either::Right(mut file)) = f {
-                    dbg![file.write_all(&key.to_bytes()).await].unwrap_or_else(|e| warn!["{e}"])
+                    file.write_all(&key.to_bytes())
+                        .await
+                        .unwrap_or_else(|e| warn!["{e}"])
                 }
                 key
             }
@@ -346,14 +348,13 @@ pub(crate) async fn run(
                     SwarmEvent::Behaviour(ComposedBehaviourEvent::Identify(identify::Event::Received{ peer_id, info, .. })) => {
                         swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         for a in info.listen_addrs.clone() {swarm.behaviour_mut().kad.add_address(&peer_id, a);}
-                        peer_infos.insert(peer_id, dbg![info]);
+                        peer_infos.insert(peer_id, info);
                     }
                     SwarmEvent::Behaviour(ComposedBehaviourEvent::Identify(identify::Event::Error{ connection_id, error, .. })) => match error {
                         libp2p::swarm::StreamUpgradeError::Timeout => {swarm.close_connection(connection_id);}
                         _ => warn!("{error}")
                     },
                     SwarmEvent::Behaviour(ComposedBehaviourEvent::AutonatClient(libp2p::autonat::v2::client::Event{ tested_addr, result, .. })) => {
-                        dbg![&multiaddrs_autonat];
                         debug_assert![multiaddrs_autonat.keys().contains(&tested_addr)];
                         *multiaddrs_autonat.entry(tested_addr).or_default() = match result {
                             Ok(()) => {
