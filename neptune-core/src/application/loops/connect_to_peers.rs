@@ -317,6 +317,17 @@ where
     inner_ret
 }
 
+/// Handles all incoming connections. Returns when the connection is closed.
+///
+///
+/// A returned `Result::Error` always indicates that the connection was closed
+/// through some networking error, either in this function or in the peer loop
+/// that this function invokes if the handshake protocol is successful.
+///
+/// A returned `Result::Ok` means that either the peer loop was entered or the
+/// handshake was not completed. The reason for this behavior is that we want
+/// malicious connection attempts to be as resource light as possible. And
+/// allocating thousands of anyhow errors can use a lot of RAM.
 async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -344,12 +355,16 @@ where
         data: peer_handshake_data,
     }) = peer.try_next().await?
     else {
-        bail!("Didn't get handshake on connection attempt, from {peer_address}");
+        // no heavy anyhow::Error, just close
+        warn!("No valid handshake from {peer_address}. Closing connection.");
+        return Ok(());
     };
-    ensure!(
-        magic_value == *MAGIC_STRING_REQUEST,
-        "Expected magic value, got {magic_value:?}",
-    );
+
+    if magic_value != *MAGIC_STRING_REQUEST {
+        // no heavy anyhow::Error, just close
+        warn!("No valid magic value from {peer_address}. Closing connection.");
+        return Ok(());
+    }
 
     let handshake_response = PeerMessage::Handshake {
         magic_value: *MAGIC_STRING_RESPONSE,
