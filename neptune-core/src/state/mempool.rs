@@ -2339,7 +2339,7 @@ mod tests {
             .lock_guard_mut()
             .await
             .mempool
-            .insert(never_mined_tx.into(), UpgradePriority::Critical);
+            .insert(never_mined_tx.into(), UpgradePriority::Irrelevant);
 
         // Add some blocks. The transaction must stay in the mempool, since it
         // is not being mined.
