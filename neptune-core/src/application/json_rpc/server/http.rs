@@ -83,6 +83,21 @@ mod tests {
     use macro_rules_attr::apply;
     use serde_json::json;
 
+    #[test]
+    fn namespace_parses_case_insensitively() {
+        use std::str::FromStr;
+
+        assert_eq!(Namespace::from_str("node").unwrap(), Namespace::Node);
+        assert_eq!(Namespace::from_str("Node").unwrap(), Namespace::Node);
+        assert_eq!(Namespace::from_str("NODE").unwrap(), Namespace::Node);
+        assert_eq!(Namespace::from_str("NoDe").unwrap(), Namespace::Node);
+
+        assert!(
+            Namespace::from_str("nodewallet").is_err(),
+            "Expected parse error for invalid namespace"
+        );
+    }
+
     #[apply(shared_tokio_runtime)]
     async fn namespace_isolates_correctly() {
         let server = test_rpc_server().await;

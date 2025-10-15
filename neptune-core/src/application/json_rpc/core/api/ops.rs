@@ -9,9 +9,9 @@ use strum::EnumString;
 /// API version.
 pub const RPC_API_VERSION: u16 = 1;
 
-// TODO: Strum EnumString is too sensitive
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString)]
 #[serde(rename_all = "camelCase")]
+#[strum(ascii_case_insensitive)]
 pub enum Namespace {
     Node,
     Networking,
