@@ -976,16 +976,23 @@ impl Block {
             .build()
             .unwrap();
 
-        let auth_paths = self.pow_mast_paths();
         let prev_block_digest = self.header().prev_block_digest;
-        thread_pool.install(|| {
-            Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(
-                auth_paths,
-                maybe_cancel_channel,
-                consensus_rule_set,
-                prev_block_digest,
-            )
-        })
+        if consensus_rule_set == ConsensusRuleSet::Reboot {
+            thread_pool.install(|| {
+                Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess_reboot(
+                    self.pow_mast_paths(),
+                    maybe_cancel_channel,
+                    prev_block_digest,
+                )
+            })
+        } else {
+            thread_pool.install(|| {
+                Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess_alpha(
+                    maybe_cancel_channel,
+                    prev_block_digest,
+                )
+            })
+        }
     }
 
     /// Mock verification of Pow. Use only on networks that allow for PoW

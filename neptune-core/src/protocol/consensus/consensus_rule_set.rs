@@ -18,9 +18,8 @@ pub const BLOCK_HEIGHT_HARDFORK_ALPHA: BlockHeight =
 /// Consensus logic not captured by this encapsulation lives on
 /// [`Transaction::is_valid`][super::transaction::Transaction::is_valid] and
 /// ultimately [`Block::is_valid`][super::block::Block::is_valid].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Default, strum_macros::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, strum_macros::Display)]
 pub enum ConsensusRuleSet {
-    #[default]
     Reboot,
     HardforkAlpha,
 }

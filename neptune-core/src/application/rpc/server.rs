@@ -5746,7 +5746,8 @@ mod tests {
                 "Node must reject new tip with invalid PoW solution."
             );
 
-            let solution = puzzle.solve(ConsensusRuleSet::default());
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block1.header().height);
+            let solution = puzzle.solve(consensus_rule_set);
             assert!(
                 bob.clone()
                     .provide_new_tip(context::current(), bob_token, solution, proposal.clone())

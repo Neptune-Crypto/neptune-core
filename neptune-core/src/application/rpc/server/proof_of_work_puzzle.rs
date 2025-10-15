@@ -18,6 +18,7 @@ use crate::Block;
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct ProofOfWorkPuzzle {
     // All fields public since used downstream by mining pool software.
+    /// MAST authentication paths fixing everything but the pow field.
     pub pow_mast_paths: PowMastPaths,
 
     /// The threshold digest that defines when a PoW solution is valid. The
@@ -46,14 +47,14 @@ impl ProofOfWorkPuzzle {
             .body()
             .total_guesser_reward()
             .expect("Block proposal must have well-defined guesser reward");
-        let auth_paths = block_proposal.pow_mast_paths();
+        let pow_mast_paths = block_proposal.pow_mast_paths();
         let threshold = parent_difficulty.target();
         let prev_block = block_proposal.header().prev_block_digest;
 
-        let id = Tip5::hash(&auth_paths);
+        let id = Tip5::hash(&pow_mast_paths);
 
         Self {
-            pow_mast_paths: auth_paths,
+            pow_mast_paths,
             threshold,
             total_guesser_reward: guesser_reward,
             id,
@@ -67,12 +68,12 @@ impl ProofOfWorkPuzzle {
     pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> BlockPow {
         use rayon::prelude::*;
         info!("Starting PoW preprocessing");
-        let guesser_buffer = BlockPow::preprocess(
-            self.pow_mast_paths,
-            None,
-            consensus_rule_set,
-            self.prev_block,
-        );
+        let guesser_buffer = match consensus_rule_set {
+            ConsensusRuleSet::Reboot => {
+                BlockPow::preprocess_reboot(self.pow_mast_paths, None, self.prev_block)
+            }
+            ConsensusRuleSet::HardforkAlpha => BlockPow::preprocess_alpha(None, self.prev_block),
+        };
         info!("Done with PoW preprocessing");
 
         info!("Now attempting to find valid nonce");

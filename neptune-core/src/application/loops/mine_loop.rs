@@ -1077,7 +1077,7 @@ pub(crate) mod tests {
 
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let guesser_buffer =
-            block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
+            block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::Reboot);
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(rand::rng, |prng, _i| {
@@ -2148,8 +2148,9 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let guesser_buffer =
-            successor_block.guess_preprocess(None, None, ConsensusRuleSet::default());
+        let network = Network::Main;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, predecessor_header.height);
+        let guesser_buffer = successor_block.guess_preprocess(None, None, consensus_rule_set);
         let mast_auth_paths = successor_block.pow_mast_paths();
         let target = predecessor_block.header().difficulty.target();
         loop {

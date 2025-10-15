@@ -341,15 +341,45 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             .collect()
     }
 
-    pub(crate) fn preprocess(
+    pub(crate) fn preprocess_reboot(
         mast_auth_paths: PowMastPaths,
+        cancel_channel: Option<&dyn Cancelable>,
+        prev_block_digest: Digest,
+    ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+        Self::preprocess_inner(
+            Some(mast_auth_paths),
+            cancel_channel,
+            ConsensusRuleSet::Reboot,
+            prev_block_digest,
+        )
+    }
+
+    pub(crate) fn preprocess_alpha(
+        cancel_channel: Option<&dyn Cancelable>,
+        prev_block_digest: Digest,
+    ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+        Self::preprocess_inner(
+            None,
+            cancel_channel,
+            ConsensusRuleSet::HardforkAlpha,
+            prev_block_digest,
+        )
+    }
+
+    /// # Panics
+    ///
+    ///  - If `mast_auth_paths` is `None` and `consensus_rule_set` is `Reboot`.
+    fn preprocess_inner(
+        mast_auth_paths: Option<PowMastPaths>,
         cancel_channel: Option<&dyn Cancelable>,
         consensus_rule_set: ConsensusRuleSet,
         prev_block_digest: Digest,
     ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
         let bud_prefix = if consensus_rule_set == ConsensusRuleSet::Reboot {
             // Commitment to all the fields in the block that are not pow
-            mast_auth_paths.commit()
+            mast_auth_paths
+                .expect("mast auth paths must be given when consensus rule set is reboot")
+                .commit()
         } else {
             // Commitment only to previous block hash such that preprocessing
             // can be reused across different block proposals with the same
@@ -596,19 +626,20 @@ pub(crate) mod tests {
         const MERKLE_TREE_HEIGHT: usize = 10;
         const MERKLE_TREE_NUM_LEAFS: usize = 1usize << 10;
         let mut rng = rng();
-        let auth_paths = rng.random::<PowMastPaths>();
-        let prev_block_digest = rng.random();
-        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
-            auth_paths,
-            None,
-            ConsensusRuleSet::default(),
-            prev_block_digest,
-        );
+        for consensus_rule_set in ConsensusRuleSet::iter() {
+            let auth_paths = rng.random::<PowMastPaths>();
+            let prev_block_digest = rng.random();
+            let buffer = if consensus_rule_set == ConsensusRuleSet::Reboot {
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess_reboot(auth_paths, None, prev_block_digest)
+            } else {
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess_alpha(None, prev_block_digest)
+            };
 
-        let index = rng.random_range(0..MERKLE_TREE_NUM_LEAFS);
-        let expensive_leaf = Pow::<MERKLE_TREE_HEIGHT>::leaf(auth_paths.commit(), index as u64);
-        let amortized_leaf = buffer.merkle_tree.leaf(index);
-        assert_eq!(amortized_leaf, expensive_leaf);
+            let index = rng.random_range(0..MERKLE_TREE_NUM_LEAFS);
+            let expensive_leaf = Pow::<MERKLE_TREE_HEIGHT>::leaf(auth_paths.commit(), index as u64);
+            let amortized_leaf = buffer.merkle_tree.leaf(index);
+            assert_eq!(amortized_leaf, expensive_leaf);
+        }
     }
 
     #[test]
@@ -619,12 +650,8 @@ pub(crate) mod tests {
             parent_block_hash: Digest,
         ) {
             let start = Instant::now();
-            let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
-                auth_paths,
-                None,
-                ConsensusRuleSet::default(),
-                parent_block_hash,
-            );
+            let buffer =
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess_reboot(auth_paths, None, parent_block_hash);
             let duration = start.elapsed();
             let estimated_mt_size = buffer.merkle_tree.num_leafs() * 2 * Digest::BYTES;
             println!("Merkle tree height: {MERKLE_TREE_HEIGHT}");
@@ -677,12 +704,16 @@ pub(crate) mod tests {
         let prev_block_digest = rng.random();
 
         for consensus_rule_set in ConsensusRuleSet::iter() {
-            let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
-                auth_paths,
-                None,
-                consensus_rule_set,
-                prev_block_digest,
-            );
+            let buffer = match consensus_rule_set {
+                ConsensusRuleSet::Reboot => Pow::<MERKLE_TREE_HEIGHT>::preprocess_reboot(
+                    auth_paths,
+                    None,
+                    prev_block_digest,
+                ),
+                ConsensusRuleSet::HardforkAlpha => {
+                    Pow::<MERKLE_TREE_HEIGHT>::preprocess_alpha(None, prev_block_digest)
+                }
+            };
 
             for difficulty in [2_u32, 4] {
                 let target = Difficulty::from(difficulty).target();
@@ -727,10 +758,9 @@ pub(crate) mod tests {
             // spawn preprocess task
             let prev_block_digest = rng.random();
             let join_handle = tokio::task::spawn_blocking(move || {
-                Pow::<MERKLE_TREE_HEIGHT>::preprocess(
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess_reboot(
                     mast_auth_paths,
                     Some(&tx),
-                    ConsensusRuleSet::default(),
                     prev_block_digest,
                 )
             });
