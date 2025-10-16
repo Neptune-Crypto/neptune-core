@@ -1,0 +1,128 @@
+#!/bin/bash
+# Commit message hook for Neptune Core
+# Validates commit message format
+#
+# Installation:
+#   git config core.hooksPath .githooks
+#   chmod +x .githooks/commit-msg
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Skip merge commits and revert commits
+if echo "$COMMIT_MSG" | grep -qE '^Merge |^Revert '; then
+    exit 0
+fi
+
+# Conventional Commits format
+# <type>(<scope>): <description>
+#
+# Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build, revert
+# Scope: optional
+# Description: required
+
+echo -e "${BLUE}🔍 Validating commit message...${NC}"
+
+# Extract first line
+FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
+
+# Check if message is empty
+if [ -z "$FIRST_LINE" ]; then
+    echo -e "${RED}❌ Commit message cannot be empty${NC}"
+    exit 1
+fi
+
+# Check conventional commits format
+if ! echo "$FIRST_LINE" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?: .+'; then
+    echo -e "${YELLOW}⚠️  Commit message doesn't follow Conventional Commits format${NC}"
+    echo ""
+    echo -e "${YELLOW}Current message:${NC}"
+    echo "  $FIRST_LINE"
+    echo ""
+    echo -e "${YELLOW}Recommended format:${NC}"
+    echo "  <type>(<scope>): <description>"
+    echo ""
+    echo -e "${YELLOW}Types:${NC}"
+    echo "  feat:     A new feature"
+    echo "  fix:      A bug fix"
+    echo "  docs:     Documentation only changes"
+    echo "  style:    Code style changes (formatting, missing semi-colons, etc)"
+    echo "  refactor: Code refactoring (no functional changes)"
+    echo "  perf:     Performance improvements"
+    echo "  test:     Adding or updating tests"
+    echo "  chore:    Maintenance tasks"
+    echo "  ci:       CI/CD changes"
+    echo "  build:    Build system changes"
+    echo "  revert:   Revert a previous commit"
+    echo ""
+    echo -e "${YELLOW}Examples:${NC}"
+    echo "  feat(p2p): Add connection rate limiting"
+    echo "  fix(cli): Resolve wallet initialization issue"
+    echo "  docs: Update README with new build instructions"
+    echo "  refactor(state): Simplify peer management logic"
+    echo ""
+    echo -e "${YELLOW}To bypass this check (not recommended):${NC}"
+    echo "  git commit --no-verify"
+    echo ""
+    exit 1
+fi
+
+# Check message length
+LENGTH=${#FIRST_LINE}
+
+if [ "$LENGTH" -lt 10 ]; then
+    echo -e "${RED}❌ Commit message is too short (< 10 characters)${NC}"
+    echo "  Current: $LENGTH characters"
+    echo "  Minimum: 10 characters"
+    exit 1
+fi
+
+if [ "$LENGTH" -gt 72 ]; then
+    echo -e "${YELLOW}⚠️  First line is longer than 72 characters${NC}"
+    echo "  Current: $LENGTH characters"
+    echo "  Recommended: ≤ 72 characters"
+    echo ""
+    echo "Consider using a shorter subject line and add details in the body."
+    echo ""
+    echo -e "${YELLOW}To bypass this check:${NC}"
+    echo "  git commit --no-verify"
+    echo ""
+    exit 1
+fi
+
+# Check for common issues
+if echo "$FIRST_LINE" | grep -qE '\.$'; then
+    echo -e "${YELLOW}⚠️  Subject line should not end with a period${NC}"
+    exit 1
+fi
+
+if ! echo "$FIRST_LINE" | grep -qE ': [a-z]'; then
+    echo -e "${YELLOW}⚠️  Description should start with a lowercase letter${NC}"
+    exit 1
+fi
+
+# Check for imperative mood (common verbs)
+DESCRIPTION=$(echo "$FIRST_LINE" | sed -E 's/^[^:]+: //')
+FIRST_WORD=$(echo "$DESCRIPTION" | awk '{print $1}')
+
+# Common past tense verbs to avoid
+PAST_TENSE_VERBS="added|fixed|updated|changed|removed|deleted|created|implemented|refactored|improved|optimized"
+
+if echo "$FIRST_WORD" | grep -qiE "^($PAST_TENSE_VERBS)"; then
+    echo -e "${YELLOW}⚠️  Use imperative mood (e.g., 'Add' not 'Added')${NC}"
+    echo "  Current: $FIRST_WORD"
+    echo "  Suggestion: ${FIRST_WORD%d}"  # Remove 'd' from end
+    exit 1
+fi
+
+# All checks passed
+echo -e "${GREEN}✅ Commit message format is valid${NC}"
+exit 0
+

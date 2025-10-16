@@ -223,7 +223,16 @@ jobs:
   # PR validation summary
   pr-validation-summary:
     name: PR Validation Summary
-    needs: [pr-metadata, code-quality, build-verification, test-execution, p2p-changes, documentation-check, dependency-check]
+    needs:
+      [
+        pr-metadata,
+        code-quality,
+        build-verification,
+        test-execution,
+        p2p-changes,
+        documentation-check,
+        dependency-check,
+      ]
     if: always() && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
@@ -231,31 +240,31 @@ jobs:
         run: |
           echo "## PR Validation Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ "${{ needs.pr-metadata.result }}" == "success" ]; then
             echo "✅ PR Metadata: Passed" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ PR Metadata: Failed" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           if [ "${{ needs.code-quality.result }}" == "success" ]; then
             echo "✅ Code Quality: Passed" >> $GITHUB_STEP_SUMMARY
           else
             echo "⚠️ Code Quality: Issues Found" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           if [ "${{ needs.build-verification.result }}" == "success" ]; then
             echo "✅ Build: Passed" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Build: Failed" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           if [ "${{ needs.test-execution.result }}" == "success" ]; then
             echo "✅ Tests: Passed" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Tests: Failed" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           if [ "${{ needs.p2p-changes.result }}" == "success" ]; then
             echo "✅ P2P Verification: Passed" >> $GITHUB_STEP_SUMMARY
           else
@@ -268,7 +277,6 @@ jobs:
             echo "❌ **PR validation failed - fix issues before merging**" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
-          
+
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ **PR is ready for review**" >> $GITHUB_STEP_SUMMARY
-
