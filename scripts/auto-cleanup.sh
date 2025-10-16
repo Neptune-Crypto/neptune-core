@@ -105,7 +105,7 @@ if [ -z "$DBG_FILES" ]; then
 else
     DBG_COUNT=$(echo "$DBG_FILES" | wc -l)
     echo -e "${YELLOW}Found dbg! in $DBG_COUNT file(s)${NC}"
-    
+
     if [ "$DRY_RUN" = "true" ]; then
         echo "$DBG_FILES" | while read -r file; do
             echo "  Would process: $file"
@@ -235,7 +235,7 @@ else
     echo ""
     echo -e "Fixes applied: ${GREEN}$FIXES_APPLIED${NC}"
     echo ""
-    
+
     # Check git status
     if ! git diff --quiet; then
         echo -e "${YELLOW}Changes made:${NC}"

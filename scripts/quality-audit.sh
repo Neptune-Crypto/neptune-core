@@ -61,7 +61,7 @@ else
     echo ""
     echo -e "${CYAN}To fix:${NC} cargo fmt --all"
     echo ""
-    
+
     echo "## 1. Format Issues" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
     echo "❌ **Status:** $FILE_COUNT file(s) need formatting" >> "$REPORT_FILE"
@@ -100,7 +100,7 @@ if [ "$CLIPPY_ERRORS" -gt 0 ]; then
     echo -e "${RED}Top 10 errors:${NC}"
     echo "$CLIPPY_OUTPUT" | grep -A 3 "^error:" | head -40
     echo ""
-    
+
     echo "### Top Errors" >> "$REPORT_FILE"
     echo "\`\`\`" >> "$REPORT_FILE"
     echo "$CLIPPY_OUTPUT" | grep -A 3 "^error:" | head -40 >> "$REPORT_FILE"
@@ -112,7 +112,7 @@ if [ "$CLIPPY_WARNINGS" -gt 0 ]; then
     echo -e "${YELLOW}Top 10 warnings:${NC}"
     echo "$CLIPPY_OUTPUT" | grep -A 3 "^warning:" | head -40
     echo ""
-    
+
     echo "### Top Warnings" >> "$REPORT_FILE"
     echo "\`\`\`" >> "$REPORT_FILE"
     echo "$CLIPPY_OUTPUT" | grep -A 3 "^warning:" | head -40 >> "$REPORT_FILE"
@@ -318,17 +318,17 @@ echo ""
 
 if command -v cargo-audit &> /dev/null; then
     AUDIT_OUTPUT=$(cargo audit 2>&1 || true)
-    
+
     VULNERABILITIES=$(echo "$AUDIT_OUTPUT" | grep -c "vulnerability" || echo "0")
     echo -e "Vulnerabilities: ${YELLOW}$VULNERABILITIES${NC}"
-    
+
     if [ "$VULNERABILITIES" -gt 0 ]; then
         echo ""
         echo "Details:"
         echo "$AUDIT_OUTPUT" | grep -A 10 "vulnerability"
         echo ""
     fi
-    
+
     echo "## 6. Security Audit" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
     echo "**Vulnerabilities:** $VULNERABILITIES" >> "$REPORT_FILE"
@@ -344,7 +344,7 @@ else
     echo -e "${YELLOW}⚠️  cargo-audit not installed${NC}"
     echo -e "Install with: ${CYAN}cargo install cargo-audit${NC}"
     echo ""
-    
+
     echo "## 6. Security Audit" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
     echo "⚠️ **cargo-audit not installed**" >> "$REPORT_FILE"
@@ -404,7 +404,7 @@ if echo "$TEST_OUTPUT" | grep -q "test result: FAILED"; then
     echo -e "${RED}❌ Tests failed${NC}"
     echo -e "Passed: ${GREEN}$PASSED${NC}"
     echo -e "Failed: ${RED}$FAILED${NC}"
-    
+
     echo "## 8. Test Status" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
     echo "❌ **Status:** Tests failed" >> "$REPORT_FILE"
@@ -414,7 +414,7 @@ if echo "$TEST_OUTPUT" | grep -q "test result: FAILED"; then
 else
     PASSED=$(echo "$TEST_OUTPUT" | grep "test result:" | tail -1 | grep -oP '\d+(?= passed)' || echo "0")
     echo -e "${GREEN}✅ All tests passed ($PASSED)${NC}"
-    
+
     echo "## 8. Test Status" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
     echo "✅ **Status:** All tests passed" >> "$REPORT_FILE"
