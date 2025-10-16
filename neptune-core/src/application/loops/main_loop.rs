@@ -137,6 +137,9 @@ pub struct MainLoopHandler {
     rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
     task_handles: Vec<JoinHandle<()>>,
 
+    // P2P integration layer for enhanced DDoS protection
+    p2p_integration: Option<crate::p2p::integration::MainLoopIntegration>,
+
     #[cfg(test)]
     mock_now: Option<SystemTime>,
 }
@@ -411,6 +414,7 @@ impl MainLoopHandler {
         miner_to_main_rx: mpsc::Receiver<MinerToMain>,
         rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
         task_handles: Vec<JoinHandle<()>>,
+        p2p_integration: Option<crate::p2p::integration::MainLoopIntegration>,
     ) -> Self {
         let maybe_main_to_miner_tx = if global_state_lock.cli().mine() {
             Some(main_to_miner_tx)
@@ -428,6 +432,7 @@ impl MainLoopHandler {
             miner_to_main_rx,
             rpc_server_to_main_rx,
             task_handles,
+            p2p_integration,
 
             #[cfg(test)]
             mock_now: None,
