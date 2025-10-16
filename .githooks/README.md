@@ -5,6 +5,7 @@ This directory contains custom Git hooks to ensure code quality and consistency 
 ## 🎯 Purpose
 
 The hooks provide:
+
 - **Fast local feedback** (catch issues before CI/CD)
 - **Consistent code quality** (enforced formatting, linting)
 - **Security validation** (vulnerability scanning)
@@ -46,40 +47,49 @@ git config core.hooksPath
 Runs before **every commit** to catch basic issues.
 
 **Checks:**
+
 1. ✅ **Format Check** (`cargo fmt`)
+
    - Enforces consistent code formatting
    - Blocks commit if formatting issues found
-   
+
 2. ✅ **Clippy Lints** (`cargo clippy`)
+
    - Runs static analysis
    - Blocks on errors, warns on warnings
-   
+
 3. ✅ **Build Check** (`cargo check`)
+
    - Ensures code compiles
    - Blocks commit if build fails
-   
+
 4. ✅ **Quick Tests**
+
    - Runs unit tests for affected crates only
    - Fast feedback (seconds, not minutes)
-   
+
 5. ✅ **P2P Module Check** (if P2P files changed)
+
    - Validates P2P module structure
    - Runs P2P-specific tests
    - **Unique to our fork!**
-   
+
 6. ✅ **Security Audit** (if cargo-audit installed)
+
    - Scans for known vulnerabilities
    - Warns but doesn't block
-   
+
 7. ✅ **Code Pattern Checks**
+
    - Detects TODO/FIXME/HACK comments
    - Warns about `println!` in non-test code
    - Warns about excessive `unwrap()` calls
    - Detects `dbg!` macros
-   
+
 8. ✅ **File Size Check**
+
    - Warns about files > 1000 lines
-   
+
 9. ✅ **Commit Message Validation**
    - Checks Conventional Commits format
    - Validates message length
@@ -95,47 +105,57 @@ Runs before **every commit** to catch basic issues.
 Runs before **pushing to remote** to ensure production-ready code.
 
 **Checks:**
+
 1. ✅ **Branch Protection**
+
    - Warns when pushing to master/main
    - Prompts for confirmation
-   
+
 2. ✅ **Full Release Build**
+
    - Builds all packages in release mode
    - Ensures production binaries compile
-   
+
 3. ✅ **Comprehensive Test Suite**
+
    - Runs all tests (lib, bins, integration)
    - Blocks push if any tests fail
-   
+
 4. ✅ **Documentation Build**
+
    - Ensures docs build without errors
    - Validates doc comments
-   
+
 5. ✅ **P2P Module Verification**
+
    - Checks all critical P2P components exist
    - Runs full P2P test suite
    - **Critical for our hardened fork!**
-   
+
 6. ✅ **Security Audit** (strict on master)
+
    - Blocks push to master if high/critical vulnerabilities
    - Warns on other branches
-   
+
 7. ✅ **Code Quality Metrics**
+
    - Tracks warning count (goal: <50)
    - Counts TODO/FIXME comments
-   
+
 8. ✅ **Comprehensive Clippy**
+
    - Runs clippy in pedantic mode
    - Provides detailed feedback
-   
+
 9. ✅ **Commit History Check**
+
    - Shows unpushed commits
    - Helps review before push
-   
+
 10. ✅ **Branch-Specific Checks**
     - **master/main**: Strict (zero errors)
     - **develop**: Standard checks
-    - **feature/***: Standard checks
+    - **feature/\***: Standard checks
 
 **Execution Time:** ~2-5 minutes (with cache)
 
@@ -148,16 +168,19 @@ Runs before **pushing to remote** to ensure production-ready code.
 Validates commit message format using **Conventional Commits** standard.
 
 **Checks:**
+
 1. ✅ **Conventional Commits Format**
+
    ```
    <type>(<scope>): <description>
-   
+
    [optional body]
-   
+
    [optional footer]
    ```
 
 2. ✅ **Valid Types**
+
    - `feat`: New feature
    - `fix`: Bug fix
    - `docs`: Documentation changes
@@ -171,13 +194,15 @@ Validates commit message format using **Conventional Commits** standard.
    - `revert`: Revert previous commit
 
 3. ✅ **Message Length**
+
    - Minimum: 10 characters
    - Recommended: ≤ 72 characters (first line)
-   
+
 4. ✅ **Imperative Mood**
+
    - "Add feature" ✅
    - "Added feature" ❌
-   
+
 5. ✅ **No Trailing Period**
    - "Add feature" ✅
    - "Add feature." ❌
@@ -267,22 +292,24 @@ Push Successful
 
 ## 🎯 When Hooks Run
 
-| Hook | Trigger | Blocks | Time | Can Skip |
-|------|---------|--------|------|----------|
-| `commit-msg` | Every commit | Yes | <1s | Yes |
-| `pre-commit` | Every commit | Yes | 10-30s | Yes |
-| `pre-push` | Before push | Yes | 2-5m | Yes |
+| Hook         | Trigger      | Blocks | Time   | Can Skip |
+| ------------ | ------------ | ------ | ------ | -------- |
+| `commit-msg` | Every commit | Yes    | <1s    | Yes      |
+| `pre-commit` | Every commit | Yes    | 10-30s | Yes      |
+| `pre-push`   | Before push  | Yes    | 2-5m   | Yes      |
 
 ## 💡 Tips & Best Practices
 
 ### For Developers
 
 1. **Install hooks immediately** after cloning
+
    ```bash
    bash .githooks/install-hooks.sh
    ```
 
 2. **Run checks manually** before committing
+
    ```bash
    cargo fmt --all
    cargo clippy --workspace
@@ -290,11 +317,13 @@ Push Successful
    ```
 
 3. **Use meaningful commit messages**
+
    - Follow Conventional Commits
    - Be specific about changes
    - Reference issues when applicable
 
 4. **Address warnings proactively**
+
    - Don't accumulate TODOs/FIXMEs
    - Fix clippy warnings
    - Keep files under 1000 lines
@@ -426,17 +455,18 @@ git pull origin develop
 
 ## 🆚 Comparison: Hooks vs CI/CD
 
-| Aspect | Git Hooks | CI/CD |
-|--------|-----------|-------|
-| **Speed** | ⚡ Fast (seconds-minutes) | ⏱️ Slower (minutes) |
-| **Feedback** | 🔄 Immediate | ⏰ Delayed |
-| **Scope** | 📦 Local changes | 🌐 Full codebase |
-| **Environment** | 💻 Developer machine | ☁️ Cloud runners |
-| **Cost** | 🆓 Free | 💰 Actions minutes |
-| **Bypassable** | ✅ Yes | ❌ No |
-| **Purpose** | 🚫 Prevent bad commits | ✅ Verify quality |
+| Aspect          | Git Hooks                 | CI/CD               |
+| --------------- | ------------------------- | ------------------- |
+| **Speed**       | ⚡ Fast (seconds-minutes) | ⏱️ Slower (minutes) |
+| **Feedback**    | 🔄 Immediate              | ⏰ Delayed          |
+| **Scope**       | 📦 Local changes          | 🌐 Full codebase    |
+| **Environment** | 💻 Developer machine      | ☁️ Cloud runners    |
+| **Cost**        | 🆓 Free                   | 💰 Actions minutes  |
+| **Bypassable**  | ✅ Yes                    | ❌ No               |
+| **Purpose**     | 🚫 Prevent bad commits    | ✅ Verify quality   |
 
 **Best Practice:** Use both!
+
 - Hooks catch issues early (fast feedback)
 - CI/CD provides final validation (comprehensive)
 
@@ -498,11 +528,13 @@ CI/CD confirms ✅
 ### What Hooks Check
 
 1. **Dependency Vulnerabilities**
+
    - cargo-audit scans
    - Blocks critical/high on master
    - Warns on other branches
 
 2. **Code Patterns**
+
    - No `dbg!` macros in production
    - Limited `unwrap()` usage
    - Proper error handling
@@ -545,7 +577,6 @@ CI/CD confirms ✅
 
 ---
 
-**Last Updated:** 2025-10-16  
-**Maintained By:** Sea of Freedom Fork Team  
+**Last Updated:** 2025-10-16
+**Maintained By:** Sea of Freedom Fork Team
 **Questions?** Open an issue or check the docs!
-
