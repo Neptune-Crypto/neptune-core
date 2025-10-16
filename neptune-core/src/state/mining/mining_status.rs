@@ -69,8 +69,10 @@ impl Display for MiningStatus {
             MiningStatus::Inactive => None,
         };
         // remove sub-second component, so humantime ends with seconds.
-        let elapsed_time =
-            elapsed_time_exact.map(|v| v - Duration::from_nanos(v.subsec_nanos().into()));
+        let elapsed_time = elapsed_time_exact.map(|v| {
+            v.checked_sub(Duration::from_nanos(v.subsec_nanos().into()))
+                .unwrap()
+        });
         let input_output_info = match self {
             MiningStatus::Guessing(info) => {
                 format!(" {}/{}", info.num_inputs, info.num_outputs)

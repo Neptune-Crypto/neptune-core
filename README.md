@@ -34,7 +34,7 @@ Neptune-core is the reference implementation for the [Neptune Cash](https://nept
 - Build for release and put the binaries in your local path (`~/.cargo/bin/`):
   ```
   cargo install --locked --path neptune-core
-  cargo install --locked --path neptune-cli
+  cargo install --locked --path neptune-core-cli
   cargo install --locked --path neptune-dashboard
   ```
 
@@ -60,7 +60,7 @@ Windows should just work out-of-the-box with cargo build etc.
 - Build for release and put the binaries in your local path (`~/.cargo/bin/`):
   ```
   cargo install --locked --path neptune-core
-  cargo install --locked --path neptune-cli
+  cargo install --locked --path neptune-core-cli
   cargo install --locked --path neptune-dashboard
   ```
 
