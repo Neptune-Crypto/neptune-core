@@ -15,8 +15,8 @@ use crate::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcMmrAccumulator {
-    leaf_count: u64,
-    peaks: Vec<Digest>,
+    pub leaf_count: u64,
+    pub peaks: Vec<Digest>,
 }
 
 impl From<&MmrAccumulator> for RpcMmrAccumulator {

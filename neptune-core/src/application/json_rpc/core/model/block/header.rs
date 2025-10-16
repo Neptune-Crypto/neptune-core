@@ -9,7 +9,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcBlockPow {
     pub root: Digest,
@@ -29,7 +29,7 @@ impl From<BlockPow> for RpcBlockPow {
     }
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcGuesserReceiverData {
     pub receiver_digest: Digest,
@@ -45,7 +45,7 @@ impl From<GuesserReceiverData> for RpcGuesserReceiverData {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcBlockHeader {
     pub version: BFieldElement,

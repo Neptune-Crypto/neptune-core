@@ -103,9 +103,18 @@ pub mod tests {
             config::cli_args,
             json_rpc::{core::api::rpc::RpcApi, server::http::RpcServer},
         },
+        protocol::consensus::transaction::{Transaction, TransactionProof},
         state::wallet::wallet_entropy::WalletEntropy,
-        tests::{shared::globalstate::mock_genesis_global_state, shared_tokio_runtime},
+        tests::{
+            shared::{
+                blocks::invalid_block_with_transaction, globalstate::mock_genesis_global_state,
+                strategies::txkernel,
+            },
+            shared_tokio_runtime,
+        },
+        Block,
     };
+
     use macro_rules_attr::apply;
 
     pub async fn test_rpc_server() -> RpcServer {
@@ -129,5 +138,39 @@ pub mod tests {
     async fn height_is_correct() {
         let rpc_server = test_rpc_server().await;
         assert_eq!(0, rpc_server.height().await.height);
+    }
+
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
+    async fn block_calls_are_consistent(
+        #[strategy(txkernel::with_lengths(0, 2, 2, true))]
+        tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+    ) {
+        let mut rpc_server = test_rpc_server().await;
+
+        let tx_block1 = Transaction {
+            kernel: tx_block1,
+            proof: TransactionProof::invalid(),
+        };
+        let block1 = invalid_block_with_transaction(&Block::genesis(Network::Main), tx_block1);
+        rpc_server
+            .state
+            .set_new_tip(block1.clone())
+            .await
+            .expect("block to be valid");
+
+        let block = rpc_server.block().await.block;
+        let proof = rpc_server.block_proof().await.proof;
+        assert_eq!(block.proof, proof);
+
+        let kernel = rpc_server.block_kernel().await.kernel;
+        let header = rpc_server.block_header().await.header;
+        assert_eq!(kernel.header, header);
+
+        let body = rpc_server.block_body().await.body;
+        let transaction_kernel = rpc_server.block_transaction_kernel().await.kernel;
+        assert_eq!(body.transaction_kernel, transaction_kernel);
+
+        let announcements = rpc_server.block_announcements().await.announcements;
+        assert_eq!(transaction_kernel.announcements, announcements);
     }
 }

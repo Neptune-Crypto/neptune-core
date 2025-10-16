@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RpcChunkDictionary(pub BTreeMap<u64, (Vec<Digest>, Vec<u32>)>);
 
 impl From<ChunkDictionary> for RpcChunkDictionary {
@@ -29,7 +29,7 @@ impl From<ChunkDictionary> for RpcChunkDictionary {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcRemovalRecord {
     pub absolute_indices: AbsoluteIndexSet,
@@ -56,6 +56,19 @@ pub struct RpcTransactionKernel {
     pub timestamp: Timestamp,
     pub mutator_set_hash: Digest,
     pub merge_bit: bool,
+}
+
+impl PartialEq for RpcTransactionKernel {
+    fn eq(&self, o: &Self) -> bool {
+        self.inputs == o.inputs
+            && self.outputs == o.outputs
+            && self.announcements == o.announcements
+            && self.fee == o.fee
+            && self.coinbase == o.coinbase
+            && self.timestamp == o.timestamp
+            && self.mutator_set_hash == o.mutator_set_hash
+            && self.merge_bit == o.merge_bit
+    }
 }
 
 impl From<&TransactionKernel> for RpcTransactionKernel {
