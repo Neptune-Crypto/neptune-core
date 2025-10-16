@@ -314,7 +314,7 @@ impl P2PStateManager {
     }
 
     /// Check if connection is allowed (enhanced DDoS protection)
-    pub fn is_connection_allowed(&self, address: SocketAddr) -> bool {
+    pub fn is_connection_allowed(&mut self, address: SocketAddr) -> bool {
         // Check if frozen
         if self.freeze {
             return false;

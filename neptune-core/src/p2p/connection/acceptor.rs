@@ -213,7 +213,7 @@ impl ConnectionAcceptor {
     }
 
     /// Check if connection is allowed (enhanced DDoS protection)
-    async fn is_connection_allowed(&self, peer_address: SocketAddr) -> bool {
+    async fn is_connection_allowed(&mut self, peer_address: SocketAddr) -> bool {
         // Use existing precheck
         if !precheck_incoming_connection_is_allowed(self.global_state.cli(), peer_address.ip()) {
             return false;

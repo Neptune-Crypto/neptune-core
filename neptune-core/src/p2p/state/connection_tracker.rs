@@ -476,7 +476,7 @@ impl ConnectionTracker {
             .values()
             .filter(|history| {
                 history.is_rate_limited(
-                    self.rate_limit_config.max_attempts_per_minute,
+                    self.rate_limit_config.max_attempts_per_ip_per_minute,
                     Duration::from_secs(60),
                 )
             })

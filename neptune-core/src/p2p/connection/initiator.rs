@@ -299,7 +299,7 @@ impl ConnectionInitiator {
     }
 
     /// Check if connection is allowed (enhanced DDoS protection)
-    async fn is_connection_allowed(&self, peer_address: SocketAddr) -> bool {
+    async fn is_connection_allowed(&mut self, peer_address: SocketAddr) -> bool {
         // Check if peer is banned
         if self.global_state.cli().ban.contains(&peer_address.ip()) {
             return false;

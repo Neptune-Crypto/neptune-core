@@ -339,7 +339,7 @@ impl ReputationManager {
 
     /// Check and apply automatic banning based on reputation and violations
     fn check_automatic_banning(&mut self, ip: IpAddr) {
-        let should_ban = if let Some(rep_data) = self.ip_reputations.get(ip) {
+        let should_ban = if let Some(rep_data) = self.ip_reputations.get(&ip) {
             let recent_violations = rep_data.get_recent_violations(self.config.violation_window);
 
             // Check for temporary ban

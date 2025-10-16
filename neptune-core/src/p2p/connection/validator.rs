@@ -77,20 +77,19 @@ impl ConnectionValidator {
         }
 
         // Phase 4: Max Peers Limit
-        if let Some(max_peers) = self.config.max_peers {
-            if current_peer_count >= max_peers {
-                tracing::debug!(
-                    "Connection from {} rejected: Max peers reached ({}/{})",
-                    peer_address,
-                    current_peer_count,
-                    max_peers
-                );
-                reputation_manager.record_behavior(ip, BehaviorEvent::FailedConnection);
-                return ValidationResult::Refused(
-                    ConnectionRefusedReason::MaxPeerNumberExceeded,
-                    format!("Max peers reached: {}/{}", current_peer_count, max_peers),
-                );
-            }
+        let max_peers = self.config.max_num_peers;
+        if current_peer_count >= max_peers {
+            tracing::debug!(
+                "Connection from {} rejected: Max peers reached ({}/{})",
+                peer_address,
+                current_peer_count,
+                max_peers
+            );
+            reputation_manager.record_behavior(ip, BehaviorEvent::FailedConnection);
+            return ValidationResult::Refused(
+                ConnectionRefusedReason::MaxPeerNumberExceeded,
+                format!("Max peers reached: {}/{}", current_peer_count, max_peers),
+            );
         }
 
         // Phase 5: Max Connections Per IP
@@ -218,7 +217,7 @@ impl ValidationResult {
     /// Get refusal reason if refused
     pub fn refusal_reason(&self) -> Option<(ConnectionRefusedReason, &str)> {
         match self {
-            ValidationResult::Refused(reason, msg) => Some((*reason, msg.as_str())),
+            ValidationResult::Refused(reason, msg) => Some((reason.clone(), msg.as_str())),
             ValidationResult::Allowed => None,
         }
     }
