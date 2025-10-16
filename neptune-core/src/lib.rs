@@ -290,7 +290,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         });
         task_join_handles.push(json_rpc_join_handle);
 
-        info!("Started HTTP/JSON RPC server.");
+        info!("Started HTTP-JSON RPC server on {}.", addr);
     }
 
     // Handle incoming connections, messages from peer tasks, and messages from the mining task

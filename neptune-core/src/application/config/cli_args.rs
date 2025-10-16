@@ -514,7 +514,7 @@ pub struct Args {
     /// If not given, RPC is disabled.
     #[clap(
         long,
-        default_missing_value = "127.0.0.1:8080",
+        default_missing_value = "127.0.0.1:9797",
         num_args = 0..=1,
         value_name = "ADDR"
     )]
