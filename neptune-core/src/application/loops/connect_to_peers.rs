@@ -117,6 +117,10 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
 
 /// Check if connection is allowed. Used for both ingoing and outgoing connections.
 ///
+/// MIGRATED TO: src/p2p/connection/handshake.rs:140-243
+/// This function has been migrated to the P2P module for better modularity.
+/// The new implementation is in HandshakeManager::check_if_connection_is_allowed
+///
 /// Locking:
 ///   * acquires `global_state_lock` for read
 async fn check_if_connection_is_allowed(
@@ -281,6 +285,9 @@ where
     inner_ret
 }
 
+/// MIGRATED TO: src/p2p/connection/handshake.rs:57-134
+/// This function has been migrated to the P2P module for better modularity.
+/// The new implementation is in HandshakeManager::perform_handshake
 async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -378,6 +385,10 @@ where
 
 /// Perform handshake and establish connection to a new peer while handling any
 /// panics in the peer task gracefully.
+///
+/// MIGRATED TO: src/p2p/connection/initiator.rs:45-95
+/// This function has been migrated to the P2P module for better modularity.
+/// The new implementation is in ConnectionInitiator::connect_to_peer
 ///
 /// All outgoing connections to peers must go through this function.
 pub(crate) async fn call_peer(

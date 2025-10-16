@@ -26,6 +26,7 @@
 pub mod api;
 pub mod application;
 pub mod macros;
+pub mod p2p;
 pub mod prelude;
 pub mod protocol;
 pub mod state;
@@ -68,6 +69,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::debug;
 use tracing::info;
+use tracing::warn;
 use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::data_directory::DataDirectory;
@@ -80,6 +82,7 @@ use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::connect_to_peers::call_peer;
 use crate::application::loops::main_loop::MainLoopHandler;
 use crate::application::rpc::server::RPC;
+use crate::p2p::service::P2PServiceInterface;
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalStateLock;
@@ -188,7 +191,23 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         TcpListener::bind("127.0.0.1:0").await?
     };
 
-    // Connect to peers, and provide each peer task with a thread-safe copy of the state
+    // Initialize P2P service with enhanced DDoS protection
+    let p2p_config = crate::p2p::config::P2PConfig::default(); // TODO: Extract from CLI args
+    let p2p_service_factory = crate::p2p::integration::P2PServiceFactory::new(
+        p2p_config,
+        global_state_lock.clone(),
+        main_to_peer_broadcast_tx.clone(),
+        peer_task_to_main_tx.clone(),
+    );
+
+    let mut p2p_service = p2p_service_factory
+        .create_service()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to create P2P service: {}", e))?;
+
+    info!("P2P service initialized with DDoS protection");
+
+    // Connect to peers - spawn each connection as a separate task for parallel execution
     let own_handshake_data: HandshakeData =
         global_state_lock.lock_guard().await.get_own_handshakedata();
     info!(
@@ -197,24 +216,28 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     );
     let mut task_join_handles = vec![];
     for peer_address in global_state_lock.cli().peers.clone() {
-        let peer_state_var = global_state_lock.clone(); // bump arc refcount
+        // Spawn connection as a task to allow parallel connections to all peers
+        let peer_state_var = global_state_lock.clone();
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
             main_to_peer_broadcast_tx.subscribe();
         let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = peer_task_to_main_tx.clone();
         let peer_join_handle = tokio::task::spawn(async move {
             call_peer(
                 peer_address,
-                peer_state_var.clone(),
+                peer_state_var,
                 main_to_peer_broadcast_rx_clone,
                 peer_task_to_main_tx_clone,
                 own_handshake_data,
-                1, // All outgoing connections have distance 1
+                1, // All CLI-specified peers have distance 1
             )
             .await;
         });
         task_join_handles.push(peer_join_handle);
     }
-    debug!("Made outgoing connections to peers");
+    debug!(
+        "Spawned connection tasks for {} peers",
+        task_join_handles.len()
+    );
 
     // Start mining tasks if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
@@ -279,6 +302,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     task_join_handles.push(rpc_join_handle);
     info!("Started RPC server");
 
+    // Create P2P integration layer for main loop
+    let p2p_integration = crate::p2p::integration::MainLoopIntegration::new(
+        p2p_service,
+        global_state_lock.clone(),
+        main_to_peer_broadcast_tx.clone(),
+        peer_task_to_main_tx.clone(),
+    );
+
     // Handle incoming connections, messages from peer tasks, and messages from the mining task
     Ok(MainLoopHandler::new(
         incoming_peer_listener,
@@ -290,6 +321,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         miner_to_main_rx,
         rpc_server_to_main_rx,
         task_join_handles,
+        Some(p2p_integration), // Pass P2P integration to main loop
     ))
 }
 

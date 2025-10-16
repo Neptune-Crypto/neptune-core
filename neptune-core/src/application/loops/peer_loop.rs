@@ -549,6 +549,10 @@ impl PeerLoopHandler {
     ///   * Acquires `global_state_lock` for read.
     ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
     ///     `self.reward(..)`.
+    ///
+    /// MIGRATED TO: src/p2p/protocol/handler.rs:67-150
+    /// This function has been migrated to the P2P module for better modularity.
+    /// The new implementation is in MessageHandler::handle_message
     async fn handle_peer_message<S>(
         &mut self,
         msg: PeerMessage,

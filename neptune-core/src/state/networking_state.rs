@@ -73,6 +73,10 @@ impl SyncAnchor {
 
 /// `NetworkingState` contains in-memory and persisted data for interacting
 /// with network peers.
+///
+/// MIGRATED TO: src/p2p/state/manager.rs:77-109
+/// This struct has been migrated to the P2P module for better modularity.
+/// The new implementation is in P2PStateManager
 #[derive(Debug, Clone)]
 pub struct NetworkingState {
     /// Stores info about the peers that the client is connected to

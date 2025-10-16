@@ -136,6 +136,9 @@ pub struct MainLoopHandler {
     rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
     task_handles: Vec<JoinHandle<()>>,
 
+    // P2P integration layer for enhanced DDoS protection
+    p2p_integration: Option<crate::p2p::integration::MainLoopIntegration>,
+
     #[cfg(test)]
     mock_now: Option<SystemTime>,
 }
@@ -410,6 +413,7 @@ impl MainLoopHandler {
         miner_to_main_rx: mpsc::Receiver<MinerToMain>,
         rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
         task_handles: Vec<JoinHandle<()>>,
+        p2p_integration: Option<crate::p2p::integration::MainLoopIntegration>,
     ) -> Self {
         let maybe_main_to_miner_tx = if global_state_lock.cli().mine() {
             Some(main_to_miner_tx)
@@ -427,6 +431,7 @@ impl MainLoopHandler {
             miner_to_main_rx,
             rpc_server_to_main_rx,
             task_handles,
+            p2p_integration,
 
             #[cfg(test)]
             mock_now: None,
@@ -1695,6 +1700,15 @@ impl MainLoopHandler {
                 }
 
                 // Handle incoming connections from peer
+                // MIGRATED TO: src/p2p/connection/acceptor.rs:59-95
+                // This connection acceptance logic has been migrated to the P2P module
+                // for better modularity and DDoS protection
+                //
+                // TODO: Use P2P integration for enhanced DDoS protection
+                // if let Some(p2p_integration) = &mut self.p2p_integration {
+                //     p2p_integration.handle_incoming_connection(stream, peer_address).await?;
+                // } else {
+                //     // Fallback to legacy connection handling
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
                     if !precheck_incoming_connection_is_allowed(self.global_state_lock.cli(), peer_address.ip()) {
                         continue;
@@ -2171,6 +2185,7 @@ mod tests {
             miner_to_main_rx,
             rpc_server_to_main_rx,
             task_join_handles,
+            None, // No P2P integration in tests
         );
         TestSetup {
             main_loop_handler,
