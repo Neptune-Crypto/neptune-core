@@ -1700,40 +1700,49 @@ impl MainLoopHandler {
                 }
 
                 // Handle incoming connections from peer
-                // MIGRATED TO: src/p2p/connection/acceptor.rs:59-95
-                // This connection acceptance logic has been migrated to the P2P module
-                // for better modularity and DDoS protection
-                //
-                // TODO: Use P2P integration for enhanced DDoS protection
-                // if let Some(p2p_integration) = &mut self.p2p_integration {
-                //     p2p_integration.handle_incoming_connection(stream, peer_address).await?;
-                // } else {
-                //     // Fallback to legacy connection handling
+                // Using new P2P module with DDoS protection
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
-                    if !precheck_incoming_connection_is_allowed(self.global_state_lock.cli(), peer_address.ip()) {
-                        continue;
-                    }
+                    info!("🔗 Incoming connection from {}", peer_address);
 
-                    let state = self.global_state_lock.lock_guard().await;
-                    let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> = self.main_to_peer_broadcast_tx.subscribe();
-                    let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = self.peer_task_to_main_tx.clone();
-                    let own_handshake_data: HandshakeData = state.get_own_handshakedata();
-                    let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
-                    let incoming_peer_task_handle = tokio::task::spawn(async move {
-                        match answer_peer(
-                            stream,
-                            global_state_lock,
-                            peer_address,
-                            main_to_peer_broadcast_rx_clone,
-                            peer_task_to_main_tx_clone,
-                            own_handshake_data,
-                        ).await {
-                            Ok(()) => (),
-                            Err(err) => debug!("Got result: {:?}", err),
+                    if let Some(p2p_integration) = &mut self.p2p_integration {
+                        // Use new P2P module with full DDoS protection
+                        match p2p_integration.handle_incoming_connection(stream, peer_address).await {
+                            Ok(()) => {
+                                debug!("✅ Successfully handled incoming connection from {}", peer_address);
+                            }
+                            Err(err) => {
+                                debug!("❌ Failed to handle incoming connection from {}: {}", peer_address, err);
+                            }
                         }
-                    });
-                    main_loop_state.task_handles.push(incoming_peer_task_handle);
-                    main_loop_state.task_handles.retain(|th| !th.is_finished());
+                    } else {
+                        // Fallback to legacy connection handling if P2P integration is not available
+                        warn!("⚠️  P2P integration not available, using legacy connection handling");
+
+                        if !precheck_incoming_connection_is_allowed(self.global_state_lock.cli(), peer_address.ip()) {
+                            continue;
+                        }
+
+                        let state = self.global_state_lock.lock_guard().await;
+                        let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> = self.main_to_peer_broadcast_tx.subscribe();
+                        let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = self.peer_task_to_main_tx.clone();
+                        let own_handshake_data: HandshakeData = state.get_own_handshakedata();
+                        let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
+                        let incoming_peer_task_handle = tokio::task::spawn(async move {
+                            match answer_peer(
+                                stream,
+                                global_state_lock,
+                                peer_address,
+                                main_to_peer_broadcast_rx_clone,
+                                peer_task_to_main_tx_clone,
+                                own_handshake_data,
+                            ).await {
+                                Ok(()) => (),
+                                Err(err) => debug!("Got result: {:?}", err),
+                            }
+                        });
+                        main_loop_state.task_handles.push(incoming_peer_task_handle);
+                        main_loop_state.task_handles.retain(|th| !th.is_finished());
+                    }
                 }
 
                 // Handle messages from peer tasks

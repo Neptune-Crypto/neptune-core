@@ -89,6 +89,91 @@ impl ConnectionAcceptor {
         tracing::info!("P2P connection acceptor stopped");
     }
 
+    /// Handle incoming connection with enhanced DDoS protection
+    ///
+    /// This method replaces the direct answer_peer call and adds comprehensive DDoS protection
+    /// including rate limiting, reputation checks, and connection validation.
+    pub async fn handle_incoming_connection_enhanced(
+        &mut self,
+        stream: TcpStream,
+        peer_address: SocketAddr,
+    ) -> Result<(), String> {
+        tracing::debug!("🔍 Validating incoming connection from {}", peer_address);
+
+        // Phase 1: Basic precheck (static bans, etc.)
+        if !precheck_incoming_connection_is_allowed(self.global_state.cli(), peer_address.ip()) {
+            tracing::warn!(
+                "🛡️ Connection from {} blocked by static precheck",
+                peer_address
+            );
+            return Err(format!(
+                "Connection from {} blocked by static configuration",
+                peer_address
+            ));
+        }
+
+        // Phase 2: DDoS protection checks (rate limiting, reputation)
+        if !self.state_manager.is_connection_allowed(peer_address) {
+            tracing::warn!(
+                "🛡️ DDOS PROTECTION: Connection from {} blocked by DDoS protection",
+                peer_address
+            );
+            return Err(format!(
+                "Connection from {} blocked by DDoS protection",
+                peer_address
+            ));
+        }
+
+        // Phase 3: Record connection attempt
+        self.state_manager
+            .record_connection_attempt(peer_address, true, None);
+
+        tracing::info!(
+            "✅ Connection from {} passed DDoS validation, proceeding with handshake",
+            peer_address
+        );
+
+        // Phase 4: Handle the connection using the standard answer_peer logic
+        let state = self.global_state.lock_guard().await;
+        let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
+            self.main_to_peer_broadcast_tx.subscribe();
+        let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> =
+            self.peer_task_to_main_tx.clone();
+        let own_handshake_data: HandshakeData = state.get_own_handshakedata();
+        let global_state_lock = self.global_state.clone();
+        drop(state); // Release lock before spawning task
+
+        // Spawn task to handle the connection
+        tokio::task::spawn(async move {
+            match answer_peer(
+                stream,
+                global_state_lock,
+                peer_address,
+                main_to_peer_broadcast_rx_clone,
+                peer_task_to_main_tx_clone,
+                own_handshake_data,
+            )
+            .await
+            {
+                Ok(()) => {
+                    tracing::info!(
+                        "✅ Successfully handled peer connection from {}",
+                        peer_address
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "❌ Error handling peer connection from {}: {:?}",
+                        peer_address,
+                        err
+                    );
+                }
+            }
+        });
+
+        Ok(())
+    }
+
     /// Accept a new connection with DDoS protection
     ///
     /// MIGRATED FROM: src/application/loops/main_loop.rs:1698-1723
@@ -144,71 +229,6 @@ impl ConnectionAcceptor {
                 Ok(Some(incoming_peer_task_handle))
             }
             Err(e) => Err(format!("Failed to accept connection: {}", e)),
-        }
-    }
-
-    /// Handle incoming connection with enhanced DDoS protection
-    ///
-    /// This is an enhanced version that uses the P2P handshake manager
-    /// instead of the legacy answer_peer function
-    pub async fn handle_incoming_connection_enhanced(
-        &mut self,
-        stream: TcpStream,
-        peer_address: SocketAddr,
-    ) -> Result<(), String> {
-        // Enhanced DDoS protection checks
-        if !self.is_connection_allowed(peer_address).await {
-            tracing::warn!(
-                "Connection from {} rejected by enhanced DDoS protection",
-                peer_address
-            );
-            return Err("Connection rejected by DDoS protection".to_string());
-        }
-
-        // Record connection attempt
-        self.state_manager
-            .record_connection_attempt(peer_address, true, None);
-
-        // Get handshake data
-        let own_handshake_data = {
-            let state = self.global_state.lock_guard().await;
-            state.get_own_handshakedata()
-        };
-
-        // Create handshake manager
-        let handshake_manager = HandshakeManager::new(
-            crate::p2p::config::ProtocolConfig::default(),
-            self.state_manager.clone(),
-            self.global_state.clone(),
-        );
-
-        // Perform handshake
-        match handshake_manager
-            .perform_handshake(stream, peer_address, own_handshake_data)
-            .await
-        {
-            Ok(handshake_result) => {
-                tracing::info!(
-                    "Handshake successful with {}: {:?}",
-                    peer_address,
-                    handshake_result.connection_status
-                );
-
-                // TODO: Create peer loop handler and start peer communication
-                // This will be implemented when we migrate the peer loop logic
-
-                Ok(())
-            }
-            Err(e) => {
-                let error_msg = format!("{}", e);
-                tracing::warn!("Handshake failed with {}: {}", peer_address, error_msg);
-                self.state_manager.record_connection_attempt(
-                    peer_address,
-                    false,
-                    Some(error_msg.clone()),
-                );
-                Err(error_msg)
-            }
         }
     }
 
