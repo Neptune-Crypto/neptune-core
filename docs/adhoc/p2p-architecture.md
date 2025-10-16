@@ -170,11 +170,44 @@ After rate limit violations:
 
 ## Ban System
 
+**⚠️ IMPORTANT: Ban data is IN-MEMORY ONLY (lost on restart)**
+
+All violation records, reputation scores, and automatic bans are stored in RAM and **do not survive node restarts**. Manual bans via CLI `--ban` flag DO persist.
+
 ### How Attacking Nodes Are Handled
 
 When a node is identified as attacking, it goes through a **progressive ban system**:
 
 #### Step 1: Violation Tracking
+
+**Storage Location:**
+```rust
+// neptune-core/src/p2p/state/reputation.rs
+pub struct IpReputationData {
+    pub score: f64,                                    // Current reputation score
+    pub behavior_history: VecDeque<TimestampedEvent>, // Last 100 events
+    pub violation_count: u32,                          // Total violations
+    pub temp_banned: bool,                             // Temp ban status
+    pub temp_ban_until: Option<Instant>,              // Ban expiration
+    pub perm_banned: bool,                            // Perm ban status
+    // ...
+}
+
+// Stored in ReputationManager
+ip_reputations: HashMap<IpAddr, IpReputationData>
+
+// Which lives in P2PStateManager (wrapped in Arc<RwLock<>>)
+reputation_manager: ReputationManager
+```
+
+**⚠️ CURRENT STATE: IN-MEMORY ONLY**
+- All violation records are stored in RAM (`HashMap<IpAddr, IpReputationData>`)
+- Violations are stored in a `VecDeque<TimestampedEvent>` (last 100 events per IP)
+- **Data is lost on node restart**
+- Bans do NOT survive restarts
+- Each IP can have up to 100 timestamped behavior events in history
+
+**Future Enhancement:** Persist to database for restart survival (see [Future Enhancements](#future-enhancements))
 
 Every attack attempt is recorded:
 
@@ -245,18 +278,56 @@ Over time, reputation scores decay toward neutral (0.5):
 - **Purpose:** Allow reformed IPs to reconnect
 - **Does not affect bans:** Bans must be manually lifted
 
-### Ban Persistence
+### Ban Persistence & Memory Model
 
-**Current State:**
+**⚠️ CRITICAL: All Data is In-Memory (Lost on Restart)**
 
-- Bans are in-memory only
-- Reset on node restart
+**What's Stored:**
+```
+P2PStateManager (Arc<RwLock<>>) 
+  └── ReputationManager
+      └── HashMap<IpAddr, IpReputationData>
+          ├── score: f64                      // 0.0 - 1.0
+          ├── behavior_history: VecDeque      // Last 100 events
+          ├── violation_count: u32            // Total violations
+          ├── temp_banned: bool               // Ban status
+          ├── temp_ban_until: Option<Instant> // Ban expiration (Instant = in-memory)
+          └── perm_banned: bool               // Perm ban flag
+```
 
-**Future Enhancement:**
+**Storage Details:**
+- **Type:** `HashMap<IpAddr, IpReputationData>` in RAM
+- **Lifetime:** Process lifetime only
+- **Size Limit:** Last 100 events per IP (circular buffer)
+- **Timestamps:** Use `Instant` (relative to process start, cannot persist)
+- **Persistence:** None
 
-- Persist bans to database
+**What Happens on Restart:**
+- ❌ All violation records deleted
+- ❌ All reputation scores reset to 0.5 (neutral)
+- ❌ All temporary bans lifted
+- ❌ All permanent bans lifted
+- ❌ Behavior history erased
+- ✅ Attackers can immediately reconnect
+
+**Why This Matters:**
+- Sophisticated attackers can restart attacks after node restart
+- No long-term protection against persistent attackers
+- Manual bans (via CLI `--ban` flag) DO survive restarts (stored in config)
+
+**Workaround (Current):**
+- Use CLI `--ban` flag to manually ban IPs: `neptune-core --ban 1.2.3.4`
+- These manual bans are read from CLI args and survive restarts
+- Automatic bans (from DDoS system) do NOT persist
+
+**Future Enhancement (High Priority):**
+
+- Persist reputation data to LevelDB
+- Store `SystemTime` instead of `Instant` for timestamps
+- Automatic ban list persistence
 - Shared banlist across network
 - Manual ban management commands
+- Import/export ban lists
 
 ---
 
