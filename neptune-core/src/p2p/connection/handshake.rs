@@ -1,10 +1,12 @@
 //! Handshake manager implementation
 //!
-//! This module handles the P2P handshake protocol.
+//! This module handles the P2P handshake protocol with timeout protection.
 //!
 //! MIGRATED FROM: src/application/loops/connect_to_peers.rs:284-377
 //! This code was transplanted from the original answer_peer_inner function
 //! and check_if_connection_is_allowed function to provide modular handshake handling.
+//!
+//! ENHANCED: Added timeout protection to prevent slowloris attacks.
 
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime};
@@ -12,6 +14,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{bail, ensure, Result};
 use futures::{SinkExt, TryStreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::time::timeout;
 use tokio_serde::formats::{Bincode, SymmetricalBincode};
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
@@ -57,6 +60,9 @@ impl From<OriginalConnectionRefusedReason> for crate::p2p::protocol::ConnectionR
 const MAGIC_STRING_REQUEST: &[u8; 15] = b"7B8AB7FC438F411";
 const MAGIC_STRING_RESPONSE: &[u8; 15] = b"Hello Neptune!\n";
 
+/// Handshake timeout configuration
+const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Handshake manager for handling P2P handshake protocol
 #[derive(Debug)]
 pub struct HandshakeManager {
@@ -66,6 +72,8 @@ pub struct HandshakeManager {
     state_manager: P2PStateManager,
     /// Global state lock
     global_state: GlobalStateLock,
+    /// Handshake timeout duration
+    handshake_timeout: Duration,
 }
 
 impl HandshakeManager {
@@ -79,6 +87,67 @@ impl HandshakeManager {
             config,
             state_manager,
             global_state,
+            handshake_timeout: DEFAULT_HANDSHAKE_TIMEOUT,
+        }
+    }
+
+    /// Create handshake manager with custom timeout
+    pub fn with_timeout(
+        config: ProtocolConfig,
+        state_manager: P2PStateManager,
+        global_state: GlobalStateLock,
+        handshake_timeout: Duration,
+    ) -> Self {
+        Self {
+            config,
+            state_manager,
+            global_state,
+            handshake_timeout,
+        }
+    }
+
+    /// Perform handshake with timeout protection
+    ///
+    /// This wrapper adds timeout protection to prevent slowloris attacks where
+    /// an attacker opens connections but never completes the handshake.
+    pub async fn perform_handshake_with_timeout<S>(
+        &self,
+        stream: S,
+        peer_address: SocketAddr,
+        own_handshake_data: HandshakeData,
+    ) -> Result<HandshakeResult>
+    where
+        S: AsyncRead + AsyncWrite + std::fmt::Debug + Unpin,
+    {
+        tracing::debug!(
+            "Starting handshake with {} (timeout: {:?})",
+            peer_address,
+            self.handshake_timeout
+        );
+
+        let result = timeout(
+            self.handshake_timeout,
+            self.perform_handshake(stream, peer_address, own_handshake_data),
+        )
+        .await;
+
+        match result {
+            Ok(handshake_result) => {
+                tracing::debug!("Handshake with {} completed successfully", peer_address);
+                handshake_result
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "Handshake with {} timed out after {:?}",
+                    peer_address,
+                    self.handshake_timeout
+                );
+                bail!(
+                    "Handshake timeout: connection from {} exceeded {:?}",
+                    peer_address,
+                    self.handshake_timeout
+                )
+            }
         }
     }
 
