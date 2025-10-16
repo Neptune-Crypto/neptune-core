@@ -55,7 +55,7 @@ where
     /// If we are in the test environment, try reading it from disk. And if it
     /// not there, generate it and store it to disk.
     ///
-    /// This method is a thin wrapper around [`prove_consensus_program`], which
+    /// This method is a thin wrapper around `prove_consensus_program`, which
     /// does the same but for arbitrary programs.
     //
     // The entire trait is only `pub` to facilitate benchmarks; it is not part of

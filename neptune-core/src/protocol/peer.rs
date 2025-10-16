@@ -396,6 +396,12 @@ pub enum ConnectionRefusedReason {
     Other(u8),
 }
 
+impl ConnectionRefusedReason {
+    pub(crate) fn bad_timestamp() -> Self {
+        Self::Other(0)
+    }
+}
+
 impl From<InternalConnectionStatus> for TransferConnectionStatus {
     fn from(value: InternalConnectionStatus) -> Self {
         match value {
