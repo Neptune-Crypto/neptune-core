@@ -183,13 +183,13 @@ impl MTree {
 )]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct Pow<const MERKLE_TREE_HEIGHT: usize> {
-    pub(super) root: Digest,
+    pub root: Digest,
 
     #[serde(with = "serde_arrays")]
-    pub(super) path_a: [Digest; MERKLE_TREE_HEIGHT],
+    pub path_a: [Digest; MERKLE_TREE_HEIGHT],
 
     #[serde(with = "serde_arrays")]
-    pub(super) path_b: [Digest; MERKLE_TREE_HEIGHT],
+    pub path_b: [Digest; MERKLE_TREE_HEIGHT],
 
     // The nonce comes at the end, so in the `BFieldCodec` encoding it comes
     // first. Therefore, you cannot store partial hashes of paths.
