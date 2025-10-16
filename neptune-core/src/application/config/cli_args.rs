@@ -519,7 +519,7 @@ pub struct Args {
     pub(crate) scan_keys: Option<usize>,
 
     /// Enable JSON/HTTP RPC.  
-    /// You can optionally specify an address and port (default: 127.0.0.1:8080).  
+    /// You can optionally specify an address and port (default: 127.0.0.1:9797).  
     /// If not given, RPC is disabled.
     #[clap(
         long,
