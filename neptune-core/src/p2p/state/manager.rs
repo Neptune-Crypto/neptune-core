@@ -259,14 +259,14 @@ impl P2PStateManager {
     ///
     /// MIGRATED FROM: src/state/networking_state.rs:151-153
     pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
-        self.peer_databases.peer_standings.get(&ip).cloned()
+        self.peer_databases.peer_standings.get(&ip).copied()
     }
 
     /// Clear IP standing in database
     ///
     /// MIGRATED FROM: src/state/networking_state.rs:155-163
     pub async fn clear_ip_standing_in_database(&mut self, ip: IpAddr) {
-        if let Some(mut standing) = self.peer_databases.peer_standings.get(&ip).cloned() {
+        if let Some(mut standing) = self.peer_databases.peer_standings.get(&ip).copied() {
             standing.clear_standing();
             self.peer_databases.peer_standings.insert(ip, standing);
         }
@@ -277,7 +277,7 @@ impl P2PStateManager {
     /// MIGRATED FROM: src/state/networking_state.rs:165-182
     pub async fn clear_all_standings_in_database(&mut self) {
         // Clear all standings in HashMap
-        for (_, mut standing) in self.peer_databases.peer_standings.iter_mut() {
+        for (_, standing) in &mut self.peer_databases.peer_standings {
             standing.clear_standing();
         }
     }
@@ -290,7 +290,7 @@ impl P2PStateManager {
         ip: IpAddr,
         current_standing: PeerStanding,
     ) {
-        let old_standing = self.peer_databases.peer_standings.get(&ip).cloned();
+        let old_standing = self.peer_databases.peer_standings.get(&ip).copied();
 
         if old_standing.is_none() || old_standing.unwrap().standing > current_standing.standing {
             self.peer_databases
@@ -308,7 +308,7 @@ impl P2PStateManager {
         let mut dbiterator = self.peer_databases.peer_standings.iter();
         for (ip, standing) in dbiterator.by_ref() {
             if standing.is_negative() {
-                sanctions.insert(*ip, standing.clone());
+                sanctions.insert(*ip, *standing);
             }
         }
 

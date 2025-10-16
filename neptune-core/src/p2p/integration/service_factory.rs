@@ -88,7 +88,7 @@ impl P2PServiceFactory {
         instance_id: u128,
     ) -> Result<P2PStateManager, String> {
         // Create new P2P state manager
-        let mut p2p_state_manager = P2PStateManager::new(config.clone(), instance_id);
+        let p2p_state_manager = P2PStateManager::new(config.clone(), instance_id);
 
         // TODO: Migrate existing peer data from global state
         // This will be implemented when we migrate the state management

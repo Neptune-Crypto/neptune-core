@@ -76,7 +76,7 @@ impl ReputationScore {
     fn update_score(&mut self) {
         let total = self.positive_interactions + self.negative_interactions;
         if total > 0 {
-            self.score = self.positive_interactions as f64 / total as f64;
+            self.score = f64::from(self.positive_interactions) / f64::from(total);
         }
     }
 
@@ -125,7 +125,7 @@ impl PeerReputationManager {
     pub fn add_positive_interaction(&mut self, ip: IpAddr) {
         self.reputation_scores
             .entry(ip)
-            .or_insert_with(ReputationScore::new)
+            .or_default()
             .add_positive_interaction();
     }
 
@@ -133,7 +133,7 @@ impl PeerReputationManager {
     pub fn add_negative_interaction(&mut self, ip: IpAddr) {
         self.reputation_scores
             .entry(ip)
-            .or_insert_with(ReputationScore::new)
+            .or_default()
             .add_negative_interaction();
     }
 

@@ -49,7 +49,9 @@ impl ConnectionHistory {
         self.attempts.push_back(attempt);
 
         // Keep only recent attempts (last hour)
-        let cutoff = Instant::now() - Duration::from_secs(3600);
+        let cutoff = Instant::now()
+            .checked_sub(Duration::from_secs(3600))
+            .unwrap();
         while let Some(front) = self.attempts.front() {
             if front.timestamp < cutoff {
                 self.attempts.pop_front();
@@ -68,7 +70,7 @@ impl ConnectionHistory {
 
     /// Get recent attempt count within time window
     pub fn get_recent_attempts(&self, window: Duration) -> usize {
-        let cutoff = Instant::now() - window;
+        let cutoff = Instant::now().checked_sub(window).unwrap();
         self.attempts
             .iter()
             .filter(|attempt| attempt.timestamp > cutoff)
@@ -314,7 +316,7 @@ impl ConnectionTracker {
         // Record in connection history
         self.connection_history
             .entry(ip)
-            .or_insert_with(ConnectionHistory::new)
+            .or_default()
             .add_attempt(attempt);
 
         // Record global attempt
@@ -418,7 +420,9 @@ impl ConnectionTracker {
         let now = Instant::now();
 
         // Check minute window
-        let minute_cutoff = now - self.rate_limit_config.minute_window;
+        let minute_cutoff = now
+            .checked_sub(self.rate_limit_config.minute_window)
+            .unwrap();
         let minute_count = self
             .global_attempts
             .iter()
@@ -430,7 +434,7 @@ impl ConnectionTracker {
         }
 
         // Check hour window
-        let hour_cutoff = now - self.rate_limit_config.hour_window;
+        let hour_cutoff = now.checked_sub(self.rate_limit_config.hour_window).unwrap();
         let hour_count = self
             .global_attempts
             .iter()
@@ -455,7 +459,9 @@ impl ConnectionTracker {
 
     /// Cleanup old global attempts
     fn cleanup_global_attempts(&mut self) {
-        let cutoff = Instant::now() - self.rate_limit_config.hour_window;
+        let cutoff = Instant::now()
+            .checked_sub(self.rate_limit_config.hour_window)
+            .unwrap();
         while let Some(&front) = self.global_attempts.front() {
             if front < cutoff {
                 self.global_attempts.pop_front();
@@ -508,7 +514,9 @@ impl ConnectionTracker {
 
     /// Clear old connection history
     pub fn cleanup_old_history(&mut self) {
-        let cutoff = Instant::now() - Duration::from_secs(3600); // 1 hour
+        let cutoff = Instant::now()
+            .checked_sub(Duration::from_secs(3600))
+            .unwrap(); // 1 hour
         self.connection_history.retain(|_, history| {
             history
                 .attempts
@@ -517,7 +525,9 @@ impl ConnectionTracker {
         });
 
         // Also cleanup IP rate limit states for IPs with no recent violations
-        let violation_cutoff = Instant::now() - self.rate_limit_config.cooldown_period;
+        let violation_cutoff = Instant::now()
+            .checked_sub(self.rate_limit_config.cooldown_period)
+            .unwrap();
         self.ip_rate_limits.retain(|_, state| {
             if let Some(last_violation) = state.last_violation {
                 last_violation > violation_cutoff
@@ -551,7 +561,7 @@ impl ConnectionTracker {
 
     /// Get global connection attempt rate (per minute)
     pub fn get_global_connection_rate(&self) -> usize {
-        let cutoff = Instant::now() - Duration::from_secs(60);
+        let cutoff = Instant::now().checked_sub(Duration::from_secs(60)).unwrap();
         self.global_attempts.iter().filter(|&&t| t > cutoff).count()
     }
 
@@ -583,7 +593,7 @@ impl ConnectionTracker {
                 .map(|state| state.violation_count as usize)
                 .sum(),
             global_attempts_last_minute: {
-                let cutoff = Instant::now() - Duration::from_secs(60);
+                let cutoff = Instant::now().checked_sub(Duration::from_secs(60)).unwrap();
                 self.global_attempts.iter().filter(|&&t| t > cutoff).count()
             },
             global_attempts_last_hour: self.global_attempts.len(),

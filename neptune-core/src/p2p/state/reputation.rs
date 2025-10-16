@@ -174,7 +174,7 @@ impl IpReputationData {
 
     /// Get recent violation count (last hour)
     pub fn get_recent_violations(&self, window: Duration) -> usize {
-        let cutoff = Instant::now() - window;
+        let cutoff = Instant::now().checked_sub(window).unwrap();
         self.behavior_history
             .iter()
             .filter(|e| e.timestamp > cutoff && e.event.reputation_impact() < 0.0)
@@ -327,10 +327,7 @@ impl ReputationManager {
 
     /// Record a behavior event for an IP
     pub fn record_behavior(&mut self, ip: IpAddr, event: BehaviorEvent) {
-        let rep_data = self
-            .ip_reputations
-            .entry(ip)
-            .or_insert_with(IpReputationData::new);
+        let rep_data = self.ip_reputations.entry(ip).or_default();
 
         rep_data.record_event(event);
 
@@ -377,10 +374,7 @@ impl ReputationManager {
 
     /// Apply permanent ban to an IP
     pub fn apply_permanent_ban(&mut self, ip: IpAddr) {
-        self.ip_reputations
-            .entry(ip)
-            .or_insert_with(IpReputationData::new)
-            .apply_perm_ban();
+        self.ip_reputations.entry(ip).or_default().apply_perm_ban();
         tracing::warn!("Applied permanent ban to IP {}", ip);
     }
 
@@ -506,7 +500,9 @@ impl ReputationManager {
 
     /// Clean up old reputation data
     pub fn cleanup_old_data(&mut self) {
-        let cutoff = Instant::now() - Duration::from_secs(86400 * 7); // 7 days
+        let cutoff = Instant::now()
+            .checked_sub(Duration::from_secs(86400 * 7))
+            .unwrap(); // 7 days
 
         self.ip_reputations.retain(|_, data| {
             // Keep if:

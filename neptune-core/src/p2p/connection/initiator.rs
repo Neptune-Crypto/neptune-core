@@ -21,7 +21,7 @@ use crate::application::loops::channel::{MainToPeerTask, PeerTaskToMain};
 use crate::application::loops::connect_to_peers::call_peer;
 use crate::p2p::config::ConnectionConfig;
 use crate::p2p::connection::handshake::InternalConnectionStatus;
-use crate::p2p::protocol::{ConnectionStatus, PeerMessage};
+use crate::p2p::protocol::PeerMessage;
 use crate::p2p::state::SharedP2PStateManager;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::ConnectionRefusedReason;
@@ -218,7 +218,7 @@ impl ConnectionInitiator {
         // MIGRATED FROM: connect_to_peers.rs:481-500
         let outgoing_handshake = PeerMessage::Handshake {
             magic_value: *MAGIC_STRING_REQUEST,
-            data: Box::new(own_handshake.clone()),
+            data: Box::new(*own_handshake),
         };
         peer.send(outgoing_handshake).await?;
         tracing::debug!("Awaiting connection status response from {peer_address}");

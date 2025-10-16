@@ -190,7 +190,7 @@ impl HandshakeManager {
 
         let handshake_response = PeerMessage::Handshake {
             magic_value: *MAGIC_STRING_RESPONSE,
-            data: Box::new(own_handshake_data.clone()),
+            data: Box::new(own_handshake_data),
         };
         peer.send(handshake_response).await?;
 

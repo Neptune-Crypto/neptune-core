@@ -113,7 +113,7 @@ impl MessageHandler {
         // DDoS protection: Check message rate limiting (requires mutable access)
         if self.config.enable_ddos_protection {
             let is_rate_limited = {
-                let mut state = self.state_manager.write().await;
+                let state = self.state_manager.write().await;
                 state.is_message_rate_limited(peer_address.ip())
             };
 
@@ -166,7 +166,7 @@ impl MessageHandler {
             }
             PeerMessage::Block(transfer_block) => {
                 // Convert TransferBlock to Block
-                use crate::protocol::peer::transfer_block::TransferBlock;
+
                 let block: Result<crate::protocol::consensus::block::Block, _> =
                     (*transfer_block).try_into();
                 match block {
@@ -183,7 +183,7 @@ impl MessageHandler {
             }
             PeerMessage::Transaction(transfer_transaction) => {
                 // Convert TransferTransaction to Transaction
-                use crate::protocol::peer::transfer_transaction::TransferTransaction;
+
                 let transaction: Result<crate::protocol::consensus::transaction::Transaction, _> =
                     (*transfer_transaction).try_into();
                 match transaction {

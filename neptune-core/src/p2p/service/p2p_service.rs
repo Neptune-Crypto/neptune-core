@@ -279,7 +279,7 @@ impl P2PServiceInterface for P2PService {
         tracing::debug!("Sending message to {}: {:?}", address, message.get_type());
 
         // Create message handler for this message
-        let mut message_handler = crate::p2p::protocol::handler::MessageHandler::new(
+        let message_handler = crate::p2p::protocol::handler::MessageHandler::new(
             crate::p2p::protocol::handler::HandlerConfig::default(),
             self.state_manager.clone(),
             self.global_state.clone(),

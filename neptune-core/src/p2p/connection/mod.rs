@@ -17,7 +17,7 @@ pub use manager::ConnectionManager;
 pub use validator::ConnectionValidator;
 
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 /// Connection state enumeration
 #[derive(Debug, Clone, PartialEq, Eq)]

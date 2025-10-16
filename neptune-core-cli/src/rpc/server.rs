@@ -60,7 +60,11 @@ pub async fn start(config: crate::rpc::RpcConfig) -> Result<()> {
 }
 
 /// Handle individual HTTP connection
-async fn handle_connection(mut stream: TcpStream, server_token: Token, neptune_core_port: u16) -> Result<()> {
+async fn handle_connection(
+    mut stream: TcpStream,
+    server_token: Token,
+    neptune_core_port: u16,
+) -> Result<()> {
     let mut buffer = [0; 8192]; // Increased to handle large bech32m addresses
 
     match stream.read(&mut buffer).await {
@@ -75,7 +79,10 @@ async fn handle_connection(mut stream: TcpStream, server_token: Token, neptune_c
 
             // Parse HTTP request
             let http_request = parse_http_request(&request_str)?;
-            info!("Parsed HTTP request, body present: {}", http_request.body.is_some());
+            info!(
+                "Parsed HTTP request, body present: {}",
+                http_request.body.is_some()
+            );
 
             // Extract and validate cookie
             let cookie_valid = validate_cookie(&http_request, &server_token);

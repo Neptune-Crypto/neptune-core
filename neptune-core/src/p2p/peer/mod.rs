@@ -15,7 +15,6 @@ pub use manager::PeerManager;
 pub use standing::PeerStanding;
 
 use std::net::SocketAddr;
-use std::time::SystemTime;
 
 /// Peer state enumeration
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::SystemTime;
 
 use super::{PeerInfo, PeerState};
 use crate::p2p::config::PeerConfig;

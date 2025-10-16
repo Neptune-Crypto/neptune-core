@@ -199,7 +199,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         peer_task_to_main_tx.clone(),
     );
 
-    let mut p2p_service = p2p_service_factory
+    let p2p_service = p2p_service_factory
         .create_service()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create P2P service: {}", e))?;
