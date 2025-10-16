@@ -13,7 +13,7 @@ use crate::application::loops::channel::{MainToPeerTask, PeerTaskToMain};
 use crate::p2p::config::P2PConfig;
 use crate::p2p::peer::PeerInfo;
 use crate::p2p::protocol::PeerMessage;
-use crate::p2p::state::P2PStateManager;
+use crate::p2p::state::SharedP2PStateManager;
 use crate::state::GlobalStateLock;
 
 /// Main P2P service
@@ -21,8 +21,8 @@ use crate::state::GlobalStateLock;
 pub struct P2PService {
     /// P2P configuration
     config: P2PConfig,
-    /// P2P state manager
-    state_manager: P2PStateManager,
+    /// P2P state manager (shared across all connections)
+    state_manager: SharedP2PStateManager,
     /// Global state lock
     global_state: GlobalStateLock,
     /// Main to peer broadcast channel
@@ -45,7 +45,7 @@ impl P2PService {
     /// Create new P2P service
     pub fn new(
         config: P2PConfig,
-        state_manager: P2PStateManager,
+        state_manager: SharedP2PStateManager,
         global_state: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
@@ -169,9 +169,10 @@ impl P2PService {
         );
 
         // Create connection acceptor for this connection
+        // Note: state_manager is Arc<RwLock<>> so cloning only clones the Arc, not the data
         let mut connection_acceptor = crate::p2p::connection::acceptor::ConnectionAcceptor::new(
             self.config.connection.clone(),
-            self.state_manager.clone(),
+            self.state_manager.clone(), // Clone the Arc, shares the underlying state
             self.global_state.clone(),
             self.main_to_peer_broadcast_tx.clone(),
             self.peer_task_to_main_tx.clone(),

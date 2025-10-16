@@ -22,7 +22,7 @@ use crate::application::loops::connect_to_peers::{
 };
 use crate::p2p::config::ConnectionConfig;
 use crate::p2p::connection::handshake::HandshakeManager;
-use crate::p2p::state::P2PStateManager;
+use crate::p2p::state::SharedP2PStateManager;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::state::GlobalStateLock;
 
@@ -33,8 +33,8 @@ pub struct ConnectionAcceptor {
     config: ConnectionConfig,
     /// TCP listener
     listener: Option<TcpListener>,
-    /// P2P state manager for DDoS protection
-    state_manager: P2PStateManager,
+    /// P2P state manager for DDoS protection (shared across all connections)
+    state_manager: SharedP2PStateManager,
     /// Global state lock
     global_state: GlobalStateLock,
     /// Main to peer broadcast channel
@@ -47,7 +47,7 @@ impl ConnectionAcceptor {
     /// Create new connection acceptor
     pub fn new(
         config: ConnectionConfig,
-        state_manager: P2PStateManager,
+        state_manager: SharedP2PStateManager,
         global_state: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
@@ -113,10 +113,22 @@ impl ConnectionAcceptor {
         }
 
         // Phase 2: DDoS protection checks (rate limiting, reputation)
-        if !self.state_manager.is_connection_allowed(peer_address) {
+        // Acquire write lock to check if connection is allowed (needs mutable access for rate limiting)
+        let connection_allowed = {
+            let mut state = self.state_manager.write().await;
+            state.is_connection_allowed(peer_address)
+        };
+
+        if !connection_allowed {
             tracing::warn!(
                 "🛡️ DDOS PROTECTION: Connection from {} blocked by DDoS protection",
                 peer_address
+            );
+            // Record failed attempt
+            self.state_manager.write().await.record_connection_attempt(
+                peer_address,
+                false,
+                Some("Blocked by DDoS protection".to_string()),
             );
             return Err(format!(
                 "Connection from {} blocked by DDoS protection",
@@ -124,8 +136,10 @@ impl ConnectionAcceptor {
             ));
         }
 
-        // Phase 3: Record connection attempt
+        // Phase 3: Record successful connection attempt
         self.state_manager
+            .write()
+            .await
             .record_connection_attempt(peer_address, true, None);
 
         tracing::info!(
@@ -239,14 +253,17 @@ impl ConnectionAcceptor {
             return false;
         }
 
-        // Additional DDoS protection checks
-        if !self.state_manager.is_connection_allowed(peer_address) {
-            return false;
-        }
+        // Additional DDoS protection checks (requires mutable access to state manager)
+        {
+            let mut state = self.state_manager.write().await;
+            if !state.is_connection_allowed(peer_address) {
+                return false;
+            }
 
-        // Check rate limiting
-        if self.state_manager.is_rate_limited(peer_address.ip()) {
-            return false;
+            // Check rate limiting
+            if state.is_rate_limited(peer_address.ip()) {
+                return false;
+            }
         }
 
         true
@@ -258,12 +275,13 @@ impl ConnectionAcceptor {
     }
 
     /// Get connection statistics
-    pub fn get_connection_stats(&self) -> ConnectionStats {
+    pub async fn get_connection_stats(&self) -> ConnectionStats {
+        let state = self.state_manager.read().await;
         ConnectionStats {
             is_running: self.is_running(),
-            total_connections: self.state_manager.get_total_connections(),
-            failed_connections: self.state_manager.get_failed_connections(),
-            rate_limited_connections: self.state_manager.get_rate_limited_connections(),
+            total_connections: state.get_total_connections(),
+            failed_connections: state.get_failed_connections(),
+            rate_limited_connections: state.get_rate_limited_connections(),
         }
     }
 }

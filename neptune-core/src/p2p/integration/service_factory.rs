@@ -4,12 +4,13 @@
 //! dependencies from the existing Neptune Core system.
 
 use std::net::SocketAddr;
-use tokio::sync::{broadcast, mpsc};
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc, RwLock};
 
 use crate::application::loops::channel::{MainToPeerTask, PeerTaskToMain};
 use crate::p2p::config::P2PConfig;
 use crate::p2p::service::{P2PService, P2PServiceCommand, P2PServiceEvent, P2PServiceResponse};
-use crate::p2p::state::P2PStateManager;
+use crate::p2p::state::{P2PStateManager, SharedP2PStateManager};
 use crate::state::GlobalStateLock;
 
 /// Factory for creating P2P services with proper initialization
@@ -49,19 +50,22 @@ impl P2PServiceFactory {
             state.net.instance_id
         };
 
-        // Create P2P state manager
+        // Create P2P state manager (wrapped in Arc<RwLock<>> for shared access)
         let p2p_state_manager =
             P2PServiceFactory::create_p2p_state_manager(&self.config, instance_id).await?;
+
+        // Wrap in Arc<RwLock<>> for shared, thread-safe access across all connections
+        let shared_state_manager = Arc::new(RwLock::new(p2p_state_manager));
 
         // Create event channels
         let (event_tx, event_rx) = mpsc::channel::<P2PServiceEvent>(1000);
         let (command_tx, command_rx) = mpsc::channel::<P2PServiceCommand>(1000);
         let (response_tx, response_rx) = mpsc::channel::<P2PServiceResponse>(1000);
 
-        // Create P2P service
+        // Create P2P service with shared state manager
         let mut p2p_service = P2PService::new(
             self.config.clone(),
-            p2p_state_manager,
+            shared_state_manager,
             self.global_state.clone(),
             self.main_to_peer_broadcast_tx.clone(),
             self.peer_task_to_main_tx.clone(),

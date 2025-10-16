@@ -10,7 +10,7 @@ pub mod reputation;
 
 // Re-export main types
 pub use connection_tracker::ConnectionTracker;
-pub use manager::P2PStateManager;
+pub use manager::{P2PStateManager, SharedP2PStateManager};
 pub use peer_map::PeerMap;
 pub use reputation::ReputationManager;
 

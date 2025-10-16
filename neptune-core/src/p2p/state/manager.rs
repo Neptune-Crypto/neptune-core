@@ -8,7 +8,9 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tokio::sync::RwLock;
 
 use anyhow::Result;
 use tasm_lib::prelude::Digest;
@@ -27,6 +29,9 @@ use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
 // use crate::state::database::PeerDatabases; // Temporarily disabled for type compatibility
 use crate::state::GlobalState;
+
+/// Shared P2P state manager type for thread-safe access
+pub type SharedP2PStateManager = Arc<RwLock<P2PStateManager>>;
 
 /// Temporary PeerDatabases struct for type compatibility
 #[derive(Debug, Clone)]
