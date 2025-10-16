@@ -1,0 +1,38 @@
+# EditorConfig is awesome: https://EditorConfig.org
+
+# Top-most EditorConfig file
+root = true
+
+# Default settings for all files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# 4-space indentation for specific file types
+[*.{py,rs,go,ts,tsx,js,jsx}]
+indent_size = 4
+
+# 2-space indentation for JSON, YAML, and Markdown
+[*.{json,yaml,yml,md}]
+indent_size = 2
+
+# Tab indentation for Makefiles
+[Makefile]
+indent_style = tab
+
+# Specific settings for HTML and CSS
+[*.{html,css,scss,less}]
+indent_size = 2
+
+# Handle Windows batch files
+[*.{bat,cmd}]
+end_of_line = crlf
+
+# Ignore minified files
+[*.min.{js,css}]
+insert_final_newline = false
+trim_trailing_whitespace = false
