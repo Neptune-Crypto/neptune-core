@@ -21,6 +21,7 @@ use tokio::select;
 use tokio::signal;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio::time::Instant;
@@ -1674,6 +1675,17 @@ impl MainLoopHandler {
         drop((tx_term, tx_int, tx_quit));
 
         let exit_code: i32 = loop {
+            // Use a semaphore to limit number of incoming connections. Should
+            // only be relevant as a countermeasure against a DOS. Each
+            // incoming connection must acquire a permit. If none is free,
+            // the below call to `acquire_owned` will only be resolved when an
+            // incoming connection is closed. This value is set much higher
+            // than the configured max number of peers since it's only intended
+            // to be used in case of heavy DOS.
+            let incoming_connections_limit = Arc::new(Semaphore::new(
+                self.global_state_lock.cli().max_num_peers * 2 + 4,
+            ));
+
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
@@ -1696,9 +1708,29 @@ impl MainLoopHandler {
 
                 // Handle incoming connections from peer
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
-                    if !precheck_incoming_connection_is_allowed(self.global_state_lock.cli(), peer_address.ip()) {
+                    let ip = peer_address.ip();
+                    if !precheck_incoming_connection_is_allowed(self.global_state_lock.cli(), ip) {
                         continue;
                     }
+
+                    // Is this IP banned through database entry?
+                    let peer_banned = self.global_state_lock.lock_guard().await.net.peer_databases.peer_standings.get(ip).await.is_some_and(|x| x.is_bad());
+                    if peer_banned {
+                        debug!("Banned peer {ip} attempted incoming connection. Hanging up.");
+                        continue;
+                    }
+
+                    // Bump semaphore counter for incoming connections. Should
+                    // be done after the precheck to prevent unnecessary
+                    // acquisitions.
+                    let timeout = Duration::from_secs(self.global_state_lock.cli().handshake_timeout.into());
+                    let permit = time::timeout(timeout, incoming_connections_limit.clone().acquire_owned()).await;
+                    let Ok(permit) = permit else {
+                        warn!("Too many incoming connections to handle. Dropping incoming connection from {ip}.");
+                        continue;
+                    };
+
+                    let permit = permit?;
 
                     let state = self.global_state_lock.lock_guard().await;
                     let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> = self.main_to_peer_broadcast_tx.subscribe();
@@ -1706,6 +1738,9 @@ impl MainLoopHandler {
                     let own_handshake_data: HandshakeData = state.get_own_handshakedata();
                     let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
                     let incoming_peer_task_handle = tokio::task::spawn(async move {
+                        // permit gets dropped at end of scope, to release slot.
+                        let _permit = permit;
+
                         match answer_peer(
                             stream,
                             global_state_lock,

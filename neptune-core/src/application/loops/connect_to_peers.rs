@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -16,6 +17,7 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tokio_serde::formats::Bincode;
 use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::SymmetricallyFramed;
@@ -317,6 +319,17 @@ where
     inner_ret
 }
 
+/// Handles all incoming connections. Returns when the connection is closed.
+///
+///
+/// A returned `Result::Error` always indicates that the connection was closed
+/// through some networking error, either in this function or in the peer loop
+/// that this function invokes if the handshake protocol is successful.
+///
+/// A returned `Result::Ok` means that either the peer loop was entered or the
+/// handshake was not completed. The reason for this behavior is that we want
+/// malicious connection attempts to be as resource light as possible. And
+/// allocating thousands of anyhow errors can use a lot of RAM.
 async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -339,26 +352,42 @@ where
     >::new(length_delimited, SymmetricalBincode::default());
 
     // Complete Neptune handshake
-    let Some(PeerMessage::Handshake {
-        magic_value,
-        data: peer_handshake_data,
-    }) = peer.try_next().await?
-    else {
-        bail!("Didn't get handshake on connection attempt, from {peer_address}");
+    let handshake_timeout: u64 = state.cli().handshake_timeout.into();
+    let handshake_timeout = Duration::from_secs(handshake_timeout);
+    let maybe_msg = timeout(handshake_timeout, peer.try_next()).await;
+    let (magic_value, peer_handshake) = match maybe_msg {
+        Ok(Ok(Some(PeerMessage::Handshake { magic_value, data }))) => (magic_value, data),
+        Ok(Ok(_)) => {
+            // no heavy anyhow::Error, just close
+            tracing::warn!(%peer_address, "unexpected message instead of handshake");
+            return Ok(());
+        }
+        Ok(Err(e)) => {
+            // no heavy anyhow::Error, just close
+            tracing::warn!(%peer_address, error = ?e, "I/O error during handshake");
+            return Ok(());
+        }
+        Err(_) => {
+            // no heavy anyhow::Error, just close
+            tracing::warn!(%peer_address, "handshake timed out");
+            return Ok(());
+        }
     };
-    ensure!(
-        magic_value == *MAGIC_STRING_REQUEST,
-        "Expected magic value, got {magic_value:?}",
-    );
+
+    if magic_value != *MAGIC_STRING_REQUEST {
+        // no heavy anyhow::Error, just close
+        warn!("No valid magic value from {peer_address}. Closing connection.");
+        return Ok(());
+    }
 
     let handshake_response = PeerMessage::Handshake {
         magic_value: *MAGIC_STRING_RESPONSE,
         data: Box::new(own_handshake_data),
     };
-    peer.send(handshake_response).await?;
+    timeout(handshake_timeout, peer.send(handshake_response)).await??;
 
     // Verify peer network before moving on
-    let peer_network = peer_handshake_data.network;
+    let peer_network = peer_handshake.network;
     let own_network = own_handshake_data.network;
     ensure!(
         peer_network == own_network,
@@ -370,12 +399,15 @@ where
     let connection_status = check_if_connection_is_allowed(
         state.clone(),
         &own_handshake_data,
-        &peer_handshake_data,
+        &peer_handshake,
         &peer_address,
     )
     .await;
-    peer.send(PeerMessage::ConnectionStatus(connection_status.into()))
-        .await?;
+    timeout(
+        handshake_timeout,
+        peer.send(PeerMessage::ConnectionStatus(connection_status.into())),
+    )
+    .await??;
     if let InternalConnectionStatus::Refused(reason) = connection_status {
         let reason = format!("Refusing incoming connection. Reason: {reason:?}");
         debug!("{reason}");
@@ -400,7 +432,7 @@ where
         peer_task_to_main_tx,
         state,
         peer_address,
-        *peer_handshake_data,
+        *peer_handshake,
         true,
         peer_distance,
     );
@@ -967,7 +999,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn node_refuses_reconnects_within_disconnect_cooldown_period() -> Result<()> {
         let network = Network::Main;
-        let reconnect_cooldown = Duration::from_secs(8);
+        let reconnect_cooldown = Duration::from_secs(3);
         let args = cli_args::Args {
             network,
             reconnect_cooldown,
@@ -1110,7 +1142,7 @@ mod tests {
             own_handshake,
         )
         .await;
-        assert!(answer.is_err(), "expected bad magic value failure");
+        assert!(answer.is_ok(), "Expect OK on bad magic value");
 
         Ok(())
     }
