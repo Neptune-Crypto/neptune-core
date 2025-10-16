@@ -11,6 +11,19 @@ This is a **production-hardened** implementation of the [Neptune Cash](https://n
 
 ---
 
+## ⚠️ Important Notices
+
+> [!CAUTION]
+> **This software uses novel and untested cryptography.** Use at own risk, and invest only that which you can afford to lose.
+
+> [!IMPORTANT]
+> If a catastrophic vulnerability is discovered in the protocol, **it might be restarted from genesis.**
+
+> [!NOTE]
+> **Compatibility:** This fork maintains full compatibility with the Neptune network. Your funds and transactions are interoperable with the [upstream Neptune Core](https://github.com/Neptune-Crypto/neptune-core) implementation.
+
+---
+
 ## 🛡️ Security Enhancements
 
 ### Advanced DDoS Protection (99% Attack Mitigation)
@@ -18,6 +31,7 @@ This is a **production-hardened** implementation of the [Neptune Cash](https://n
 Our implementation includes a **5-layer DDoS protection system** that has been battle-tested against various attack vectors:
 
 **Protection Layers:**
+
 1. **Rate Limiting** - Sliding window algorithm (per-IP and global limits)
 2. **Token Bucket** - Burst protection with configurable capacity
 3. **IP Reputation System** - Automatic tracking and scoring of peer behavior
@@ -25,12 +39,14 @@ Our implementation includes a **5-layer DDoS protection system** that has been b
 5. **Connection Validation** - 8-phase validation before resource allocation
 
 **Test Results:**
+
 - Connection flood attack: **99% blocked** (1,980 of 2,000 connections)
 - Slowloris protection: Handshake timeout enforcement
 - Malformed handshake rejection: Immediate connection termination
 - Resource exhaustion prevention: Minimal overhead per invalid connection
 
 **Key Features:**
+
 - ✅ Shared state management (`Arc<RwLock<>>`) for unified protection
 - ✅ Per-IP and global rate limiting
 - ✅ Automatic IP reputation tracking
@@ -54,6 +70,7 @@ src/p2p/
 ```
 
 **Benefits:**
+
 - Better separation of concerns
 - Easier security auditing
 - Comprehensive test coverage
@@ -69,6 +86,7 @@ src/p2p/
 **NEW:** Full-featured HTTP JSON-RPC server for programmatic interaction with Neptune Core.
 
 **Capabilities:**
+
 - ✅ RESTful HTTP interface on configurable port
 - ✅ Standard JSON-RPC 2.0 protocol
 - ✅ All wallet operations (generate addresses, send/receive)
@@ -78,6 +96,7 @@ src/p2p/
 - ✅ Comprehensive error handling
 
 **Example Usage:**
+
 ```bash
 # Start RPC server
 neptune-cli --rpc-mode --rpc-port 9797
@@ -94,6 +113,7 @@ curl -X POST http://localhost:9797 \
 ```
 
 **Integration Ready:**
+
 - Web applications
 - Trading bots
 - Payment processors
@@ -101,6 +121,7 @@ curl -X POST http://localhost:9797 \
 - Custom dashboards
 
 **Documentation:**
+
 - [RPC Integration Guide](neptune-core-cli/RPC_INTEGRATION_GUIDE.md)
 - [JSON-RPC Usage](neptune-core-cli/JSON_RPC_USAGE.md)
 - [Commands Reference](neptune-core-cli/COMMANDS_REFERENCE.md)
@@ -118,31 +139,18 @@ curl -X POST http://localhost:9797 \
 5. **Open Contribution** - Upstreaming improvements back to Neptune-Crypto
 
 **Commitment to Upstream:**
+
 - ✅ Regular synchronization with [Neptune-Crypto/neptune-core](https://github.com/Neptune-Crypto/neptune-core)
 - ✅ Contributing security improvements back upstream
 - ✅ Maintaining protocol compatibility
 - ✅ Collaborating on protocol evolution
 
 **Why Fork?**
+
 - Faster iteration on security features
 - Enhanced developer tooling (RPC server)
 - Production-hardened deployment patterns
 - Community-driven development
-
----
-
-## 🔒 Disclaimer
-
-> [!CAUTION]
-> This software uses novel and untested cryptography. Use at own risk, and invest only that which
-> you can afford to lose.
-
-> [!IMPORTANT]
-> If a catastrophic vulnerability is discovered in the protocol, it might be restarted from genesis.
-
-> [!NOTE]
-> This fork maintains full compatibility with the Neptune network. Your funds and transactions are
-> interoperable with the upstream Neptune Core implementation.
 
 ---
 
@@ -167,6 +175,7 @@ cargo install --locked --path neptune-dashboard
 ### From Source - Linux Debian/Ubuntu
 
 **Prerequisites:**
+
 ```bash
 # Install curl
 sudo apt install curl
@@ -183,6 +192,7 @@ sudo apt install libleveldb-dev libsnappy-dev cmake
 ```
 
 **Build:**
+
 ```bash
 # Clone and enter repository
 git clone https://github.com/seaoffreedom/neptune-core.git
@@ -202,11 +212,13 @@ cargo install --locked --path neptune-dashboard
 ### From Source - Windows
 
 **Prerequisites:**
+
 1. Install Rust: Follow [these instructions](https://doc.rust-lang.org/cargo/getting-started/installation.html)
 2. Install CMake: Download from [cmake.org](https://cmake.org/download/)
 3. Install Visual Studio with C++ support (via Rust installer)
 
 **Build:**
+
 ```powershell
 # Open PowerShell
 git clone https://github.com/seaoffreedom/neptune-core.git
@@ -226,11 +238,13 @@ cargo install --locked --path neptune-dashboard
 ## 🚀 Running & Connecting
 
 ### Generate Wallet
+
 ```bash
 neptune-cli generate-wallet
 ```
 
 ### Run Neptune Core Daemon
+
 ```bash
 # Basic usage
 neptune-core
@@ -246,6 +260,7 @@ neptune-core --help
 ```
 
 ### Advanced: Run with RPC Server
+
 ```bash
 # Terminal 1: Start Neptune Core
 neptune-core --peer 51.15.139.238:9798
@@ -260,6 +275,7 @@ curl -X POST http://localhost:9797 \
 ```
 
 ### Run Dashboard
+
 ```bash
 # Default port (9799)
 neptune-dashboard
@@ -273,21 +289,25 @@ neptune-dashboard --port 9800
 ## 📚 Documentation
 
 ### Core Documentation
+
 - [P2P Architecture](docs/adhoc/p2p-architecture.md) - Complete P2P system documentation
 - [DDoS Protection](docs/adhoc/p2p-architecture.md#ddos-protection-system) - Security architecture
 - [Git Workflow](docs/git-workflow.md) - Development workflow
 - [AGENTS.md](AGENTS.md) - Build commands and development guide
 
 ### RPC Server Documentation
+
 - [RPC Integration Guide](neptune-core-cli/RPC_INTEGRATION_GUIDE.md)
 - [JSON-RPC Usage Examples](neptune-core-cli/JSON_RPC_USAGE.md)
 - [Commands Reference](neptune-core-cli/COMMANDS_REFERENCE.md)
 - [Manual Testing Guide](neptune-core-cli/MANUAL_TESTING_GUIDE.md)
 
 ### Upstream Documentation
+
 Browse the full documentation at [docs.neptune.cash](https://docs.neptune.cash/)
 
 **Local Documentation Server:**
+
 ```bash
 # Install mdBook
 cargo install mdbook
@@ -302,6 +322,7 @@ mdbook serve --open
 ## 🛠️ Development
 
 ### Setup (Ubuntu)
+
 ```bash
 # Install development tools
 sudo apt install build-essential
@@ -317,6 +338,7 @@ sudo apt install cpulimit
 ```
 
 ### Build Commands
+
 ```bash
 # Quick check
 cargo check
@@ -335,6 +357,7 @@ cargo clippy
 ```
 
 ### Testing DDoS Protection
+
 ```bash
 # Start node in terminal 1
 neptune-core
@@ -353,6 +376,7 @@ grep "🛡️ DDOS PROTECTION" /tmp/neptune-node.log
 ```
 
 ### Integration Testing
+
 ```bash
 # 1. Build without warnings
 cargo build
@@ -378,6 +402,7 @@ make restart
 If you don't have a static IPv4, try connecting with IPv6. Our experience shows that IPv6 connections work well with Neptune Core's built-in peer discovery.
 
 **Known Peers:**
+
 - IPv4: `51.15.139.238:9798`
 - IPv4: `139.162.193.206:9798`
 - IPv6: `[2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798`
@@ -387,6 +412,7 @@ If you don't have a static IPv4, try connecting with IPv6. Our experience shows 
 ## 🔍 Monitoring & Logging
 
 ### Log Levels
+
 ```bash
 # Default (info level, tarpc warnings suppressed)
 RUST_LOG='info,tarpc=warn' neptune-core
@@ -402,7 +428,9 @@ neptune-core 2>&1 | tee neptune.log
 ```
 
 ### DDoS Protection Logs
+
 Look for these indicators in your logs:
+
 ```
 🛡️ DDOS PROTECTION: IP 1.2.3.4 blocked by DDoS protection
 🛡️ REPUTATION: IP 1.2.3.4 blocked - TEMPORARILY BANNED
@@ -410,6 +438,7 @@ Look for these indicators in your logs:
 ```
 
 ### Tokio Console (Advanced)
+
 ```bash
 # Build with tokio-console support
 cargo install --features tokio-console --locked --path .
@@ -439,6 +468,7 @@ feature/* (individual features)
 ```
 
 **Development Workflow:**
+
 1. Fork the repository
 2. Create feature branch from `develop`
 3. Implement your changes
@@ -446,6 +476,7 @@ feature/* (individual features)
 5. Submit pull request to `develop`
 
 **Code Style:**
+
 - Follow Rust style guide (`.cursor/rules/styleguide.mdc`)
 - Run `cargo fmt` before committing
 - Ensure `cargo clippy` passes
@@ -463,6 +494,7 @@ If the node crashes due to cryptographic data corruption:
 2. **Share publicly** for debugging (except on mainnet)
 
 **Exclude these files on mainnet** (contain secret keys):
+
 - `wallet.dat`
 - `incoming_randomness.dat`
 - `outgoing_randomness.dat`
@@ -477,12 +509,14 @@ If the node crashes due to cryptographic data corruption:
 To restart from the genesis block:
 
 **Delete these directories:**
+
 ```bash
 rm -rf ~/.local/share/neptune/<network>/blocks/
 rm -rf ~/.local/share/neptune/<network>/databases/
 ```
 
 **If starting a new chain** (no fund recovery):
+
 ```bash
 rm ~/.local/share/neptune/<network>/wallet/incoming_randomness.dat
 rm ~/.local/share/neptune/<network>/wallet/outgoing_randomness.dat
@@ -493,6 +527,7 @@ rm ~/.local/share/neptune/<network>/wallet/outgoing_randomness.dat
 ## 📊 Project Status
 
 **Current State:**
+
 - ✅ Production-ready DDoS protection (99% mitigation)
 - ✅ Full HTTP JSON-RPC server implementation
 - ✅ Backward compatible with Neptune network
@@ -500,6 +535,7 @@ rm ~/.local/share/neptune/<network>/wallet/outgoing_randomness.dat
 - ✅ Active development and testing
 
 **Roadmap:**
+
 - 🔄 Persistent ban list (database integration)
 - 🔄 Metrics dashboard for monitoring
 - 🔄 Shared reputation network
@@ -535,5 +571,5 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) file for 
 
 > "Security is not a product, but a process." - Bruce Schneier
 
-This fork demonstrates that process through comprehensive DDoS protection, 
+This fork demonstrates that process through comprehensive DDoS protection,
 clean architecture, and a commitment to operational excellence.
