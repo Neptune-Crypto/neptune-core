@@ -125,6 +125,15 @@ pub struct Args {
     #[clap(long)]
     pub(crate) max_connections_per_ip: Option<usize>,
 
+    /// Handshake timeout in seconds.
+    ///
+    /// The timeout used for all messages received and sent during the handshake
+    /// protocol for incoming connections. Can be lowered if the client is
+    /// attacked by many connection attempts. Can be raised if client is running
+    /// on a machine with a bad internet connection.
+    #[clap(long, default_value = "4", value_name = "SECONDS")]
+    pub(crate) handshake_timeout: u8,
+
     /// Whether to act as bootstrapper node.
     ///
     /// Bootstrapper nodes ensure that the maximum number of peers is never
