@@ -14,7 +14,6 @@ use futures::{Sink, SinkExt, TryStream};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::application::loops::channel::{MainToPeerTask, PeerTaskToMain};
-use crate::p2p::config::ProtocolConfig;
 use crate::p2p::state::SharedP2PStateManager;
 use crate::protocol::peer::peer_block_notifications::PeerBlockNotification;
 use crate::protocol::peer::transaction_notification::TransactionNotification;

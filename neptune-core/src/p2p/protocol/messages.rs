@@ -3,7 +3,6 @@
 //! This module contains the P2P protocol message definitions.
 
 use std::net::SocketAddr;
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 

@@ -69,7 +69,6 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::debug;
 use tracing::info;
-use tracing::warn;
 use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::data_directory::DataDirectory;

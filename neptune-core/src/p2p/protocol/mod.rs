@@ -15,7 +15,6 @@ pub use messages::PeerMessage;
 pub use validation::MessageValidator;
 
 use std::net::SocketAddr;
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 

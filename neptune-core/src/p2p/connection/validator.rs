@@ -3,7 +3,7 @@
 //! This module handles comprehensive connection validation with DDoS protection.
 
 use std::net::SocketAddr;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::p2p::config::ConnectionConfig;
 use crate::p2p::protocol::{ConnectionRefusedReason, HandshakeData, InternalConnectionStatus};

@@ -3,9 +3,8 @@
 //! This module provides connection lifecycle management.
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
-use super::{ConnectionEvent, ConnectionInfo, ConnectionResult, ConnectionState};
+use super::{ConnectionInfo, ConnectionState};
 use crate::p2p::config::ConnectionConfig;
 
 /// Connection manager for handling connection lifecycle

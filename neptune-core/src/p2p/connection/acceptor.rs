@@ -6,22 +6,18 @@
 //! This code was transplanted from the main loop's incoming connection handling
 //! to provide modular connection acceptance with DDoS protection.
 
-use std::net::{IpAddr, SocketAddr};
-use std::time::Duration;
+use std::net::SocketAddr;
 
-use futures::{SinkExt, TryStreamExt};
+use futures::TryStreamExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
-use super::{ConnectionInfo, ConnectionResult, ConnectionState};
-use crate::application::config::cli_args;
 use crate::application::loops::channel::{MainToPeerTask, PeerTaskToMain};
 use crate::application::loops::connect_to_peers::{
     answer_peer, precheck_incoming_connection_is_allowed,
 };
 use crate::p2p::config::ConnectionConfig;
-use crate::p2p::connection::handshake::HandshakeManager;
 use crate::p2p::state::SharedP2PStateManager;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::state::GlobalStateLock;

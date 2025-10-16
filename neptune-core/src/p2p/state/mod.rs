@@ -19,7 +19,6 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use crate::p2p::peer::PeerInfo;
-use crate::p2p::protocol::HandshakeData;
 
 /// P2P state structure
 #[derive(Debug, Clone)]

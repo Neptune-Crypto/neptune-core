@@ -13,14 +13,12 @@ This is a **production-hardened** implementation of the [Neptune Cash](https://n
 
 ## ⚠️ Important Notices
 
-> [!CAUTION]
-> **This software uses novel and untested cryptography.** Use at own risk, and invest only that which you can afford to lose.
+> [!CAUTION] > **This software uses novel and untested cryptography.** Use at own risk, and invest only that which you can afford to lose.
 
 > [!IMPORTANT]
 > If a catastrophic vulnerability is discovered in the protocol, **it might be restarted from genesis.**
 
-> [!NOTE]
-> **Compatibility:** This fork maintains full compatibility with the Neptune network. Your funds and transactions are interoperable with the [upstream Neptune Core](https://github.com/Neptune-Crypto/neptune-core) implementation.
+> [!NOTE] > **Compatibility:** This fork maintains full compatibility with the Neptune network. Your funds and transactions are interoperable with the [upstream Neptune Core](https://github.com/Neptune-Crypto/neptune-core) implementation.
 
 ---
 

@@ -9,8 +9,8 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 
 use crate::application::loops::channel::{MainToPeerTask, PeerTaskToMain};
 use crate::p2p::config::P2PConfig;
-use crate::p2p::service::{P2PService, P2PServiceCommand, P2PServiceEvent, P2PServiceResponse};
-use crate::p2p::state::{P2PStateManager, SharedP2PStateManager};
+use crate::p2p::service::P2PService;
+use crate::p2p::state::P2PStateManager;
 use crate::state::GlobalStateLock;
 
 /// Factory for creating P2P services with proper initialization
@@ -58,9 +58,9 @@ impl P2PServiceFactory {
         let shared_state_manager = Arc::new(RwLock::new(p2p_state_manager));
 
         // Create event channels
-        let (event_tx, event_rx) = mpsc::channel::<P2PServiceEvent>(1000);
-        let (command_tx, command_rx) = mpsc::channel::<P2PServiceCommand>(1000);
-        let (response_tx, response_rx) = mpsc::channel::<P2PServiceResponse>(1000);
+        let (event_tx, _event_rx) = mpsc::channel(1000);
+        let (_command_tx, command_rx) = mpsc::channel(1000);
+        let (response_tx, _response_rx) = mpsc::channel(1000);
 
         // Create P2P service with shared state manager
         let mut p2p_service = P2PService::new(

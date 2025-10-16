@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
-use super::{Transport, TransportConfig, TransportEvent};
+use super::{Transport, TransportConfig};
 
 /// TCP transport implementation
 #[derive(Debug)]

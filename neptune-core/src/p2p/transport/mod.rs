@@ -15,8 +15,6 @@ pub use tcp::TcpTransport;
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::p2p::protocol::PeerMessage;
-
 /// Transport trait for P2P communication
 pub trait Transport: AsyncRead + AsyncWrite + Send + Sync + Unpin {
     /// Get the remote peer address

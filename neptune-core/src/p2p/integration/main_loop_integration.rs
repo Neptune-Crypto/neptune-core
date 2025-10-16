@@ -10,9 +10,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::application::loops::channel::{MainToPeerTask, PeerTaskToMain};
 use crate::p2p::peer::PeerInfo;
 use crate::p2p::protocol::PeerMessage;
-use crate::p2p::service::{
-    P2PService, P2PServiceCommand, P2PServiceEvent, P2PServiceInterface, P2PServiceResponse,
-};
+use crate::p2p::service::{P2PService, P2PServiceInterface};
 use crate::state::GlobalStateLock;
 
 /// Integration layer between P2P service and main loop

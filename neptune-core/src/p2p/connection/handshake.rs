@@ -19,7 +19,6 @@ use tokio_serde::formats::{Bincode, SymmetricalBincode};
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
-use crate::application::config::cli_args;
 use crate::p2p::config::ProtocolConfig;
 use crate::p2p::protocol::{
     ConnectionStatus, HandshakeData, PeerMessage, TransferConnectionStatus,

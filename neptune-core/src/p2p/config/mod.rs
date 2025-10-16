@@ -11,9 +11,6 @@ pub use connection_config::ConnectionConfig;
 pub use peer_config::PeerConfig;
 pub use protocol_config::ProtocolConfig;
 
-use std::net::IpAddr;
-use std::time::Duration;
-
 use crate::application::config::cli_args;
 
 /// Main P2P configuration structure

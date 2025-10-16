@@ -3,12 +3,12 @@
 //! This module handles comprehensive peer reputation and IP reputation systems
 //! with behavior tracking, automatic scoring, and dynamic ban management.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
-use std::time::{Duration, Instant, SystemTime};
-use tracing::{debug, info, warn};
+use std::time::{Duration, Instant};
+use tracing::{debug, warn};
 
-use crate::p2p::peer::standing::{PeerStanding, ReputationScore};
+use crate::p2p::peer::standing::PeerStanding;
 
 /// Behavior event types for reputation scoring
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

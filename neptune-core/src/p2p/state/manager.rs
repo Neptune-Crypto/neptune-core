@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tokio::sync::RwLock;
 
 use anyhow::Result;
@@ -18,9 +18,6 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use super::{ConnectionTracker, PeerMap, ReputationManager};
 use crate::application::config::data_directory::DataDirectory;
-use crate::application::database::create_db_if_missing;
-use crate::application::database::NeptuneLevelDb;
-use crate::application::database::WriteBatchAsync;
 use crate::p2p::config::P2PConfig;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::difficulty_control::ProofOfWork;

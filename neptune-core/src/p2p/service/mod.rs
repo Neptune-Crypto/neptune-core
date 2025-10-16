@@ -14,9 +14,7 @@ pub use metrics::P2PMetrics;
 pub use p2p_service::P2PService;
 
 use std::net::SocketAddr;
-use tokio::sync::mpsc;
 
-use crate::p2p::config::P2PConfig;
 use crate::p2p::peer::PeerInfo;
 use crate::p2p::protocol::PeerMessage;
 

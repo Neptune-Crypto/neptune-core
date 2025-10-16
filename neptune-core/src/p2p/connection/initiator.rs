@@ -7,12 +7,10 @@
 //! to provide modular connection initiation with DDoS protection.
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use anyhow::{bail, ensure, Result};
 use futures::{SinkExt, TryStreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_serde::formats::{Bincode, SymmetricalBincode};
@@ -20,9 +18,9 @@ use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use crate::application::loops::channel::{MainToPeerTask, PeerTaskToMain};
-use crate::application::loops::connect_to_peers::{call_peer, close_peer_connected_callback};
+use crate::application::loops::connect_to_peers::call_peer;
 use crate::p2p::config::ConnectionConfig;
-use crate::p2p::connection::handshake::{HandshakeManager, InternalConnectionStatus};
+use crate::p2p::connection::handshake::InternalConnectionStatus;
 use crate::p2p::protocol::{ConnectionStatus, PeerMessage};
 use crate::p2p::state::SharedP2PStateManager;
 use crate::protocol::peer::handshake_data::HandshakeData;
@@ -196,10 +194,10 @@ impl ConnectionInitiator {
         stream: S,
         state: GlobalStateLock,
         peer_address: SocketAddr,
-        main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
-        peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
+        _main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
+        _peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
         own_handshake: &HandshakeData,
-        peer_distance: u8,
+        _peer_distance: u8,
     ) -> Result<()>
     where
         S: AsyncRead + AsyncWrite + std::fmt::Debug + Unpin,

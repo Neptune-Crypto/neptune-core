@@ -17,9 +17,7 @@ pub use manager::ConnectionManager;
 pub use validator::ConnectionValidator;
 
 use std::net::SocketAddr;
-use std::time::Duration;
-
-use crate::p2p::config::ConnectionConfig;
+use std::time::{Duration, SystemTime};
 
 /// Connection state enumeration
 #[derive(Debug, Clone, PartialEq, Eq)]
