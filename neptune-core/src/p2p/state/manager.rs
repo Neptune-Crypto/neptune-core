@@ -178,9 +178,11 @@ impl P2PStateManager {
         let address = peer_info.connected_address();
         self.peer_map.insert(address, peer_info);
 
-        // Record positive interaction
-        self.reputation_manager
-            .add_positive_interaction(address.ip());
+        // Record successful connection
+        self.reputation_manager.record_behavior(
+            address.ip(),
+            crate::p2p::state::reputation::BehaviorEvent::SuccessfulConnection,
+        );
         self.connection_tracker
             .record_attempt(address.ip(), true, None);
     }
@@ -329,9 +331,10 @@ impl P2PStateManager {
         }
 
         // Check if IP meets minimum reputation
-        if !self
+        if self
             .reputation_manager
-            .meets_minimum_reputation(address.ip())
+            .should_allow_connection(address.ip())
+            .is_err()
         {
             return false;
         }
@@ -371,19 +374,22 @@ impl P2PStateManager {
         self.connection_tracker
             .record_attempt(address.ip(), successful, failure_reason);
 
-        if !successful {
-            self.reputation_manager
-                .add_negative_interaction(address.ip());
-        }
+        // Record behavior in reputation system
+        let event = if successful {
+            crate::p2p::state::reputation::BehaviorEvent::SuccessfulConnection
+        } else {
+            crate::p2p::state::reputation::BehaviorEvent::FailedConnection
+        };
+        self.reputation_manager.record_behavior(address.ip(), event);
     }
 
     /// Check if IP is rate limited
-    pub fn is_rate_limited(&self, ip: IpAddr) -> bool {
+    pub fn is_rate_limited(&mut self, ip: IpAddr) -> bool {
         self.connection_tracker.is_rate_limited(ip)
     }
 
     /// Check if message is rate limited
-    pub fn is_message_rate_limited(&self, ip: IpAddr) -> bool {
+    pub fn is_message_rate_limited(&self, _ip: IpAddr) -> bool {
         // TODO: Implement message rate limiting
         false
     }
