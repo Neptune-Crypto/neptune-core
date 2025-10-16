@@ -1,0 +1,274 @@
+name: Pull Request Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CMAKE_POLICY_VERSION_MINIMUM: 3.5
+
+jobs:
+  # PR metadata validation
+  pr-metadata:
+    name: PR Metadata Check
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          if [ -z "$PR_TITLE" ]; then
+            echo "❌ PR title is empty"
+            exit 1
+          fi
+          echo "✅ PR title: $PR_TITLE"
+
+      - name: Check PR description
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+          if [ -z "$PR_BODY" ]; then
+            echo "⚠️  PR description is empty (consider adding details)"
+          else
+            echo "✅ PR has description"
+          fi
+
+  # Code quality checks
+  code-quality:
+    name: Code Quality Checks
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy with suggestions
+        run: cargo clippy --all-targets --workspace -- -D clippy::all -W clippy::pedantic
+        continue-on-error: true
+
+      - name: Check for TODO/FIXME comments in new code
+        run: |
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD | grep '\.rs$' || true)
+          if [ -n "$CHANGED_FILES" ]; then
+            echo "Checking for TODO/FIXME in changed files..."
+            git diff origin/${{ github.event.pull_request.base.ref }}...HEAD $CHANGED_FILES | grep -E '^\+.*\b(TODO|FIXME|XXX|HACK)\b' || echo "✅ No suspicious markers in new code"
+          fi
+
+  # Build verification
+  build-verification:
+    name: Build Verification
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-pr-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build all packages
+        run: cargo build --workspace --all-features
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: 3.5
+
+      - name: Check for compilation warnings
+        run: |
+          cargo build --workspace 2>&1 | tee build.log
+          WARNING_COUNT=$(grep "^warning:" build.log | wc -l)
+          echo "Total warnings: $WARNING_COUNT"
+          if [ $WARNING_COUNT -gt 150 ]; then
+            echo "⚠️  Warning count is high ($WARNING_COUNT > 150)"
+            echo "Consider addressing some warnings"
+          fi
+
+  # Test execution
+  test-execution:
+    name: Test Execution
+    if: github.event.pull_request.draft == false
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-test-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run tests
+        run: >
+          cargo test
+          --workspace
+          --lib --bins --tests
+          --
+          --skip mine_20_blocks_in_40_seconds
+          --skip hash_rate_independent_of_tx_size
+          --skip blocks_with_0_to_10_inputs_and_successors_are_valid
+          --skip can_cancel_preprocess_within_one_second
+          --skip can_cancel_merkle_tree_construction_within_two_seconds
+          --skip alice_updates_mutator_set_data_on_own_transaction
+        timeout-minutes: 30
+
+  # P2P changes detection
+  p2p-changes:
+    name: P2P Changes Detection
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for P2P module changes
+        id: p2p-check
+        run: |
+          P2P_CHANGES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD | grep 'neptune-core/src/p2p' || true)
+          if [ -n "$P2P_CHANGES" ]; then
+            echo "p2p_changed=true" >> $GITHUB_OUTPUT
+            echo "✅ P2P module changes detected"
+            echo "$P2P_CHANGES"
+          else
+            echo "p2p_changed=false" >> $GITHUB_OUTPUT
+            echo "ℹ️  No P2P module changes"
+          fi
+
+      - name: Run P2P specific tests
+        if: steps.p2p-check.outputs.p2p_changed == 'true'
+        run: |
+          cargo test --package neptune-cash --lib p2p
+
+  # Documentation check
+  documentation-check:
+    name: Documentation Check
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build documentation
+        run: cargo doc --no-deps --workspace --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+        continue-on-error: true
+
+      - name: Check for documentation in public APIs
+        run: |
+          cargo doc --workspace 2>&1 | grep "warning: missing documentation" || echo "✅ No missing documentation warnings"
+
+  # Dependency changes
+  dependency-check:
+    name: Dependency Changes Check
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Cargo.lock changes
+        run: |
+          if git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD | grep -q 'Cargo.lock'; then
+            echo "⚠️  Cargo.lock has changes"
+            echo "Dependency changes detected - ensure they are intentional"
+          else
+            echo "✅ No Cargo.lock changes"
+          fi
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        continue-on-error: true
+
+  # PR validation summary
+  pr-validation-summary:
+    name: PR Validation Summary
+    needs: [pr-metadata, code-quality, build-verification, test-execution, p2p-changes, documentation-check, dependency-check]
+    if: always() && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all validations
+        run: |
+          echo "## PR Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.pr-metadata.result }}" == "success" ]; then
+            echo "✅ PR Metadata: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ PR Metadata: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.code-quality.result }}" == "success" ]; then
+            echo "✅ Code Quality: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Code Quality: Issues Found" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.build-verification.result }}" == "success" ]; then
+            echo "✅ Build: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.test-execution.result }}" == "success" ]; then
+            echo "✅ Tests: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Tests: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.p2p-changes.result }}" == "success" ]; then
+            echo "✅ P2P Verification: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ P2P Verification: Issues" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Fail if critical checks failed
+          if [ "${{ needs.build-verification.result }}" != "success" ] || [ "${{ needs.test-execution.result }}" != "success" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **PR validation failed - fix issues before merging**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **PR is ready for review**" >> $GITHUB_STEP_SUMMARY
+
