@@ -8,6 +8,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 
 /// Connection attempt information
 #[derive(Debug, Clone)]
@@ -330,6 +331,10 @@ impl ConnectionTracker {
         // 1. Check if IP is in cooldown period
         if let Some(ip_state) = self.ip_rate_limits.get(&ip) {
             if ip_state.is_in_cooldown(self.rate_limit_config.cooldown_period) {
+                warn!(
+                    "🛡️ DDOS PROTECTION: IP {} blocked - cooldown period active (violation count: {})",
+                    ip, ip_state.violation_count
+                );
                 return Err(format!(
                     "IP {} is in cooldown period after rate limit violation",
                     ip
@@ -339,22 +344,36 @@ impl ConnectionTracker {
 
         // 2. Check global rate limits (sliding window)
         if !self.check_global_rate_limits() {
+            warn!("🛡️ DDOS PROTECTION: Global rate limit exceeded - blocking new connections");
             return Err("Global rate limit exceeded".to_string());
         }
 
         // 3. Check global token bucket
         if self.rate_limit_config.enable_token_bucket && !self.global_token_bucket.try_consume() {
+            warn!("🛡️ DDOS PROTECTION: Global token bucket exhausted - blocking connection");
             return Err("Global token bucket exhausted".to_string());
         }
 
         // 4. Check per-IP rate limits (sliding window)
         if let Some(history) = self.connection_history.get(&ip) {
             // Check minute window
-            if history.is_rate_limited(
+            let minute_rate_limited = history.is_rate_limited(
                 self.rate_limit_config.max_attempts_per_ip_per_minute,
                 self.rate_limit_config.minute_window,
-            ) {
+            );
+            let hour_rate_limited = history.is_rate_limited(
+                self.rate_limit_config.max_attempts_per_ip_per_hour,
+                self.rate_limit_config.hour_window,
+            );
+            let attempts_count = history.attempts.len();
+
+            // Drop the immutable borrow before calling record_ip_violation
+            if minute_rate_limited {
                 self.record_ip_violation(ip);
+                warn!(
+                    "🛡️ DDOS PROTECTION: IP {} blocked - exceeded {}/min limit (current: ~{})",
+                    ip, self.rate_limit_config.max_attempts_per_ip_per_minute, attempts_count
+                );
                 return Err(format!(
                     "IP {} exceeded {} connections per minute limit",
                     ip, self.rate_limit_config.max_attempts_per_ip_per_minute
@@ -362,11 +381,12 @@ impl ConnectionTracker {
             }
 
             // Check hour window
-            if history.is_rate_limited(
-                self.rate_limit_config.max_attempts_per_ip_per_hour,
-                self.rate_limit_config.hour_window,
-            ) {
+            if hour_rate_limited {
                 self.record_ip_violation(ip);
+                warn!(
+                    "🛡️ DDOS PROTECTION: IP {} blocked - exceeded {}/hour limit",
+                    ip, self.rate_limit_config.max_attempts_per_ip_per_hour
+                );
                 return Err(format!(
                     "IP {} exceeded {} connections per hour limit",
                     ip, self.rate_limit_config.max_attempts_per_ip_per_hour
@@ -383,10 +403,15 @@ impl ConnectionTracker {
 
             if !ip_state.token_bucket.try_consume() {
                 self.record_ip_violation(ip);
+                warn!(
+                    "🛡️ DDOS PROTECTION: IP {} blocked - token bucket exhausted",
+                    ip
+                );
                 return Err(format!("IP {} token bucket exhausted", ip));
             }
         }
 
+        debug!("✅ Connection allowed from {}", ip);
         Ok(())
     }
 

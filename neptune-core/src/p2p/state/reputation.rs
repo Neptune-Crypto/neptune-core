@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
 use std::time::{Duration, Instant, SystemTime};
+use tracing::{debug, info, warn};
 
 use crate::p2p::peer::standing::{PeerStanding, ReputationScore};
 
@@ -405,11 +406,26 @@ impl ReputationManager {
         if let Some(rep_data) = self.ip_reputations.get_mut(&ip) {
             // Check if banned
             if rep_data.is_banned() {
+                if rep_data.perm_banned {
+                    warn!(
+                        "🛡️ REPUTATION: IP {} blocked - PERMANENTLY BANNED (violations: {})",
+                        ip, rep_data.violation_count
+                    );
+                } else {
+                    warn!(
+                        "🛡️ REPUTATION: IP {} blocked - TEMPORARILY BANNED (until: {:?})",
+                        ip, rep_data.temp_ban_until
+                    );
+                }
                 return Err(format!("IP {} is banned", ip));
             }
 
             // Check minimum reputation
             if rep_data.score < self.config.min_reputation_score {
+                warn!(
+                    "🛡️ REPUTATION: IP {} blocked - low reputation score {:.2} < {:.2} (violations: {})",
+                    ip, rep_data.score, self.config.min_reputation_score, rep_data.violation_count
+                );
                 return Err(format!(
                     "IP {} has insufficient reputation: {:.2} < {:.2}",
                     ip, rep_data.score, self.config.min_reputation_score
@@ -419,6 +435,10 @@ impl ReputationManager {
             // Update connection count
             rep_data.connection_count += 1;
             rep_data.last_seen = Instant::now();
+            debug!(
+                "✅ Reputation check passed for {} (score: {:.2})",
+                ip, rep_data.score
+            );
         }
         // else: unknown IP, allow (will start with neutral score)
 
