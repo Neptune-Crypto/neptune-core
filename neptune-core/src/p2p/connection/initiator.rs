@@ -24,7 +24,7 @@ use crate::application::loops::connect_to_peers::{call_peer, close_peer_connecte
 use crate::p2p::config::ConnectionConfig;
 use crate::p2p::connection::handshake::{HandshakeManager, InternalConnectionStatus};
 use crate::p2p::protocol::{ConnectionStatus, PeerMessage};
-use crate::p2p::state::P2PStateManager;
+use crate::p2p::state::SharedP2PStateManager;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::ConnectionRefusedReason;
 use crate::protocol::peer::TransferConnectionStatus;
@@ -39,8 +39,8 @@ const MAGIC_STRING_RESPONSE: &[u8; 15] = b"Hello Neptune!\n";
 pub struct ConnectionInitiator {
     /// Connection configuration
     config: ConnectionConfig,
-    /// P2P state manager for DDoS protection
-    state_manager: P2PStateManager,
+    /// P2P state manager for DDoS protection (shared across all connections)
+    state_manager: SharedP2PStateManager,
     /// Global state lock
     global_state: GlobalStateLock,
     /// Main to peer broadcast channel
@@ -53,7 +53,7 @@ impl ConnectionInitiator {
     /// Create new connection initiator
     pub fn new(
         config: ConnectionConfig,
-        state_manager: P2PStateManager,
+        state_manager: SharedP2PStateManager,
         global_state: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
@@ -85,8 +85,10 @@ impl ConnectionInitiator {
             ));
         }
 
-        // Record connection attempt
+        // Record connection attempt (requires write lock)
         self.state_manager
+            .write()
+            .await
             .record_connection_attempt(peer_address, false, None);
 
         let state_clone = self.global_state.clone();
@@ -166,8 +168,10 @@ impl ConnectionInitiator {
             ));
         }
 
-        // Record connection attempt
+        // Record connection attempt (requires write lock)
         self.state_manager
+            .write()
+            .await
             .record_connection_attempt(peer_address, false, None);
 
         // Use existing call_peer function
@@ -305,9 +309,12 @@ impl ConnectionInitiator {
             return false;
         }
 
-        // Check rate limiting
-        if self.state_manager.is_rate_limited(peer_address.ip()) {
-            return false;
+        // Check rate limiting (requires mutable access to state manager)
+        {
+            let mut state = self.state_manager.write().await;
+            if state.is_rate_limited(peer_address.ip()) {
+                return false;
+            }
         }
 
         // Check if we're at max connections
@@ -436,11 +443,12 @@ impl ConnectionInitiator {
     }
 
     /// Get connection statistics
-    pub fn get_connection_stats(&self) -> ConnectionStats {
+    pub async fn get_connection_stats(&self) -> ConnectionStats {
+        let state = self.state_manager.read().await;
         ConnectionStats {
-            total_connections: self.state_manager.get_total_connections(),
-            failed_connections: self.state_manager.get_failed_connections(),
-            rate_limited_connections: self.state_manager.get_rate_limited_connections(),
+            total_connections: state.get_total_connections(),
+            failed_connections: state.get_failed_connections(),
+            rate_limited_connections: state.get_rate_limited_connections(),
         }
     }
 }

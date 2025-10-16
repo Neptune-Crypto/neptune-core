@@ -15,7 +15,7 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::application::loops::channel::{MainToPeerTask, PeerTaskToMain};
 use crate::p2p::config::ProtocolConfig;
-use crate::p2p::state::P2PStateManager;
+use crate::p2p::state::SharedP2PStateManager;
 use crate::protocol::peer::peer_block_notifications::PeerBlockNotification;
 use crate::protocol::peer::transaction_notification::TransactionNotification;
 use crate::protocol::peer::PeerMessage;
@@ -26,8 +26,8 @@ use crate::state::GlobalStateLock;
 pub struct MessageHandler {
     /// Handler configuration
     config: HandlerConfig,
-    /// P2P state manager for DDoS protection
-    state_manager: P2PStateManager,
+    /// P2P state manager for DDoS protection (shared across all connections)
+    state_manager: SharedP2PStateManager,
     /// Global state lock
     global_state: GlobalStateLock,
     /// Main to peer broadcast channel
@@ -64,7 +64,7 @@ impl MessageHandler {
     /// Create new message handler
     pub fn new(
         config: HandlerConfig,
-        state_manager: P2PStateManager,
+        state_manager: SharedP2PStateManager,
         global_state: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
@@ -111,12 +111,14 @@ impl MessageHandler {
             tracing::debug!("Received {} from peer {}", message.get_type(), peer_address);
         }
 
-        // DDoS protection: Check message rate limiting
+        // DDoS protection: Check message rate limiting (requires mutable access)
         if self.config.enable_ddos_protection {
-            if self
-                .state_manager
-                .is_message_rate_limited(peer_address.ip())
-            {
+            let is_rate_limited = {
+                let mut state = self.state_manager.write().await;
+                state.is_message_rate_limited(peer_address.ip())
+            };
+
+            if is_rate_limited {
                 tracing::warn!(
                     "Message from {} rate limited by DDoS protection",
                     peer_address
@@ -578,11 +580,12 @@ impl MessageHandler {
     }
 
     /// Get message handler statistics
-    pub fn get_stats(&self) -> MessageHandlerStats {
+    pub async fn get_stats(&self) -> MessageHandlerStats {
+        let state = self.state_manager.read().await;
         MessageHandlerStats {
-            total_messages_processed: self.state_manager.get_total_messages_processed(),
-            rate_limited_messages: self.state_manager.get_rate_limited_messages(),
-            invalid_messages: self.state_manager.get_invalid_messages(),
+            total_messages_processed: state.get_total_messages_processed(),
+            rate_limited_messages: state.get_rate_limited_messages(),
+            invalid_messages: state.get_invalid_messages(),
         }
     }
 }
