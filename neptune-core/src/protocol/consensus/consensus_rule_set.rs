@@ -3,6 +3,10 @@ use strum_macros::EnumIter;
 use crate::api::export::BlockHeight;
 use crate::api::export::Network;
 use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
+use crate::BFieldElement;
+
+pub const BLOCK_HEIGHT_HARDFORK_ALPHA: BlockHeight =
+    BlockHeight::new(BFieldElement::new(15_000u64));
 
 /// Enumerates all possible sets of consensus rules.
 ///
@@ -14,17 +18,17 @@ use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 /// Consensus logic not captured by this encapsulation lives on
 /// [`Transaction::is_valid`][super::transaction::Transaction::is_valid] and
 /// ultimately [`Block::is_valid`][super::block::Block::is_valid].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Default, strum_macros::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, strum_macros::Display)]
 pub enum ConsensusRuleSet {
-    #[default]
     Reboot,
+    HardforkAlpha,
 }
 
 impl ConsensusRuleSet {
     /// Maximum block size in number of BFieldElements
     pub(crate) const fn max_block_size(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => {
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -37,23 +41,46 @@ impl ConsensusRuleSet {
     /// planned hard or soft forks that activate at a given height. The first
     /// argument is necessary because the forks can activate at different
     /// heights based on the network.
-    pub(crate) fn infer_from(_network: Network, _block_height: BlockHeight) -> Self {
-        Self::Reboot
+    pub(crate) fn infer_from(network: Network, block_height: BlockHeight) -> Self {
+        match network {
+            Network::Main => {
+                if block_height < 12_000u64.into() {
+                    ConsensusRuleSet::Reboot
+                } else {
+                    ConsensusRuleSet::HardforkAlpha
+                }
+            }
+            Network::TestnetMock => ConsensusRuleSet::HardforkAlpha,
+            Network::RegTest => ConsensusRuleSet::HardforkAlpha,
+            Network::Testnet(_) => {
+                if block_height < 120u64.into() {
+                    ConsensusRuleSet::Reboot
+                } else {
+                    ConsensusRuleSet::HardforkAlpha
+                }
+            }
+        }
     }
 
     pub(crate) fn max_num_inputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
+            }
         }
     }
     pub(crate) fn max_num_outputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
+            }
         }
     }
     pub(crate) fn max_num_announcements(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
+            }
         }
     }
 }
@@ -296,5 +323,46 @@ pub(crate) mod tests {
             bob.set_new_tip(next_block.clone()).await.unwrap();
             predecessor = next_block;
         }
+    }
+
+    #[traced_test]
+    #[test]
+    fn hard_fork_alpha() {
+        // Start at hard fork block height minus 2
+        let init_block_heigth = BLOCK_HEIGHT_HARDFORK_ALPHA
+            .previous()
+            .unwrap()
+            .previous()
+            .unwrap();
+        let bpw = BlockPrimitiveWitness::deterministic_with_block_height(init_block_heigth);
+
+        tokio_runtime().block_on(new_blocks_hardfork_alpha(bpw));
+    }
+
+    async fn new_blocks_hardfork_alpha(block_primitive_witness: BlockPrimitiveWitness) {
+        // 1. generate state synced to height
+        let mut rng = StdRng::seed_from_u64(55512345);
+        let network = Network::Main;
+        let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
+        let cli = cli_args::Args {
+            network,
+            compose: true,
+            guess: true,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
+
+        let (fake_genesis, block_b) =
+            Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness).await;
+        let mut now = block_b.header().timestamp;
+        assert!(block_b.is_valid(&fake_genesis, now, network).await);
+
+        // Solve PoW for block_b
+
+        let mut bob = mock_genesis_global_state_with_block(0, bob_wallet, cli, fake_genesis).await;
+        bob.set_new_tip(block_b.clone()).await.unwrap();
+
+        let observed_block_height = bob.lock_guard().await.chain.light_state().header().height;
+        assert_eq!(BlockHeight::from(10_000u64), observed_block_height,);
     }
 }

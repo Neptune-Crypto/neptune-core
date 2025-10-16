@@ -281,7 +281,7 @@ pub(crate) async fn produce_single_proof(
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<Proof, CreateProofError> {
     match consensus_rule_set {
-        ConsensusRuleSet::Reboot => {
+        ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
             SingleProof::produce(primitive_witness, triton_vm_job_queue, proof_job_options).await
         }
     }
@@ -297,7 +297,9 @@ pub(crate) fn single_proof_claim(
     consensus_rule_set: ConsensusRuleSet,
 ) -> Claim {
     match consensus_rule_set {
-        ConsensusRuleSet::Reboot => SingleProof::claim(tx_kernel_mast_hash),
+        ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+            SingleProof::claim(tx_kernel_mast_hash)
+        }
     }
 }
 
@@ -1037,7 +1039,7 @@ pub(crate) mod tests {
             let merge_witness = deterministic_merge_witness(
                 (2, 2, 2),
                 (2, 2, 2),
-                ConsensusRuleSet::default(),
+                ConsensusRuleSet::HardforkAlpha,
                 network,
             )
             .await;
@@ -1053,7 +1055,7 @@ pub(crate) mod tests {
                 3,
                 3,
                 network,
-                ConsensusRuleSet::default(),
+                ConsensusRuleSet::HardforkAlpha,
             )
             .await;
             positive_prop(merge_witness);
@@ -1098,7 +1100,7 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn only_additions_small() {
-            let consensus_rule_set = ConsensusRuleSet::default();
+            let consensus_rule_set = ConsensusRuleSet::HardforkAlpha;
             positive_prop(
                 deterministic_update_witness_only_additions_to_mutator_set(
                     2,
@@ -1112,7 +1114,7 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn only_additions_medium() {
-            let consensus_rule_set = ConsensusRuleSet::default();
+            let consensus_rule_set = ConsensusRuleSet::HardforkAlpha;
             positive_prop(
                 deterministic_update_witness_only_additions_to_mutator_set(
                     4,
@@ -1126,7 +1128,7 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_tiny() {
-            let consensus_rule_set = ConsensusRuleSet::default();
+            let consensus_rule_set = ConsensusRuleSet::HardforkAlpha;
             positive_prop(
                 deterministic_update_witness_additions_and_removals(1, 1, 1, consensus_rule_set)
                     .await,
@@ -1135,7 +1137,7 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_small() {
-            let consensus_rule_set = ConsensusRuleSet::default();
+            let consensus_rule_set = ConsensusRuleSet::HardforkAlpha;
             positive_prop(
                 deterministic_update_witness_additions_and_removals(2, 2, 2, consensus_rule_set)
                     .await,
@@ -1144,7 +1146,7 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_midi() {
-            let consensus_rule_set = ConsensusRuleSet::default();
+            let consensus_rule_set = ConsensusRuleSet::HardforkAlpha;
             positive_prop(
                 deterministic_update_witness_additions_and_removals(3, 3, 3, consensus_rule_set)
                     .await,
@@ -1153,7 +1155,7 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_medium() {
-            let consensus_rule_set = ConsensusRuleSet::default();
+            let consensus_rule_set = ConsensusRuleSet::HardforkAlpha;
             positive_prop(
                 deterministic_update_witness_additions_and_removals(4, 4, 4, consensus_rule_set)
                     .await,
@@ -1239,7 +1241,7 @@ pub(crate) mod tests {
             // It takes a long time to generate the witness, so we reuse it across
             // multiple tests
 
-            let consensus_rule_set = ConsensusRuleSet::default();
+            let consensus_rule_set = ConsensusRuleSet::HardforkAlpha;
             let good_witness = deterministic_update_witness_only_additions_to_mutator_set(
                 2,
                 2,
@@ -1263,7 +1265,7 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn disallow_update_of_tx_with_zero_inputs() {
-            let consensus_rule_set = ConsensusRuleSet::default();
+            let consensus_rule_set = ConsensusRuleSet::HardforkAlpha;
             let only_new_additions_0_outputs =
                 deterministic_update_witness_only_additions_to_mutator_set(
                     0,

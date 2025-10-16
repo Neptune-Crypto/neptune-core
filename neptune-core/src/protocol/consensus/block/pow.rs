@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::mem::MaybeUninit;
+use std::num::NonZeroUsize;
 
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -23,6 +24,7 @@ use crate::application::loops::channel::Cancelable;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
@@ -276,8 +278,8 @@ pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
 
     hash: Digest,
 
-    /// Authentication paths for all fields but the PoW field
-    mast_auth_paths: PowMastPaths,
+    /// The hash of the parent block of this guesser buffer.
+    prev_block_digest: Digest,
 }
 
 impl<const MERKLE_TREE_HEIGHT: usize> Default for GuesserBuffer<MERKLE_TREE_HEIGHT> {
@@ -285,7 +287,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Default for GuesserBuffer<MERKLE_TREE_HEIG
         Self {
             merkle_tree: MTree::default(),
             hash: Default::default(),
-            mast_auth_paths: Default::default(),
+            prev_block_digest: Default::default(),
         }
     }
 }
@@ -318,12 +320,72 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         (index_a, index_b)
     }
 
-    pub(crate) fn preprocess(
+    const fn bitreverse(mut k: u32, log2_n: u32) -> u32 {
+        k = ((k & 0x55555555) << 1) | ((k & 0xaaaaaaaa) >> 1);
+        k = ((k & 0x33333333) << 2) | ((k & 0xcccccccc) >> 2);
+        k = ((k & 0x0f0f0f0f) << 4) | ((k & 0xf0f0f0f0) >> 4);
+        k = ((k & 0x00ff00ff) << 8) | ((k & 0xff00ff00) >> 8);
+        k = k.rotate_right(16);
+        k >> ((32 - log2_n) & 0x1f)
+    }
+
+    fn swap_indices(len: usize) -> Vec<Option<NonZeroUsize>> {
+        let log_2_len = len.checked_ilog2().unwrap_or(0);
+        (0..len)
+            .map(|k| {
+                let rev_k = Self::bitreverse(k as u32, log_2_len);
+
+                // 0 >= bitreverse(0, log_2_len) == 0 => unwrap is fine
+                ((k as u32) < rev_k).then(|| NonZeroUsize::new(rev_k as usize).unwrap())
+            })
+            .collect()
+    }
+
+    pub(crate) fn preprocess_reboot(
         mast_auth_paths: PowMastPaths,
         cancel_channel: Option<&dyn Cancelable>,
+        prev_block_digest: Digest,
     ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
-        // Commitment to all the fields in the block that are not pow
-        let commitment = mast_auth_paths.commit();
+        Self::preprocess_inner(
+            Some(mast_auth_paths),
+            cancel_channel,
+            ConsensusRuleSet::Reboot,
+            prev_block_digest,
+        )
+    }
+
+    pub(crate) fn preprocess_alpha(
+        cancel_channel: Option<&dyn Cancelable>,
+        prev_block_digest: Digest,
+    ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+        Self::preprocess_inner(
+            None,
+            cancel_channel,
+            ConsensusRuleSet::HardforkAlpha,
+            prev_block_digest,
+        )
+    }
+
+    /// # Panics
+    ///
+    ///  - If `mast_auth_paths` is `None` and `consensus_rule_set` is `Reboot`.
+    fn preprocess_inner(
+        mast_auth_paths: Option<PowMastPaths>,
+        cancel_channel: Option<&dyn Cancelable>,
+        consensus_rule_set: ConsensusRuleSet,
+        prev_block_digest: Digest,
+    ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+        let bud_prefix = if consensus_rule_set == ConsensusRuleSet::Reboot {
+            // Commitment to all the fields in the block that are not pow
+            mast_auth_paths
+                .expect("mast auth paths must be given when consensus rule set is reboot")
+                .commit()
+        } else {
+            // Commitment only to previous block hash such that preprocessing
+            // can be reused across different block proposals with the same
+            // parent.
+            prev_block_digest
+        };
 
         // number steps between checking channel cancellation
         let checkpoint_distance: usize =
@@ -350,7 +412,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                 .into_par_iter()
                 .zip(ins[range].par_iter_mut())
                 .for_each(|(i, bud)| {
-                    bud.write(Self::bud(commitment, i as u64));
+                    bud.write(Self::bud(bud_prefix, i as u64));
                 });
 
             if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
@@ -365,7 +427,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         // iterate log-many times over the buffer to compute leafs from buds
         let mut outs = ins.clone();
         let mut buds = &mut ins;
-        let mut leafs = &mut outs;
+        let mut resulting_leafs = &mut outs;
         let mut num_swaps = 0;
         for i in 0..NUM_BUD_LAYERS {
             for j in 0..num_checkpoints {
@@ -373,7 +435,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                 range
                     .clone()
                     .into_par_iter()
-                    .zip(leafs[range].par_iter_mut())
+                    .zip(resulting_leafs[range].par_iter_mut())
                     .for_each(|(k, leaf)| {
                         *leaf = Tip5::hash_pair(buds[k], buds[(k + (1 << i)) % Self::NUM_LEAFS]);
                     });
@@ -382,30 +444,45 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                     return Default::default();
                 }
             }
-            std::mem::swap(&mut leafs, &mut buds);
+            std::mem::swap(&mut resulting_leafs, &mut buds);
             num_swaps += 1;
         }
 
-        std::mem::swap(&mut leafs, &mut buds);
+        std::mem::swap(&mut resulting_leafs, &mut buds);
         num_swaps += 1;
 
-        let merkle_tree = if num_swaps & 1 == 1 {
-            MTree::build_inplace(ins, outs, cancel_channel)
+        let (mut leafs, internal_nodes) = if num_swaps & 1 == 1 {
+            (ins, outs)
         } else {
-            MTree::build_inplace(outs, ins, cancel_channel)
+            (outs, ins)
         };
 
-        let hash = Tip5::hash_pair(merkle_tree.root(), commitment);
+        if consensus_rule_set != ConsensusRuleSet::Reboot {
+            // The index swapping could be done here, or in each guess. Since
+            // we're optimizing for fast guessing, the index swapping is done
+            // here.
+            let swap_indices = Self::swap_indices(leafs.len());
+            for (k, maybe_rev_k) in swap_indices.iter().enumerate() {
+                if let Some(rev_k) = maybe_rev_k {
+                    leafs.swap(k, rev_k.get());
+                }
+            }
+        };
+
+        let merkle_tree = MTree::build_inplace(leafs, internal_nodes, cancel_channel);
+
+        let hash = Tip5::hash_pair(merkle_tree.root(), bud_prefix);
 
         GuesserBuffer::<MERKLE_TREE_HEIGHT> {
             merkle_tree,
             hash,
-            mast_auth_paths,
+            prev_block_digest,
         }
     }
 
     pub fn guess(
         buffer: &GuesserBuffer<MERKLE_TREE_HEIGHT>,
+        mast_auth_paths: &PowMastPaths,
         nonce: Digest,
         target: Digest,
     ) -> Option<Self> {
@@ -432,7 +509,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             path_b,
         };
 
-        let pow_digest = buffer.mast_auth_paths.fast_mast_hash(pow);
+        let pow_digest = mast_auth_paths.fast_mast_hash(pow);
         if pow_digest > target {
             None
         } else {
@@ -444,16 +521,39 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         self,
         auth_paths: PowMastPaths,
         target: Digest,
+        consensus_rule_set: ConsensusRuleSet,
+        parent_digest: Digest,
     ) -> Result<(), PowValidationError> {
-        let commitment = auth_paths.commit();
-        let buffer_hash = Tip5::hash_pair(self.root, commitment);
+        let leaf_prefix = match consensus_rule_set {
+            ConsensusRuleSet::Reboot => auth_paths.commit(),
+            ConsensusRuleSet::HardforkAlpha => parent_digest,
+        };
+        let buffer_hash = Tip5::hash_pair(self.root, leaf_prefix);
         let (index_a, index_b) = Self::indices(buffer_hash, self.nonce);
-        let leaf_a = Self::leaf(commitment, index_a);
+
+        let (leaf_a, leaf_b) = if consensus_rule_set == ConsensusRuleSet::Reboot {
+            (
+                Self::leaf(leaf_prefix, index_a),
+                Self::leaf(leaf_prefix, index_b),
+            )
+        } else {
+            let index_a = u64::from(Self::bitreverse(
+                index_a.try_into().unwrap(),
+                Self::MERKLE_TREE_HEIGHT as u32,
+            ));
+            let index_b = u64::from(Self::bitreverse(
+                index_b.try_into().unwrap(),
+                Self::MERKLE_TREE_HEIGHT as u32,
+            ));
+            (
+                Self::leaf(leaf_prefix, index_a),
+                Self::leaf(leaf_prefix, index_b),
+            )
+        };
+
         if !MTree::verify(self.root, index_a as usize, &self.path_a, leaf_a) {
             return Err(PowValidationError::PathAInvalid);
         }
-
-        let leaf_b = Self::leaf(commitment, index_b);
         if !MTree::verify(self.root, index_b as usize, &self.path_b, leaf_b) {
             return Err(PowValidationError::PathBInvalid);
         }
@@ -503,6 +603,7 @@ pub(crate) mod tests {
     use std::time::Instant;
 
     use rand::rng;
+    use strum::IntoEnumIterator;
     use tasm_lib::twenty_first::bfe;
 
     use super::*;
@@ -525,21 +626,32 @@ pub(crate) mod tests {
         const MERKLE_TREE_HEIGHT: usize = 10;
         const MERKLE_TREE_NUM_LEAFS: usize = 1usize << 10;
         let mut rng = rng();
-        let auth_paths = rng.random::<PowMastPaths>();
-        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths, None);
+        for consensus_rule_set in ConsensusRuleSet::iter() {
+            let auth_paths = rng.random::<PowMastPaths>();
+            let prev_block_digest = rng.random();
+            let buffer = if consensus_rule_set == ConsensusRuleSet::Reboot {
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess_reboot(auth_paths, None, prev_block_digest)
+            } else {
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess_alpha(None, prev_block_digest)
+            };
 
-        let index = rng.random_range(0..MERKLE_TREE_NUM_LEAFS);
-        let expensive_leaf = Pow::<MERKLE_TREE_HEIGHT>::leaf(auth_paths.commit(), index as u64);
-        let amortized_leaf = buffer.merkle_tree.leaf(index);
-        assert_eq!(amortized_leaf, expensive_leaf);
+            let index = rng.random_range(0..MERKLE_TREE_NUM_LEAFS);
+            let expensive_leaf = Pow::<MERKLE_TREE_HEIGHT>::leaf(auth_paths.commit(), index as u64);
+            let amortized_leaf = buffer.merkle_tree.leaf(index);
+            assert_eq!(amortized_leaf, expensive_leaf);
+        }
     }
 
     #[test]
     #[ignore = "benchmark of memory and time requirements of preprocess for guessing"]
     fn benchmark_memory_requirements() {
-        fn report<const MERKLE_TREE_HEIGHT: usize>(auth_paths: PowMastPaths) {
+        fn report<const MERKLE_TREE_HEIGHT: usize>(
+            auth_paths: PowMastPaths,
+            parent_block_hash: Digest,
+        ) {
             let start = Instant::now();
-            let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths, None);
+            let buffer =
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess_reboot(auth_paths, None, parent_block_hash);
             let duration = start.elapsed();
             let estimated_mt_size = buffer.merkle_tree.num_leafs() * 2 * Digest::BYTES;
             println!("Merkle tree height: {MERKLE_TREE_HEIGHT}");
@@ -549,11 +661,12 @@ pub(crate) mod tests {
 
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
-        report::<25>(auth_paths);
-        report::<26>(auth_paths);
-        report::<27>(auth_paths);
-        report::<28>(auth_paths);
-        report::<29>(auth_paths);
+        let parent_block_hash = rng.random::<Digest>();
+        report::<25>(auth_paths, parent_block_hash);
+        report::<26>(auth_paths, parent_block_hash);
+        report::<27>(auth_paths, parent_block_hash);
+        report::<28>(auth_paths, parent_block_hash);
+        report::<29>(auth_paths, parent_block_hash);
     }
 
     #[test]
@@ -588,23 +701,41 @@ pub(crate) mod tests {
         const MERKLE_TREE_HEIGHT: usize = 10;
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
-        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths, None);
+        let prev_block_digest = rng.random();
 
-        for difficulty in [2_u32, 4] {
-            let target = Difficulty::from(difficulty).target();
-            let mut successful_guess = None;
-            'inner_loop: for _ in 0..120 {
-                let nonce = rng.random();
-                if let Some(solution) = Pow::guess(&buffer, nonce, target) {
-                    successful_guess = Some(solution);
-                    break 'inner_loop;
+        for consensus_rule_set in ConsensusRuleSet::iter() {
+            let buffer = match consensus_rule_set {
+                ConsensusRuleSet::Reboot => Pow::<MERKLE_TREE_HEIGHT>::preprocess_reboot(
+                    auth_paths,
+                    None,
+                    prev_block_digest,
+                ),
+                ConsensusRuleSet::HardforkAlpha => {
+                    Pow::<MERKLE_TREE_HEIGHT>::preprocess_alpha(None, prev_block_digest)
                 }
-            }
+            };
 
-            assert_eq!(
-                Ok(()),
-                successful_guess.unwrap().validate(auth_paths, target)
-            );
+            for difficulty in [2_u32, 4] {
+                let target = Difficulty::from(difficulty).target();
+                let mut successful_guess = None;
+                'inner_loop: for _ in 0..120 {
+                    let nonce = rng.random();
+                    if let Some(solution) = Pow::guess(&buffer, &auth_paths, nonce, target) {
+                        successful_guess = Some(solution);
+                        break 'inner_loop;
+                    }
+                }
+
+                assert_eq!(
+                    Ok(()),
+                    successful_guess.unwrap().validate(
+                        auth_paths,
+                        target,
+                        consensus_rule_set,
+                        prev_block_digest
+                    )
+                );
+            }
         }
     }
 
@@ -625,8 +756,13 @@ pub(crate) mod tests {
             let mast_auth_paths = rng.random::<PowMastPaths>();
 
             // spawn preprocess task
+            let prev_block_digest = rng.random();
             let join_handle = tokio::task::spawn_blocking(move || {
-                Pow::<MERKLE_TREE_HEIGHT>::preprocess(mast_auth_paths, Some(&tx))
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess_reboot(
+                    mast_auth_paths,
+                    Some(&tx),
+                    prev_block_digest,
+                )
             });
 
             // wait 0.5 millis
