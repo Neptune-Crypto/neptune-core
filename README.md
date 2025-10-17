@@ -180,6 +180,17 @@ You can still use a custom data directory (forces legacy mode):
 neptune-core --data-dir /custom/path/to/data
 ```
 
+**Implementation Notes:**
+
+Phase 2 (Data Decoupling) was implemented with the following key features:
+- **Smart Path Detection**: Automatically detects multiple legacy layout patterns
+- **Atomic Migration**: Safe file moves with backup creation before any changes
+- **Password Retry**: 3 attempts for interactive password prompts (typo protection)
+- **Cross-Platform**: Tested on Linux with real 11GB mainnet data
+- **Zero Downtime**: Migration happens automatically on first run
+- **Comprehensive Logging**: Clear progress updates during migration
+- **Integration**: Works seamlessly with Phase 1 wallet encryption
+
 ### Modularized P2P Architecture
 
 Complete refactor of the P2P networking layer for enhanced security and maintainability:
