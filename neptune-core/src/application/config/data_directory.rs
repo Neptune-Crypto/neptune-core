@@ -136,21 +136,25 @@ impl DataDirectory {
             .join(".neptune")
     }
 
-    /// Default root for old layout: ~/.local/share/neptune/core/<network>/ (or OS equivalent)
+    /// Default root for old layout: tries multiple legacy locations
+    /// - ~/.local/share/neptune/<network>/ (older versions)
+    /// - ~/.local/share/neptune/core/<network>/ (some versions had "core" subdir)
     fn default_old_root(network: Network) -> Result<PathBuf> {
         let project_dirs = ProjectDirs::from("org", "neptune", "neptune")
             .context("Could not determine data directory")?;
 
         let network_dir = network.to_string();
-        // Old layout: ProjectDirs::data_dir() returns ~/.local/share/neptune/ on Linux
-        // and had an extra "core" subdirectory
-        let data_dir = project_dirs
-            .data_dir()
-            .to_path_buf()
-            .join("core")
-            .join(network_dir);
-
-        Ok(data_dir)
+        let base_dir = project_dirs.data_dir().to_path_buf();
+        
+        // Try direct path first (most common for main network)
+        let direct_path = base_dir.join(&network_dir);
+        if Self::has_old_layout(&direct_path) {
+            return Ok(direct_path);
+        }
+        
+        // Fall back to core subdirectory path (used by some networks like regtest)
+        let core_path = base_dir.join("core").join(&network_dir);
+        Ok(core_path)
     }
 
     /// Check if new layout exists
