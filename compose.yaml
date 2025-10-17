@@ -1,0 +1,15 @@
+name: neptune.cash
+
+services:
+  node:
+    build:
+      context: "."
+      dockerfile: "alpine.Dockerfile"
+      tags:
+        - "neptune-cash:alpine"
+    ports:
+      - 9798:9798
+
+    volumes:
+      - "~/.local/share/neptune/main:/home/triton/.local/share/neptune/main"
+
