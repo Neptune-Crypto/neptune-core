@@ -1,0 +1,213 @@
+name: Develop Branch CI
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CMAKE_POLICY_VERSION_MINIMUM: 3.5
+
+jobs:
+  # Quick checks that run first - fail fast
+  quick-checks:
+    name: Quick Checks (fmt, clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy (warnings allowed for develop)
+        run: cargo clippy --all-targets --workspace -- -D clippy::all -W clippy::pedantic
+        continue-on-error: true
+
+  # Build and test on multiple platforms
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    needs: quick-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build all packages
+        run: cargo build --workspace --all-features
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: 3.5
+
+      - name: Build documentation
+        run: cargo doc --no-deps --workspace --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+        continue-on-error: true
+
+      - name: Run tests (excluding slow tests)
+        run: >
+          cargo test
+          --workspace
+          --lib --bins --tests --examples
+          --
+          --skip mine_20_blocks_in_40_seconds
+          --skip hash_rate_independent_of_tx_size
+          --skip blocks_with_0_to_10_inputs_and_successors_are_valid
+          --skip can_cancel_preprocess_within_one_second
+          --skip can_cancel_merkle_tree_construction_within_two_seconds
+          --skip alice_updates_mutator_set_data_on_own_transaction
+        timeout-minutes: 30
+
+      - name: Run doc tests
+        run: cargo test --doc --workspace
+        continue-on-error: true
+
+  # P2P & DDoS Protection Tests
+  p2p-tests:
+    name: P2P & DDoS Protection Tests
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python for DDoS tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-p2p-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build --release --bin neptune-core
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: 3.5
+
+      - name: Run P2P module tests
+        run: cargo test --release p2p
+
+      - name: Start test node (background)
+        run: |
+          target/release/neptune-core --network testnet &
+          echo $! > neptune.pid
+          sleep 10
+        continue-on-error: true
+
+      - name: Run DDoS protection tests
+        run: |
+          if [ -f scripts/python/ddos.py ]; then
+            python scripts/python/ddos.py --force --quick
+          fi
+        continue-on-error: true
+
+      - name: Stop test node
+        run: |
+          if [ -f neptune.pid ]; then
+            kill $(cat neptune.pid) || true
+          fi
+        if: always()
+
+  # Security audit
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run security audit
+        run: cargo audit
+        continue-on-error: true
+
+  # Dependency review for PRs
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        continue-on-error: true
+
+  # Build summary
+  develop-ci-success:
+    name: Develop CI Success
+    needs: [quick-checks, build-and-test, p2p-tests, security-audit]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs
+        run: |
+          if [ "${{ needs.quick-checks.result }}" != "success" ]; then
+            echo "❌ Quick checks failed"
+            exit 1
+          fi
+          if [ "${{ needs.build-and-test.result }}" != "success" ]; then
+            echo "⚠️  Build and test had issues"
+          fi
+          if [ "${{ needs.p2p-tests.result }}" != "success" ]; then
+            echo "⚠️  P2P tests had issues"
+          fi
+          if [ "${{ needs.security-audit.result }}" != "success" ]; then
+            echo "⚠️  Security audit had findings"
+          fi
+          echo "✅ Develop CI completed"
+

@@ -1,5 +1,6 @@
 pub(crate) mod models;
 mod parser;
+mod rpc;
 
 use std::io;
 use std::io::stdout;
@@ -391,16 +392,66 @@ struct Config {
     #[clap(long)]
     data_dir: Option<PathBuf>,
 
+    /// Start RPC server mode
+    #[clap(long)]
+    rpc_mode: bool,
+
+    /// RPC server port (default: 9798)
+    #[clap(long, default_value = "9798")]
+    rpc_port: u16,
+
+    /// Get authentication cookie for RPC access
+    #[clap(long)]
+    get_cookie: bool,
+
     #[clap(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize tracing with neptune-core style formatting
+    tracing_subscriber::fmt()
+        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+        .with_thread_ids(true)
+        .with_target(true)
+        .with_level(true)
+        .init();
+
     let args: Config = Config::parse();
 
+    // Handle get-cookie command
+    if args.get_cookie {
+        get_cookie_command(args.port).await?;
+        return Ok(());
+    }
+
+    // Handle RPC server mode
+    if args.rpc_mode {
+        let data_dir = if let Some(dir) = args.data_dir {
+            dir
+        } else {
+            DataDirectory::get(None, Network::Main)
+                .await
+                .unwrap()
+                .root_dir_path()
+        };
+
+        let rpc_config = rpc::RpcConfig::new(args.rpc_port, args.port, data_dir);
+
+        println!("Starting neptune-cli RPC server on port {}", args.rpc_port);
+        println!("Press Ctrl+C to stop the server");
+
+        rpc::start_rpc_server(rpc_config).await?;
+        return Ok(());
+    }
+
     // Handle commands that don't require a server
-    match &args.command {
+    let command = args
+        .command
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("No command specified"))?;
+    match &command {
         Command::Completions => {
             if let Some(shell) = Shell::from_env() {
                 generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
@@ -409,8 +460,9 @@ async fn main() -> Result<()> {
             bail!("Unknown shell. Shell completions not available.")
         }
         Command::WhichWallet { network } => {
-            let wallet_dir =
-                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
+            let wallet_dir = DataDirectory::get(args.data_dir.clone(), *network)
+                .await?
+                .wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletFileContext::wallet_secret_path(&wallet_dir);
@@ -422,13 +474,19 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Command::GenerateWallet { network } => {
-            let wallet_dir =
-                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
+            let wallet_dir = DataDirectory::get(args.data_dir.clone(), *network)
+                .await?
+                .wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
 
-            let wallet_file_context = WalletFileContext::read_from_file_or_create(&wallet_dir)?;
+            // For CLI wallet generation, allow interactive prompts (no CLI password)
+            let wallet_file_context = WalletFileContext::read_from_file_or_create(
+                &wallet_dir,
+                None, // No CLI password for generate-wallet command
+                true, // Allow interactive password prompt
+            )?;
 
             if wallet_file_context.wallet_is_new {
                 println!("New wallet generated.");
@@ -449,7 +507,7 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Command::ImportSeedPhrase { network } => {
-            let data_directory = DataDirectory::get(args.data_dir.clone(), *network)?;
+            let data_directory = DataDirectory::get(args.data_dir.clone(), *network).await?;
             let wallet_dir = data_directory.wallet_directory_path();
             let wallet_db_dir = data_directory.wallet_database_dir_path();
             let wallet_secret_path = WalletFileContext::wallet_secret_path(&wallet_dir);
@@ -499,8 +557,9 @@ async fn main() -> Result<()> {
         }
         Command::ExportSeedPhrase { network } => {
             // The root path is where both the wallet and all databases are stored
-            let wallet_dir =
-                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
+            let wallet_dir = DataDirectory::get(args.data_dir.clone(), *network)
+                .await?
+                .wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletFileContext::wallet_secret_path(&wallet_dir);
@@ -525,14 +584,15 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Command::NthReceivingAddress { network, index } => {
-            return get_nth_receiving_address(*network, args.data_dir.clone(), *index);
+            return get_nth_receiving_address(*network, args.data_dir.clone(), *index).await;
         }
         Command::PremineReceivingAddress { network } => {
-            return get_nth_receiving_address(*network, args.data_dir.clone(), 0);
+            return get_nth_receiving_address(*network, args.data_dir.clone(), 0).await;
         }
         Command::ShamirCombine { t, network } => {
-            let wallet_dir =
-                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
+            let wallet_dir = DataDirectory::get(args.data_dir.clone(), *network)
+                .await?
+                .wallet_directory_path();
             let wallet_file = WalletFileContext::wallet_secret_path(&wallet_dir);
 
             // if the wallet file already exists, bail
@@ -671,8 +731,9 @@ async fn main() -> Result<()> {
             }
 
             // The root path is where both the wallet and all databases are stored
-            let wallet_dir =
-                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
+            let wallet_dir = DataDirectory::get(args.data_dir.clone(), *network)
+                .await?
+                .wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             let wallet_file_name = WalletFileContext::wallet_secret_path(&wallet_dir);
@@ -751,7 +812,7 @@ async fn main() -> Result<()> {
     }
     .into();
 
-    match args.command {
+    match command {
         Command::Completions
         | Command::GenerateWallet { .. }
         | Command::WhichWallet { .. }
@@ -1321,10 +1382,62 @@ async fn main() -> Result<()> {
 //
 // Otherwise, we call cookie_hint() RPC to obtain data-dir.
 // But the API might be disabled, which we detect and fallback to the default data-dir.
+/// Get authentication cookie for RPC access
+async fn get_cookie_command(port: u16) -> anyhow::Result<()> {
+    use neptune_cash::application::rpc::server::RPCClient;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use tarpc::client;
+    use tarpc::context;
+    use tarpc::tokio_serde::formats::Json;
+
+    // Connect to neptune-core to get cookie hint
+    let server_socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let transport = tarpc::serde_transport::tcp::connect(server_socket, Json::default)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to connect to neptune-core: {}. Is neptune-core running?",
+                e
+            )
+        })?;
+
+    let client = RPCClient::new(client::Config::default(), transport).spawn();
+    let ctx = context::current();
+
+    // Get cookie hint from neptune-core
+    let cookie_hint = client
+        .cookie_hint(ctx)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get cookie hint from neptune-core: {}", e))??;
+
+    // Load the actual cookie from the file (for validation)
+    let _cookie = auth::Cookie::try_load(&cookie_hint.data_directory)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to load cookie from file: {}", e))?;
+
+    // Read cookie file directly to get the raw bytes for hex encoding
+    let cookie_path = auth::Cookie::cookie_file_path(&cookie_hint.data_directory);
+    let cookie_bytes = tokio::fs::read(&cookie_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read cookie file: {}", e))?;
+    let cookie_hex = hex::encode(cookie_bytes);
+
+    println!("Authentication cookie for RPC access:");
+    println!("Cookie: neptune-cli={}", cookie_hex);
+    println!();
+    println!("Use this cookie in your HTTP requests:");
+    println!("curl -X POST http://localhost:9800 \\");
+    println!("  -H \"Content-Type: application/json\" \\");
+    println!("  -H \"Cookie: neptune-cli={}\" \\", cookie_hex);
+    println!("  -d '{{\"jsonrpc\": \"2.0\", \"method\": \"block_height\", \"params\": {{}}, \"id\": 1}}'");
+
+    Ok(())
+}
+
 async fn get_cookie_hint(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
     async fn fallback(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
         let network = client.network(context::current()).await??;
-        let data_directory = DataDirectory::get(args.data_dir.clone(), network)?;
+        let data_directory = DataDirectory::get(args.data_dir.clone(), network).await?;
         Ok(auth::CookieHint {
             data_directory,
             network,
@@ -1348,12 +1461,14 @@ async fn get_cookie_hint(client: &RPCClient, args: &Config) -> anyhow::Result<au
 ///
 /// Read the wallet file directly; avoid going through the RPC interface of
 /// `neptune-core`.
-fn get_nth_receiving_address(
+async fn get_nth_receiving_address(
     network: Network,
     data_dir: Option<PathBuf>,
     index: usize,
 ) -> Result<()> {
-    let wallet_dir = DataDirectory::get(data_dir.clone(), network)?.wallet_directory_path();
+    let wallet_dir = DataDirectory::get(data_dir.clone(), network)
+        .await?
+        .wallet_directory_path();
 
     // Get wallet object, create various wallet secret files
     let wallet_file_name = WalletFileContext::wallet_secret_path(&wallet_dir);

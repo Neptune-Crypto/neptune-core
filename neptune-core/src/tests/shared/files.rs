@@ -21,7 +21,7 @@ use crate::application::config::data_directory::DataDirectory;
 /// fail as they each hold a lock on the database.
 ///
 /// For now we use databases on disk. In-memory databases would be nicer.
-pub(crate) fn unit_test_data_directory(
+pub(crate) async fn unit_test_data_directory(
     network: crate::api::export::Network,
 ) -> Result<DataDirectory> {
     let mut rng = rand::rng();
@@ -30,7 +30,7 @@ pub(crate) fn unit_test_data_directory(
         .join(format!("neptune-unit-tests-{}", user))
         .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
 
-    DataDirectory::get(Some(tmp_root), network)
+    DataDirectory::get(Some(tmp_root), network).await
 }
 
 /// Waits until the file at `path` exists, or returns `Err` after 30 seconds.

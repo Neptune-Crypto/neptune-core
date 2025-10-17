@@ -1,0 +1,173 @@
+---
+alwaysApply: true
+---
+
+# Development Etiquette Rules for Neptune Core Wallet
+
+## Code Management Principles
+
+### File Management
+
+- **Edit existing files** rather than creating new ones when possible
+- **Clean up after amendments** - remove unused imports, variables, and artifacts
+- **No unused artifacts** - ensure all code serves a purpose
+- **Minimal documentation** - only create docs when explicitly requested or absolutely necessary
+- **Consolidate related functionality** - avoid file proliferation
+
+### Code Quality Standards
+
+- **DRY (Don't Repeat Yourself)** - eliminate code duplication
+- **KISS (Keep It Simple, Stupid)** - prefer simple, readable solutions
+- **Clear separation of concerns** - each module/function has a single responsibility
+- **Consistent patterns** - follow established conventions in the codebase
+
+## Communication Guidelines
+
+### Before Making Changes
+
+- **Ask for confirmation** before making significant code amendments
+- **Explain the approach** and get approval for the implementation plan
+- **Discuss alternatives** when multiple solutions exist
+- **Clarify requirements** if the request is ambiguous
+
+### Scope Management
+
+- **Stay focused** on the current topic - don't race ahead to future features
+- **Complete current task** before moving to the next
+- **Don't implement unrequested features** without explicit discussion
+- **Address one concern at a time** for better clarity
+
+### Feedback and Updates
+
+- **Provide clear feedback** on what was changed and why
+- **Confirm completion** of requested tasks
+- **Report any issues** encountered during implementation
+- **Suggest improvements** only when directly relevant
+
+## Development Workflow
+
+### Code Review Process
+
+- **Self-review** before presenting changes
+- **Test changes** to ensure they work as expected
+- **Check for side effects** that might impact other functionality
+- **Verify no breaking changes** unless explicitly intended
+
+### Error Handling
+
+- **Handle errors gracefully** with appropriate user feedback
+- **Log errors** with sufficient context for debugging
+- **Don't suppress errors** without good reason
+- **Provide fallback behavior** when possible
+
+### Performance Considerations
+
+- **Consider performance impact** of changes
+- **Avoid premature optimization** but don't ignore obvious inefficiencies
+- **Profile when necessary** to identify bottlenecks
+- **Use appropriate data structures** for the use case
+
+## Project-Specific Guidelines
+
+### Electron Architecture
+
+- **Maintain IPC boundaries** - don't mix main/renderer concerns
+- **Use proper context isolation** in preload scripts
+- **Handle process lifecycle** correctly
+- **Respect security constraints** of Electron
+
+### State Management
+
+- **Keep state minimal** - only store what's necessary
+- **Use appropriate state patterns** (local vs global)
+- **Avoid prop drilling** with proper state organization
+- **Maintain state consistency** across components
+
+### API Integration
+
+- **Handle network failures** gracefully
+- **Implement proper retry logic** for transient failures
+- **Cache appropriately** without stale data issues
+- **Validate all inputs** before processing
+
+## Code Style Enforcement
+
+### Consistency
+
+- **Follow established patterns** in the codebase
+- **Use consistent naming** conventions
+- **Maintain consistent formatting** and structure
+- **Apply same patterns** across similar functionality
+
+### Documentation
+
+- **Document complex logic** with clear comments
+- **Use JSDoc** for public APIs
+- **Keep comments up-to-date** with code changes
+- **Explain "why" not "what"** in comments
+
+### Testing
+
+- **Test edge cases** and error conditions
+- **Verify user workflows** work end-to-end
+- **Check backward compatibility** when making changes
+- **Validate data integrity** in state changes
+
+## Interaction Patterns
+
+### User Requests
+
+- **Understand the intent** behind requests
+- **Ask clarifying questions** when needed
+- **Provide options** when multiple approaches exist
+- **Confirm understanding** before proceeding
+
+### Problem Solving
+
+- **Identify root causes** not just symptoms
+- **Consider long-term implications** of solutions
+- **Balance ideal vs practical** solutions
+- **Document decisions** for future reference
+
+### Collaboration
+
+- **Respect existing code** and patterns
+- **Build upon existing architecture** rather than replacing it
+- **Maintain backward compatibility** unless breaking changes are needed
+- **Communicate changes** that might affect other developers
+
+## Quality Assurance
+
+### Before Completion
+
+- **Verify all requirements** are met
+- **Check for linting errors** and fix them
+- **Ensure no console errors** or warnings
+- **Test the complete user flow**
+
+### After Completion
+
+- **Clean up temporary files** or test code
+- **Remove debug statements** and console logs
+- **Update related documentation** if necessary
+- **Provide summary** of changes made
+
+## Emergency Protocols
+
+### When Things Go Wrong
+
+- **Stop and assess** the situation
+- **Don't make additional changes** until the issue is resolved
+- **Communicate the problem** clearly
+- **Provide rollback options** when possible
+
+### Recovery Procedures
+
+- **Document the issue** for future reference
+- **Implement proper fixes** rather than workarounds
+- **Test the fix thoroughly** before considering it complete
+- **Learn from the experience** to prevent recurrence
+
+---
+
+_These etiquette rules ensure professional, efficient, and maintainable development practices for the Neptune Core Wallet project._

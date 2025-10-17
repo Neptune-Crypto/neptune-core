@@ -126,3 +126,6 @@ fabric.properties
 # Debuggable Tasm programs for triton-tui
 program.tasm
 vm_state.json
+
+# Project-specific documentation and configuration
+ad-hoc-docs/

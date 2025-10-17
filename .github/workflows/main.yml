@@ -6,15 +6,45 @@ on:
     branches:
       - master
 
-name: Rust
+name: Master Branch CI
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CMAKE_POLICY_VERSION_MINIMUM: 3.5
 
 jobs:
+  # Format check - must pass
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+  # Full build, lint, and test matrix
   runner-matrix:
-    name: format, lint, test
+    name: Build, Lint & Test (${{ matrix.os }})
+    needs: format-check
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
@@ -25,16 +55,43 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-build-
 
       - name: Build documentation
         run: cargo doc --no-deps --workspace --document-private-items
         env:
           RUSTDOCFLAGS: -D warnings
 
-      - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
+      - name: Run clippy (strict mode for master)
+        run: cargo clippy --all-targets --workspace -- -D warnings
+
+      - name: Build all packages
+        run: cargo build --workspace --all-features
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: 3.5
 
       - name: Build benches
         run: cargo build --benches
@@ -42,6 +99,7 @@ jobs:
       - name: Run tests without benches
         run: >
           cargo test
+          --workspace
           --lib --bins --tests --examples
           --
           --skip mine_20_blocks_in_40_seconds
@@ -50,7 +108,108 @@ jobs:
           --skip can_cancel_preprocess_within_one_second
           --skip can_cancel_merkle_tree_construction_within_two_seconds
           --skip alice_updates_mutator_set_data_on_own_transaction
+        timeout-minutes: 45
 
-        # `--doc` cannot be mixed with other target option
       - name: Run documentation tests
-        run: cargo test --doc
+        run: cargo test --doc --workspace
+
+  # Security checks for master
+  security-checks:
+    name: Security Checks
+    needs: format-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run security audit (strict for master)
+        run: cargo audit
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: Run cargo deny
+        run: cargo deny check
+        continue-on-error: true
+
+  # P2P and DDoS protection verification
+  p2p-verification:
+    name: P2P & DDoS Protection Verification
+    needs: format-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-p2p-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build --release --bin neptune-core --bin neptune-core-cli
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: 3.5
+
+      - name: Run P2P unit tests
+        run: cargo test --release --package neptune-cash --lib p2p
+
+      - name: Verify P2P module structure
+        run: |
+          if [ ! -d "neptune-core/src/p2p" ]; then
+            echo "❌ P2P module not found"
+            exit 1
+          fi
+          echo "✅ P2P module structure verified"
+
+      - name: Check DDoS mitigation components
+        run: |
+          FILES=(
+            "neptune-core/src/p2p/state/reputation.rs"
+            "neptune-core/src/p2p/state/connection_tracker.rs"
+            "neptune-core/src/p2p/connection/validator.rs"
+          )
+          for file in "${FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing DDoS component: $file"
+              exit 1
+            fi
+          done
+          echo "✅ All DDoS mitigation components present"
+
+  # Success gate for master
+  master-ci-success:
+    name: Master CI Success
+    needs: [format-check, runner-matrix, security-checks, p2p-verification]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs succeeded
+        run: |
+          if [ "${{ needs.format-check.result }}" != "success" ]; then
+            echo "❌ Format check failed"
+            exit 1
+          fi
+          if [ "${{ needs.runner-matrix.result }}" != "success" ]; then
+            echo "❌ Build/test matrix failed"
+            exit 1
+          fi
+          if [ "${{ needs.security-checks.result }}" != "success" ]; then
+            echo "⚠️  Security checks failed (review required)"
+            exit 1
+          fi
+          if [ "${{ needs.p2p-verification.result }}" != "success" ]; then
+            echo "❌ P2P verification failed"
+            exit 1
+          fi
+          echo "✅ All master CI checks passed!"

@@ -1,0 +1,410 @@
+---
+alwaysApply: true
+---
+
+# Rust Style Guide
+
+## Core Formatting Rules
+
+### Indentation and Line Width
+
+- Use **4 spaces** for indentation (never tabs)
+- Maximum line width: **100 characters**
+- Prefer block indent over visual indent for better diffs
+
+### Trailing Commas
+
+- Use trailing commas in comma-separated lists when followed by a newline
+- Makes moving code easier and produces smaller diffs
+
+### Blank Lines
+
+- Separate items and statements by **zero or one blank line** (1-2 newlines)
+- Don't include trailing whitespace on any line
+
+### Comments
+
+- Prefer line comments (`//`) over block comments (`/* ... */`)
+- Put single space after `//` opening
+- Complete sentences: start with capital letter, end with period
+- Limit comment lines to 80 characters (or max line width if smaller)
+- Put doc comments (`///`) before attributes
+
+## Items and Module Organization
+
+### Module Structure
+
+- `extern crate` statements first, alphabetically ordered
+- `use` statements before module declarations
+- Version-sort imports and module declarations
+- `self` and `super` come before other names in imports
+
+### Function Definitions
+
+```rust
+// Single line when possible
+fn foo(arg1: i32, arg2: i32) -> i32 { ... }
+
+// Multi-line when needed
+fn foo(
+    arg1: i32,
+    arg2: i32,
+) -> i32 {
+    ...
+}
+```
+
+### Structs and Unions
+
+```rust
+// Multi-line struct
+struct Foo {
+    a: A,
+    b: B,
+}
+
+// Single-line when small
+struct Bar { field1: Type1, field2: Type2 }
+
+// Unit struct preferred over empty struct
+struct Baz;
+```
+
+### Enums
+
+```rust
+enum FooBar {
+    First(u32),
+    Second,
+    Error {
+        err: Box<Error>,
+        line: u32,
+    },
+}
+```
+
+### Traits and Impls
+
+```rust
+// Empty trait/impl on one line
+trait Foo {}
+impl Foo {}
+
+// With bounds
+trait Bar: Debug + Clone {}
+
+// Multi-line impl
+impl Bar for Foo {
+    // methods
+}
+```
+
+### Generics and Where Clauses
+
+```rust
+// Single line generics
+fn foo<T: Display, U: Debug>(x: Vec<T>, y: Vec<U>) -> i32
+
+// Multi-line generics
+fn foo<
+    T: Display,
+    U: Debug,
+>(x: Vec<T>, y: Vec<U>) -> i32
+
+// Where clauses
+fn complex<T, U>(args) -> ReturnType
+where
+    T: Bound,
+    U: AnotherBound,
+{
+    body
+}
+```
+
+### Imports (use statements)
+
+```rust
+// Single line imports
+use a::b::c;
+use a::b::{foo, bar, baz};
+
+// Multi-line when necessary
+use a::b::{
+    long, list, of, imports,
+    more, imports,
+};
+```
+
+## Statements and Expressions
+
+### Let Statements
+
+```rust
+// Basic let statement
+let x = 5;
+
+// With type annotation
+let x: i32 = 5;
+
+// Pattern matching
+let (x, y) = (1, 2);
+let Some(value) = option;
+```
+
+### Control Flow
+
+```rust
+// If statements
+if condition {
+    do_something();
+} else if other_condition {
+    do_other();
+} else {
+    do_default();
+}
+
+// Match expressions
+match value {
+    Pattern1 => expression1,
+    Pattern2 => {
+        statement1;
+        statement2;
+        expression
+    }
+    _ => default_expression,
+}
+
+// Loops
+for item in iter {
+    process(item);
+}
+
+while condition {
+    do_work();
+}
+
+loop {
+    if should_break {
+        break;
+    }
+}
+```
+
+### Expressions
+
+```rust
+// Function calls
+function_call(arg1, arg2);
+
+// Method calls
+object.method().chain().call();
+
+// Array/vector indexing
+array[index]
+
+// Field access
+struct.field
+
+// Block expressions
+let result = {
+    let temp = calculate();
+    temp * 2
+};
+```
+
+## Types and Type Annotations
+
+### Basic Types
+
+- Use explicit types when it improves readability
+- Prefer type aliases for complex types
+- Use `_` for type inference when appropriate
+
+### Type Aliases
+
+```rust
+// Single line
+type Foo = Bar<T>;
+
+// Multi-line when needed
+type VeryLongType<T, U: SomeBound>
+    = AnEvenLongerType<T, U, Foo<T>>;
+```
+
+### Associated Types
+
+```rust
+trait Iterator {
+    type Item;
+    type IntoIter: Iterator<Item = Self::Item>;
+}
+```
+
+## Cargo.toml Conventions
+
+### Package Metadata
+
+```toml
+[package]
+name = "package-name"
+version = "0.1.0"
+edition = "2021"
+authors = ["Author <email@example.com>"]
+description = "Brief description"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/user/repo"
+```
+
+### Dependencies
+
+```toml
+[dependencies]
+# Pin major versions for stability
+serde = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+
+[dev-dependencies]
+# Test-only dependencies
+proptest = "1.0"
+```
+
+### Workspace Configuration
+
+```toml
+[workspace]
+members = ["crate1", "crate2"]
+resolver = "2"
+```
+
+## Naming Conventions
+
+### Variables and Functions
+
+- Use `snake_case` for variables, functions, and modules
+- Use `SCREAMING_SNAKE_CASE` for constants
+- Use `PascalCase` for types, traits, and enums
+
+### File and Module Names
+
+- Use `snake_case` for file names
+- Match module names to file names
+
+## Error Handling
+
+### Result and Option
+
+- Prefer explicit error handling over unwrap/expect in production code
+- Use `?` operator for error propagation when appropriate
+- Provide meaningful error messages
+
+### Panics
+
+- Only use `panic!` for truly unrecoverable errors
+- Prefer `Result` types for recoverable errors
+
+## Performance Guidelines
+
+### Cloning and References
+
+- Prefer borrowing over cloning when possible
+- Use `clone()` only when necessary
+- Consider using `Cow` for conditional ownership
+
+### Collections
+
+- Choose appropriate collection types
+- Use iterators for functional-style operations
+- Avoid unnecessary allocations
+
+## Documentation
+
+### Doc Comments
+
+- Use `///` for public API documentation
+- Include examples in doc comments when helpful
+- Document all public functions, types, and modules
+- Use `//!` for module-level documentation
+
+### Code Comments
+
+- Explain **why**, not **what**
+- Keep comments up to date with code changes
+- Remove commented-out code before committing
+
+## Testing
+
+### Test Organization
+
+- Place unit tests in the same file as the code being tested
+- Use `#[cfg(test)]` for test modules
+- Place integration tests in `tests/` directory
+
+### Test Naming
+
+- Use descriptive test names that explain the scenario
+- Use `#[test]` attribute for test functions
+- Group related tests in modules
+
+## Common Patterns
+
+### Match Expressions
+
+- Use exhaustive patterns
+- Prefer `match` over `if let` for multiple conditions
+- Use `_` for catch-all patterns
+
+### Iterators
+
+- Prefer iterator methods over manual loops
+- Use `collect()` when you need a collection
+- Chain iterator methods for readability
+
+### Error Types
+
+- Create custom error types for your domain
+- Implement `std::error::Error` trait
+- Use `thiserror` or `anyhow` for error handling
+
+## Code Review Checklist
+
+- [ ] Code follows naming conventions
+- [ ] Proper error handling
+- [ ] No unnecessary clones or allocations
+- [ ] Tests cover new functionality
+- [ ] Documentation is updated
+- [ ] No commented-out code
+- [ ] Consistent formatting
+- [ ] No clippy warnings
+
+## Tools Integration
+
+### rustfmt
+
+- Run `cargo fmt` before committing
+- Use default rustfmt settings
+- Configure exceptions only when necessary
+
+### clippy
+
+- Run `cargo clippy` regularly
+- Address all clippy warnings
+- Use `#[allow(clippy::lint_name)]` sparingly
+
+### cargo check
+
+- Use `cargo check` for fast compilation checks
+- Run `cargo test` before pushing
+- Use `cargo build --release` for performance testing
+
+## Best Practices Summary
+
+1. **Readability over cleverness** - Write code that's easy to understand
+2. **Consistency** - Follow established patterns in the codebase
+3. **Performance awareness** - Consider performance implications
+4. **Error handling** - Handle errors explicitly and gracefully
+5. **Testing** - Write tests for your code
+6. **Documentation** - Document public APIs thoroughly
+7. **Tool usage** - Leverage rustfmt, clippy, and other tools
+8. **Code review** - Review code for style and correctness
+
+Remember: The goal is to write Rust code that is not only correct but also maintainable, readable, and follows community standards.
