@@ -615,3 +615,187 @@ impl std::fmt::Display for DataDirectory {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Test that explicit data directory uses legacy mode
+    #[tokio::test]
+    async fn test_explicit_data_dir_uses_legacy_mode() {
+        let temp_dir = TempDir::new().unwrap();
+        let explicit_path = temp_dir.path().to_path_buf();
+
+        let data_dir = DataDirectory::get(Some(explicit_path.clone()), Network::RegTest)
+            .await
+            .unwrap();
+
+        assert_eq!(data_dir.layout_mode, LayoutMode::Legacy);
+        assert_eq!(data_dir.root_dir_path(), explicit_path);
+    }
+
+    /// Test that new installation creates separated layout
+    #[tokio::test]
+    async fn test_fresh_install_creates_separated_layout() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Mock the home directory
+        std::env::set_var("HOME", temp_dir.path());
+
+        let data_dir = DataDirectory::get(None, Network::RegTest).await.unwrap();
+
+        assert_eq!(data_dir.layout_mode, LayoutMode::Separated);
+        assert!(data_dir
+            .root_dir_path()
+            .to_string_lossy()
+            .contains("regtest"));
+    }
+
+    /// Test path resolution for separated layout
+    #[tokio::test]
+    async fn test_separated_layout_paths() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().join(".neptune").join("regtest");
+
+        let data_dir = DataDirectory {
+            root: root.clone(),
+            network: Network::RegTest,
+            layout_mode: LayoutMode::Separated,
+        };
+
+        // Check wallet paths
+        assert_eq!(data_dir.wallet_directory_path(), root.join(WALLET_SUBDIR));
+        assert_eq!(
+            data_dir.wallet_database_dir_path(),
+            root.join(WALLET_SUBDIR)
+                .join(WALLET_DB_SUBDIR)
+                .join(WALLET_DB_NAME)
+        );
+
+        // Check blockchain paths
+        assert_eq!(
+            data_dir.database_dir_path(),
+            root.join(CHAIN_SUBDIR).join(CHAIN_DB_SUBDIR)
+        );
+        assert_eq!(
+            data_dir.block_dir_path(),
+            root.join(CHAIN_SUBDIR).join(BLOCKS_SUBDIR)
+        );
+    }
+
+    /// Test path resolution for legacy layout
+    #[tokio::test]
+    async fn test_legacy_layout_paths() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().to_path_buf();
+
+        let data_dir = DataDirectory {
+            root: root.clone(),
+            network: Network::RegTest,
+            layout_mode: LayoutMode::Legacy,
+        };
+
+        // Check paths use old structure
+        assert_eq!(
+            data_dir.wallet_directory_path(),
+            root.join(WALLET_DIRECTORY)
+        );
+        assert_eq!(
+            data_dir.database_dir_path(),
+            root.join(DATABASE_DIRECTORY_ROOT_NAME)
+        );
+        assert_eq!(data_dir.block_dir_path(), root.join(DIR_NAME_FOR_BLOCKS));
+    }
+
+    /// Test wallet_root and blockchain_root methods
+    #[tokio::test]
+    async fn test_root_getters() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().join(".neptune").join("regtest");
+
+        // Separated layout
+        let separated = DataDirectory {
+            root: root.clone(),
+            network: Network::RegTest,
+            layout_mode: LayoutMode::Separated,
+        };
+
+        assert_eq!(separated.wallet_root(), root.join(WALLET_SUBDIR));
+        assert_eq!(separated.blockchain_root(), root.join(CHAIN_SUBDIR));
+
+        // Legacy layout
+        let legacy_root = temp_dir.path().join("legacy");
+        let legacy = DataDirectory {
+            root: legacy_root.clone(),
+            network: Network::RegTest,
+            layout_mode: LayoutMode::Legacy,
+        };
+
+        assert_eq!(legacy.wallet_root(), legacy_root);
+        assert_eq!(legacy.blockchain_root(), legacy_root);
+    }
+
+    /// Test Display trait implementation
+    #[tokio::test]
+    async fn test_display_format() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().to_path_buf();
+
+        let legacy = DataDirectory {
+            root: root.clone(),
+            network: Network::RegTest,
+            layout_mode: LayoutMode::Legacy,
+        };
+
+        let display = format!("{}", legacy);
+        assert!(display.contains("Legacy"));
+        assert!(display.contains(&root.display().to_string()));
+
+        let separated = DataDirectory {
+            root: root.clone(),
+            network: Network::RegTest,
+            layout_mode: LayoutMode::Separated,
+        };
+
+        let display = format!("{}", separated);
+        assert!(display.contains("Wallet"));
+        assert!(display.contains("Chain"));
+    }
+
+    /// Test that has_new_layout correctly detects new layout
+    #[tokio::test]
+    async fn test_has_new_layout_detection() {
+        let temp_dir = TempDir::new().unwrap();
+        let network_dir = temp_dir.path().join("regtest");
+
+        // Should return false when no wallet exists
+        assert!(!DataDirectory::has_new_layout(&network_dir));
+
+        // Create wallet directory and encrypted wallet file
+        let wallet_dir = network_dir.join(WALLET_SUBDIR);
+        std::fs::create_dir_all(&wallet_dir).unwrap();
+        std::fs::write(wallet_dir.join("wallet.encrypted"), "test").unwrap();
+
+        // Should now detect new layout
+        assert!(DataDirectory::has_new_layout(&network_dir));
+    }
+
+    /// Test that has_old_layout correctly detects old layout
+    #[tokio::test]
+    async fn test_has_old_layout_detection() {
+        let temp_dir = TempDir::new().unwrap();
+        let old_root = temp_dir.path().to_path_buf();
+
+        // Should return false when no wallet exists
+        assert!(!DataDirectory::has_old_layout(&old_root));
+
+        // Create wallet directory and wallet.dat file (old structure)
+        let wallet_dir = old_root.join(WALLET_DIRECTORY);
+        std::fs::create_dir_all(&wallet_dir).unwrap();
+        std::fs::write(wallet_dir.join("wallet.dat"), "test").unwrap();
+
+        // Should now detect old layout
+        assert!(DataDirectory::has_old_layout(&old_root));
+    }
+}
