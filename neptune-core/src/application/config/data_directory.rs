@@ -6,6 +6,7 @@ use anyhow::Result;
 use directories::ProjectDirs;
 use serde::Deserialize;
 use serde::Serialize;
+use tracing::{info, warn};
 
 use crate::application::config::network::Network;
 use crate::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
@@ -24,33 +25,133 @@ const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.
 const DB_MIGRATION_BACKUPS_DIR: &str = "migration_backups";
 
+// Phase 2: New layout constants
+const WALLET_SUBDIR: &str = "wallet";
+const CHAIN_SUBDIR: &str = "chain";
+const WALLET_DB_SUBDIR: &str = "db";
+const CHAIN_DB_SUBDIR: &str = "db";
+const BLOCKS_SUBDIR: &str = "blocks";
+
+/// Layout mode for data directory organization
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+enum LayoutMode {
+    /// Legacy mode: Monolithic structure (v0.1-v0.4)
+    /// All data in one directory: ~/.config/neptune/core/<network>/
+    Legacy,
+
+    /// New mode: Separated structure (v0.5+)
+    /// wallet/ and chain/ subdirectories: ~/.neptune/<network>/
+    Separated,
+}
+
 // TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataDirectory {
-    data_dir: PathBuf,
+    /// Root directory for all neptune data
+    /// - Legacy mode: ~/.config/neptune/core/<network>/
+    /// - New mode: ~/.neptune/<network>/
+    root: PathBuf,
+
+    /// Network name (main, testnet, etc.)
+    network: Network,
+
+    /// Layout mode: Legacy or Separated
+    layout_mode: LayoutMode,
 }
 
 impl DataDirectory {
     ///////////////////////////////////////////////////////////////////////////
     ///
-    /// The data directory that contains the wallet and blockchain state
+    /// Get data directory with smart layout detection and migration support
     ///
-    /// The default varies by operating system, and includes the network, e.g.
+    /// Priority order:
+    /// 1. Explicit `root_dir` → Use as legacy mode
+    /// 2. New layout exists (~/.neptune/<network>/) → Use it
+    /// 3. Old layout exists (~/.config/neptune/core/<network>/) → Use legacy mode
+    /// 4. Neither exists → Create new layout
     ///
-    /// - Linux:   /home/alice/.config/neptune/core/main
-    /// - Windows: C:\Users\Alice\AppData\Roaming\neptune\core\main
-    /// - macOS:   /Users/Alice/Library/Application Support/neptune/main
+    /// New default location: ~/.neptune/<network>/
+    /// Legacy location: ~/.config/neptune/core/<network>/
     pub fn get(root_dir: Option<PathBuf>, network: Network) -> Result<Self> {
-        let project_dirs = root_dir
-            .map(ProjectDirs::from_path)
-            .unwrap_or_else(|| ProjectDirs::from("org", "neptune", "neptune"))
+        // Priority 1: Explicit root_dir → Legacy mode
+        if let Some(explicit_root) = root_dir {
+            info!(
+                "Using explicit data directory (legacy mode): {}",
+                explicit_root.display()
+            );
+            return Ok(Self {
+                root: explicit_root,
+                network,
+                layout_mode: LayoutMode::Legacy,
+            });
+        }
+
+        // Get default paths for detection
+        let new_root = Self::default_new_root();
+        let new_network_dir = new_root.join(network.to_string());
+        let old_root = Self::default_old_root(network)?;
+
+        // Priority 2: New layout exists → Use it
+        if Self::has_new_layout(&new_network_dir) {
+            info!("Using new data layout: {}", new_network_dir.display());
+            return Ok(Self {
+                root: new_network_dir,
+                network,
+                layout_mode: LayoutMode::Separated,
+            });
+        }
+
+        // Priority 3: Old layout exists → Legacy mode (with migration suggestion)
+        if Self::has_old_layout(&old_root) {
+            warn!("⚠️  Using legacy data layout: {}", old_root.display());
+            warn!("💡 Consider migrating to new layout with: neptune-cli migrate-data-layout");
+            warn!("   Or the node will prompt you on next startup");
+            return Ok(Self {
+                root: old_root,
+                network,
+                layout_mode: LayoutMode::Legacy,
+            });
+        }
+
+        // Priority 4: Fresh install → Use new layout
+        info!("Creating new data layout: {}", new_network_dir.display());
+        Ok(Self {
+            root: new_network_dir,
+            network,
+            layout_mode: LayoutMode::Separated,
+        })
+    }
+
+    /// Default root for new layout: ~/.neptune/
+    fn default_new_root() -> PathBuf {
+        dirs::home_dir()
+            .expect("Could not determine home directory")
+            .join(".neptune")
+    }
+
+    /// Default root for old layout: ~/.config/neptune/core/<network>/ (or OS equivalent)
+    fn default_old_root(network: Network) -> Result<PathBuf> {
+        let project_dirs = ProjectDirs::from("org", "neptune", "neptune")
             .context("Could not determine data directory")?;
 
         let network_dir = network.to_string();
-        let network_path = Path::new(&network_dir);
-        let data_dir = project_dirs.data_dir().to_path_buf().join(network_path);
+        let data_dir = project_dirs.data_dir().to_path_buf().join(network_dir);
 
-        Ok(DataDirectory { data_dir })
+        Ok(data_dir)
+    }
+
+    /// Check if new layout exists
+    fn has_new_layout(network_dir: &Path) -> bool {
+        // New layout has wallet/wallet.encrypted or wallet/wallet.dat
+        let wallet_dir = network_dir.join(WALLET_SUBDIR);
+        wallet_dir.join("wallet.encrypted").exists() || wallet_dir.join("wallet.dat").exists()
+    }
+
+    /// Check if old layout exists
+    fn has_old_layout(old_root: &Path) -> bool {
+        // Old layout has wallet/wallet.encrypted or wallet/wallet.dat at root
+        let wallet_dir = old_root.join(WALLET_DIRECTORY);
+        wallet_dir.join("wallet.encrypted").exists() || wallet_dir.join("wallet.dat").exists()
     }
 
     /// Create directory if it does not exist
@@ -81,19 +182,40 @@ impl DataDirectory {
     ///
     /// The root data directory path
     pub fn root_dir_path(&self) -> PathBuf {
-        self.data_dir.clone()
+        self.root.clone()
+    }
+
+    /// Get wallet root directory (for backups and isolation)
+    pub fn wallet_root(&self) -> PathBuf {
+        match self.layout_mode {
+            LayoutMode::Legacy => self.root.clone(),
+            LayoutMode::Separated => self.root.join(WALLET_SUBDIR),
+        }
+    }
+
+    /// Get blockchain root directory (for separate storage)
+    pub fn blockchain_root(&self) -> PathBuf {
+        match self.layout_mode {
+            LayoutMode::Legacy => self.root.clone(),
+            LayoutMode::Separated => self.root.join(CHAIN_SUBDIR),
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////
     ///
     /// The rpc (auth) cookie file path
     pub fn rpc_cookie_file_path(&self) -> PathBuf {
-        self.data_dir.join(Path::new(RPC_COOKIE_FILE_NAME))
+        self.root.join(RPC_COOKIE_FILE_NAME)
     }
 
-    /// The block database directory path
+    /// The blockchain database directory path
+    /// - Legacy: <root>/database/
+    /// - New: <root>/chain/db/
     pub fn database_dir_path(&self) -> PathBuf {
-        self.data_dir.join(Path::new(DATABASE_DIRECTORY_ROOT_NAME))
+        match self.layout_mode {
+            LayoutMode::Legacy => self.root.join(DATABASE_DIRECTORY_ROOT_NAME),
+            LayoutMode::Separated => self.root.join(CHAIN_SUBDIR).join(CHAIN_DB_SUBDIR),
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -113,22 +235,40 @@ impl DataDirectory {
     ///
     /// note: this is not used by neptune-core, but is used/shared by
     ///       neptune-cli, neptune-dashboard
+    ///
+    /// - Legacy: <root>/utxo-transfer/
+    /// - New: <root>/wallet/utxo-transfer/
     pub fn utxo_transfer_directory_path(&self) -> PathBuf {
-        self.data_dir.join(Path::new(UTXO_TRANSFER_DIRECTORY))
+        match self.layout_mode {
+            LayoutMode::Legacy => self.root.join(UTXO_TRANSFER_DIRECTORY),
+            LayoutMode::Separated => self.root.join(WALLET_SUBDIR).join(UTXO_TRANSFER_DIRECTORY),
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////
     ///
-    /// The wallet file path
+    /// The wallet file directory path
+    /// - Legacy: <root>/wallet/
+    /// - New: <root>/wallet/
     pub fn wallet_directory_path(&self) -> PathBuf {
-        self.data_dir.join(Path::new(WALLET_DIRECTORY))
+        match self.layout_mode {
+            LayoutMode::Legacy => self.root.join(WALLET_DIRECTORY),
+            LayoutMode::Separated => self.root.join(WALLET_SUBDIR),
+        }
     }
 
     /// The wallet database directory path.
-    ///
-    /// This directory lives within `DataDirectory::database_dir_path()`.
+    /// - Legacy: <root>/database/wallet/
+    /// - New: <root>/wallet/db/wallet/
     pub fn wallet_database_dir_path(&self) -> PathBuf {
-        self.database_dir_path().join(Path::new(WALLET_DB_NAME))
+        match self.layout_mode {
+            LayoutMode::Legacy => self.database_dir_path().join(WALLET_DB_NAME),
+            LayoutMode::Separated => self
+                .root
+                .join(WALLET_SUBDIR)
+                .join(WALLET_DB_SUBDIR)
+                .join(WALLET_DB_NAME),
+        }
     }
 
     /// directory for storing database backups before migrating schema to newer version
@@ -202,10 +342,13 @@ impl DataDirectory {
     ///////////////////////////////////////////////////////////////////////////
     ///
     /// The block body directory.
-    ///
-    /// This directory lives within `DataDirectory::root_dir_path()`.
+    /// - Legacy: <root>/blocks/
+    /// - New: <root>/chain/blocks/
     pub fn block_dir_path(&self) -> PathBuf {
-        self.data_dir.join(Path::new(DIR_NAME_FOR_BLOCKS))
+        match self.layout_mode {
+            LayoutMode::Legacy => self.root.join(DIR_NAME_FOR_BLOCKS),
+            LayoutMode::Separated => self.root.join(CHAIN_SUBDIR).join(BLOCKS_SUBDIR),
+        }
     }
 
     /// The block index database directory path.
@@ -232,6 +375,14 @@ impl DataDirectory {
 
 impl std::fmt::Display for DataDirectory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.data_dir.display())
+        match self.layout_mode {
+            LayoutMode::Legacy => write!(f, "Legacy: {}", self.root.display()),
+            LayoutMode::Separated => write!(
+                f,
+                "Wallet: {}, Chain: {}",
+                self.wallet_root().display(),
+                self.blockchain_root().display()
+            ),
+        }
     }
 }
