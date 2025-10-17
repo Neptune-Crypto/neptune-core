@@ -136,13 +136,19 @@ impl DataDirectory {
             .join(".neptune")
     }
 
-    /// Default root for old layout: ~/.config/neptune/core/<network>/ (or OS equivalent)
+    /// Default root for old layout: ~/.local/share/neptune/core/<network>/ (or OS equivalent)
     fn default_old_root(network: Network) -> Result<PathBuf> {
         let project_dirs = ProjectDirs::from("org", "neptune", "neptune")
             .context("Could not determine data directory")?;
 
         let network_dir = network.to_string();
-        let data_dir = project_dirs.data_dir().to_path_buf().join(network_dir);
+        // Old layout: ProjectDirs::data_dir() returns ~/.local/share/neptune/ on Linux
+        // and had an extra "core" subdirectory
+        let data_dir = project_dirs
+            .data_dir()
+            .to_path_buf()
+            .join("core")
+            .join(network_dir);
 
         Ok(data_dir)
     }
