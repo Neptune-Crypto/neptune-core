@@ -276,16 +276,71 @@ impl WalletFileContext {
     ) -> Result<WalletFile> {
         let encrypted_file = EncryptedWalletFile::read_from_file(encrypted_path)?;
 
-        // Get password from best available source
-        let password = PasswordSource::get_password(cli_password, allow_interactive)?;
+        // Try up to 3 times if interactive (for typos), only once otherwise
+        let max_attempts = if allow_interactive && cli_password.is_none() {
+            3
+        } else {
+            1
+        };
 
-        // Decrypt wallet
-        let plaintext_json = encrypted_file.decrypt(&password)?;
-        let wallet: WalletFile = serde_json::from_str(&plaintext_json)
-            .context("Failed to deserialize decrypted wallet data")?;
+        for attempt in 1..=max_attempts {
+            // Get password from best available source
+            let password = match PasswordSource::get_password(cli_password, allow_interactive) {
+                Ok(pwd) => pwd,
+                Err(e) => {
+                    if attempt < max_attempts {
+                        error!("Failed to get password: {}", e);
+                        continue;
+                    }
+                    return Err(e);
+                }
+            };
 
-        info!("✅ Wallet decrypted successfully");
-        Ok(wallet)
+            // Attempt decryption
+            match encrypted_file.decrypt(&password) {
+                Ok(plaintext_json) => {
+                    let wallet: WalletFile = serde_json::from_str(&plaintext_json)
+                        .context("Failed to deserialize decrypted wallet data")?;
+
+                    info!("✅ Wallet decrypted successfully");
+                    return Ok(wallet);
+                }
+                Err(e) => {
+                    if attempt < max_attempts {
+                        error!(
+                            "❌ Decryption failed (attempt {}/{}): Wrong password",
+                            attempt, max_attempts
+                        );
+                        warn!("Please try again...");
+                    } else {
+                        // Final attempt failed
+                        error!("❌ Decryption failed after {} attempts", max_attempts);
+                        error!("Wallet location: {}", encrypted_path.display());
+
+                        if !allow_interactive {
+                            error!("💡 To unlock wallet interactively, run without --non-interactive-password");
+                            error!(
+                                "💡 Or set correct NEPTUNE_WALLET_PASSWORD environment variable"
+                            );
+                        }
+
+                        return Err(anyhow::anyhow!(
+                            "Failed to decrypt wallet: {}\n\n\
+                            Your wallet is safe but cannot be unlocked with the provided password.\n\
+                            Location: {}\n\n\
+                            Solutions:\n\
+                            1. Use the correct password\n\
+                            2. Run without --non-interactive-password for interactive prompt\n\
+                            3. Check NEPTUNE_WALLET_PASSWORD environment variable",
+                            e,
+                            encrypted_path.display()
+                        ));
+                    }
+                }
+            }
+        }
+
+        unreachable!()
     }
 
     /// Migrate plaintext wallet to encrypted format with backup

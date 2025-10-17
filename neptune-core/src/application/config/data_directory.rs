@@ -145,13 +145,13 @@ impl DataDirectory {
 
         let network_dir = network.to_string();
         let base_dir = project_dirs.data_dir().to_path_buf();
-        
+
         // Try direct path first (most common for main network)
         let direct_path = base_dir.join(&network_dir);
         if Self::has_old_layout(&direct_path) {
             return Ok(direct_path);
         }
-        
+
         // Fall back to core subdirectory path (used by some networks like regtest)
         let core_path = base_dir.join("core").join(&network_dir);
         Ok(core_path)
