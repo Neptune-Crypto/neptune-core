@@ -79,7 +79,7 @@ fi
 # =============================================================================
 if [ "$CURRENT_BRANCH" = "master" ] || [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "develop" ]; then
     print_section "2. Full Build Check (Release)"
-    
+
     echo "Building release binaries..."
     if cargo build --release --workspace > /dev/null 2>&1; then
         print_success "Release build successful"
@@ -90,7 +90,7 @@ if [ "$CURRENT_BRANCH" = "master" ] || [ "$CURRENT_BRANCH" = "main" ] || [ "$CUR
     fi
 else
     print_section "2. Quick Build Check (Debug)"
-    
+
     echo "Running quick debug build..."
     if cargo check --workspace > /dev/null 2>&1; then
         print_success "Debug build successful"
@@ -102,27 +102,24 @@ else
 fi
 
 # =============================================================================
-# 3. TEST SUITE (quick tests on feature branches, full on main branches)
+# 3. TEST SUITE (only on master/main/develop)
 # =============================================================================
 if [ "$CURRENT_BRANCH" = "master" ] || [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "develop" ]; then
     print_section "3. Comprehensive Test Suite"
     
     echo "Running full test suite (this may take a while)..."
     TEST_OUTPUT=$(cargo test --workspace --lib --bins --tests 2>&1 || true)
-else
-    print_section "3. Quick Test Suite"
     
-    echo "Running quick tests..."
-    TEST_OUTPUT=$(cargo test --workspace --lib 2>&1 || true)
-fi
-
-if echo "$TEST_OUTPUT" | grep -q "test result: FAILED"; then
-    print_error "Tests failed"
-    echo "$TEST_OUTPUT" | grep -A 10 "FAILED"
-    exit 1
+    if echo "$TEST_OUTPUT" | grep -q "test result: FAILED"; then
+        print_error "Tests failed"
+        echo "$TEST_OUTPUT" | grep -A 10 "FAILED"
+        exit 1
+    else
+        PASSED=$(echo "$TEST_OUTPUT" | grep "test result:" | tail -1 | grep -oP '\d+(?= passed)' || echo "0")
+        print_success "All tests passed ($PASSED tests)"
+    fi
 else
-    PASSED=$(echo "$TEST_OUTPUT" | grep "test result:" | tail -1 | grep -oP '\d+(?= passed)' || echo "0")
-    print_success "All tests passed ($PASSED tests)"
+    print_success "Skipping tests on feature branch (will run in CI)"
 fi
 
 # =============================================================================
