@@ -143,7 +143,7 @@ async fn get_cookie_hint(
         args: &Config,
     ) -> anyhow::Result<auth::CookieHint> {
         let network = client.network(context::current()).await??;
-        let data_directory = DataDirectory::get(args.data_dir.clone(), network)?;
+        let data_directory = DataDirectory::get(args.data_dir.clone(), network).await?;
         Ok(auth::CookieHint {
             data_directory,
             network,

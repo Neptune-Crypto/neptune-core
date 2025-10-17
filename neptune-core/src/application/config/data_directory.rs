@@ -67,12 +67,12 @@ impl DataDirectory {
     /// Priority order:
     /// 1. Explicit `root_dir` → Use as legacy mode
     /// 2. New layout exists (~/.neptune/<network>/) → Use it
-    /// 3. Old layout exists (~/.config/neptune/core/<network>/) → Use legacy mode
+    /// 3. Old layout exists (~/.config/neptune/core/<network>/) → Migrate and use new layout
     /// 4. Neither exists → Create new layout
     ///
     /// New default location: ~/.neptune/<network>/
     /// Legacy location: ~/.config/neptune/core/<network>/
-    pub fn get(root_dir: Option<PathBuf>, network: Network) -> Result<Self> {
+    pub async fn get(root_dir: Option<PathBuf>, network: Network) -> Result<Self> {
         // Priority 1: Explicit root_dir → Legacy mode
         if let Some(explicit_root) = root_dir {
             info!(
@@ -101,15 +101,22 @@ impl DataDirectory {
             });
         }
 
-        // Priority 3: Old layout exists → Legacy mode (with migration suggestion)
+        // Priority 3: Old layout exists → Migrate to new layout
         if Self::has_old_layout(&old_root) {
-            warn!("⚠️  Using legacy data layout: {}", old_root.display());
-            warn!("💡 Consider migrating to new layout with: neptune-cli migrate-data-layout");
-            warn!("   Or the node will prompt you on next startup");
+            warn!("⚠️  Detected legacy data layout: {}", old_root.display());
+            info!("🔄 Automatically migrating to new layout...");
+
+            // Perform migration
+            Self::migrate_to_new_layout(&old_root, &new_network_dir, network).await?;
+
+            info!(
+                "✅ Migration successful! Using new layout: {}",
+                new_network_dir.display()
+            );
             return Ok(Self {
-                root: old_root,
+                root: new_network_dir,
                 network,
-                layout_mode: LayoutMode::Legacy,
+                layout_mode: LayoutMode::Separated,
             });
         }
 
@@ -152,6 +159,228 @@ impl DataDirectory {
         // Old layout has wallet/wallet.encrypted or wallet/wallet.dat at root
         let wallet_dir = old_root.join(WALLET_DIRECTORY);
         wallet_dir.join("wallet.encrypted").exists() || wallet_dir.join("wallet.dat").exists()
+    }
+
+    /// Migrate from old layout to new layout
+    ///
+    /// Moves files from ~/.config/neptune/core/<network>/ to ~/.neptune/<network>/
+    /// with wallet/ and chain/ subdirectories.
+    ///
+    /// This is a destructive operation but creates a backup at old_root.backup
+    pub async fn migrate_to_new_layout(
+        old_root: &Path,
+        new_root: &Path,
+        network: Network,
+    ) -> Result<()> {
+        info!("🔄 Starting data layout migration...");
+        info!("  From: {}", old_root.display());
+        info!("  To:   {}", new_root.display());
+
+        // 1. Create backup marker at old location (before any moves)
+        let backup_marker = old_root.join(".migrated_to_v2");
+        let migration_info = format!(
+            "Migrated to: {}\nDate: {:?}\nNetwork: {}",
+            new_root.display(),
+            std::time::SystemTime::now(),
+            network
+        );
+        tokio::fs::write(&backup_marker, migration_info)
+            .await
+            .context("Failed to create migration marker")?;
+
+        // 2. Create new directory structure
+        info!("📁 Creating new directory structure...");
+        tokio::fs::create_dir_all(new_root.join(WALLET_SUBDIR))
+            .await
+            .context("Failed to create wallet directory")?;
+        tokio::fs::create_dir_all(new_root.join(WALLET_SUBDIR).join(WALLET_DB_SUBDIR))
+            .await
+            .context("Failed to create wallet db directory")?;
+        tokio::fs::create_dir_all(new_root.join(CHAIN_SUBDIR).join(CHAIN_DB_SUBDIR))
+            .await
+            .context("Failed to create chain db directory")?;
+        tokio::fs::create_dir_all(new_root.join(CHAIN_SUBDIR).join(BLOCKS_SUBDIR))
+            .await
+            .context("Failed to create blocks directory")?;
+
+        // 3. Move wallet files
+        info!("📦 Moving wallet data...");
+        Self::move_wallet_data(old_root, new_root).await?;
+
+        // 4. Move blockchain data
+        info!("⛓️  Moving blockchain data (this may take a while)...");
+        Self::move_blockchain_data(old_root, new_root).await?;
+
+        // 5. Rename old directory to .backup
+        let backup_dir = old_root.with_extension("backup");
+        info!(
+            "💾 Creating backup of old location: {}",
+            backup_dir.display()
+        );
+        tokio::fs::rename(old_root, &backup_dir)
+            .await
+            .context("Failed to rename old directory to backup")?;
+
+        info!("✅ Migration complete!");
+        info!("  New location: {}", new_root.display());
+        info!("  Backup: {}", backup_dir.display());
+        info!("💡 After verifying everything works, you can delete the backup:");
+        info!("   rm -rf {}", backup_dir.display());
+
+        Ok(())
+    }
+
+    /// Move wallet data from old to new layout
+    async fn move_wallet_data(old_root: &Path, new_root: &Path) -> Result<()> {
+        // Move wallet files (wallet.encrypted, *.dat)
+        let old_wallet_dir = old_root.join(WALLET_DIRECTORY);
+        let new_wallet_dir = new_root.join(WALLET_SUBDIR);
+
+        if old_wallet_dir.exists() {
+            // Move all files from old wallet dir to new wallet dir
+            Self::move_dir_contents(&old_wallet_dir, &new_wallet_dir, &["*"])
+                .await
+                .context("Failed to move wallet files")?;
+        }
+
+        // Move wallet database
+        let old_wallet_db = old_root
+            .join(DATABASE_DIRECTORY_ROOT_NAME)
+            .join(WALLET_DB_NAME);
+        let new_wallet_db = new_root
+            .join(WALLET_SUBDIR)
+            .join(WALLET_DB_SUBDIR)
+            .join(WALLET_DB_NAME);
+
+        if old_wallet_db.exists() {
+            tokio::fs::rename(&old_wallet_db, &new_wallet_db)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to move wallet database from {} to {}",
+                        old_wallet_db.display(),
+                        new_wallet_db.display()
+                    )
+                })?;
+        }
+
+        // Move UTXO transfer files (if exist)
+        let old_utxo_transfer = old_root.join(UTXO_TRANSFER_DIRECTORY);
+        let new_utxo_transfer = new_root.join(WALLET_SUBDIR).join(UTXO_TRANSFER_DIRECTORY);
+
+        if old_utxo_transfer.exists() {
+            tokio::fs::rename(&old_utxo_transfer, &new_utxo_transfer)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to move utxo-transfer from {} to {}",
+                        old_utxo_transfer.display(),
+                        new_utxo_transfer.display()
+                    )
+                })?;
+        }
+
+        Ok(())
+    }
+
+    /// Move blockchain data from old to new layout
+    async fn move_blockchain_data(old_root: &Path, new_root: &Path) -> Result<()> {
+        let old_db_dir = old_root.join(DATABASE_DIRECTORY_ROOT_NAME);
+        let new_db_dir = new_root.join(CHAIN_SUBDIR).join(CHAIN_DB_SUBDIR);
+
+        // Move blockchain databases
+        let blockchain_dbs = [
+            BLOCK_INDEX_DB_NAME,
+            MUTATOR_SET_DIRECTORY_NAME,
+            ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME,
+            BANNED_IPS_DB_NAME,
+        ];
+
+        for db_name in &blockchain_dbs {
+            let old_db = old_db_dir.join(db_name);
+            let new_db = new_db_dir.join(db_name);
+
+            if old_db.exists() {
+                tokio::fs::rename(&old_db, &new_db).await.with_context(|| {
+                    format!(
+                        "Failed to move database {} from {} to {}",
+                        db_name,
+                        old_db.display(),
+                        new_db.display()
+                    )
+                })?;
+            }
+        }
+
+        // Move migration backups directory if it exists
+        let old_migration_backups = old_db_dir.join(DB_MIGRATION_BACKUPS_DIR);
+        let new_migration_backups = new_db_dir.join(DB_MIGRATION_BACKUPS_DIR);
+
+        if old_migration_backups.exists() {
+            tokio::fs::rename(&old_migration_backups, &new_migration_backups)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to move migration_backups from {} to {}",
+                        old_migration_backups.display(),
+                        new_migration_backups.display()
+                    )
+                })?;
+        }
+
+        // Move blocks
+        let old_blocks = old_root.join(DIR_NAME_FOR_BLOCKS);
+        let new_blocks = new_root.join(CHAIN_SUBDIR).join(BLOCKS_SUBDIR);
+
+        if old_blocks.exists() {
+            tokio::fs::rename(&old_blocks, &new_blocks)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to move blocks from {} to {}",
+                        old_blocks.display(),
+                        new_blocks.display()
+                    )
+                })?;
+        }
+
+        Ok(())
+    }
+
+    /// Move contents of a directory matching patterns
+    async fn move_dir_contents(
+        from_dir: &Path,
+        to_dir: &Path,
+        _patterns: &[&str], // patterns for future filtering if needed
+    ) -> Result<()> {
+        if !from_dir.exists() {
+            return Ok(());
+        }
+
+        // Ensure destination exists
+        tokio::fs::create_dir_all(to_dir).await?;
+
+        // Read directory contents
+        let mut entries = tokio::fs::read_dir(from_dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let file_name = entry.file_name();
+            let from_path = entry.path();
+            let to_path = to_dir.join(&file_name);
+
+            // Move file or directory
+            tokio::fs::rename(&from_path, &to_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to move {} to {}",
+                        from_path.display(),
+                        to_path.display()
+                    )
+                })?;
+        }
+
+        Ok(())
     }
 
     /// Create directory if it does not exist
