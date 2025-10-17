@@ -1680,8 +1680,12 @@ fn generate_wallet(network: &str) -> Result<String> {
         std::fs::create_dir_all(parent_dir)?;
     }
 
-    // Generate new wallet
-    let wallet_file_context = WalletFileContext::read_from_file_or_create(&wallet_dir)?;
+    // Generate new wallet (RPC context - use environment variable or fail)
+    let wallet_file_context = WalletFileContext::read_from_file_or_create(
+        &wallet_dir,
+        None,  // No CLI password in RPC context
+        false, // RPC cannot prompt interactively, must use env var
+    )?;
 
     if wallet_file_context.wallet_is_new {
         Ok(format!(

@@ -4,10 +4,11 @@
 [![Upstream](https://img.shields.io/badge/Upstream-Neptune--Crypto-blue.svg)](https://github.com/Neptune-Crypto/neptune-core)
 [![Security](https://img.shields.io/badge/Security-Hardened-green.svg)]()
 [![DDoS Protection](https://img.shields.io/badge/DDoS-99%25%20Mitigation-brightgreen.svg)]()
+[![Wallet Encryption](https://img.shields.io/badge/Wallet-AES--256--GCM-brightgreen.svg)]()
 
-> **A security-hardened fork of [Neptune Core](https://github.com/Neptune-Crypto/neptune-core) with enterprise-grade DDoS protection and enhanced RPC capabilities**
+> **A security-hardened fork of [Neptune Core](https://github.com/Neptune-Crypto/neptune-core) with enterprise-grade DDoS protection, wallet encryption, and enhanced RPC capabilities**
 
-This is a **production-hardened** implementation of the [Neptune Cash](https://neptune.cash/) protocol, featuring comprehensive network security enhancements while maintaining full backward compatibility with the upstream Neptune network.
+This is a **production-hardened** implementation of the [Neptune Cash](https://neptune.cash/) protocol, featuring comprehensive network security enhancements, industry-standard wallet encryption, and advanced developer tooling while maintaining full backward compatibility with the upstream Neptune network.
 
 ---
 
@@ -51,6 +52,60 @@ Our implementation includes a **5-layer DDoS protection system** that has been b
 - ✅ Configurable ban thresholds (temporary/permanent)
 - ✅ Comprehensive logging and observability
 - ✅ Zero-configuration protection (works out-of-the-box)
+
+### Enterprise-Grade Wallet Encryption
+
+**NEW:** Production-ready wallet encryption protecting your master seed at rest.
+
+**Security Features:**
+
+- 🔐 **AES-256-GCM** - Authenticated encryption for wallet files
+- 🔑 **Argon2id KDF** - Memory-hard key derivation (prevents GPU attacks)
+- 🛡️ **HKDF-SHA256** - Secure key derivation for multiple keys
+- ✅ **Automatic Migration** - Seamlessly upgrades plaintext wallets
+- 🔒 **Secure Deletion** - Overwrites plaintext data before removal
+- 💾 **Verified Backups** - Automatic backup with integrity checking
+
+**Password Options:**
+
+```bash
+# Interactive password prompt (recommended)
+neptune-core
+
+# CLI password (testing/automation only)
+neptune-core --wallet-password "your-password"
+
+# Environment variable
+export NEPTUNE_WALLET_PASSWORD="your-password"
+neptune-core
+
+# Non-interactive mode (fails if password unavailable)
+neptune-core --non-interactive-password
+```
+
+**Technical Details:**
+
+- **Encrypted Format:** `wallet.encrypted` (replaces plaintext `wallet.dat`)
+- **Encryption:** AES-256-GCM with random nonces
+- **KDF Parameters:** Argon2id with 32MB memory, 3 iterations, 4 parallelism
+- **Key Size:** 256-bit encryption keys
+- **Password Strength:** Enforced minimum requirements (8+ chars, mixed case, numbers)
+
+**Migration Process:**
+
+1. Detects existing `wallet.dat` on first run
+2. Creates secure backup (`wallet.dat.backup`)
+3. Migrates to encrypted format (`wallet.encrypted`)
+4. Verifies successful migration
+5. Securely deletes plaintext wallet (3-pass overwrite)
+
+**Why This Matters:**
+
+- **Before:** Wallet seed stored in plaintext JSON (critical vulnerability)
+  - Linux: Only protected by file permissions (chmod 600) - vulnerable to root access, disk theft, backups
+  - Windows: **NO PROTECTION** - any user or malware could read the plaintext seed
+- **After:** Industry-standard encryption protects your master seed on all platforms
+- **Protection Against:** Disk theft, unauthorized access, malware, memory dumps, swap file leakage, backup exposure
 
 ### Modularized P2P Architecture
 
@@ -493,9 +548,11 @@ If the node crashes due to cryptographic data corruption:
 
 **Exclude these files on mainnet** (contain secret keys):
 
-- `wallet.dat`
-- `incoming_randomness.dat`
-- `outgoing_randomness.dat`
+- `wallet.encrypted` ⚠️ **CRITICAL** - Contains your encrypted master seed
+- `wallet.dat` - Legacy plaintext wallet (if exists)
+- `wallet.dat.backup` - Migration backup (if exists)
+- `incoming_randomness.dat` - UTXO recovery data
+- `outgoing_randomness.dat` - UTXO recovery data
 
 **Data directory location (Linux):**
 `~/.local/share/neptune/`
@@ -527,13 +584,17 @@ rm ~/.local/share/neptune/<network>/wallet/outgoing_randomness.dat
 **Current State:**
 
 - ✅ Production-ready DDoS protection (99% mitigation)
+- ✅ Enterprise-grade wallet encryption (AES-256-GCM + Argon2id)
 - ✅ Full HTTP JSON-RPC server implementation
+- ✅ Automatic plaintext wallet migration
 - ✅ Backward compatible with Neptune network
 - ✅ Comprehensive documentation
 - ✅ Active development and testing
 
 **Roadmap:**
 
+- 🔄 Hardware wallet integration
+- 🔄 Multi-signature wallet support
 - 🔄 Persistent ban list (database integration)
 - 🔄 Metrics dashboard for monitoring
 - 🔄 Shared reputation network

@@ -28,6 +28,7 @@
 ### Current Vulnerability
 
 **CONFIRMED:** Wallet seed stored as plaintext JSON:
+
 ```json
 {
   "name": "standard_wallet",
@@ -39,6 +40,7 @@
 ```
 
 **Risk Level:** CRITICAL
+
 - ❌ Anyone with file read access = complete wallet compromise
 - ❌ Cloud backup exposes master seed
 - ❌ Malware can trivially steal funds
@@ -53,6 +55,7 @@
 ### What We're Cutting
 
 **DEFERRED to Phase 2 (v0.5.x or v0.6.0):**
+
 - ❌ Data directory decoupling (wallet vs blockchain separation)
 - ❌ Database encryption (LevelDB wrapper)
 - ❌ Windows ACL implementation
@@ -60,6 +63,7 @@
 - ❌ Hardware wallet support
 
 **KEEPING in Phase 1 (v0.4.1/v0.5.0):**
+
 - ✅ Wallet file encryption (Argon2id + AES-256-GCM)
 - ✅ Password management (interactive prompt)
 - ✅ Automatic migration (plaintext → encrypted)
@@ -68,11 +72,11 @@
 
 ### Aggressive Timeline
 
-| Week | Focus | Deliverables |
-|------|-------|--------------|
-| **Week 1** | Core encryption system | Working encrypt/decrypt, password mgmt |
+| Week       | Focus                   | Deliverables                           |
+| ---------- | ----------------------- | -------------------------------------- |
+| **Week 1** | Core encryption system  | Working encrypt/decrypt, password mgmt |
 | **Week 2** | Integration & migration | CLI integration, auto-migration, tests |
-| **Week 3** | Polish & release | Documentation, security audit, release |
+| **Week 3** | Polish & release        | Documentation, security audit, release |
 
 **Total:** 15 working days
 
@@ -85,6 +89,7 @@
 **Goal:** Add dependencies, create module structure
 
 **Tasks:**
+
 1. Add required crates to `Cargo.toml`
 2. Create module structure in `neptune-core/src/state/wallet/encryption/`
 3. Write module documentation
@@ -107,6 +112,7 @@ rpassword = "7.3"        # Password input
 ```
 
 **Module Structure:**
+
 ```
 neptune-core/src/state/wallet/
 ├── encryption/              # NEW
@@ -157,7 +163,7 @@ impl WalletKeyManager {
     /// - Takes ~1 second on modern hardware
     pub fn from_password(password: &str, salt: &[u8; 32]) -> Result<Self> {
         let mut master_key = Zeroizing::new([0u8; 32]);
-        
+
         // Configure Argon2id (memory-hard, side-channel resistant)
         let params = ParamsBuilder::new()
             .m_cost(256 * 1024)  // 256 MB RAM
@@ -166,23 +172,23 @@ impl WalletKeyManager {
             .output_len(32)      // 256-bit key
             .build()
             .map_err(|e| anyhow!("Invalid Argon2 params: {}", e))?;
-        
+
         let argon2 = Argon2::new(
             argon2::Algorithm::Argon2id,  // Hybrid (data + time)
             Version::V0x13,                // Latest version
             params,
         );
-        
+
         // Derive key (expensive operation)
         argon2.hash_password_into(
             password.as_bytes(),
             salt,
             &mut *master_key,
         )?;
-        
+
         Ok(Self { master_key })
     }
-    
+
     /// Generate random salt for new wallet
     pub fn generate_salt() -> [u8; 32] {
         let mut salt = [0u8; 32];
@@ -190,7 +196,7 @@ impl WalletKeyManager {
         OsRng.fill_bytes(&mut salt);
         salt
     }
-    
+
     /// Derive wallet file encryption key using HKDF-SHA256
     pub fn derive_wallet_key(&self) -> Zeroizing<[u8; 32]> {
         let hkdf = Hkdf::<Sha256>::new(None, &*self.master_key);
@@ -212,43 +218,43 @@ impl Drop for WalletKeyManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_deterministic_derivation() {
         let password = "correct-horse-battery-staple";
         let salt = [42u8; 32];
-        
+
         let km1 = WalletKeyManager::from_password(password, &salt).unwrap();
         let km2 = WalletKeyManager::from_password(password, &salt).unwrap();
-        
+
         // Same password + salt = same key
         assert_eq!(
             km1.derive_wallet_key().as_ref(),
             km2.derive_wallet_key().as_ref()
         );
     }
-    
+
     #[test]
     fn test_different_passwords_different_keys() {
         let salt = [42u8; 32];
-        
+
         let km1 = WalletKeyManager::from_password("password1", &salt).unwrap();
         let km2 = WalletKeyManager::from_password("password2", &salt).unwrap();
-        
+
         // Different passwords = different keys
         assert_ne!(
             km1.derive_wallet_key().as_ref(),
             km2.derive_wallet_key().as_ref()
         );
     }
-    
+
     #[test]
     fn test_different_salts_different_keys() {
         let password = "same-password";
-        
+
         let km1 = WalletKeyManager::from_password(password, &[1u8; 32]).unwrap();
         let km2 = WalletKeyManager::from_password(password, &[2u8; 32]).unwrap();
-        
+
         // Different salts = different keys
         assert_ne!(
             km1.derive_wallet_key().as_ref(),
@@ -259,6 +265,7 @@ mod tests {
 ```
 
 **Testing:**
+
 ```bash
 cargo test --package neptune-core --lib wallet::encryption::key_manager
 ```
@@ -295,29 +302,29 @@ impl WalletCipher {
             .map_err(|e| anyhow!("Invalid AES key: {}", e))?;
         Ok(Self { cipher })
     }
-    
+
     /// Generate random 96-bit nonce
     pub fn generate_nonce() -> [u8; 12] {
         let mut nonce = [0u8; 12];
         OsRng.fill_bytes(&mut nonce);
         nonce
     }
-    
+
     /// Encrypt plaintext with authenticated encryption
     ///
     /// Returns: (ciphertext, auth_tag)
     pub fn encrypt(&self, plaintext: &[u8], nonce: &[u8; 12]) -> Result<Vec<u8>> {
         let nonce = Nonce::from_slice(nonce);
-        
+
         self.cipher
             .encrypt(nonce, plaintext)
             .map_err(|e| anyhow!("Encryption failed: {}", e))
     }
-    
+
     /// Decrypt ciphertext with authentication verification
     pub fn decrypt(&self, ciphertext: &[u8], nonce: &[u8; 12]) -> Result<Vec<u8>> {
         let nonce = Nonce::from_slice(nonce);
-        
+
         self.cipher
             .decrypt(nonce, ciphertext)
             .map_err(|e| anyhow!("Decryption failed (wrong password or corrupted data): {}", e))
@@ -327,66 +334,66 @@ impl WalletCipher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
         let key = [42u8; 32];
         let cipher = WalletCipher::new(&key).unwrap();
-        
+
         let plaintext = b"secret wallet data";
         let nonce = WalletCipher::generate_nonce();
-        
+
         let ciphertext = cipher.encrypt(plaintext, &nonce).unwrap();
         let decrypted = cipher.decrypt(&ciphertext, &nonce).unwrap();
-        
+
         assert_eq!(plaintext, decrypted.as_slice());
     }
-    
+
     #[test]
     fn test_wrong_key_fails() {
         let key1 = [1u8; 32];
         let key2 = [2u8; 32];
-        
+
         let cipher1 = WalletCipher::new(&key1).unwrap();
         let cipher2 = WalletCipher::new(&key2).unwrap();
-        
+
         let plaintext = b"secret";
         let nonce = WalletCipher::generate_nonce();
-        
+
         let ciphertext = cipher1.encrypt(plaintext, &nonce).unwrap();
-        
+
         // Wrong key should fail to decrypt
         assert!(cipher2.decrypt(&ciphertext, &nonce).is_err());
     }
-    
+
     #[test]
     fn test_wrong_nonce_fails() {
         let key = [42u8; 32];
         let cipher = WalletCipher::new(&key).unwrap();
-        
+
         let plaintext = b"secret";
         let nonce1 = [1u8; 12];
         let nonce2 = [2u8; 12];
-        
+
         let ciphertext = cipher.encrypt(plaintext, &nonce1).unwrap();
-        
+
         // Wrong nonce should fail to decrypt (authentication failure)
         assert!(cipher.decrypt(&ciphertext, &nonce2).is_err());
     }
-    
+
     #[test]
     fn test_tampered_ciphertext_fails() {
         let key = [42u8; 32];
         let cipher = WalletCipher::new(&key).unwrap();
-        
+
         let plaintext = b"secret";
         let nonce = WalletCipher::generate_nonce();
-        
+
         let mut ciphertext = cipher.encrypt(plaintext, &nonce).unwrap();
-        
+
         // Tamper with ciphertext
         ciphertext[0] ^= 0xFF;
-        
+
         // Should fail authentication
         assert!(cipher.decrypt(&ciphertext, &nonce).is_err());
     }
@@ -439,15 +446,15 @@ impl PasswordManager {
     pub fn prompt_new_password() -> Result<Zeroizing<String>> {
         loop {
             let password = prompt_password("🔐 Enter new wallet password: ")?;
-            
+
             if password.is_empty() {
                 eprintln!("❌ Password cannot be empty");
                 continue;
             }
-            
+
             let strength = Self::validate_strength(&password);
             println!("{} Password strength: {:?}", strength.emoji(), strength);
-            
+
             if matches!(strength, PasswordStrength::VeryWeak | PasswordStrength::Weak) {
                 eprintln!("⚠️  Warning: Weak password! Minimum 12 characters recommended.");
                 eprint!("Continue anyway? (yes/no): ");
@@ -458,29 +465,29 @@ impl PasswordManager {
                     continue;
                 }
             }
-            
+
             let confirm = prompt_password("🔐 Confirm password: ")?;
-            
+
             if password != confirm {
                 eprintln!("❌ Passwords do not match");
                 continue;
             }
-            
+
             return Ok(Zeroizing::new(password));
         }
     }
-    
+
     /// Prompt user for existing password
     pub fn prompt_password(prompt: &str) -> Result<Zeroizing<String>> {
         let password = prompt_password(prompt)?;
-        
+
         if password.is_empty() {
             anyhow::bail!("Password cannot be empty");
         }
-        
+
         Ok(Zeroizing::new(password))
     }
-    
+
     /// Validate password strength
     pub fn validate_strength(password: &str) -> PasswordStrength {
         let length = password.len();
@@ -488,7 +495,7 @@ impl PasswordManager {
         let has_lowercase = password.chars().any(|c| c.is_lowercase());
         let has_digit = password.chars().any(|c| c.is_numeric());
         let has_special = password.chars().any(|c| !c.is_alphanumeric());
-        
+
         let score =
             (length >= 12) as u8 * 2 +
             (length >= 16) as u8 * 2 +
@@ -496,7 +503,7 @@ impl PasswordManager {
             has_lowercase as u8 +
             has_digit as u8 +
             has_special as u8;
-        
+
         match score {
             0..=3 => PasswordStrength::VeryWeak,
             4..=5 => PasswordStrength::Weak,
@@ -510,29 +517,29 @@ impl PasswordManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_password_strength() {
         assert_eq!(
             PasswordManager::validate_strength("weak"),
             PasswordStrength::VeryWeak
         );
-        
+
         assert_eq!(
             PasswordManager::validate_strength("WeakPassword"),
             PasswordStrength::Weak
         );
-        
+
         assert_eq!(
             PasswordManager::validate_strength("Medium-Pass-123"),
             PasswordStrength::Medium
         );
-        
+
         assert_eq!(
             PasswordManager::validate_strength("Strong-Pass-2025!"),
             PasswordStrength::Strong
         );
-        
+
         assert_eq!(
             PasswordManager::validate_strength("Very-Strong-Passphrase-2025!@#$"),
             PasswordStrength::VeryStrong
@@ -589,16 +596,16 @@ pub struct AesGcmParams {
 pub struct EncryptedWalletFile {
     /// Format version (for future migrations)
     pub version: u8,
-    
+
     /// Encryption algorithm identifier
     pub algorithm: String,
-    
+
     /// Argon2id parameters
     pub kdf_params: Argon2Params,
-    
+
     /// AES-GCM parameters
     pub cipher_params: AesGcmParams,
-    
+
     /// Encrypted wallet data (includes auth tag)
     pub ciphertext: Vec<u8>,
 }
@@ -606,28 +613,28 @@ pub struct EncryptedWalletFile {
 impl EncryptedWalletFile {
     /// Current format version
     pub const VERSION: u8 = 1;
-    
+
     /// Algorithm identifier
     pub const ALGORITHM: &'static str = "argon2id-aes256gcm";
-    
+
     /// Encrypt a wallet file with password
     pub fn encrypt(wallet: &WalletFile, password: &str) -> Result<Self> {
         // 1. Generate random parameters
         let kdf_params = Argon2Params::default();
         let nonce = WalletCipher::generate_nonce();
-        
+
         // 2. Derive encryption key from password
         let key_manager = WalletKeyManager::from_password(password, &kdf_params.salt)?;
         let encryption_key = key_manager.derive_wallet_key();
-        
+
         // 3. Serialize wallet to binary
         let plaintext = bincode::serialize(wallet)
             .map_err(|e| anyhow!("Failed to serialize wallet: {}", e))?;
-        
+
         // 4. Encrypt with AES-256-GCM (includes auth tag)
         let cipher = WalletCipher::new(&encryption_key)?;
         let ciphertext = cipher.encrypt(&plaintext, &nonce)?;
-        
+
         Ok(Self {
             version: Self::VERSION,
             algorithm: Self::ALGORITHM.to_string(),
@@ -636,62 +643,62 @@ impl EncryptedWalletFile {
             ciphertext,
         })
     }
-    
+
     /// Decrypt wallet file with password
     pub fn decrypt(&self, password: &str) -> Result<WalletFile> {
         // 1. Verify version
         if self.version != Self::VERSION {
             anyhow::bail!("Unsupported wallet version: {}", self.version);
         }
-        
+
         if self.algorithm != Self::ALGORITHM {
             anyhow::bail!("Unsupported encryption algorithm: {}", self.algorithm);
         }
-        
+
         // 2. Derive decryption key from password
         let key_manager = WalletKeyManager::from_password(password, &self.kdf_params.salt)?;
         let decryption_key = key_manager.derive_wallet_key();
-        
+
         // 3. Decrypt with AES-256-GCM (verifies auth tag)
         let cipher = WalletCipher::new(&decryption_key)?;
         let plaintext = cipher.decrypt(&self.ciphertext, &self.cipher_params.nonce)
             .map_err(|e| anyhow!("Decryption failed (wrong password?): {}", e))?;
-        
+
         // 4. Deserialize wallet from binary
         let wallet: WalletFile = bincode::deserialize(&plaintext)
             .map_err(|e| anyhow!("Failed to deserialize wallet: {}", e))?;
-        
+
         Ok(wallet)
     }
-    
+
     /// Save encrypted wallet to file
     pub fn save_to_file(&self, path: &std::path::Path) -> Result<()> {
         let json = serde_json::to_string_pretty(self)?;
-        
+
         #[cfg(unix)]
         {
             use std::fs::OpenOptions;
             use std::os::unix::fs::OpenOptionsExt;
             use std::io::Write;
-            
+
             let mut file = OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
                 .mode(0o600)  // Owner read/write only
                 .open(path)?;
-            
+
             file.write_all(json.as_bytes())?;
         }
-        
+
         #[cfg(not(unix))]
         {
             std::fs::write(path, json)?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Load encrypted wallet from file
     pub fn load_from_file(path: &std::path::Path) -> Result<Self> {
         let json = std::fs::read_to_string(path)?;
@@ -704,43 +711,43 @@ impl EncryptedWalletFile {
 mod tests {
     use super::*;
     use crate::state::wallet::secret_key_material::SecretKeyMaterial;
-    
+
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
         let wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
         let password = "test-password-123";
-        
+
         let encrypted = EncryptedWalletFile::encrypt(&wallet, password).unwrap();
         let decrypted = encrypted.decrypt(password).unwrap();
-        
+
         assert_eq!(wallet.secret_key(), decrypted.secret_key());
     }
-    
+
     #[test]
     fn test_wrong_password_fails() {
         let wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
-        
+
         let encrypted = EncryptedWalletFile::encrypt(&wallet, "correct").unwrap();
-        
+
         assert!(encrypted.decrypt("wrong").is_err());
     }
-    
+
     #[test]
     fn test_file_roundtrip() {
         use tempfile::tempdir;
-        
+
         let wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
         let password = "test-password";
-        
+
         let encrypted = EncryptedWalletFile::encrypt(&wallet, password).unwrap();
-        
+
         let temp_dir = tempdir().unwrap();
         let file_path = temp_dir.path().join("wallet.encrypted");
-        
+
         encrypted.save_to_file(&file_path).unwrap();
         let loaded = EncryptedWalletFile::load_from_file(&file_path).unwrap();
         let decrypted = loaded.decrypt(password).unwrap();
-        
+
         assert_eq!(wallet.secret_key(), decrypted.secret_key());
     }
 }
@@ -766,7 +773,7 @@ impl WalletFileContext {
     pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
         let wallet_secret_path = Self::wallet_secret_path(wallet_directory_path);
         let encrypted_wallet_path = wallet_directory_path.join("wallet.encrypted");
-        
+
         let wallet_is_new;
         let wallet_secret = if encrypted_wallet_path.exists() {
             // Load encrypted wallet
@@ -784,70 +791,70 @@ impl WalletFileContext {
             wallet_is_new = true;
             Self::create_new_encrypted_wallet(&encrypted_wallet_path)?
         };
-        
+
         // ... rest of function
     }
-    
+
     fn load_encrypted_wallet(path: &Path) -> Result<WalletFile> {
         let encrypted = EncryptedWalletFile::load_from_file(path)?;
-        
+
         let password = PasswordManager::prompt_password("🔐 Enter wallet password: ")?;
-        
+
         encrypted.decrypt(&password)
             .context("Failed to decrypt wallet (wrong password?)")
     }
-    
+
     fn migrate_plaintext_wallet(old_path: &Path, new_path: &Path) -> Result<WalletFile> {
         // Read plaintext wallet
         let wallet = WalletFile::read_from_file(old_path)?;
-        
+
         println!("⚠️  SECURITY: Your wallet is currently unencrypted!");
         println!("📦 We'll now encrypt it to protect your funds.");
         println!();
-        
+
         // Prompt for new password
         let password = PasswordManager::prompt_new_password()?;
-        
+
         // Encrypt and save
         let encrypted = EncryptedWalletFile::encrypt(&wallet, &password)?;
         encrypted.save_to_file(new_path)?;
-        
+
         // Backup old wallet
         let backup_path = old_path.with_extension("dat.backup");
         std::fs::copy(old_path, &backup_path)?;
         info!("✅ Backup of plaintext wallet saved to: {}", backup_path.display());
-        
+
         // Delete old wallet (secure delete if possible)
         std::fs::remove_file(old_path)?;
         info!("✅ Plaintext wallet deleted");
-        
+
         println!("✅ Wallet encrypted successfully!");
         println!("📁 New location: {}", new_path.display());
         println!("💾 Backup: {}", backup_path.display());
         println!();
         println!("⚠️  IMPORTANT: Write down your password! If you lose it, your funds are GONE.");
-        
+
         Ok(wallet)
     }
-    
+
     fn create_new_encrypted_wallet(path: &Path) -> Result<WalletFile> {
         let wallet = WalletFile::new_random();
-        
+
         println!("🆕 Creating new wallet...");
         println!();
-        
+
         // Prompt for password
         let password = PasswordManager::prompt_new_password()?;
-        
+
         // Encrypt and save
         let encrypted = EncryptedWalletFile::encrypt(&wallet, &password)?;
         encrypted.save_to_file(path)?;
-        
+
         println!("✅ Wallet created and encrypted!");
         println!("📁 Location: {}", path.display());
         println!();
         println!("⚠️  CRITICAL: Back up your seed phrase AND password!");
-        
+
         Ok(wallet)
     }
 }
@@ -862,12 +869,13 @@ impl WalletFileContext {
 **Goal:** Add CLI flags, comprehensive tests
 
 **CLI Changes:** (minimal for fast-track)
+
 ```rust
 // neptune-core-cli/src/main.rs
 #[derive(Parser)]
 pub struct Args {
     // ... existing args
-    
+
     /// Skip wallet password prompt (use env var NEPTUNE_WALLET_PASSWORD)
     /// WARNING: Not recommended for interactive use
     #[arg(long)]
@@ -876,12 +884,14 @@ pub struct Args {
 ```
 
 **Environment Variable Support:**
+
 ```bash
 export NEPTUNE_WALLET_PASSWORD="my-secure-password"
 neptune-core --no-password-prompt
 ```
 
 **Integration Tests:**
+
 ```rust
 // neptune-core/tests/wallet_encryption_test.rs
 #[tokio::test]
@@ -909,11 +919,13 @@ async fn test_wrong_password_fails() {
 **Goal:** User-facing documentation
 
 **Files to Create:**
+
 1. `docs/user-guides/wallet-encryption.md` - User guide
 2. `docs/security/encryption-technical-spec.md` - Technical spec
 3. Update `README.md` - Highlight encryption feature
 
 **Key Topics:**
+
 - How to encrypt existing wallet
 - Password best practices
 - What happens if you lose your password
@@ -929,6 +941,7 @@ async fn test_wrong_password_fails() {
 **Goal:** Internal security review
 
 **Checklist:**
+
 - [ ] Key derivation parameters reviewed
 - [ ] No secrets in logs/debug output
 - [ ] Memory cleanup verified (Zeroizing)
@@ -946,6 +959,7 @@ async fn test_wrong_password_fails() {
 ### Day 11-12: Bug Fixes & Edge Cases
 
 **Focus:**
+
 - Handle disk full errors
 - Handle corrupted encrypted files
 - Handle interrupted migrations
@@ -955,6 +969,7 @@ async fn test_wrong_password_fails() {
 ### Day 13: Performance Testing
 
 **Benchmarks:**
+
 - Key derivation time (target: ~1 second)
 - Encryption time (target: <100ms)
 - Decryption time (target: <100ms)
@@ -963,6 +978,7 @@ async fn test_wrong_password_fails() {
 ### Day 14: Release Preparation
 
 **Tasks:**
+
 - Version bump (v0.4.0 → v0.4.1 or v0.5.0)
 - Changelog update
 - Release notes
@@ -971,6 +987,7 @@ async fn test_wrong_password_fails() {
 ### Day 15: Community Communication
 
 **Deliverables:**
+
 - Security advisory (describe vulnerability + fix)
 - Migration guide
 - FAQ document
@@ -981,6 +998,7 @@ async fn test_wrong_password_fails() {
 ## Implementation Checklist
 
 ### Core Encryption System
+
 - [ ] Day 1: Dependencies + module structure
 - [ ] Day 2: WalletKeyManager (Argon2id)
 - [ ] Day 3: WalletCipher (AES-256-GCM)
@@ -988,6 +1006,7 @@ async fn test_wrong_password_fails() {
 - [ ] Day 5: EncryptedWalletFile format
 
 ### Integration
+
 - [ ] Day 6: Integrate with WalletFile
 - [ ] Day 7: CLI integration
 - [ ] Day 8: Integration tests
@@ -995,6 +1014,7 @@ async fn test_wrong_password_fails() {
 - [ ] Day 10: Security audit
 
 ### Polish
+
 - [ ] Day 11-12: Bug fixes
 - [ ] Day 13: Performance testing
 - [ ] Day 14: Release prep
@@ -1038,23 +1058,27 @@ rpassword = "7.3"
 ## Testing Strategy
 
 ### Unit Tests (Per Module)
+
 - `key_manager_test.rs` - Key derivation tests
 - `cipher_test.rs` - Encryption/decryption tests
 - `password_test.rs` - Password validation tests
 - `format_test.rs` - Serialization tests
 
 ### Integration Tests
+
 - `wallet_encryption_test.rs` - Full encryption lifecycle
 - `migration_test.rs` - Plaintext → encrypted migration
 - `cli_test.rs` - CLI integration
 
 ### Security Tests
+
 - Wrong password rejection
 - Tampered ciphertext detection
 - Memory cleanup verification
 - File permission verification (Unix)
 
 ### Performance Tests
+
 - Key derivation benchmarks
 - Encryption/decryption speed
 - Memory usage
@@ -1100,6 +1124,7 @@ neptune-cli encrypt-wallet --wallet-path ~/.config/neptune/core/main/wallet/wall
 ### Rollback (Emergency)
 
 If migration fails:
+
 1. `wallet.dat.backup` is preserved
 2. User can manually restore: `mv wallet.dat.backup wallet.dat`
 3. Try migration again with bug fix
@@ -1109,21 +1134,25 @@ If migration fails:
 ## Rollout Plan
 
 ### Phase 1: Testing Release (Days 11-12)
+
 - Internal testing
 - Select beta testers (5-10 users)
 - Collect feedback
 
 ### Phase 2: Announcement (Day 13)
+
 - Security advisory published
 - Explain vulnerability + fix
 - Migration guide released
 
 ### Phase 3: Release (Day 14)
+
 - Tag v0.4.1 or v0.5.0
 - Publish binaries
 - Update documentation
 
 ### Phase 4: Support (Day 15+)
+
 - Monitor Discord/GitHub for issues
 - Rapid bug fixes if needed
 - Collect feedback for Phase 2 (data decoupling)
@@ -1133,16 +1162,19 @@ If migration fails:
 ## Success Metrics
 
 ### Security
+
 - ✅ 0 wallets compromised by file-level attacks (post-encryption)
 - ✅ 0 password recovery attacks successful (Argon2 resistance)
 - ✅ 0 authentication bypass (AES-GCM integrity)
 
 ### Adoption
+
 - ✅ >90% of active users migrate within 1 month
 - ✅ 0 users lose funds due to migration bugs
 - ✅ <5% of users report migration issues
 
 ### Performance
+
 - ✅ Key derivation: 0.8-1.2 seconds (target: ~1s)
 - ✅ Encryption: <100ms
 - ✅ Node startup delay: <2s (acceptable for security)
@@ -1152,28 +1184,36 @@ If migration fails:
 ## Risk Mitigation
 
 ### Risk: Password Loss
+
 **Mitigation:**
+
 - Prominent warnings about password importance
 - Suggest password manager usage
 - Backup wallet.dat.backup for emergency recovery
 - Consider future recovery mechanism (Shamir secret sharing)
 
 ### Risk: Migration Bugs
+
 **Mitigation:**
+
 - Extensive testing (unit + integration)
 - Beta testing phase
 - Keep wallet.dat.backup for rollback
 - Clear error messages
 
 ### Risk: Performance Issues
+
 **Mitigation:**
+
 - Benchmark early (Day 13)
 - Tune Argon2 parameters if needed
 - Document expected delay
 - Consider async key derivation for UI responsiveness
 
 ### Risk: Cross-Platform Issues
+
 **Mitigation:**
+
 - Test on Linux, macOS, Windows
 - Document platform-specific behavior
 - Fallback for missing features (e.g., secure delete)
@@ -1192,20 +1232,24 @@ If migration fails:
 **Fixed In:** v0.4.1
 
 ## Vulnerability
+
 Prior to v0.4.1, Neptune Core wallet seeds were stored unencrypted on disk.
 Any malware or user with file read access could steal funds.
 
 ## Fix
+
 v0.4.1 introduces wallet encryption using Argon2id + AES-256-GCM.
 Existing wallets are automatically migrated on startup.
 
 ## Action Required
+
 1. Update to v0.4.1
 2. Start neptune-core (migration happens automatically)
 3. Choose a strong password (12+ characters)
 4. Write down your password (cannot be recovered!)
 
 ## Timeline
+
 - Disclosure: [Date]
 - Patch Released: [Date]
 - Recommended Update By: [Date + 7 days]
@@ -1227,4 +1271,3 @@ Existing wallets are automatically migrated on startup.
 **Priority:** CRITICAL
 
 **Let's fast-track this and protect our users! 🔐**
-

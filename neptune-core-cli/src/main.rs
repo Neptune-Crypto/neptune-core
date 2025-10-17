@@ -476,7 +476,12 @@ async fn main() -> Result<()> {
             // Get wallet object, create various wallet secret files
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
 
-            let wallet_file_context = WalletFileContext::read_from_file_or_create(&wallet_dir)?;
+            // For CLI wallet generation, allow interactive prompts (no CLI password)
+            let wallet_file_context = WalletFileContext::read_from_file_or_create(
+                &wallet_dir,
+                None, // No CLI password for generate-wallet command
+                true, // Allow interactive password prompt
+            )?;
 
             if wallet_file_context.wallet_is_new {
                 println!("New wallet generated.");

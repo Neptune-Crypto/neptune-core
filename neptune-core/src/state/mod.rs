@@ -641,8 +641,16 @@ impl GlobalState {
         // Get wallet object, create various wallet secret files
         let wallet_dir = data_directory.wallet_directory_path();
         DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
-        let wallet_file_context =
-            WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?;
+
+        // Password handling based on CLI flags
+        let cli_password = cli.wallet_password.as_deref();
+        let allow_interactive = !cli.non_interactive_password;
+
+        let wallet_file_context = WalletFileContext::read_from_file_or_create(
+            &data_directory.wallet_directory_path(),
+            cli_password,
+            allow_interactive,
+        )?;
         debug!("Now getting wallet state. This may take a while if the database needs pruning.");
         let wallet_state =
             WalletState::try_new_from_context(&data_directory, wallet_file_context, &cli, &genesis)

@@ -60,20 +60,20 @@ neptune-core/
 
 #### `neptune-core/src/state/wallet/encryption/mod.rs`
 
-```rust
+````rust
 //! Wallet encryption system using Argon2id + AES-256-GCM
 //!
 //! This module provides cryptographic protection for wallet seed files at rest.
-//! 
+//!
 //! ## Security Properties
-//! 
+//!
 //! - **Key Derivation**: Argon2id (memory-hard, side-channel resistant)
 //! - **Encryption**: AES-256-GCM (authenticated encryption)
 //! - **Key Management**: HKDF-SHA256 for sub-key derivation
 //! - **Memory Safety**: Zeroizing for all secret keys
-//! 
+//!
 //! ## Architecture
-//! 
+//!
 //! ```text
 //! User Password (UTF-8)
 //!     ↓ Argon2id (256 MB, 4 iterations)
@@ -83,19 +83,19 @@ neptune-core/
 //!     ↓ AES-256-GCM
 //! Encrypted Wallet File
 //! ```
-//! 
+//!
 //! ## Usage
-//! 
+//!
 //! ```rust
 //! use neptune_cash::state::wallet::encryption::{EncryptedWalletFile, PasswordManager};
 //! use neptune_cash::state::wallet::wallet_file::WalletFile;
-//! 
+//!
 //! // Create new encrypted wallet
 //! let wallet = WalletFile::new_random();
 //! let password = PasswordManager::prompt_new_password()?;
 //! let encrypted = EncryptedWalletFile::encrypt(&wallet, &password)?;
 //! encrypted.save_to_file(path)?;
-//! 
+//!
 //! // Load and decrypt
 //! let encrypted = EncryptedWalletFile::load_from_file(path)?;
 //! let password = PasswordManager::prompt_password("Enter password: ")?;
@@ -116,7 +116,7 @@ mod password;
 
 #[cfg(test)]
 mod tests;
-```
+````
 
 **Location:** `neptune-core/src/state/wallet/encryption/mod.rs`
 **Lines:** ~60
@@ -164,7 +164,7 @@ mod tests;
 
 ```rust
 //! Integration tests for encryption module
-//! 
+//!
 //! Tests the complete encryption workflow end-to-end
 
 #[cfg(test)]
@@ -173,59 +173,59 @@ mod integration_tests {
     use crate::state::wallet::secret_key_material::SecretKeyMaterial;
     use crate::state::wallet::wallet_file::WalletFile;
     use tempfile::tempdir;
-    
+
     #[test]
     fn test_full_encryption_workflow() {
         // Create wallet → Encrypt → Save → Load → Decrypt → Verify
         let original_wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
         let password = "test-password-12345";
-        
+
         // Encrypt
         let encrypted = EncryptedWalletFile::encrypt(&original_wallet, password).unwrap();
-        
+
         // Save to disk
         let temp_dir = tempdir().unwrap();
         let wallet_path = temp_dir.path().join("wallet.encrypted");
         encrypted.save_to_file(&wallet_path).unwrap();
-        
+
         // Load from disk
         let loaded_encrypted = EncryptedWalletFile::load_from_file(&wallet_path).unwrap();
-        
+
         // Decrypt
         let decrypted_wallet = loaded_encrypted.decrypt(password).unwrap();
-        
+
         // Verify
         assert_eq!(
             original_wallet.secret_key(),
             decrypted_wallet.secret_key()
         );
     }
-    
+
     #[test]
     fn test_different_passwords_produce_different_ciphertexts() {
         let wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
-        
+
         let encrypted1 = EncryptedWalletFile::encrypt(&wallet, "password1").unwrap();
         let encrypted2 = EncryptedWalletFile::encrypt(&wallet, "password2").unwrap();
-        
+
         // Different passwords = different salts = different ciphertexts
         assert_ne!(encrypted1.ciphertext, encrypted2.ciphertext);
         assert_ne!(encrypted1.kdf_params.salt, encrypted2.kdf_params.salt);
     }
-    
+
     #[test]
     fn test_file_permissions_unix() {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            
+
             let wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
             let encrypted = EncryptedWalletFile::encrypt(&wallet, "test").unwrap();
-            
+
             let temp_dir = tempdir().unwrap();
             let wallet_path = temp_dir.path().join("wallet.encrypted");
             encrypted.save_to_file(&wallet_path).unwrap();
-            
+
             // Verify permissions are 0600
             let metadata = std::fs::metadata(&wallet_path).unwrap();
             let permissions = metadata.permissions();
@@ -247,7 +247,7 @@ mod integration_tests {
 
 ```rust
 //! End-to-end tests for wallet encryption
-//! 
+//!
 //! Tests the full lifecycle including migration from plaintext
 
 use neptune_cash::state::wallet::encryption::{EncryptedWalletFile, PasswordManager};
@@ -261,19 +261,19 @@ async fn test_encrypted_wallet_lifecycle() {
     let temp_dir = tempdir().unwrap();
     let wallet_dir = temp_dir.path().join("wallet");
     std::fs::create_dir_all(&wallet_dir).unwrap();
-    
+
     // Create encrypted wallet
     let wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
     let password = "test-password-123";
     let encrypted = EncryptedWalletFile::encrypt(&wallet, password).unwrap();
-    
+
     let wallet_path = wallet_dir.join("wallet.encrypted");
     encrypted.save_to_file(&wallet_path).unwrap();
-    
+
     // Load and verify
     let loaded = EncryptedWalletFile::load_from_file(&wallet_path).unwrap();
     let decrypted = loaded.decrypt(password).unwrap();
-    
+
     assert_eq!(wallet.secret_key(), decrypted.secret_key());
 }
 
@@ -282,12 +282,12 @@ async fn test_plaintext_migration() {
     let temp_dir = tempdir().unwrap();
     let wallet_dir = temp_dir.path().join("wallet");
     std::fs::create_dir_all(&wallet_dir).unwrap();
-    
+
     // Create plaintext wallet (old format)
     let wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
     let plaintext_path = wallet_dir.join("wallet.dat");
     wallet.save_to_disk(&plaintext_path).unwrap();
-    
+
     // TODO: Test automatic migration when loading WalletFileContext
     // This will be implemented in Day 6
 }
@@ -296,10 +296,10 @@ async fn test_plaintext_migration() {
 async fn test_wrong_password_fails_gracefully() {
     let wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
     let encrypted = EncryptedWalletFile::encrypt(&wallet, "correct-password").unwrap();
-    
+
     let result = encrypted.decrypt("wrong-password");
     assert!(result.is_err());
-    
+
     let error_message = format!("{}", result.unwrap_err());
     assert!(error_message.contains("wrong password"));
 }
@@ -309,10 +309,10 @@ async fn test_corrupted_ciphertext_fails() {
     let wallet = WalletFile::new(SecretKeyMaterial(rand::random()));
     let password = "test-password";
     let mut encrypted = EncryptedWalletFile::encrypt(&wallet, password).unwrap();
-    
+
     // Corrupt ciphertext
     encrypted.ciphertext[0] ^= 0xFF;
-    
+
     let result = encrypted.decrypt(password);
     assert!(result.is_err());
 }
@@ -331,6 +331,7 @@ async fn test_corrupted_ciphertext_fails() {
 **File:** `neptune-core/Cargo.toml`
 
 **Changes:**
+
 ```toml
 # Add after existing [dependencies] section
 
@@ -352,6 +353,7 @@ rpassword = "7.3"
 **File:** `neptune-core/src/state/wallet/mod.rs`
 
 **Current Structure:**
+
 ```rust
 // Current exports (partial)
 pub mod address;
@@ -365,6 +367,7 @@ pub mod wallet_state;
 ```
 
 **Changes:**
+
 ```rust
 // Add after existing module declarations
 pub mod encryption;  // NEW: Encryption module
@@ -387,6 +390,7 @@ pub use encryption::{
 **File:** `neptune-core/src/state/wallet/wallet_file.rs`
 
 **Current Key Functions:**
+
 - `WalletFileContext::read_from_file_or_create()`
 - `WalletFile::read_from_file()`
 - `WalletFile::save_to_disk()`
@@ -404,6 +408,7 @@ use std::env;
 #### B. Modify `WalletFileContext::read_from_file_or_create()`
 
 **Current (lines 58-129):**
+
 ```rust
 pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
     let wallet_secret_path = Self::wallet_secret_path(wallet_directory_path);
@@ -424,11 +429,12 @@ pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
 ```
 
 **New (replace entire function):**
+
 ```rust
 pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
     let wallet_secret_path = Self::wallet_secret_path(wallet_directory_path);
     let encrypted_wallet_path = wallet_directory_path.join("wallet.encrypted");
-    
+
     let wallet_is_new;
     let wallet_secret = if encrypted_wallet_path.exists() {
         // Load encrypted wallet
@@ -436,13 +442,13 @@ pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
               encrypted_wallet_path.display());
         wallet_is_new = false;
         Self::load_encrypted_wallet(&encrypted_wallet_path)?
-        
+
     } else if wallet_secret_path.exists() {
         // Migrate plaintext wallet to encrypted format
         info!("***** Migrating plaintext wallet to encrypted format *****\n");
         wallet_is_new = false;
         Self::migrate_plaintext_wallet(&wallet_secret_path, &encrypted_wallet_path)?
-        
+
     } else {
         // Create new encrypted wallet
         info!("***** Creating new encrypted wallet in {} *****\n\n\n",
@@ -450,7 +456,7 @@ pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
         wallet_is_new = true;
         Self::create_new_encrypted_wallet(&encrypted_wallet_path)?
     };
-    
+
     // ... rest of function unchanged (randomness files, etc.)
 }
 ```
@@ -463,7 +469,7 @@ pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
 /// Load and decrypt an encrypted wallet file
 fn load_encrypted_wallet(path: &Path) -> Result<WalletFile> {
     let encrypted = EncryptedWalletFile::load_from_file(path)?;
-    
+
     // Check for password in environment variable (for automation)
     let password = if let Ok(env_password) = env::var("NEPTUNE_WALLET_PASSWORD") {
         warn!("⚠️  Using password from NEPTUNE_WALLET_PASSWORD environment variable");
@@ -472,7 +478,7 @@ fn load_encrypted_wallet(path: &Path) -> Result<WalletFile> {
     } else {
         PasswordManager::prompt_password("🔐 Enter wallet password: ")?
     };
-    
+
     encrypted.decrypt(&password)
         .context("Failed to decrypt wallet (wrong password?)")
 }
@@ -481,7 +487,7 @@ fn load_encrypted_wallet(path: &Path) -> Result<WalletFile> {
 fn migrate_plaintext_wallet(old_path: &Path, new_path: &Path) -> Result<WalletFile> {
     // Read plaintext wallet
     let wallet = WalletFile::read_from_file(old_path)?;
-    
+
     info!("╔══════════════════════════════════════════════════════════╗");
     info!("║  ⚠️  SECURITY UPGRADE: WALLET ENCRYPTION               ║");
     info!("╚══════════════════════════════════════════════════════════╝");
@@ -489,23 +495,23 @@ fn migrate_plaintext_wallet(old_path: &Path, new_path: &Path) -> Result<WalletFi
     info!("Your wallet is currently stored UNENCRYPTED on disk.");
     info!("We'll now encrypt it to protect your funds from theft.");
     info!("");
-    
+
     // Prompt for new password
     let password = PasswordManager::prompt_new_password()?;
-    
+
     // Encrypt and save
     let encrypted = EncryptedWalletFile::encrypt(&wallet, &password)?;
     encrypted.save_to_file(new_path)?;
-    
+
     // Backup old wallet
     let backup_path = old_path.with_extension("dat.backup");
     std::fs::copy(old_path, &backup_path)?;
     info!("✅ Backup of plaintext wallet saved to: {}", backup_path.display());
-    
+
     // Delete old wallet
     std::fs::remove_file(old_path)?;
     info!("✅ Plaintext wallet securely deleted");
-    
+
     info!("");
     info!("╔══════════════════════════════════════════════════════════╗");
     info!("║  ✅ WALLET ENCRYPTED SUCCESSFULLY                       ║");
@@ -516,26 +522,26 @@ fn migrate_plaintext_wallet(old_path: &Path, new_path: &Path) -> Result<WalletFi
     info!("⚠️  CRITICAL: WRITE DOWN YOUR PASSWORD!");
     info!("⚠️  If you lose it, your funds are PERMANENTLY LOST.");
     info!("");
-    
+
     Ok(wallet)
 }
 
 /// Create a new encrypted wallet
 fn create_new_encrypted_wallet(path: &Path) -> Result<WalletFile> {
     let wallet = WalletFile::new_random();
-    
+
     info!("╔══════════════════════════════════════════════════════════╗");
     info!("║  🆕 CREATING NEW ENCRYPTED WALLET                      ║");
     info!("╚══════════════════════════════════════════════════════════╝");
     info!("");
-    
+
     // Prompt for password
     let password = PasswordManager::prompt_new_password()?;
-    
+
     // Encrypt and save
     let encrypted = EncryptedWalletFile::encrypt(&wallet, &password)?;
     encrypted.save_to_file(path)?;
-    
+
     info!("");
     info!("╔══════════════════════════════════════════════════════════╗");
     info!("║  ✅ WALLET CREATED AND ENCRYPTED                       ║");
@@ -548,7 +554,7 @@ fn create_new_encrypted_wallet(path: &Path) -> Result<WalletFile> {
     info!("");
     info!("If you lose either, your funds are PERMANENTLY LOST!");
     info!("");
-    
+
     Ok(wallet)
 }
 ```
@@ -556,6 +562,7 @@ fn create_new_encrypted_wallet(path: &Path) -> Result<WalletFile> {
 **Lines Added:** ~150 (3 new helper functions)
 
 **Total Impact on wallet_file.rs:**
+
 - Lines modified: ~40
 - Lines added: ~150
 - New dependencies: `encryption` module
@@ -570,6 +577,7 @@ fn create_new_encrypted_wallet(path: &Path) -> Result<WalletFile> {
 **Changes:** Only if `WalletFile` loading errors need better context
 
 **Likely changes:**
+
 ```rust
 // In try_new_from_context() around line 290
 let wallet_file_context =
@@ -622,6 +630,7 @@ Continue normal startup...
 ```
 
 **Key Integration Points:**
+
 1. **Load existing encrypted wallet** - Password prompt on startup
 2. **Migrate plaintext wallet** - One-time migration with password setup
 3. **Create new encrypted wallet** - Password setup for new users
@@ -795,6 +804,7 @@ Node running! 🚀
 ```
 
 **Time Breakdown:**
+
 - Steps 1-6: ~10ms (file I/O)
 - Steps 7-9: ~100ms (user input) or instant (env var)
 - **Step 12: ~1 second (Argon2id - intentionally slow for security)**
@@ -854,6 +864,7 @@ Continue normal startup...
 ```
 
 **Time Breakdown:**
+
 - Steps 1-12: ~100ms
 - Steps 13-16: ~5 seconds (user interaction)
 - **Step 18: ~1 second (Argon2id)**
@@ -1016,4 +1027,3 @@ neptune-core/tests/
 
 **Status:** ✅ Ready for Day 1 implementation
 **Next Step:** Begin Day 1 - Add dependencies + create module skeleton
-

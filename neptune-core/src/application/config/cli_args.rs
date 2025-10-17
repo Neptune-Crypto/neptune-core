@@ -516,6 +516,41 @@ pub struct Args {
     /// Example: `neptune-core --scan-keys 42`
     #[clap(long)]
     pub(crate) scan_keys: Option<usize>,
+
+    /// Password for encrypted wallet (INSECURE - use only for testing/automation).
+    ///
+    /// ⚠️  WARNING: Passing passwords via command line is INSECURE because:
+    ///  - The password will be visible in process lists (`ps aux`)
+    ///  - It may be logged in shell history files
+    ///  - It's visible to other users on the system
+    ///
+    /// For production use, prefer:
+    ///  1. Interactive password prompt (default, most secure)
+    ///  2. Environment variable: `NEPTUNE_WALLET_PASSWORD` (better than CLI)
+    ///  3. This CLI flag (least secure, only for testing)
+    ///
+    /// If neither this flag nor the environment variable is set, you will be
+    /// prompted to enter the password interactively when the wallet is loaded.
+    ///
+    /// Example: `neptune-core --wallet-password "MySecurePassword123!"`
+    #[clap(long)]
+    pub wallet_password: Option<String>,
+
+    /// Skip interactive password prompt and fail if password is not available.
+    ///
+    /// When this flag is set:
+    ///  - The node will NOT prompt for a password interactively
+    ///  - Password must be provided via `--wallet-password` or `NEPTUNE_WALLET_PASSWORD`
+    ///  - If no password is available, node startup will fail
+    ///
+    /// This is useful for:
+    ///  - Automated/headless deployments
+    ///  - CI/CD pipelines
+    ///  - System services that cannot handle interactive prompts
+    ///
+    /// Example: `NEPTUNE_WALLET_PASSWORD="secret" neptune-core --non-interactive-password`
+    #[clap(long)]
+    pub non_interactive_password: bool,
 }
 
 impl Default for Args {

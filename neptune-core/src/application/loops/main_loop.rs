@@ -2211,6 +2211,7 @@ mod tests {
             miner_to_main_rx,
             rpc_server_to_main_rx,
             task_join_handles,
+            None, // p2p_integration for tests
         );
         TestSetup {
             main_loop_handler,

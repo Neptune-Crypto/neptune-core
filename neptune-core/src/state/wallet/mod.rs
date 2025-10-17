@@ -1,6 +1,7 @@
 pub mod address;
 pub mod change_policy;
 pub mod coin_with_possible_timelock;
+pub mod encryption; // Phase 1: Wallet encryption module
 pub(crate) mod expected_utxo;
 pub(crate) mod incoming_utxo;
 pub(crate) mod migrate_db;
@@ -19,6 +20,9 @@ pub mod wallet_entropy;
 pub mod wallet_file;
 pub(crate) mod wallet_state;
 pub mod wallet_status;
+
+// Re-export commonly used encryption types
+pub use encryption::{EncryptedWalletFile, PasswordManager, PasswordStrength};
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
