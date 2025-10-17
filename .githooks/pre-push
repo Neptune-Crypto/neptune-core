@@ -75,26 +75,46 @@ if [ "$CURRENT_BRANCH" = "master" ] || [ "$CURRENT_BRANCH" = "main" ]; then
 fi
 
 # =============================================================================
-# 2. FULL BUILD CHECK
+# 2. FULL BUILD CHECK (only on master/main/develop)
 # =============================================================================
-print_section "2. Full Build Check (Release)"
-
-echo "Building release binaries..."
-if cargo build --release --workspace > /dev/null 2>&1; then
-    print_success "Release build successful"
+if [ "$CURRENT_BRANCH" = "master" ] || [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "develop" ]; then
+    print_section "2. Full Build Check (Release)"
+    
+    echo "Building release binaries..."
+    if cargo build --release --workspace > /dev/null 2>&1; then
+        print_success "Release build successful"
+    else
+        print_error "Release build failed"
+        echo -e "${YELLOW}Run: cargo build --release --workspace${NC}"
+        exit 1
+    fi
 else
-    print_error "Release build failed"
-    echo -e "${YELLOW}Run: cargo build --release --workspace${NC}"
-    exit 1
+    print_section "2. Quick Build Check (Debug)"
+    
+    echo "Running quick debug build..."
+    if cargo check --workspace > /dev/null 2>&1; then
+        print_success "Debug build successful"
+    else
+        print_error "Build check failed"
+        echo -e "${YELLOW}Run: cargo check --workspace${NC}"
+        exit 1
+    fi
 fi
 
 # =============================================================================
-# 3. COMPREHENSIVE TEST SUITE
+# 3. TEST SUITE (quick tests on feature branches, full on main branches)
 # =============================================================================
-print_section "3. Comprehensive Test Suite"
-
-echo "Running full test suite (this may take a while)..."
-TEST_OUTPUT=$(cargo test --workspace --lib --bins --tests 2>&1 || true)
+if [ "$CURRENT_BRANCH" = "master" ] || [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "develop" ]; then
+    print_section "3. Comprehensive Test Suite"
+    
+    echo "Running full test suite (this may take a while)..."
+    TEST_OUTPUT=$(cargo test --workspace --lib --bins --tests 2>&1 || true)
+else
+    print_section "3. Quick Test Suite"
+    
+    echo "Running quick tests..."
+    TEST_OUTPUT=$(cargo test --workspace --lib 2>&1 || true)
+fi
 
 if echo "$TEST_OUTPUT" | grep -q "test result: FAILED"; then
     print_error "Tests failed"
