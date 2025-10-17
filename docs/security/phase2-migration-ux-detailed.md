@@ -5,6 +5,7 @@
 **The Challenge:** Legacy users have their data at `~/.config/neptune/core/main/`. We want to decouple wallet/blockchain data without breaking their setup or forcing disruptive changes.
 
 **The Solution:** Multi-tier migration strategy with three options:
+
 1. **In-place decoupling** (safest, no data move)
 2. **Full migration** (recommended, separates directories)
 3. **Legacy mode** (no changes, backward compatible)
@@ -27,21 +28,22 @@
 
 ### Quick Comparison Table
 
-| Feature | In-Place Decoupling | Full Migration | Legacy Mode |
-|---------|---------------------|----------------|-------------|
-| **Data Location** | Same dir, logical separation | Physically separated dirs | Unchanged |
-| **Backup Required** | No (reads only) | Yes (moves data) | No |
-| **Disk Space** | 0 extra (no copy) | 0 extra (moves, not copies) | 0 extra |
-| **Time Required** | < 1 second | 5-30 minutes (large blockchain) | Instant |
-| **Risk Level** | ⭐ Very Low | ⭐⭐ Low (with backup) | ⭐ Very Low |
-| **Benefits** | Logical separation, easy rollback | Physical separation, full XDG compliance | No changes |
-| **Wallet-Only Backup** | ✅ Yes (via directory list) | ✅ Yes (via separate path) | ❌ No |
-| **Rollback** | Instant (just restart) | Via backup restore | N/A |
-| **Recommended For** | 95% of users | Power users, fresh machines | Users with custom scripts |
+| Feature                | In-Place Decoupling               | Full Migration                           | Legacy Mode               |
+| ---------------------- | --------------------------------- | ---------------------------------------- | ------------------------- |
+| **Data Location**      | Same dir, logical separation      | Physically separated dirs                | Unchanged                 |
+| **Backup Required**    | No (reads only)                   | Yes (moves data)                         | No                        |
+| **Disk Space**         | 0 extra (no copy)                 | 0 extra (moves, not copies)              | 0 extra                   |
+| **Time Required**      | < 1 second                        | 5-30 minutes (large blockchain)          | Instant                   |
+| **Risk Level**         | ⭐ Very Low                       | ⭐⭐ Low (with backup)                   | ⭐ Very Low               |
+| **Benefits**           | Logical separation, easy rollback | Physical separation, full XDG compliance | No changes                |
+| **Wallet-Only Backup** | ✅ Yes (via directory list)       | ✅ Yes (via separate path)               | ❌ No                     |
+| **Rollback**           | Instant (just restart)            | Via backup restore                       | N/A                       |
+| **Recommended For**    | 95% of users                      | Power users, fresh machines              | Users with custom scripts |
 
 ### Visual Representation
 
 **Before (Legacy):**
+
 ```
 ~/.config/neptune/core/main/
 ├── wallet/
@@ -52,6 +54,7 @@
 ```
 
 **After In-Place Decoupling:**
+
 ```
 ~/.config/neptune/core/main/          # Same location!
 ├── wallet/                             # Wallet root (logical)
@@ -73,6 +76,7 @@
 ```
 
 **After Full Migration:**
+
 ```
 ~/.config/neptune/wallet/main/
 ├── files/
@@ -110,23 +114,26 @@ Creates a **logical separation** within the existing directory using symlinks an
 ### How It Works
 
 1. **Create logical roots:**
+
    ```bash
    mkdir -p ~/.config/neptune/core/main/wallet/
    mkdir -p ~/.config/neptune/core/main/blockchain/
    ```
 
 2. **Create symlinks to existing data:**
+
    ```bash
    # Wallet symlinks
    ln -s ../../wallet_files ~/.config/neptune/core/main/wallet/files
    ln -s ../../database/wallet ~/.config/neptune/core/main/wallet/database
-   
+
    # Blockchain symlinks
    ln -s ../database ~/.config/neptune/core/main/blockchain/database
    ln -s ../blocks ~/.config/neptune/core/main/blockchain/blocks
    ```
 
 3. **Rename original wallet dir to avoid confusion:**
+
    ```bash
    mv ~/.config/neptune/core/main/wallet ~/.config/neptune/core/main/wallet_files
    ```
@@ -161,19 +168,19 @@ pub struct DataDirectory {
     wallet_root: PathBuf,      // .../core/main/wallet/
     blockchain_root: PathBuf,  // .../core/main/blockchain/
     node_root: PathBuf,        // .../core/main/
-    
+
     layout_mode: LayoutMode,
 }
 
 pub enum LayoutMode {
     /// Legacy: Single root, no separation
     Legacy,
-    
+
     /// In-place: Logical separation with symlinks in same dir
     InPlaceDecoupled {
         base_root: PathBuf,  // Original .../core/main/ location
     },
-    
+
     /// Separated: Physical separation across different dirs
     FullySeparated,
 }
@@ -223,6 +230,7 @@ Physically moves data to XDG-compliant separated directories.
 **Same as documented in main plan**, but with these additions:
 
 1. **Pre-flight checks:**
+
    ```
    ✓ Checking available disk space...
    ✓ Verifying source data integrity...
@@ -230,6 +238,7 @@ Physically moves data to XDG-compliant separated directories.
    ```
 
 2. **Backup creation:**
+
    ```
    📦 Creating safety backup...
    Backup location: ~/.config/neptune/core/main.backup-20251017/
@@ -239,16 +248,18 @@ Physically moves data to XDG-compliant separated directories.
    ```
 
 3. **Migration with progress:**
+
    ```
    🔐 Moving wallet data...
    [====================================] 100% (52.3 MB)
-   
+
    ⛓️  Moving blockchain data...
    [====================================] 45% (92.1 GB / 205.3 GB)
    Estimated time remaining: 8 minutes
    ```
 
 4. **Verification:**
+
    ```
    ✓ Wallet files accessible
    ✓ Wallet DB opens successfully
@@ -258,16 +269,17 @@ Physically moves data to XDG-compliant separated directories.
    ```
 
 5. **Cleanup option:**
+
    ```
    Migration complete! 🎉
-   
+
    Backup location: ~/.config/neptune/core/main.backup-20251017/
-   
+
    Options:
    1. Keep backup (recommended for 7 days)
    2. Delete backup (frees 205 GB)
    3. Delete old directory after backup (frees 205 GB, keep backup)
-   
+
    Choice [1]: _
    ```
 
@@ -309,6 +321,7 @@ Continue using the old monolithic structure with zero changes.
 ### How to Enable
 
 **Explicitly:**
+
 ```bash
 neptune-core --data-dir ~/.config/neptune/core/main/
 ```
@@ -353,14 +366,14 @@ Recommended options:
      • Zero risk
      • Enables wallet-only backups
      • Easy rollback
-     
+
   2. Full migration (for power users)
      • Separates directories physically
      • Wallet: ~/.config/neptune/wallet/main/
      • Blockchain: ~/.local/share/neptune/blockchain/main/
      • Takes 5-30 minutes
      • Requires backup
-     
+
   3. Keep legacy layout
      • No changes
      • Works with existing scripts
@@ -455,7 +468,7 @@ pub struct DataDirectory {
     wallet_root: PathBuf,
     blockchain_root: PathBuf,
     node_root: PathBuf,
-    
+
     layout_mode: LayoutMode,
 }
 
@@ -465,12 +478,12 @@ pub enum LayoutMode {
     Legacy {
         root: PathBuf,
     },
-    
+
     /// In-place: Logical separation with symlinks (v0.5+ default for migrations)
     InPlaceDecoupled {
         root: PathBuf,  // Base directory (e.g., ~/.config/neptune/core/main/)
     },
-    
+
     /// Separated: Physical separation across different dirs (v0.5+ fresh installs)
     FullySeparated,
 }
@@ -488,20 +501,20 @@ impl DataDirectory {
         if wallet_dir.is_some() || blockchain_dir.is_some() {
             return Self::get_separated(wallet_dir, blockchain_dir, network);
         }
-        
+
         if let Some(root) = root_dir {
             return Self::get_legacy(root, network);
         }
-        
+
         // Priority 2: Auto-detect existing structure
         let default_legacy_root = Self::default_legacy_root(network);
-        
+
         if Self::has_old_structure(&default_legacy_root) {
             // Old structure detected - offer migration
             if allow_interactive {
                 // Show interactive prompt
                 let choice = Self::prompt_migration_choice().await?;
-                
+
                 match choice {
                     MigrationChoice::InPlaceDecouple => {
                         Self::perform_in_place_decoupling(&default_legacy_root, network).await?;
@@ -527,7 +540,7 @@ impl DataDirectory {
             Self::get_separated(None, None, network)
         }
     }
-    
+
     /// Get in-place decoupled layout
     fn get_in_place_decoupled(root: PathBuf, network: Network) -> Result<Self> {
         Ok(DataDirectory {
@@ -537,22 +550,22 @@ impl DataDirectory {
             layout_mode: LayoutMode::InPlaceDecoupled { root },
         })
     }
-    
+
     /// Perform in-place decoupling (instant, no data movement)
     async fn perform_in_place_decoupling(root: &Path, network: Network) -> Result<()> {
         info!("✨ Creating in-place decoupled layout...");
-        
+
         // 1. Rename original wallet dir to avoid confusion
         let old_wallet = root.join("wallet");
         let wallet_files = root.join("wallet_files");
         if old_wallet.exists() {
             tokio::fs::rename(&old_wallet, &wallet_files).await?;
         }
-        
+
         // 2. Create logical structure directories
         tokio::fs::create_dir_all(root.join("wallet")).await?;
         tokio::fs::create_dir_all(root.join("blockchain")).await?;
-        
+
         // 3. Create symlinks for wallet
         #[cfg(unix)]
         {
@@ -565,7 +578,7 @@ impl DataDirectory {
                 root.join("wallet/database"),
             )?;
         }
-        
+
         // 4. Create symlinks for blockchain
         #[cfg(unix)]
         {
@@ -578,7 +591,7 @@ impl DataDirectory {
                 root.join("blockchain/blocks"),
             )?;
         }
-        
+
         // 5. Create metadata file
         let metadata = LayoutMetadata {
             version: 2,
@@ -587,37 +600,37 @@ impl DataDirectory {
             blockchain_root: "blockchain/".to_string(),
             created_at: chrono::Utc::now(),
         };
-        
+
         let metadata_json = serde_json::to_string_pretty(&metadata)?;
         tokio::fs::write(root.join(".layout_v2.json"), metadata_json).await?;
-        
+
         info!("✓ In-place decoupling complete!");
         info!("✓ Wallet root: {}", root.join("wallet").display());
         info!("✓ Blockchain root: {}", root.join("blockchain").display());
-        
+
         Ok(())
     }
-    
+
     /// Interactive migration prompt
     async fn prompt_migration_choice() -> Result<MigrationChoice> {
         use dialoguer::{Select, theme::ColorfulTheme};
-        
+
         println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         println!("🔔 DATA LAYOUT UPGRADE AVAILABLE");
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        
+
         let choices = vec![
             "In-place decoupling (RECOMMENDED) - Instant, no data movement",
             "Full migration - Physically separate wallet/blockchain directories",
             "Keep legacy layout - No changes",
         ];
-        
+
         let selection = Select::with_theme(&ColorfulTheme::default())
             .with_prompt("Choose upgrade option")
             .items(&choices)
             .default(0)
             .interact()?;
-        
+
         Ok(match selection {
             0 => MigrationChoice::InPlaceDecouple,
             1 => MigrationChoice::FullMigration,
@@ -659,23 +672,23 @@ use flate2::write::GzEncoder;
 
 pub async fn backup_wallet(data_dir: &Path, output_path: Option<&Path>) -> Result<()> {
     let layout = detect_layout(data_dir)?;
-    
+
     let backup_name = format!(
         "neptune-wallet-backup-{}.tar.gz",
         chrono::Utc::now().format("%Y%m%d-%H%M%S")
     );
-    
+
     let output = output_path
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::env::current_dir().unwrap().join(&backup_name));
-    
+
     info!("📦 Creating wallet backup...");
     info!("Output: {}", output.display());
-    
+
     let file = std::fs::File::create(&output)?;
     let encoder = GzEncoder::new(file, Compression::default());
     let mut tar = Builder::new(encoder);
-    
+
     match layout {
         LayoutMode::InPlaceDecoupled { root } => {
             // Backup wallet files
@@ -698,13 +711,13 @@ pub async fn backup_wallet(data_dir: &Path, output_path: Option<&Path>) -> Resul
             }
         }
     }
-    
+
     tar.finish()?;
-    
+
     let size = tokio::fs::metadata(&output).await?.len();
     info!("✓ Backup complete: {} ({} MB)", output.display(), size / 1_000_000);
     info!("💡 Store this backup securely - it contains your wallet secrets!");
-    
+
     Ok(())
 }
 ```
@@ -718,6 +731,7 @@ pub async fn backup_wallet(data_dir: &Path, output_path: Option<&Path>) -> Resul
 **Problem:** Symlinks broken, node won't start
 
 **Recovery:**
+
 ```bash
 # Quick fix: Just use legacy mode
 neptune-core --data-dir ~/.config/neptune/core/main/
@@ -734,6 +748,7 @@ rm ~/.config/neptune/core/main/.layout_v2.json
 **Problem:** Power loss during migration
 
 **Recovery:**
+
 ```bash
 # Restore from auto-created backup
 rm -rf ~/.config/neptune/wallet/main/
@@ -747,6 +762,7 @@ mv ~/.config/neptune/core/main.backup-20251017/ \
 **Problem:** Need to restore wallet from backup
 
 **Recovery:**
+
 ```bash
 # Extract backup
 tar -xzf neptune-wallet-backup-20251017.tar.gz -C /tmp/
@@ -766,18 +782,21 @@ systemctl start neptune-core
 ## 8. Success Metrics
 
 **In-Place Decoupling:**
+
 - ✅ Completes in < 1 second
 - ✅ Zero data loss reports
 - ✅ 100% rollback success rate
 - ✅ Wallet backup script works
 
 **Full Migration:**
+
 - ✅ < 0.1% data loss (all from user error, not migration bugs)
 - ✅ > 95% completion rate (not abandoned mid-migration)
 - ✅ < 30 minutes for 200 GB blockchain
 - ✅ Automatic backup created every time
 
 **User Satisfaction:**
+
 - ✅ > 80% choose in-place decoupling (validates default choice)
 - ✅ < 5% choose legacy mode (shows upgrade value)
 - ✅ < 1% support requests related to migration
@@ -811,4 +830,3 @@ systemctl start neptune-core
 **Status:** Ready for Implementation
 **Depends On:** Phase 2 Main Plan
 **Author:** Sea of Freedom Development Team
-
