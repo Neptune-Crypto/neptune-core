@@ -117,7 +117,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     info!("Starting neptune-core node on {}.", cli_args.network);
 
     // Get data directory (wallet, block database), create one if none exists
-    let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)?;
+    let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network).await?;
     DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path()).await?;
     info!("Data directory is {}", data_directory);
 

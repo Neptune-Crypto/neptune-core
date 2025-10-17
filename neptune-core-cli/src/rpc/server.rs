@@ -25,7 +25,8 @@ pub async fn start(config: crate::rpc::RpcConfig) -> Result<()> {
     let data_directory = neptune_cash::application::config::data_directory::DataDirectory::get(
         None, // Use default data directory since config.data_dir is already the full path
         neptune_cash::application::config::network::Network::Main,
-    )?;
+    )
+    .await?;
 
     // Load cookie using exact same pattern as main.rs
     let token: neptune_cash::application::rpc::auth::Token =

@@ -92,7 +92,7 @@ impl WalletFileContext {
         // Phase 1 logic (unchanged):
         let encrypted_path = Self::wallet_encrypted_path(wallet_directory_path);
         let plaintext_path = Self::wallet_secret_path(wallet_directory_path);
-        
+
         // Priority 1: Load encrypted wallet
         if encrypted_path.exists() {
             let wallet = Self::load_encrypted_wallet(
@@ -102,7 +102,7 @@ impl WalletFileContext {
             )?;
             return Ok(wallet);
         }
-        
+
         // Priority 2: Migrate plaintext wallet
         if plaintext_path.exists() {
             let wallet = Self::migrate_plaintext_wallet_to_encrypted(
@@ -114,7 +114,7 @@ impl WalletFileContext {
             )?;
             return Ok(wallet);
         }
-        
+
         // Priority 3: Create new encrypted wallet
         let wallet = Self::create_new_encrypted_wallet(
             wallet_directory_path,
@@ -142,16 +142,16 @@ impl GlobalState {
         //                               ^^^^^^^^^^^^^^^^^^^
         // OLD: ~/.config/neptune/core/main/wallet/
         // NEW: ~/.neptune/main/wallet/
-        
+
         DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
-        
+
         // Phase 1: Load encrypted wallet (UNCHANGED)
         let wallet_file_context = WalletFileContext::read_from_file_or_create(
             &wallet_dir,           // ← Just pass new path
             cli.wallet_password.as_deref(),
             !cli.non_interactive_password,
         )?;
-        
+
         // Rest unchanged...
     }
 }
@@ -199,6 +199,7 @@ User has plaintext wallet at:
 ```
 
 **Result:** User gets both migrations in one go:
+
 - Phase 2: Files moved to new location
 - Phase 1: Plaintext encrypted
 
@@ -275,6 +276,7 @@ neptune-cli backup-wallet
 ```
 
 **Phase 1 encryption ensures the backup is secure:**
+
 - `wallet.encrypted` is encrypted with your password
 - Even if backup is stolen, attacker needs password to decrypt
 - Argon2id makes brute-force attacks extremely expensive
@@ -285,24 +287,24 @@ neptune-cli backup-wallet
 
 ### Phase 1 Alone (v0.4.x)
 
-| Threat | Protection |
-|--------|------------|
-| Malware reads wallet.dat | ✅ Protected (encrypted) |
-| Cloud backup uploads wallet | ✅ Protected (encrypted) |
-| Disk forensics | ✅ Protected (encrypted) |
-| Root/Admin access | ✅ Protected (needs password) |
-| **Accidental blockchain corruption** | ❌ Could affect wallet |
-| **Wallet backup without blockchain** | ❌ Must backup 205 GB |
+| Threat                               | Protection                    |
+| ------------------------------------ | ----------------------------- |
+| Malware reads wallet.dat             | ✅ Protected (encrypted)      |
+| Cloud backup uploads wallet          | ✅ Protected (encrypted)      |
+| Disk forensics                       | ✅ Protected (encrypted)      |
+| Root/Admin access                    | ✅ Protected (needs password) |
+| **Accidental blockchain corruption** | ❌ Could affect wallet        |
+| **Wallet backup without blockchain** | ❌ Must backup 205 GB         |
 
 ### Phase 1 + Phase 2 (v0.5.0)
 
-| Threat | Protection |
-|--------|------------|
-| Malware reads wallet.encrypted | ✅ Protected (encrypted) |
-| Cloud backup uploads wallet | ✅ Protected (encrypted) |
-| Disk forensics | ✅ Protected (encrypted) |
-| Root/Admin access | ✅ Protected (needs password) |
-| **Accidental blockchain corruption** | ✅ **Wallet isolated** |
+| Threat                               | Protection                        |
+| ------------------------------------ | --------------------------------- |
+| Malware reads wallet.encrypted       | ✅ Protected (encrypted)          |
+| Cloud backup uploads wallet          | ✅ Protected (encrypted)          |
+| Disk forensics                       | ✅ Protected (encrypted)          |
+| Root/Admin access                    | ✅ Protected (needs password)     |
+| **Accidental blockchain corruption** | ✅ **Wallet isolated**            |
 | **Wallet backup without blockchain** | ✅ **Just backup wallet/ folder** |
 
 ---
@@ -316,17 +318,17 @@ neptune-cli backup-wallet
 async fn test_phase1_phase2_fresh_install() {
     // Test: Fresh install uses new layout + encryption
     let data_dir = DataDirectory::get(None, Network::Main, false).await.unwrap();
-    
+
     // Phase 2: Should use new location
     assert_eq!(data_dir.wallet_root(), home_dir().join(".neptune/main/wallet"));
-    
+
     // Phase 1: Should create encrypted wallet
     let wallet_ctx = WalletFileContext::read_from_file_or_create(
         &data_dir.wallet_directory_path(),
         Some("testpassword"),
         false,
     ).unwrap();
-    
+
     // Verify encrypted file exists at new location
     assert!(data_dir.wallet_directory_path().join("wallet.encrypted").exists());
 }
@@ -334,27 +336,27 @@ async fn test_phase1_phase2_fresh_install() {
 #[tokio::test]
 async fn test_phase1_phase2_migration_from_plaintext() {
     // Test: Migrate from old plaintext to new encrypted location
-    
+
     // Setup: Create old structure with plaintext wallet
     let old_dir = create_old_structure_with_plaintext_wallet();
-    
+
     // Phase 2: Migrate
     let data_dir = DataDirectory::get(None, Network::Main, true).await.unwrap();
-    
+
     // Phase 1: Should encrypt during load
     let wallet_ctx = WalletFileContext::read_from_file_or_create(
         &data_dir.wallet_directory_path(),
         Some("testpassword"),
         false,
     ).unwrap();
-    
+
     // Verify:
     // 1. Old location backed up
     assert!(old_dir.with_extension("backup").exists());
-    
+
     // 2. New location has encrypted wallet
     assert!(data_dir.wallet_directory_path().join("wallet.encrypted").exists());
-    
+
     // 3. Old plaintext wallet deleted
     assert!(!data_dir.wallet_directory_path().join("wallet.dat").exists());
 }
@@ -362,27 +364,27 @@ async fn test_phase1_phase2_migration_from_plaintext() {
 #[tokio::test]
 async fn test_phase1_phase2_migration_from_encrypted() {
     // Test: Migrate from old encrypted location to new location
-    
+
     // Setup: Create old structure with encrypted wallet
     let old_dir = create_old_structure_with_encrypted_wallet("password123");
-    
+
     // Phase 2: Migrate
     let data_dir = DataDirectory::get(None, Network::Main, true).await.unwrap();
-    
+
     // Phase 1: Should just load encrypted wallet
     let wallet_ctx = WalletFileContext::read_from_file_or_create(
         &data_dir.wallet_directory_path(),
         Some("password123"),
         false,
     ).unwrap();
-    
+
     // Verify:
     // 1. Old location backed up
     assert!(old_dir.with_extension("backup").exists());
-    
+
     // 2. New location has same encrypted wallet
     assert!(data_dir.wallet_directory_path().join("wallet.encrypted").exists());
-    
+
     // 3. Wallet seed unchanged (verify by comparing balances)
     assert_eq!(wallet_ctx.wallet_file.secret_seed(), expected_seed);
 }
@@ -413,6 +415,7 @@ Confirm password: ********
 ```
 
 **What happened:**
+
 1. Phase 2: Created new directory structure at `~/.neptune/main/`
 2. Phase 1: Encrypted wallet with user password
 3. Result: Secure wallet at organized location
@@ -455,6 +458,7 @@ Confirm password: ********
 ```
 
 **What happened:**
+
 1. Phase 2: Moved files to new location
 2. Phase 1: Detected plaintext, encrypted it
 3. Result: Encrypted wallet at new organized location
@@ -488,6 +492,7 @@ Enter wallet password: ********
 ```
 
 **What happened:**
+
 1. Phase 2: Moved files to new location
 2. Phase 1: Detected encrypted wallet, asked for password
 3. Result: Encrypted wallet still encrypted, just moved
@@ -499,32 +504,38 @@ Enter wallet password: ********
 ### For Users
 
 ✅ **Phase 1 + Phase 2 work seamlessly together**
+
 - If you have encryption → it stays encrypted after migration
 - If you don't have encryption → you get it during migration
 - Your password works the same regardless of location
 
 ✅ **No double migration needed**
+
 - One upgrade handles both improvements
 - Clear prompts explain what's happening
 - Safe with automatic backups
 
 ✅ **Better security from both phases**
+
 - Phase 1: Encrypted wallet seed (password-protected)
 - Phase 2: Isolated wallet directory (easier to secure)
 
 ### For Developers
 
 ✅ **Zero conflicts between phases**
+
 - Phase 1 encryption is location-agnostic
 - Phase 2 just changes paths, not logic
 - Both features compose perfectly
 
 ✅ **Minimal code changes**
+
 - Phase 1 code: 0 changes needed
 - Phase 2 code: Only DataDirectory refactor
 - Integration: Just pass new paths
 
 ✅ **Easy to test**
+
 - Unit tests for each phase independently
 - Integration tests for combined scenarios
 - Clear separation of concerns
@@ -533,16 +544,16 @@ Enter wallet password: ********
 
 ## 10. Summary Matrix
 
-| Aspect | Phase 1 (Encryption) | Phase 2 (Decoupling) | Combined |
-|--------|---------------------|----------------------|----------|
-| **File Location** | Any | `~/.neptune/main/` | ✅ Compatible |
-| **Wallet Security** | Password-encrypted | Directory isolation | ✅ Enhanced |
-| **Migration** | Plaintext → Encrypted | Old → New location | ✅ Single flow |
-| **Backup** | Encrypted file | Wallet-only backup | ✅ Secure + Small |
-| **Code Complexity** | Encryption module | DataDirectory | ✅ Separate concerns |
-| **User Experience** | Password prompts | Directory migration | ✅ Clear + Simple |
-| **Testing** | Encryption tests | Migration tests | ✅ Independent |
-| **Rollback** | Not needed | Restore .backup | ✅ Safe |
+| Aspect              | Phase 1 (Encryption)  | Phase 2 (Decoupling) | Combined             |
+| ------------------- | --------------------- | -------------------- | -------------------- |
+| **File Location**   | Any                   | `~/.neptune/main/`   | ✅ Compatible        |
+| **Wallet Security** | Password-encrypted    | Directory isolation  | ✅ Enhanced          |
+| **Migration**       | Plaintext → Encrypted | Old → New location   | ✅ Single flow       |
+| **Backup**          | Encrypted file        | Wallet-only backup   | ✅ Secure + Small    |
+| **Code Complexity** | Encryption module     | DataDirectory        | ✅ Separate concerns |
+| **User Experience** | Password prompts      | Directory migration  | ✅ Clear + Simple    |
+| **Testing**         | Encryption tests      | Migration tests      | ✅ Independent       |
+| **Rollback**        | Not needed            | Restore .backup      | ✅ Safe              |
 
 ---
 
@@ -573,4 +584,3 @@ Enter wallet password: ********
 **Status:** Integration Design Complete
 **Compatibility:** Phase 1 (v0.4.0) ✅ + Phase 2 (v0.5.0) ✅
 **Author:** Sea of Freedom Development Team
-

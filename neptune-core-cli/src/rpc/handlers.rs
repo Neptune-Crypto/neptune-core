@@ -119,7 +119,7 @@ async fn get_cookie_hint(
     // If data_dir is provided, use it directly
     if let Some(data_dir) = data_dir {
         let network = client.network(context::current()).await??;
-        let data_directory = DataDirectory::get(Some(data_dir), network)?;
+        let data_directory = DataDirectory::get(Some(data_dir), network).await?;
         return Ok(auth::CookieHint {
             data_directory,
             network,
@@ -133,7 +133,7 @@ async fn get_cookie_hint(
         Err(RpcError::CookieHintDisabled) => {
             // Fallback to default data directory
             let network = client.network(context::current()).await??;
-            let data_directory = DataDirectory::get(None, network)?;
+            let data_directory = DataDirectory::get(None, network).await?;
             Ok(auth::CookieHint {
                 data_directory,
                 network,
@@ -168,7 +168,7 @@ pub async fn handle_request(
         "which_wallet" => {
             let network = extract_string_param(&request.params, "network")
                 .unwrap_or_else(|| "main".to_string());
-            let wallet_path = get_wallet_path(&network)?;
+            let wallet_path = get_wallet_path(&network).await?;
             let result = serde_json::Value::String(wallet_path);
             Ok(JsonRpcResponse::success(request.id, result))
         }
@@ -176,7 +176,7 @@ pub async fn handle_request(
         "generate_wallet" => {
             let network = extract_string_param(&request.params, "network")
                 .unwrap_or_else(|| "main".to_string());
-            let wallet_info = generate_wallet(&network)?;
+            let wallet_info = generate_wallet(&network).await?;
             let result = serde_json::Value::String(wallet_info);
             Ok(JsonRpcResponse::success(request.id, result))
         }
@@ -184,7 +184,7 @@ pub async fn handle_request(
         "export_seed_phrase" => {
             let network = extract_string_param(&request.params, "network")
                 .unwrap_or_else(|| "main".to_string());
-            let seed_phrase = export_seed_phrase(&network)?;
+            let seed_phrase = export_seed_phrase(&network).await?;
             let result = serde_json::Value::String(seed_phrase);
             Ok(JsonRpcResponse::success(request.id, result))
         }
@@ -193,7 +193,7 @@ pub async fn handle_request(
             let n = extract_u32_param(&request.params, "n")?;
             let network = extract_string_param(&request.params, "network")
                 .unwrap_or_else(|| "main".to_string());
-            let address = get_nth_receiving_address(n, &network)?;
+            let address = get_nth_receiving_address(n, &network).await?;
             let result = serde_json::Value::String(address);
             Ok(JsonRpcResponse::success(request.id, result))
         }
@@ -201,7 +201,7 @@ pub async fn handle_request(
         "premine_receiving_address" => {
             let network = extract_string_param(&request.params, "network")
                 .unwrap_or_else(|| "main".to_string());
-            let address = get_premine_receiving_address(&network)?;
+            let address = get_premine_receiving_address(&network).await?;
             let result = serde_json::Value::String(address);
             Ok(JsonRpcResponse::success(request.id, result))
         }
@@ -221,7 +221,7 @@ pub async fn handle_request(
             let n = extract_u32_param(&request.params, "n")?;
             let network = extract_string_param(&request.params, "network")
                 .unwrap_or_else(|| "main".to_string());
-            let shares = shamir_share(t, n, &network)?;
+            let shares = shamir_share(t, n, &network).await?;
             let result = serde_json::Value::String(shares);
             Ok(JsonRpcResponse::success(request.id, result))
         }
@@ -1642,28 +1642,28 @@ fn generate_help(command: Option<&str>) -> Result<String> {
 }
 
 /// Get wallet file path
-fn get_wallet_path(network: &str) -> Result<String> {
+async fn get_wallet_path(network: &str) -> Result<String> {
     let network_type = match network {
         "main" => Network::Main,
         "regtest" => Network::RegTest,
         _ => Network::Main,
     };
 
-    let data_dir = DataDirectory::get(None, network_type)?;
+    let data_dir = DataDirectory::get(None, network_type).await?;
     let wallet_dir = data_dir.wallet_directory_path();
     let wallet_path = WalletFileContext::wallet_secret_path(&wallet_dir);
     Ok(wallet_path.to_string_lossy().to_string())
 }
 
 /// Generate new wallet
-fn generate_wallet(network: &str) -> Result<String> {
+async fn generate_wallet(network: &str) -> Result<String> {
     let network_type = match network {
         "main" => Network::Main,
         "regtest" => Network::RegTest,
         _ => Network::Main,
     };
 
-    let data_dir = DataDirectory::get(None, network_type)?;
+    let data_dir = DataDirectory::get(None, network_type).await?;
     let wallet_dir = data_dir.wallet_directory_path();
     let wallet_path = WalletFileContext::wallet_secret_path(&wallet_dir);
 
@@ -1701,14 +1701,14 @@ fn generate_wallet(network: &str) -> Result<String> {
 }
 
 /// Export seed phrase
-fn export_seed_phrase(network: &str) -> Result<String> {
+async fn export_seed_phrase(network: &str) -> Result<String> {
     let network_type = match network {
         "main" => Network::Main,
         "regtest" => Network::RegTest,
         _ => Network::Main,
     };
 
-    let data_dir = DataDirectory::get(None, network_type)?;
+    let data_dir = DataDirectory::get(None, network_type).await?;
     let wallet_dir = data_dir.wallet_directory_path();
     let wallet_path = WalletFileContext::wallet_secret_path(&wallet_dir);
 
@@ -1731,14 +1731,14 @@ fn export_seed_phrase(network: &str) -> Result<String> {
 }
 
 /// Get nth receiving address
-fn get_nth_receiving_address(n: u32, network: &str) -> Result<String> {
+async fn get_nth_receiving_address(n: u32, network: &str) -> Result<String> {
     let network_type = match network {
         "main" => Network::Main,
         "regtest" => Network::RegTest,
         _ => Network::Main,
     };
 
-    let data_dir = DataDirectory::get(None, network_type)?;
+    let data_dir = DataDirectory::get(None, network_type).await?;
     let wallet_dir = data_dir.wallet_directory_path();
     let wallet_path = WalletFileContext::wallet_secret_path(&wallet_dir);
 
@@ -1762,14 +1762,14 @@ fn get_nth_receiving_address(n: u32, network: &str) -> Result<String> {
 }
 
 /// Get premine receiving address
-fn get_premine_receiving_address(network: &str) -> Result<String> {
+async fn get_premine_receiving_address(network: &str) -> Result<String> {
     let network_type = match network {
         "main" => Network::Main,
         "regtest" => Network::RegTest,
         _ => Network::Main,
     };
 
-    let data_dir = DataDirectory::get(None, network_type)?;
+    let data_dir = DataDirectory::get(None, network_type).await?;
     let wallet_dir = data_dir.wallet_directory_path();
     let wallet_path = WalletFileContext::wallet_secret_path(&wallet_dir);
 
@@ -1802,7 +1802,7 @@ async fn import_seed_phrase(seed_phrase: &str, network: &str) -> Result<String> 
         _ => Network::Main,
     };
 
-    let data_dir = DataDirectory::get(None, network_type)?;
+    let data_dir = DataDirectory::get(None, network_type).await?;
     let wallet_dir = data_dir.wallet_directory_path();
     let wallet_db_dir = data_dir.wallet_database_dir_path();
     let wallet_path = WalletFileContext::wallet_secret_path(&wallet_dir);
@@ -1849,7 +1849,7 @@ async fn import_seed_phrase(seed_phrase: &str, network: &str) -> Result<String> 
 }
 
 /// Create Shamir secret shares
-fn shamir_share(t: u32, n: u32, network: &str) -> Result<String> {
+async fn shamir_share(t: u32, n: u32, network: &str) -> Result<String> {
     use rand::Rng;
 
     let network_type = match network {
@@ -1858,7 +1858,7 @@ fn shamir_share(t: u32, n: u32, network: &str) -> Result<String> {
         _ => Network::Main,
     };
 
-    let data_dir = DataDirectory::get(None, network_type)?;
+    let data_dir = DataDirectory::get(None, network_type).await?;
     let wallet_dir = data_dir.wallet_directory_path();
     let wallet_path = WalletFileContext::wallet_secret_path(&wallet_dir);
 
@@ -1916,7 +1916,7 @@ async fn shamir_combine(shares: &str, network: &str) -> Result<String> {
         _ => Network::Main,
     };
 
-    let data_dir = DataDirectory::get(None, network_type)?;
+    let data_dir = DataDirectory::get(None, network_type).await?;
     let wallet_dir = data_dir.wallet_directory_path();
     let wallet_path = WalletFileContext::wallet_secret_path(&wallet_dir);
 

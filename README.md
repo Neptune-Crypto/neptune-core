@@ -5,10 +5,11 @@
 [![Security](https://img.shields.io/badge/Security-Hardened-green.svg)]()
 [![DDoS Protection](https://img.shields.io/badge/DDoS-99%25%20Mitigation-brightgreen.svg)]()
 [![Wallet Encryption](https://img.shields.io/badge/Wallet-AES--256--GCM-brightgreen.svg)]()
+[![Data Layout](https://img.shields.io/badge/Data-Separated-brightgreen.svg)]()
 
-> **A security-hardened fork of [Neptune Core](https://github.com/Neptune-Crypto/neptune-core) with enterprise-grade DDoS protection, wallet encryption, and enhanced RPC capabilities**
+> **A security-hardened fork of [Neptune Core](https://github.com/Neptune-Crypto/neptune-core) with enterprise-grade DDoS protection, wallet encryption, separated data layout, and enhanced RPC capabilities**
 
-This is a **production-hardened** implementation of the [Neptune Cash](https://neptune.cash/) protocol, featuring comprehensive network security enhancements, industry-standard wallet encryption, and advanced developer tooling while maintaining full backward compatibility with the upstream Neptune network.
+This is a **production-hardened** implementation of the [Neptune Cash](https://neptune.cash/) protocol, featuring comprehensive network security enhancements, industry-standard wallet encryption, clean data separation for better backups and security, and advanced developer tooling while maintaining full backward compatibility with the upstream Neptune network.
 
 ---
 
@@ -106,6 +107,78 @@ neptune-core --non-interactive-password
   - Windows: **NO PROTECTION** - any user or malware could read the plaintext seed
 - **After:** Industry-standard encryption protects your master seed on all platforms
 - **Protection Against:** Disk theft, unauthorized access, malware, memory dumps, swap file leakage, backup exposure
+
+### Separated Data Layout
+
+**NEW:** Clean separation of wallet and blockchain data for better security and backup management.
+
+**Directory Structure:**
+
+```
+~/.neptune/<network>/
+├── wallet/                 # Wallet data (encrypted seeds, keys)
+│   ├── wallet.encrypted   # Encrypted master seed
+│   ├── db/                # Wallet transaction database
+│   └── utxo-transfer/     # UTXO transfer files (if any)
+└── chain/                 # Blockchain data (can be resynced)
+    ├── db/                # Block index, AOCL, peer standings
+    └── blocks/            # Block storage
+```
+
+**Benefits:**
+
+- 🔐 **Better Security** - Wallet and chain data physically separated
+- 💾 **Selective Backups** - Back up only wallet data (much smaller)
+- 🔄 **Easy Resync** - Delete `chain/` to resync without losing wallet
+- 📁 **Clear Organization** - Know exactly where your valuable data is
+- 🌍 **Cross-Platform** - Works identically on Linux, macOS, and Windows
+- ⚡ **Automatic Migration** - Seamlessly upgrades old layouts
+
+**Migration:**
+
+The node automatically detects and migrates old data layouts on first run:
+
+```bash
+# Old layout (pre-v0.5.0)
+~/.config/neptune/core/<network>/
+├── wallet/
+├── database/
+└── blocks/
+
+# New layout (v0.5.0+)
+~/.neptune/<network>/
+├── wallet/
+└── chain/
+```
+
+**Migration Process:**
+
+1. Detects legacy layout on startup
+2. Creates new directory structure
+3. Moves all files to appropriate locations
+4. Creates backup of old location (`old_dir.backup`)
+5. Logs all steps with clear instructions
+
+**For CLI Tools:**
+
+```bash
+# Generate wallet (uses new layout automatically)
+neptune-cli generate-wallet
+
+# Export seed phrase (finds wallet automatically)
+neptune-cli export-seed-phrase
+
+# All commands work with both old and new layouts
+```
+
+**Legacy Compatibility:**
+
+You can still use a custom data directory (forces legacy mode):
+
+```bash
+# Use explicit directory (no separation)
+neptune-core --data-dir /custom/path/to/data
+```
 
 ### Modularized P2P Architecture
 
