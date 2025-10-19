@@ -1,12 +1,12 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::{
-    application::json_rpc::core::model::{
-        block::{body::RpcBlockBody, header::RpcBlockHeader},
-        common::RpcBFieldElements,
-    },
-    protocol::consensus::block::{block_kernel::BlockKernel, Block, BlockProof},
-};
+use crate::application::json_rpc::core::model::block::body::RpcBlockBody;
+use crate::application::json_rpc::core::model::block::header::RpcBlockHeader;
+use crate::application::json_rpc::core::model::common::RpcBFieldElements;
+use crate::protocol::consensus::block::block_kernel::BlockKernel;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::block::BlockProof;
 
 pub mod body;
 pub mod header;

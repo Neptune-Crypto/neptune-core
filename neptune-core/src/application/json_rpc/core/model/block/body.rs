@@ -1,16 +1,13 @@
-use serde::{Deserialize, Serialize};
-use tasm_lib::{
-    prelude::Digest,
-    twenty_first::{prelude::Mmr, util_types::mmr::mmr_accumulator::MmrAccumulator},
-};
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::prelude::Digest;
+use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::{
-    application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel,
-    protocol::consensus::block::block_body::BlockBody,
-    util_types::mutator_set::{
-        active_window::ActiveWindow, mutator_set_accumulator::MutatorSetAccumulator,
-    },
-};
+use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
+use crate::protocol::consensus::block::block_body::BlockBody;
+use crate::util_types::mutator_set::active_window::ActiveWindow;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

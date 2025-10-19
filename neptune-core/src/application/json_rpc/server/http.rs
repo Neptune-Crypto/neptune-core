@@ -1,23 +1,21 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
+use std::sync::Arc;
 
-use axum::{
-    extract::{rejection::JsonRejection, State},
-    routing::post,
-    Json, Router,
-};
+use axum::extract::rejection::JsonRejection;
+use axum::extract::State;
+use axum::routing::post;
+use axum::Json;
+use axum::Router;
 use tokio::net::TcpListener;
 
-use crate::{
-    application::json_rpc::core::{
-        api::{
-            ops::{Namespace, RpcMethods},
-            router::RpcRouter,
-            rpc::RpcApi,
-        },
-        error::{RpcError, RpcRequest, RpcResponse},
-    },
-    state::GlobalStateLock,
-};
+use crate::application::json_rpc::core::api::ops::Namespace;
+use crate::application::json_rpc::core::api::ops::RpcMethods;
+use crate::application::json_rpc::core::api::router::RpcRouter;
+use crate::application::json_rpc::core::api::rpc::RpcApi;
+use crate::application::json_rpc::core::error::RpcError;
+use crate::application::json_rpc::core::error::RpcRequest;
+use crate::application::json_rpc::core::error::RpcResponse;
+use crate::state::GlobalStateLock;
 
 #[derive(Clone, Debug)]
 pub struct RpcServer {
@@ -29,6 +27,11 @@ impl RpcServer {
         Self { state }
     }
 
+    /// Starts the RPC server.
+    ///
+    /// All RPC endpoints are accessible via `POST` requests to the root path `/`.
+    /// The specific method is selected using the `method` field in the JSON request body,
+    /// formatted as `namespace_method`.
     pub async fn serve(&self, listener: TcpListener) {
         let api: Arc<dyn RpcApi> = Arc::new(self.clone());
         let namespaces: HashSet<Namespace> = self.state.cli().rpc_modules.iter().copied().collect();
@@ -41,6 +44,54 @@ impl RpcServer {
         axum::serve(listener, app).await.unwrap();
     }
 
+    /// Handles incoming RPC requests.
+    ///
+    /// # Request Body
+    ///
+    /// Expects a JSON-RPC 2.0 compliant body with the following fields:
+    /// - `jsonrpc`: `"2.0"`
+    /// - `method`: The RPC method to call, formatted as `namespace_method`
+    /// - `params`: An array of parameters to pass to the method
+    /// - `id` (optional): Request identifier for matching responses
+    ///
+    /// # Response
+    ///
+    /// Returns a JSON-RPC 2.0 response:
+    /// - On success: `{ "jsonrpc": "2.0", "id": <request_id>, "result": <method_result> }`
+    /// - On error: `{ "jsonrpc": "2.0", "id": <request_id>, "error": { "code": <error_code>, "message": <error_message> } }`
+    ///
+    /// # Examples
+    ///
+    /// Request:
+    /// ```json
+    /// POST /
+    /// {
+    ///     "method": "node_network",
+    ///     "params": [],
+    ///     "id": 1
+    /// }
+    /// ```
+    ///
+    /// Success Response:
+    /// ```json
+    /// {
+    ///     "jsonrpc": "2.0",
+    ///     "id": 1,
+    ///     "result": { "network": "main" }
+    /// }
+    /// ```
+    ///
+    /// Error Response:
+    /// ```json
+    /// {
+    ///     "jsonrpc": "2.0",
+    ///     "id": 1,
+    ///     "error": {
+    ///         "code": -32601,
+    ///         "message": "Method not found"
+    ///     }
+    /// }
+    /// ```
     async fn rpc_handler(
         State(router): State<Arc<RpcRouter>>,
         // An optimization to avoid deserializing 2 times

@@ -1,16 +1,16 @@
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::{
-    api::export::Timestamp,
-    application::json_rpc::core::model::common::{RpcBFieldElements, RpcNativeCurrencyAmount},
-    protocol::consensus::transaction::transaction_kernel::TransactionKernel,
-    util_types::mutator_set::removal_record::{
-        absolute_index_set::AbsoluteIndexSet, chunk_dictionary::ChunkDictionary, RemovalRecord,
-    },
-};
+use crate::api::export::Timestamp;
+use crate::application::json_rpc::core::model::common::RpcBFieldElements;
+use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RpcChunkDictionary(pub BTreeMap<u64, (Vec<Digest>, Vec<u32>)>);

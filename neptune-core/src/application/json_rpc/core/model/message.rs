@@ -1,13 +1,12 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_tuple::Deserialize_tuple;
 
-use crate::application::json_rpc::core::model::{
-    block::{
-        body::RpcBlockBody, header::RpcBlockHeader, transaction_kernel::RpcTransactionKernel,
-        RpcBlock, RpcBlockKernel, RpcBlockProof,
-    },
-    common::RpcBFieldElements,
-};
+use crate::application::json_rpc::core::model::block::body::*;
+use crate::application::json_rpc::core::model::block::header::*;
+use crate::application::json_rpc::core::model::block::transaction_kernel::*;
+use crate::application::json_rpc::core::model::block::*;
+use crate::application::json_rpc::core::model::common::*;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]

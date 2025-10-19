@@ -1,7 +1,11 @@
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::application::json_rpc::core::api::rpc::RpcApi;
-use crate::application::json_rpc::core::error::{RpcError, RpcResult};
+use crate::application::json_rpc::core::error::RpcError;
+use crate::application::json_rpc::core::error::RpcResult;
 
 type HandlerFn = Box<
     dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = RpcResult<serde_json::Value>> + Send>>

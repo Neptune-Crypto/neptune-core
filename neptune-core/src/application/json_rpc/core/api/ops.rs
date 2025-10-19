@@ -1,10 +1,12 @@
+use neptune_rpc_macros::Router;
+use serde::Deserialize;
+use serde::Serialize;
+use strum::EnumString;
+
 use crate::application::json_rpc::core::api::router::RpcRouter;
 use crate::application::json_rpc::core::api::rpc::RpcApi;
 use crate::application::json_rpc::core::error::RpcError;
 use crate::application::json_rpc::core::model::message::*;
-use neptune_rpc_macros::Router;
-use serde::{Deserialize, Serialize};
-use strum::EnumString;
 
 /// API version.
 pub const RPC_API_VERSION: u16 = 1;

@@ -1,13 +1,12 @@
-use serde::{Deserialize, Serialize};
-use tasm_lib::{prelude::Digest, triton_vm::prelude::BFieldElement};
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::prelude::Digest;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::{
-    api::export::Timestamp,
-    protocol::consensus::block::{
-        block_header::{BlockHeader, BlockPow},
-        guesser_receiver_data::GuesserReceiverData,
-    },
-};
+use crate::api::export::Timestamp;
+use crate::protocol::consensus::block::block_header::BlockHeader;
+use crate::protocol::consensus::block::block_header::BlockPow;
+use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

@@ -1,11 +1,14 @@
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
+
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
+use serde::Serializer;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::{
-    api::export::NativeCurrencyAmount,
-    state::wallet::address::common::{bfes_to_bytes, bytes_to_bfes},
-};
+use crate::api::export::NativeCurrencyAmount;
+use crate::state::wallet::address::common::bfes_to_bytes;
+use crate::state::wallet::address::common::bytes_to_bfes;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RpcNativeCurrencyAmount(pub NativeCurrencyAmount);
