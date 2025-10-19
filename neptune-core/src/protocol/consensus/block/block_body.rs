@@ -80,6 +80,8 @@ pub struct BlockBody {
     /// This field represents the state of the MS *after* applying the update
     /// induced by the transaction, but *before* applying the update induced by
     /// guesser fees (and perhaps later composer fees).
+    ///
+    /// For the final post-block state, refer to [`mutator_set_accumulator_after`].
     pub mutator_set_accumulator: MutatorSetAccumulator,
 
     /// Lock-free UTXOs do not come with lock scripts and do not live in the mutator set.
