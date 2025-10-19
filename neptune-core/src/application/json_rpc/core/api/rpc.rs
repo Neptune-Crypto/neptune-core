@@ -14,46 +14,46 @@ pub trait RpcApi: Sync + Send {
     }
     async fn height_call(&self, request: HeightRequest) -> HeightResponse;
 
-    async fn block(&self) -> BlockResponse {
-        self.block_call(BlockRequest {}).await
+    async fn tip(&self) -> TipResponse {
+        self.tip_call(TipRequest {}).await
     }
-    async fn block_call(&self, request: BlockRequest) -> BlockResponse;
+    async fn tip_call(&self, request: TipRequest) -> TipResponse;
 
-    async fn block_proof(&self) -> BlockProofResponse {
-        self.block_proof_call(BlockProofRequest {}).await
+    async fn tip_proof(&self) -> TipProofResponse {
+        self.tip_proof_call(TipProofRequest {}).await
     }
-    async fn block_proof_call(&self, request: BlockProofRequest) -> BlockProofResponse;
+    async fn tip_proof_call(&self, request: TipProofRequest) -> TipProofResponse;
 
-    async fn block_kernel(&self) -> BlockKernelResponse {
-        self.block_kernel_call(BlockKernelRequest {}).await
+    async fn tip_kernel(&self) -> TipKernelResponse {
+        self.tip_kernel_call(TipKernelRequest {}).await
     }
-    async fn block_kernel_call(&self, request: BlockKernelRequest) -> BlockKernelResponse;
+    async fn tip_kernel_call(&self, request: TipKernelRequest) -> TipKernelResponse;
 
-    async fn block_header(&self) -> BlockHeaderResponse {
-        self.block_header_call(BlockHeaderRequest {}).await
+    async fn tip_header(&self) -> TipHeaderResponse {
+        self.tip_header_call(TipHeaderRequest {}).await
     }
-    async fn block_header_call(&self, request: BlockHeaderRequest) -> BlockHeaderResponse;
+    async fn tip_header_call(&self, request: TipHeaderRequest) -> TipHeaderResponse;
 
-    async fn block_body(&self) -> BlockBodyResponse {
-        self.block_body_call(BlockBodyRequest {}).await
+    async fn tip_body(&self) -> TipBodyResponse {
+        self.tip_body_call(TipBodyRequest {}).await
     }
-    async fn block_body_call(&self, request: BlockBodyRequest) -> BlockBodyResponse;
+    async fn tip_body_call(&self, request: TipBodyRequest) -> TipBodyResponse;
 
-    async fn block_transaction_kernel(&self) -> BlockTransactionKernelResponse {
-        self.block_transaction_kernel_call(BlockTransactionKernelRequest {})
+    async fn tip_transaction_kernel(&self) -> TipTransactionKernelResponse {
+        self.tip_transaction_kernel_call(TipTransactionKernelRequest {})
             .await
     }
-    async fn block_transaction_kernel_call(
+    async fn tip_transaction_kernel_call(
         &self,
-        request: BlockTransactionKernelRequest,
-    ) -> BlockTransactionKernelResponse;
+        request: TipTransactionKernelRequest,
+    ) -> TipTransactionKernelResponse;
 
-    async fn block_announcements(&self) -> BlockAnnouncementsResponse {
-        self.block_announcements_call(BlockAnnouncementsRequest {})
+    async fn tip_announcements(&self) -> TipAnnouncementsResponse {
+        self.tip_announcements_call(TipAnnouncementsRequest {})
             .await
     }
-    async fn block_announcements_call(
+    async fn tip_announcements_call(
         &self,
-        request: BlockAnnouncementsRequest,
-    ) -> BlockAnnouncementsResponse;
+        request: TipAnnouncementsRequest,
+    ) -> TipAnnouncementsResponse;
 }

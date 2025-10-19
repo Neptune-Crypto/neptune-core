@@ -31,70 +31,70 @@ pub struct HeightResponse {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockRequest {}
+pub struct TipRequest {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockResponse {
+pub struct TipResponse {
     pub block: RpcBlock,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockProofRequest {}
+pub struct TipProofRequest {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockProofResponse {
+pub struct TipProofResponse {
     pub proof: RpcBlockProof,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockKernelRequest {}
+pub struct TipKernelRequest {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockKernelResponse {
+pub struct TipKernelResponse {
     pub kernel: RpcBlockKernel,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockHeaderRequest {}
+pub struct TipHeaderRequest {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockHeaderResponse {
+pub struct TipHeaderResponse {
     pub header: RpcBlockHeader,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockBodyRequest {}
+pub struct TipBodyRequest {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockBodyResponse {
+pub struct TipBodyResponse {
     pub body: RpcBlockBody,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockTransactionKernelRequest {}
+pub struct TipTransactionKernelRequest {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockTransactionKernelResponse {
+pub struct TipTransactionKernelResponse {
     pub kernel: RpcTransactionKernel,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockAnnouncementsRequest {}
+pub struct TipAnnouncementsRequest {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockAnnouncementsResponse {
+pub struct TipAnnouncementsResponse {
     pub announcements: Vec<RpcBFieldElements>,
 }

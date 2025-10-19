@@ -32,25 +32,25 @@ pub enum RpcMethods {
     Height,
 
     #[namespace(Namespace::Chain)]
-    Block,
+    Tip,
 
     #[namespace(Namespace::Chain)]
-    BlockProof,
+    TipProof,
 
     #[namespace(Namespace::Chain)]
-    BlockKernel,
+    TipKernel,
 
     #[namespace(Namespace::Chain)]
-    BlockHeader,
+    TipHeader,
 
     #[namespace(Namespace::Chain)]
-    BlockBody,
+    TipBody,
 
     #[namespace(Namespace::Chain)]
-    BlockTransactionKernel,
+    TipTransactionKernel,
 
     #[namespace(Namespace::Chain)]
-    BlockAnnouncements,
+    TipAnnouncements,
 }
 
 #[cfg(test)]

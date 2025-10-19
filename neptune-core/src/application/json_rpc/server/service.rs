@@ -20,67 +20,64 @@ impl RpcApi for RpcServer {
         }
     }
 
-    async fn block_call(&self, _: BlockRequest) -> BlockResponse {
+    async fn tip_call(&self, _: TipRequest) -> TipResponse {
         let state = self.state.lock_guard().await;
         let block = state.chain.light_state();
 
-        BlockResponse {
+        TipResponse {
             block: block.into(),
         }
     }
 
-    async fn block_proof_call(&self, _: BlockProofRequest) -> BlockProofResponse {
+    async fn tip_proof_call(&self, _: TipProofRequest) -> TipProofResponse {
         let state = self.state.lock_guard().await;
         let proof = &state.chain.light_state().proof;
 
-        BlockProofResponse {
+        TipProofResponse {
             proof: proof.into(),
         }
     }
 
-    async fn block_kernel_call(&self, _: BlockKernelRequest) -> BlockKernelResponse {
+    async fn tip_kernel_call(&self, _: TipKernelRequest) -> TipKernelResponse {
         let state = self.state.lock_guard().await;
         let kernel = &state.chain.light_state().kernel;
 
-        BlockKernelResponse {
+        TipKernelResponse {
             kernel: kernel.into(),
         }
     }
 
-    async fn block_header_call(&self, _: BlockHeaderRequest) -> BlockHeaderResponse {
+    async fn tip_header_call(&self, _: TipHeaderRequest) -> TipHeaderResponse {
         let state = self.state.lock_guard().await;
 
-        BlockHeaderResponse {
+        TipHeaderResponse {
             header: state.chain.light_state().header().into(),
         }
     }
 
-    async fn block_body_call(&self, _: BlockBodyRequest) -> BlockBodyResponse {
+    async fn tip_body_call(&self, _: TipBodyRequest) -> TipBodyResponse {
         let state = self.state.lock_guard().await;
 
-        BlockBodyResponse {
+        TipBodyResponse {
             body: state.chain.light_state().body().into(),
         }
     }
 
-    async fn block_transaction_kernel_call(
+    async fn tip_transaction_kernel_call(
         &self,
-        _: BlockTransactionKernelRequest,
-    ) -> BlockTransactionKernelResponse {
+        _: TipTransactionKernelRequest,
+    ) -> TipTransactionKernelResponse {
         let state = self.state.lock_guard().await;
 
-        BlockTransactionKernelResponse {
+        TipTransactionKernelResponse {
             kernel: state.chain.light_state().body().transaction_kernel().into(),
         }
     }
 
-    async fn block_announcements_call(
-        &self,
-        _: BlockAnnouncementsRequest,
-    ) -> BlockAnnouncementsResponse {
+    async fn tip_announcements_call(&self, _: TipAnnouncementsRequest) -> TipAnnouncementsResponse {
         let state = self.state.lock_guard().await;
 
-        BlockAnnouncementsResponse {
+        TipAnnouncementsResponse {
             announcements: state
                 .chain
                 .light_state()
@@ -141,7 +138,7 @@ pub mod tests {
     }
 
     #[test_strategy::proptest(async = "tokio", cases = 5)]
-    async fn block_calls_are_consistent(
+    async fn tip_calls_are_consistent(
         #[strategy(txkernel::with_lengths(0, 2, 2, true))]
         tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
@@ -158,19 +155,19 @@ pub mod tests {
             .await
             .expect("block to be valid");
 
-        let block = rpc_server.block().await.block;
-        let proof = rpc_server.block_proof().await.proof;
+        let block = rpc_server.tip().await.block;
+        let proof = rpc_server.tip_proof().await.proof;
         assert_eq!(block.proof, proof);
 
-        let kernel = rpc_server.block_kernel().await.kernel;
-        let header = rpc_server.block_header().await.header;
+        let kernel = rpc_server.tip_kernel().await.kernel;
+        let header = rpc_server.tip_header().await.header;
         assert_eq!(kernel.header, header);
 
-        let body = rpc_server.block_body().await.body;
-        let transaction_kernel = rpc_server.block_transaction_kernel().await.kernel;
+        let body = rpc_server.tip_body().await.body;
+        let transaction_kernel = rpc_server.tip_transaction_kernel().await.kernel;
         assert_eq!(body.transaction_kernel, transaction_kernel);
 
-        let announcements = rpc_server.block_announcements().await.announcements;
+        let announcements = rpc_server.tip_announcements().await.announcements;
         assert_eq!(transaction_kernel.announcements, announcements);
     }
 }
