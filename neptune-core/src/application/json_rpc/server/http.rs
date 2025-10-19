@@ -114,32 +114,33 @@ impl RpcServer {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{collections::HashSet, sync::Arc};
-
-    use crate::{
-        application::json_rpc::{
-            core::{
-                api::{
-                    ops::{Namespace, RpcMethods},
-                    router::RpcRouter,
-                    rpc::RpcApi,
-                },
-                error::{RpcError, RpcRequest, RpcResponse},
-            },
-            server::{http::RpcServer, service::tests::test_rpc_server},
-        },
-        tests::shared_tokio_runtime,
-    };
-    use axum::{extract::State, Json};
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use axum::extract::State;
+    use axum::Json;
     use macro_rules_attr::apply;
     use serde_json::json;
 
+    use crate::application::json_rpc::core::api::ops::Namespace;
+    use crate::application::json_rpc::core::api::ops::RpcMethods;
+    use crate::application::json_rpc::core::api::router::RpcRouter;
+    use crate::application::json_rpc::core::error::RpcError;
+    use crate::application::json_rpc::core::error::RpcRequest;
+    use crate::application::json_rpc::core::error::RpcResponse;
+    use crate::application::json_rpc::server::http::RpcServer;
+    use crate::application::json_rpc::server::service::tests::test_rpc_server;
+    use crate::tests::shared_tokio_runtime;
+
     #[apply(shared_tokio_runtime)]
     async fn namespace_isolates_correctly() {
-        let server = test_rpc_server().await;
-        let api: Arc<dyn RpcApi> = Arc::new(server);
-        let namespaces = HashSet::from([Namespace::Node]);
-        let router = Arc::new(RpcMethods::new_router(api, namespaces));
+        let router_no_chain = Arc::new(RpcMethods::new_router(
+            Arc::new(test_rpc_server().await),
+            HashSet::from([Namespace::Node]),
+        ));
+        let router_with_chain = Arc::new(RpcMethods::new_router(
+            Arc::new(test_rpc_server().await),
+            HashSet::from([Namespace::Node, Namespace::Chain]),
+        ));
 
         async fn make_rpc_request(router: Arc<RpcRouter>, method: &str) -> RpcResponse {
             let request = RpcRequest {
@@ -153,24 +154,33 @@ mod tests {
                 .0
         }
 
-        let node_network_res = make_rpc_request(router.clone(), "node_network").await;
+        let node_network_res = make_rpc_request(router_no_chain.clone(), "node_network").await;
         assert!(
             matches!(node_network_res, RpcResponse::Success { .. }),
             "Expected success for node_network, got: {:?}",
             node_network_res
         );
 
-        let chain_height_res = make_rpc_request(router, "chain_height").await;
+        let chain_height_method_name = "chain_height";
+        let chain_height_res_bad =
+            make_rpc_request(router_no_chain, chain_height_method_name).await;
         assert!(
             matches!(
-                chain_height_res,
+                chain_height_res_bad,
                 RpcResponse::Error {
                     error: RpcError::MethodNotFound,
                     ..
                 }
             ),
             "Expected MethodNotFound error for chain_height, got: {:?}",
-            chain_height_res
+            chain_height_res_bad
+        );
+        let chain_height_res_good =
+            make_rpc_request(router_with_chain.clone(), chain_height_method_name).await;
+        assert!(
+            matches!(chain_height_res_good, RpcResponse::Success { .. }),
+            "Expected success for chain_height, got: {:?}",
+            chain_height_res_good
         );
     }
 }

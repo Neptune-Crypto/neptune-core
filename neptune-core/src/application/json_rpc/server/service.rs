@@ -94,25 +94,20 @@ impl RpcApi for RpcServer {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
-    use crate::{
-        api::export::Network,
-        application::{
-            config::cli_args,
-            json_rpc::{core::api::rpc::RpcApi, server::http::RpcServer},
-        },
-        protocol::consensus::transaction::{Transaction, TransactionProof},
-        state::wallet::wallet_entropy::WalletEntropy,
-        tests::{
-            shared::{
-                blocks::invalid_block_with_transaction, globalstate::mock_genesis_global_state,
-                strategies::txkernel,
-            },
-            shared_tokio_runtime,
-        },
-        Block,
-    };
-
     use macro_rules_attr::apply;
+
+    use crate::api::export::Network;
+    use crate::application::config::cli_args;
+    use crate::application::json_rpc::core::api::rpc::RpcApi;
+    use crate::application::json_rpc::server::http::RpcServer;
+    use crate::protocol::consensus::transaction::Transaction;
+    use crate::protocol::consensus::transaction::TransactionProof;
+    use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::strategies::txkernel;
+    use crate::tests::shared_tokio_runtime;
+    use crate::Block;
 
     pub async fn test_rpc_server() -> RpcServer {
         let global_state_lock = mock_genesis_global_state(
