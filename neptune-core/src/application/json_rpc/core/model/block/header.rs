@@ -65,7 +65,7 @@ impl From<&BlockHeader> for RpcBlockHeader {
             prev_block_digest: header.prev_block_digest,
             timestamp: header.timestamp,
             pow: header.pow.into(),
-            cumulative_proof_of_work: header.cumulative_proof_of_work.to_string(), // TODO: RPC types
+            cumulative_proof_of_work: header.cumulative_proof_of_work.to_string(),
             difficulty: header.difficulty.to_string(),
             guesser_receiver_data: header.guesser_receiver_data.into(),
         }

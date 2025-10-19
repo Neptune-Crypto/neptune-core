@@ -12,6 +12,8 @@ use crate::util_types::mutator_set::removal_record::absolute_index_set::Absolute
 use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
+pub type RpcAbsoluteIndexSet = AbsoluteIndexSet;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RpcChunkDictionary(pub BTreeMap<u64, (Vec<Digest>, Vec<u32>)>);
 
@@ -32,7 +34,7 @@ impl From<ChunkDictionary> for RpcChunkDictionary {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcRemovalRecord {
-    pub absolute_indices: AbsoluteIndexSet,
+    pub absolute_indices: RpcAbsoluteIndexSet,
     pub target_chunks: RpcChunkDictionary,
 }
 

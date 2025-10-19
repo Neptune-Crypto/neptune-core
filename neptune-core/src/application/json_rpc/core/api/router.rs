@@ -60,12 +60,14 @@ pub type RpcRouter = Router<dyn RpcApi>;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::tests::shared_tokio_runtime;
+    use std::sync::Arc;
 
-    use super::*;
     use macro_rules_attr::apply;
     use serde_json::json;
-    use std::sync::Arc;
+
+    use crate::application::json_rpc::core::api::router::Router;
+    use crate::application::json_rpc::core::error::RpcError;
+    use crate::tests::shared_tokio_runtime;
 
     struct DummyApi;
 
