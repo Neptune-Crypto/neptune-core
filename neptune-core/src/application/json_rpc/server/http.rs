@@ -116,6 +116,7 @@ impl RpcServer {
 mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
+
     use axum::extract::State;
     use axum::Json;
     use macro_rules_attr::apply;
