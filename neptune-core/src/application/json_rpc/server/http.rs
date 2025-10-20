@@ -57,10 +57,24 @@ impl RpcServer {
     /// # Response
     ///
     /// Returns a JSON-RPC 2.0 response:
-    /// - On success: `{ "jsonrpc": "2.0", "id": <request_id>, "result": <method_result> }`
-    /// - On error: `{ "jsonrpc": "2.0", "id": <request_id>, "error": { "code": <error_code>, "message": <error_message> } }`
+    /// - On success:  
+    ///   `{
+    ///       "jsonrpc": "2.0",
+    ///       "id": <request_id>,
+    ///       "result": <method_result>
+    ///   }`
     ///
-    /// # Examples
+    /// - On error:  
+    ///   `{
+    ///       "jsonrpc": "2.0",
+    ///       "id": <request_id>,
+    ///       "error": {
+    ///           "code": <error_code>,
+    ///           "message": <error_message>
+    ///       }
+    ///   }`
+    ///
+    /// # Example
     ///
     /// Request:
     /// ```json

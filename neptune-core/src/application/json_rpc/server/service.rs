@@ -107,6 +107,8 @@ pub mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
+    use crate::twenty_first::bfe;
+    use crate::BFieldElement;
     use crate::Block;
 
     pub async fn test_rpc_server() -> RpcServer {
@@ -129,7 +131,7 @@ pub mod tests {
     #[apply(shared_tokio_runtime)]
     async fn height_is_correct() {
         let rpc_server = test_rpc_server().await;
-        assert_eq!(0, rpc_server.height().await.height);
+        assert_eq!(bfe!(0), rpc_server.height().await.height);
     }
 
     #[test_strategy::proptest(async = "tokio", cases = 5)]

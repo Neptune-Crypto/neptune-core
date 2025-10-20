@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 use serde_tuple::Deserialize_tuple;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::application::json_rpc::core::model::block::body::*;
 use crate::application::json_rpc::core::model::block::header::*;
@@ -25,7 +26,7 @@ pub struct HeightRequest {}
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeightResponse {
-    pub height: u64, // This technically could exceed JavaScript's safe int limits but practically it would take thousand(?) years.
+    pub height: BFieldElement,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
