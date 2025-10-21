@@ -679,12 +679,18 @@ pub(crate) async fn mine(
             .reset(tokio::time::Instant::now() + infinite);
 
         let (is_connected, is_syncing) = global_state_lock
-            .lock(|s| (!s.net.peer_map.is_empty(), s.net.sync_anchor.is_some()))
+            .lock(|s| {
+                (
+                    // Prevent isolated mining on main net
+                    !s.net.peer_map.is_empty() || !s.cli().network.is_main(),
+                    s.net.sync_anchor.is_some(),
+                )
+            })
             .await;
         if !is_connected {
             const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
             global_state_lock.set_mining_status_to_inactive().await;
-            warn!("Not mining because client has no connections");
+            warn!("Not mining because main net client has no connections.");
             sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
             continue;
         }
