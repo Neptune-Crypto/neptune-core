@@ -1,6 +1,7 @@
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -537,6 +538,24 @@ impl PeerLoopHandler {
         }
 
         Ok(())
+    }
+
+    /// Return the duration with which to sleep before processing a transaction
+    /// notification.
+    ///
+    /// # Panics
+    ///  - If number of peers is zero
+    ///  - If number of peers exceed u64::MAX
+    fn sleep_time_before_tx_notification_processing(num_peers: usize) -> Duration {
+        const MEAN_SLEEP_TIME_IN_MS_PER_CONNECTED_PEER: u64 = 250;
+        let num_peers: u64 = num_peers.try_into().unwrap();
+        let delay_factor = num_peers
+            .checked_sub(1)
+            .expect("At least 1 peer must be connected for this function to work");
+        let sleep_time_ms =
+            rand::random_range(0..=delay_factor * MEAN_SLEEP_TIME_IN_MS_PER_CONNECTED_PEER * 2);
+
+        Duration::from_millis(sleep_time_ms)
     }
 
     /// Handle peer messages and returns Ok(true) if connection should be closed.
@@ -1423,6 +1442,19 @@ impl PeerLoopHandler {
                 {
                     log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
 
+                    // Very often, the same transaction notification is received
+                    // multiple times, from all peers. To reduce the number of
+                    // times a transaction is received, a delay is inserted
+                    // here, such that a transaction is hopefully only received
+                    // from one or two peers at a time. In case only this peer
+                    // is connected, sleep time is always zero. No locks may be
+                    // held while sleeping.
+                    let num_peers = self.global_state_lock.lock_guard().await.net.peer_map.len();
+                    tokio::time::sleep(Self::sleep_time_before_tx_notification_processing(
+                        num_peers,
+                    ))
+                    .await;
+
                     // 1. Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
                     let state = self.global_state_lock.lock_guard().await;
@@ -2102,6 +2134,27 @@ mod tests {
         drop(from_main_tx);
 
         Ok(())
+    }
+
+    #[test]
+    fn sleep_time_before_tx_notification_processing_unit_test() {
+        assert_eq!(
+            Duration::ZERO,
+            PeerLoopHandler::sleep_time_before_tx_notification_processing(1)
+        );
+
+        assert!(
+            PeerLoopHandler::sleep_time_before_tx_notification_processing(2)
+                <= Duration::from_millis(500)
+        );
+        assert!(
+            PeerLoopHandler::sleep_time_before_tx_notification_processing(3)
+                <= Duration::from_millis(1000)
+        );
+        assert!(
+            PeerLoopHandler::sleep_time_before_tx_notification_processing(4)
+                <= Duration::from_millis(1500)
+        );
     }
 
     mod peer_discovery {
