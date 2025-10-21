@@ -363,6 +363,7 @@ pub(crate) mod tests {
 
                 let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
 
+                let new_timestamp = parent.header().timestamp + Timestamp::minutes(9);
                 let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
                 guess_nonce(
                     network,
@@ -372,7 +373,8 @@ pub(crate) mod tests {
                     GuessingConfiguration {
                         num_guesser_threads: global_state_lock.cli().guesser_threads,
                         address: guesser_address,
-                        rng: Some(deterministic_guesser_rng),
+                        override_rng: Some(deterministic_guesser_rng),
+                        override_timestamp: Some(new_timestamp),
                     },
                 )
                 .await;
@@ -414,6 +416,7 @@ pub(crate) mod tests {
                 .wallet_entropy
                 .guesser_fee_key();
             let (guesser_tx_b, guesser_rx_b) = oneshot::channel::<NewBlockFound>();
+            let guesser_timestamp_b = block_b_no_pow.header().timestamp;
             guess_nonce(
                 network,
                 block_b_no_pow,
@@ -422,7 +425,10 @@ pub(crate) mod tests {
                 GuessingConfiguration {
                     num_guesser_threads: cli.guesser_threads,
                     address: guesser_key.to_address().into(),
-                    rng: Some(rng),
+                    // For deterministic pow-guessing, both RNG and timestamp
+                    // must be deterministic.
+                    override_rng: Some(rng),
+                    override_timestamp: Some(guesser_timestamp_b),
                 },
             )
             .await;

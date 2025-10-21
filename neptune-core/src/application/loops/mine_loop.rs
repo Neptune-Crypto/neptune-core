@@ -66,7 +66,8 @@ use crate::COMPOSITION_FAILED_EXIT_CODE;
 pub(crate) struct GuessingConfiguration {
     pub(crate) num_guesser_threads: Option<usize>,
     pub(crate) address: ReceivingAddress,
-    pub(crate) rng: Option<StdRng>,
+    pub(crate) override_rng: Option<StdRng>,
+    pub(crate) override_timestamp: Option<Timestamp>,
 }
 
 /// Creates a block transaction and composes a block from it. Returns the block
@@ -153,7 +154,6 @@ pub(crate) async fn guess_nonce(
             previous_block_header,
             sender,
             guessing_configuration,
-            Timestamp::now(),
             None,
         )
     })
@@ -174,14 +174,16 @@ fn guess_worker(
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     guessing_configuration: GuessingConfiguration,
-    now: Timestamp,
     override_target_block_interval: Option<Timestamp>,
 ) {
     let GuessingConfiguration {
         num_guesser_threads,
         address: guesser_address,
-        rng,
+        override_rng: rng,
+        override_timestamp: now,
     } = guessing_configuration;
+
+    let now = now.unwrap_or(Timestamp::now());
 
     info!(
         "prev block height: {}, prev block time: {}, now: {}",
@@ -731,7 +733,8 @@ pub(crate) async fn mine(
                 GuessingConfiguration {
                     num_guesser_threads: cli_args.guesser_threads,
                     address: guesser_key.to_address().into(),
-                    rng: None,
+                    override_rng: None,
+                    override_timestamp: None,
                 },
             );
 
@@ -1595,9 +1598,9 @@ pub(crate) mod tests {
             GuessingConfiguration {
                 num_guesser_threads,
                 address: guesser_key.to_address().into(),
-                rng: None,
+                override_rng: None,
+                override_timestamp: None,
             },
-            Timestamp::now(),
             None,
         );
 
@@ -1679,9 +1682,9 @@ pub(crate) mod tests {
             GuessingConfiguration {
                 num_guesser_threads,
                 address: guesser_key.to_address().into(),
-                rng: None,
+                override_rng: None,
+                override_timestamp: None,
             },
-            Timestamp::now(),
             None,
         );
 
@@ -1831,9 +1834,9 @@ pub(crate) mod tests {
                 GuessingConfiguration {
                     num_guesser_threads,
                     address: guesser_key.to_address().into(),
-                    rng: None,
+                    override_rng: None,
+                    override_timestamp: None,
                 },
-                Timestamp::now(),
                 Some(target_block_interval),
             );
 
@@ -2461,9 +2464,9 @@ pub(crate) mod tests {
                 GuessingConfiguration {
                     num_guesser_threads,
                     address: guesser_key.to_address().into(),
-                    rng: None,
+                    override_rng: None,
+                    override_timestamp: Some(block_time),
                 },
-                block_time,
                 None,
             );
 
