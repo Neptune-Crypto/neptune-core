@@ -210,6 +210,18 @@ pub struct Args {
     #[clap(long, default_value = "0.01", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_gobbling_fee: NativeCurrencyAmount,
 
+    /// Minimum fee value for ProofCollection-backed transaction per input.
+    ///
+    /// Transactions with fees lower than this will not be requested from
+    /// peers, will not be inserted into the mempool, and will not be
+    /// relayed to peers.
+    ///
+    /// The value is per input. So the fee must be at least this value times
+    /// the number of inputs in the transaction for the transaction to be
+    /// relayed to peers.
+    #[clap(long, default_value = "0.0005", value_parser = NativeCurrencyAmount::coins_from_str)]
+    pub(crate) min_relay_pctx_fee_per_input: NativeCurrencyAmount,
+
     /// Whether to produce block proposals, which is the 2nd step of three-step
     /// mining. Note that composing block proposals involves the computationally
     /// expensive task of producing STARK proofs. You should have plenty of
