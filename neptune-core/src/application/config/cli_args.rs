@@ -65,10 +65,12 @@ pub struct Args {
     /// Execute command when the best block changes (%s in cmd is replaced by
     /// block hash).
     ///
-    /// The node waits until the command has finished.
+    /// A process is spawned to execute the command. The command's exit value
+    /// is not checked. The process is spawned as a "fire and forget" process,
+    /// meaning that the node software continues and does not wait for the
+    /// spawned process to finish.
     ///
-    /// If external command cannot be started, or if it does not return exit
-    /// code 0, entire node is stopped.
+    /// If external command cannot be started, the entire node is stopped.
     ///
     /// Anything after the 1st space is interpreted as an argument. So the file
     /// used here may not contain spaces.
