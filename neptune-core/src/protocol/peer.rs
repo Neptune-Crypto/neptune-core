@@ -100,6 +100,11 @@ pub enum NegativePeerSanction {
     UnwantedMessage,
 
     NoStandingFoundMaybeCrash,
+
+    /// A sync challenge was received. Is punished to prevent many challenges
+    /// from same peer, as they're expensive (in disk I/O and networking
+    /// bandwidth) to respond to.
+    ReceivedSyncChallenge,
 }
 
 /// The reason for improving a peer's standing
@@ -171,6 +176,7 @@ impl Display for NegativePeerSanction {
             }
             NegativePeerSanction::FishyPowEvolutionChallengeResponse => "fishy pow evolution",
             NegativePeerSanction::FishyDifficultiesChallengeResponse => "fishy difficulties",
+            NegativePeerSanction::ReceivedSyncChallenge => "received sync challenge",
         };
         write!(f, "{string}")
     }
@@ -246,6 +252,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::BatchBlocksRequestTooManyDigests => -50,
             NegativePeerSanction::FishyPowEvolutionChallengeResponse => -51,
             NegativePeerSanction::FishyDifficultiesChallengeResponse => -51,
+            NegativePeerSanction::ReceivedSyncChallenge => -50,
         }
     }
 }
