@@ -13,6 +13,7 @@ use clap::Parser;
 use itertools::Itertools;
 use num_traits::Zero;
 use sysinfo::System;
+use tracing::error;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
@@ -21,11 +22,14 @@ use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::json_rpc::core::api::ops::Namespace;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;
+
+const MAX_NUM_INPUTS_FOR_PC_BACKED_TXS: u64 = 200;
 
 /// The `neptune-core` command-line program starts a Neptune node.
 #[derive(Parser, Debug, Clone)]
@@ -209,6 +213,18 @@ pub struct Args {
     /// threshold cannot be collected by proof upgrading will not be upgraded.
     #[clap(long, default_value = "0.01", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_gobbling_fee: NativeCurrencyAmount,
+
+    /// Minimum fee value for ProofCollection-backed transaction per input.
+    ///
+    /// Transactions with fees lower than this will not be requested from
+    /// peers, will not be inserted into the mempool, and will not be
+    /// relayed to peers.
+    ///
+    /// The value is per input. So the fee must be at least this value times
+    /// the number of inputs in the transaction for the transaction to be
+    /// relayed to peers.
+    #[clap(long, default_value = "0.0005", value_parser = NativeCurrencyAmount::coins_from_str)]
+    pub(crate) min_relay_pctx_fee_per_input: NativeCurrencyAmount,
 
     /// Whether to produce block proposals, which is the 2nd step of three-step
     /// mining. Note that composing block proposals involves the computationally
@@ -722,6 +738,41 @@ impl Args {
     /// creates a `TritonVmProofJobOptions` from cli args.
     pub fn as_proof_job_options(&self) -> TritonVmProofJobOptions {
         self.into()
+    }
+
+    /// Check if a transaction should be inserted into the mempool and relayed
+    /// to peers. Proofcollection-backed transactions that pay too small fees
+    /// are not relayed.
+    pub(crate) fn relay_transaction(
+        &self,
+        num_inputs: u64,
+        tx_fee: NativeCurrencyAmount,
+        proof_quality: TransactionProofQuality,
+    ) -> bool {
+        match proof_quality {
+            TransactionProofQuality::ProofCollection => {
+                if num_inputs > MAX_NUM_INPUTS_FOR_PC_BACKED_TXS {
+                    return false;
+                }
+
+                let num_inputs: u32 = num_inputs
+                    .try_into()
+                    .expect("Already checked that number of inputs was not too high.");
+
+                let Some(min_fee) = self
+                    .min_relay_pctx_fee_per_input
+                    .checked_scalar_mul(num_inputs)
+                else {
+                    error!("Multiplication overflowed in fee calculation. This should not happen.");
+                    return false;
+                };
+
+                tx_fee >= min_fee
+            }
+            // For now, all single proof txs are relayed. A threshold value
+            // could be set here too though.
+            TransactionProofQuality::SingleProof => true,
+        }
     }
 }
 

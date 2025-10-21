@@ -1249,12 +1249,24 @@ impl PeerLoopHandler {
             PeerMessage::Transaction(transaction) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Transaction");
 
+                let num_inputs: u64 = transaction.kernel.inputs.len().try_into().unwrap();
                 debug!(
-                    "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
-                    transaction.kernel.inputs.len(),
+                    "`peer_loop` received following transaction from peer. {num_inputs} inputs,\
+                     {} outputs. Synced to mutator set hash: {}",
                     transaction.kernel.outputs.len(),
                     transaction.kernel.mutator_set_hash
                 );
+
+                if !self.global_state_lock.cli().relay_transaction(
+                    num_inputs,
+                    transaction.kernel.fee,
+                    transaction.proof.proof_quality(),
+                ) {
+                    warn!("Received transaction not meeting relay criteria");
+                    self.punish(NegativePeerSanction::UnrelayableTransaction)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 let transaction: Transaction = (*transaction).into();
 
@@ -1428,6 +1440,16 @@ impl PeerLoopHandler {
                 // new scope for state read-lock to avoid holding across peer.send()
                 {
                     log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
+
+                    // 0. Check that transaction meets relay criteria
+                    if !self.global_state_lock.cli().relay_transaction(
+                        tx_notification.num_inputs,
+                        tx_notification.fee,
+                        tx_notification.proof_quality,
+                    ) {
+                        debug!("transaction does not meet relay criteria");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
 
                     // 1. Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
@@ -4287,6 +4309,110 @@ mod tests {
                     _ => panic!("Main loop must receive new transaction"),
                 };
             }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn dont_request_pctx_with_low_fee() {
+            let network = Network::Main;
+            let (main_to_peer_tx, from_main_rx_clone, to_main_tx, to_main_rx, state_lock, hsd) =
+                get_test_genesis_setup(network, 1, cli_args::Args::default())
+                    .await
+                    .unwrap();
+            let fee = NativeCurrencyAmount::from_nau(500);
+            let pctx =
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
+                    .await;
+
+            let tx_notification: TransactionNotification = (pctx.as_ref()).try_into().unwrap();
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            // Mock a timestamp to allow transaction to be considered valid
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock,
+                get_dummy_socket_address(0),
+                hsd,
+                true,
+                1,
+            );
+
+            let mut peer_state = MutablePeerState::new(hsd.tip_header.height);
+            peer_loop_handler
+                .run(mock, from_main_rx_clone, &mut peer_state)
+                .await
+                .unwrap();
+
+            drop(to_main_rx);
+            drop(main_to_peer_tx);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn dont_accept_pctx_with_low_fee() {
+            let network = Network::Main;
+            let (main_to_peer_tx, from_main_rx_clone, to_main_tx, mut to_main_rx, state_lock, _) =
+                get_test_genesis_setup(network, 1, cli_args::Args::default())
+                    .await
+                    .unwrap();
+            let fee = NativeCurrencyAmount::from_nau(500);
+            let pctx =
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
+                    .await;
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::Transaction(Box::new(
+                    pctx.as_ref().try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let peer_address = get_dummy_socket_address(0);
+            let peer_hsd = get_dummy_handshake_data_for_genesis(network);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock.clone(),
+                peer_address,
+                peer_hsd,
+                true,
+                1,
+            );
+
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            match to_main_rx.recv().await {
+                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
+                _ => panic!("Must receive remove of peer block max height"),
+            }
+
+            assert_eq!(
+                Err(TryRecvError::Empty),
+                to_main_rx.try_recv(),
+                "Tx must not be sent to main"
+            );
+
+            let latest_sanction = state_lock
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::UnrelayableTransaction,
+                latest_sanction
+                    .latest_punishment
+                    .expect("peer must be sanctioned for sending no-relay tx")
+                    .0
+            );
+
+            drop(to_main_rx);
+            drop(main_to_peer_tx);
         }
     }
 
