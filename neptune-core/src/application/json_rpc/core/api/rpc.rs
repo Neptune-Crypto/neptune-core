@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 
 use crate::application::json_rpc::core::model::message::*;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::block_selector::BlockSelector;
 
 #[async_trait]
 pub trait RpcApi: Sync + Send {
@@ -56,4 +58,44 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: TipAnnouncementsRequest,
     ) -> TipAnnouncementsResponse;
+
+    async fn cookie_hint(&self) -> CookieHintResponse {
+        self.cookie_hint_call(CookieHintRequest {}).await
+    }
+    async fn cookie_hint_call(&self, request: CookieHintRequest) -> CookieHintResponse;
+
+    async fn block_info(&self, block_selector: BlockSelector) -> BlockInfoResponse {
+        self.block_info_call(BlockInfoRequest { block_selector })
+            .await
+    }
+    async fn block_info_call(&self, request: BlockInfoRequest) -> BlockInfoResponse;
+
+    async fn block_digest(&self, block_selector: BlockSelector) -> BlockDigestResponse {
+        self.block_digest_call(BlockDigestRequest { block_selector })
+            .await
+    }
+    async fn block_digest_call(&self, request: BlockDigestRequest) -> BlockDigestResponse;
+
+    async fn block_digests_by_height(&self, height: BlockHeight) -> BlockDigestsByHeightResponse {
+        self.block_digests_by_height_call(BlockDigestsByHeightRequest { height })
+            .await
+    }
+    async fn block_digests_by_height_call(
+        &self,
+        request: BlockDigestsByHeightRequest,
+    ) -> BlockDigestsByHeightResponse;
+
+    async fn latest_tip_digests(&self, n: usize) -> LatestTipDigestsResponse {
+        self.latest_tip_digests_call(LatestTipDigestsRequest { n })
+            .await
+    }
+    async fn latest_tip_digests_call(
+        &self,
+        request: LatestTipDigestsRequest,
+    ) -> LatestTipDigestsResponse;
+
+    async fn confirmations(&self) -> ConfirmationsResponse {
+        self.confirmations_call(ConfirmationsRequest {}).await
+    }
+    async fn confirmations_call(&self, request: ConfirmationsRequest) -> ConfirmationsResponse;
 }

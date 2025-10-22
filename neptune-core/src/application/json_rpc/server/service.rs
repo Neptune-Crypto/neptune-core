@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use crate::application::json_rpc::core::api::rpc::RpcApi;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::server::http::RpcServer;
+use crate::protocol::consensus::block::block_info::BlockInfo;
 
 #[async_trait]
 impl RpcApi for RpcServer {
@@ -88,6 +89,107 @@ impl RpcApi for RpcServer {
                 .map(|a| a.message.clone().into())
                 .collect(),
         }
+    }
+
+    async fn cookie_hint_call(&self, _: CookieHintRequest) -> CookieHintResponse {
+        let state = self.state.lock_guard().await;
+        let data_dir = state
+            .wallet_state
+            .configuration
+            .data_directory()
+            .root_dir_path()
+            .to_string_lossy()
+            .to_string();
+
+        CookieHintResponse {
+            data_directory: data_dir,
+            network: self.state.cli().network.to_string(),
+        }
+    }
+
+    async fn block_info_call(&self, request: BlockInfoRequest) -> BlockInfoResponse {
+        let state = self.state.lock_guard().await;
+        let Some(digest) = request.block_selector.as_digest(&state).await else {
+            return BlockInfoResponse { block_info: None };
+        };
+
+        let tip_digest = state.chain.light_state().hash();
+        let archival_state = state.chain.archival_state();
+
+        let Some(block) = archival_state.get_block(digest).await.ok().flatten() else {
+            return BlockInfoResponse { block_info: None };
+        };
+
+        let is_canonical = archival_state
+            .block_belongs_to_canonical_chain(digest)
+            .await;
+
+        let sibling_blocks = archival_state
+            .block_height_to_block_digests(block.header().height)
+            .await
+            .into_iter()
+            .filter(|d| *d != digest)
+            .collect();
+
+        BlockInfoResponse {
+            block_info: Some(BlockInfo::new(
+                &block,
+                archival_state.genesis_block().hash(),
+                tip_digest,
+                sibling_blocks,
+                is_canonical,
+            )),
+        }
+    }
+
+    async fn block_digest_call(&self, request: BlockDigestRequest) -> BlockDigestResponse {
+        let state = self.state.lock_guard().await;
+        let digest = request.block_selector.as_digest(&state).await;
+
+        BlockDigestResponse { digest }
+    }
+
+    async fn block_digests_by_height_call(
+        &self,
+        request: BlockDigestsByHeightRequest,
+    ) -> BlockDigestsByHeightResponse {
+        let state = self.state.lock_guard().await;
+        let digests = state
+            .chain
+            .archival_state()
+            .block_height_to_block_digests(request.height)
+            .await;
+
+        BlockDigestsByHeightResponse { digests }
+    }
+
+    async fn latest_tip_digests_call(
+        &self,
+        request: LatestTipDigestsRequest,
+    ) -> LatestTipDigestsResponse {
+        let state = self.state.lock_guard().await;
+        let latest_block_digest = state.chain.light_state().hash();
+        let digests = state
+            .chain
+            .archival_state()
+            .get_ancestor_block_digests(latest_block_digest, request.n)
+            .await;
+
+        LatestTipDigestsResponse { digests }
+    }
+
+    async fn confirmations_call(&self, _: ConfirmationsRequest) -> ConfirmationsResponse {
+        let state = self.state.lock_guard().await;
+        let confirmations = match state.get_latest_balance_height().await {
+            Some(latest_balance_height) => {
+                let tip_block_header = state.chain.light_state().header();
+                let diff = (tip_block_header.height - latest_balance_height) as u64 + 1;
+                Some(diff.into())
+            }
+            None => None,
+        };
+
+        ConfirmationsResponse { confirmations }
     }
 }
 

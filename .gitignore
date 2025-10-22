@@ -126,3 +126,10 @@ fabric.properties
 # Debuggable Tasm programs for triton-tui
 program.tasm
 vm_state.json
+
+# Cursor AI configuration and agent instructions
+.cursor/
+AGENTS.md
+
+# Ad-hoc documentation (temporary/working docs)
+docs/adhoc/
