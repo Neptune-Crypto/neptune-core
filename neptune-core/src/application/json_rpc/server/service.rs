@@ -238,6 +238,7 @@ pub mod tests {
     use crate::api::export::Network;
     use crate::application::config::cli_args;
     use crate::application::json_rpc::core::api::rpc::RpcApi;
+    use crate::application::json_rpc::core::model::common::RpcBlockSelector;
     use crate::application::json_rpc::server::http::RpcServer;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
@@ -305,5 +306,71 @@ pub mod tests {
 
         let announcements = rpc_server.tip_announcements().await.announcements;
         assert_eq!(transaction_kernel.announcements, announcements);
+    }
+
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
+    async fn get_block_calls_are_consistent(
+        #[strategy(txkernel::with_lengths(0, 2, 2, true))]
+    tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+    ) {
+        let mut rpc_server = test_rpc_server().await;
+
+        let tx_block1 = Transaction {
+            kernel: tx_block1,
+            proof: TransactionProof::invalid(),
+        };
+        let block1 = invalid_block_with_transaction(&Block::genesis(Network::Main), tx_block1);
+        rpc_server
+            .state
+            .set_new_tip(block1.clone())
+            .await
+            .expect("block to be valid");
+
+        for height in [0, 1] {
+            let selector = RpcBlockSelector::Height(height.into());
+
+            let block = rpc_server
+                .get_block(selector)
+                .await
+                .block
+                .expect("block should exist");
+            let proof = rpc_server
+                .get_block_proof(selector)
+                .await
+                .proof
+                .expect("proof should exist");
+            assert_eq!(block.proof, proof);
+
+            let kernel = rpc_server
+                .get_block_kernel(selector)
+                .await
+                .kernel
+                .expect("kernel should exist");
+            let header = rpc_server
+                .get_block_header(selector)
+                .await
+                .header
+                .expect("header should exist");
+            assert_eq!(kernel.header, header);
+
+            let body = rpc_server
+                .get_block_body(selector)
+                .await
+                .body
+                .expect("body should exist");
+            let transaction_kernel = rpc_server
+                .get_block_transaction_kernel(selector)
+                .await
+                .kernel
+                .expect("transaction kernel should exist");
+            assert_eq!(body.transaction_kernel, transaction_kernel);
+
+            let announcements = rpc_server
+                .get_block_announcements(selector)
+                .await
+                .announcements
+                .expect("announcements should exist");
+            assert_eq!(transaction_kernel.announcements, announcements);
+        }
     }
 }
