@@ -1,6 +1,8 @@
 use async_trait::async_trait;
+use tracing::info;
 
 use crate::application::json_rpc::core::api::rpc::RpcApi;
+use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::server::http::RpcServer;
 
@@ -88,6 +90,164 @@ impl RpcApi for RpcServer {
                 .map(|a| a.message.clone().into())
                 .collect(),
         }
+    }
+
+    async fn get_block_call(&self, request: GetBlockRequest) -> GetBlockResponse {
+        let state = self.state.lock_guard().await;
+        let block = match request.selector.as_digest(&state).await {
+            Some(digest) => state
+                .chain
+                .archival_state()
+                .get_block(digest)
+                .await
+                .unwrap()
+                .as_ref()
+                .map(RpcBlock::from),
+            None => None,
+        };
+
+        GetBlockResponse { block }
+    }
+
+    async fn get_block_proof_call(&self, request: GetBlockProofRequest) -> GetBlockProofResponse {
+        let state = self.state.lock_guard().await;
+        let proof = match request.selector.as_digest(&state).await {
+            Some(digest) => state
+                .chain
+                .archival_state()
+                .get_block(digest)
+                .await
+                .unwrap()
+                .as_ref()
+                .map(|b| (&b.proof).into()),
+            None => None,
+        };
+
+        GetBlockProofResponse { proof }
+    }
+
+    async fn get_block_kernel_call(
+        &self,
+        request: GetBlockKernelRequest,
+    ) -> GetBlockKernelResponse {
+        let state = self.state.lock_guard().await;
+        let kernel = match request.selector.as_digest(&state).await {
+            Some(digest) => state
+                .chain
+                .archival_state()
+                .get_block(digest)
+                .await
+                .unwrap()
+                .as_ref()
+                .map(|b| (&b.kernel).into()),
+            None => None,
+        };
+
+        GetBlockKernelResponse { kernel }
+    }
+
+    async fn get_block_header_call(
+        &self,
+        request: GetBlockHeaderRequest,
+    ) -> GetBlockHeaderResponse {
+        let state = self.state.lock_guard().await;
+        let header = match request.selector.as_digest(&state).await {
+            Some(digest) => state
+                .chain
+                .archival_state()
+                .get_block(digest)
+                .await
+                .unwrap()
+                .as_ref()
+                .map(|b| b.header().into()),
+            None => None,
+        };
+
+        GetBlockHeaderResponse { header }
+    }
+
+    async fn get_block_body_call(&self, request: GetBlockBodyRequest) -> GetBlockBodyResponse {
+        let state = self.state.lock_guard().await;
+        let body = match request.selector.as_digest(&state).await {
+            Some(digest) => state
+                .chain
+                .archival_state()
+                .get_block(digest)
+                .await
+                .unwrap()
+                .as_ref()
+                .map(|b| b.body().into()),
+            None => None,
+        };
+
+        GetBlockBodyResponse { body }
+    }
+
+    async fn get_block_transaction_kernel_call(
+        &self,
+        request: GetBlockTransactionKernelRequest,
+    ) -> GetBlockTransactionKernelResponse {
+        let state = self.state.lock_guard().await;
+        let kernel = match request.selector.as_digest(&state).await {
+            Some(digest) => state
+                .chain
+                .archival_state()
+                .get_block(digest)
+                .await
+                .unwrap()
+                .as_ref()
+                .map(|b| b.body().transaction_kernel().into()),
+            None => None,
+        };
+
+        GetBlockTransactionKernelResponse { kernel }
+    }
+
+    async fn get_block_announcements_call(
+        &self,
+        request: GetBlockAnnouncementsRequest,
+    ) -> GetBlockAnnouncementsResponse {
+        let state = self.state.lock_guard().await;
+        let announcements = match request.selector.as_digest(&state).await {
+            Some(digest) => {
+                let announcements = state
+                    .chain
+                    .archival_state()
+                    .get_block(digest)
+                    .await
+                    .unwrap()
+                    .as_ref()
+                    .map(|b| b.body().transaction_kernel().announcements.clone())
+                    .unwrap();
+
+                info!(
+                    "Announcements len: {}, both equality: {}",
+                    announcements.len(),
+                    announcements[0] == announcements[1]
+                );
+                println!("{}", announcements[0]);
+                println!("{}", announcements[1]);
+
+                state
+                    .chain
+                    .archival_state()
+                    .get_block(digest)
+                    .await
+                    .unwrap()
+                    .as_ref()
+                    .map(|b| {
+                        b.body()
+                            .transaction_kernel()
+                            .announcements
+                            .iter()
+                            .map(|a| a.message.clone().into())
+                            .collect::<Vec<_>>()
+                    })
+            }
+            None => None,
+        };
+
+        GetBlockAnnouncementsResponse { announcements }
     }
 }
 

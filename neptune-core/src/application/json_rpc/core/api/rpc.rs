@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use crate::application::json_rpc::core::model::common::RpcBlockSelector;
 use crate::application::json_rpc::core::model::message::*;
 
 #[async_trait]
@@ -56,4 +57,59 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: TipAnnouncementsRequest,
     ) -> TipAnnouncementsResponse;
+
+    async fn get_block(&self, selector: RpcBlockSelector) -> GetBlockResponse {
+        self.get_block_call(GetBlockRequest { selector }).await
+    }
+    async fn get_block_call(&self, request: GetBlockRequest) -> GetBlockResponse;
+
+    async fn get_block_proof(&self, selector: RpcBlockSelector) -> GetBlockProofResponse {
+        self.get_block_proof_call(GetBlockProofRequest { selector })
+            .await
+    }
+    async fn get_block_proof_call(&self, request: GetBlockProofRequest) -> GetBlockProofResponse;
+
+    async fn get_block_kernel(&self, selector: RpcBlockSelector) -> GetBlockKernelResponse {
+        self.get_block_kernel_call(GetBlockKernelRequest { selector })
+            .await
+    }
+    async fn get_block_kernel_call(&self, request: GetBlockKernelRequest)
+        -> GetBlockKernelResponse;
+
+    async fn get_block_header(&self, selector: RpcBlockSelector) -> GetBlockHeaderResponse {
+        self.get_block_header_call(GetBlockHeaderRequest { selector })
+            .await
+    }
+    async fn get_block_header_call(&self, request: GetBlockHeaderRequest)
+        -> GetBlockHeaderResponse;
+
+    async fn get_block_body(&self, selector: RpcBlockSelector) -> GetBlockBodyResponse {
+        self.get_block_body_call(GetBlockBodyRequest { selector })
+            .await
+    }
+    async fn get_block_body_call(&self, request: GetBlockBodyRequest) -> GetBlockBodyResponse;
+
+    async fn get_block_transaction_kernel(
+        &self,
+        selector: RpcBlockSelector,
+    ) -> GetBlockTransactionKernelResponse {
+        self.get_block_transaction_kernel_call(GetBlockTransactionKernelRequest { selector })
+            .await
+    }
+    async fn get_block_transaction_kernel_call(
+        &self,
+        request: GetBlockTransactionKernelRequest,
+    ) -> GetBlockTransactionKernelResponse;
+
+    async fn get_block_announcements(
+        &self,
+        selector: RpcBlockSelector,
+    ) -> GetBlockAnnouncementsResponse {
+        self.get_block_announcements_call(GetBlockAnnouncementsRequest { selector })
+            .await
+    }
+    async fn get_block_announcements_call(
+        &self,
+        request: GetBlockAnnouncementsRequest,
+    ) -> GetBlockAnnouncementsResponse;
 }

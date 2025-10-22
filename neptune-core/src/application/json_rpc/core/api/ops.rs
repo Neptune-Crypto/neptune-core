@@ -53,6 +53,27 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Chain)]
     TipAnnouncements,
+
+    #[namespace(Namespace::Archival)]
+    GetBlock,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockProof,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockKernel,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockHeader,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockBody,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockTransactionKernel,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockAnnouncements,
 }
 
 #[cfg(test)]
