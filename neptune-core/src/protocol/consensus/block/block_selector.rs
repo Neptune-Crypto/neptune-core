@@ -22,19 +22,20 @@ use thiserror::Error;
 use super::block_height::BlockHeight;
 use crate::state::GlobalState;
 use crate::twenty_first::prelude::Digest;
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum BlockSelector {
-    Special(BlockSelectorLiteral),
-    Digest(Digest),
-    Height(BlockHeight),
-}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum BlockSelectorLiteral {
     Genesis,
     Tip,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum BlockSelector {
+    Special(BlockSelectorLiteral),
+    Digest(Digest),
+    Height(BlockHeight),
 }
 
 /// BlockSelector can be written out as any of:

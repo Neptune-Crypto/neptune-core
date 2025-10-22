@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use tracing::info;
 
 use crate::application::json_rpc::core::api::rpc::RpcApi;
 use crate::application::json_rpc::core::model::block::RpcBlock;
@@ -209,41 +208,21 @@ impl RpcApi for RpcServer {
     ) -> GetBlockAnnouncementsResponse {
         let state = self.state.lock_guard().await;
         let announcements = match request.selector.as_digest(&state).await {
-            Some(digest) => {
-                let announcements = state
-                    .chain
-                    .archival_state()
-                    .get_block(digest)
-                    .await
-                    .unwrap()
-                    .as_ref()
-                    .map(|b| b.body().transaction_kernel().announcements.clone())
-                    .unwrap();
-
-                info!(
-                    "Announcements len: {}, both equality: {}",
-                    announcements.len(),
-                    announcements[0] == announcements[1]
-                );
-                println!("{}", announcements[0]);
-                println!("{}", announcements[1]);
-
-                state
-                    .chain
-                    .archival_state()
-                    .get_block(digest)
-                    .await
-                    .unwrap()
-                    .as_ref()
-                    .map(|b| {
-                        b.body()
-                            .transaction_kernel()
-                            .announcements
-                            .iter()
-                            .map(|a| a.message.clone().into())
-                            .collect::<Vec<_>>()
-                    })
-            }
+            Some(digest) => state
+                .chain
+                .archival_state()
+                .get_block(digest)
+                .await
+                .unwrap()
+                .as_ref()
+                .map(|b| {
+                    b.body()
+                        .transaction_kernel()
+                        .announcements
+                        .iter()
+                        .map(|a| a.message.clone().into())
+                        .collect::<Vec<_>>()
+                }),
             None => None,
         };
 
