@@ -2314,10 +2314,20 @@ mod tests {
     }
 
     mod blocks {
+        use futures::channel::oneshot;
         use itertools::Itertools;
 
         use super::*;
+        use crate::application::loops::channel::NewBlockFound;
+        use crate::application::loops::mine_loop::guess_nonce;
+        use crate::application::loops::mine_loop::GuessingConfiguration;
+        use crate::protocol::consensus::block::difficulty_control::Difficulty;
+        use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
+        use crate::tests::shared::blocks::next_block;
+        use crate::tests::shared::globalstate::test_setup_custom_genesis_block;
+        use crate::tests::tokio_runtime;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -3750,6 +3760,127 @@ mod tests {
             );
 
             Ok(())
+        }
+
+        #[traced_test]
+        #[test]
+        fn hardfork_alpha_happy_case() {
+            // Ensure that valid blocks are all accepted across hardfork alpha.
+            // Scenario: Current height is hardfork minus 2. Then receives peer
+            // notification of first block after hardfork. Must accept all
+            // blocks from peer, not punish peer, and send blocks to main
+            // loop.
+            let init_block_heigth = BlockHeight::from(14999u64);
+            let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
+                init_block_heigth,
+                Difficulty::MINIMUM,
+            );
+
+            tokio_runtime().block_on(runner(bpw));
+            async fn runner(block_primitive_witness: BlockPrimitiveWitness) {
+                let network = Network::Main;
+                let (hard_fork_minus_2, hard_fork_minus_1_no_pow) =
+                    Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
+                        .await;
+
+                let (
+                    _peer_broadcast_tx,
+                    from_main_rx_clone,
+                    to_main_tx,
+                    mut to_main_rx1,
+                    state_lock,
+                    hsd,
+                ) = test_setup_custom_genesis_block(
+                    network,
+                    1,
+                    cli_args::Args::default(),
+                    hard_fork_minus_2.clone(),
+                )
+                .await
+                .unwrap();
+
+                // Solve PoW for 1st block after genesis
+                let (guesser_tx_b, guesser_rx) = oneshot::channel::<NewBlockFound>();
+                let guesser_timestamp = hard_fork_minus_1_no_pow.header().timestamp;
+                let rng = StdRng::seed_from_u64(55512345);
+                guess_nonce(
+                    network,
+                    hard_fork_minus_1_no_pow,
+                    *hard_fork_minus_2.header(),
+                    guesser_tx_b,
+                    GuessingConfiguration {
+                        num_guesser_threads: state_lock.cli().guesser_threads,
+                        address: GenerationReceivingAddress::derive_from_seed(Digest::default())
+                            .into(),
+                        // For deterministic pow-guessing, both RNG and timestamp
+                        // must be deterministic.
+                        override_rng: Some(rng),
+                        override_timestamp: Some(guesser_timestamp),
+                    },
+                )
+                .await;
+
+                let hard_fork_minus_1 = *guesser_rx.await.unwrap().block;
+
+                let first_block_after_hardfork =
+                    next_block(state_lock.clone(), hard_fork_minus_1.clone()).await;
+
+                let mock = Mock::new(vec![
+                    Action::Read(PeerMessage::BlockNotification(
+                        (&first_block_after_hardfork).into(),
+                    )),
+                    Action::Write(PeerMessage::BlockRequestByHeight(BlockHeight::from(
+                        15000u64,
+                    ))),
+                    Action::Read(PeerMessage::Block(Box::new(
+                        first_block_after_hardfork.clone().try_into().unwrap(),
+                    ))),
+                    Action::Write(PeerMessage::BlockRequestByHash(hard_fork_minus_1.hash())),
+                    Action::Read(PeerMessage::Block(Box::new(
+                        hard_fork_minus_1.clone().try_into().unwrap(),
+                    ))),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+
+                let peer_address = get_dummy_socket_address(0);
+                let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                    to_main_tx.clone(),
+                    state_lock.clone(),
+                    peer_address,
+                    hsd,
+                    false,
+                    1,
+                    first_block_after_hardfork.header().timestamp,
+                );
+                peer_loop_handler
+                    .run_wrapper(mock, from_main_rx_clone)
+                    .await
+                    .unwrap();
+
+                match to_main_rx1.recv().await {
+                    Some(PeerTaskToMain::NewBlocks(blocks)) => {
+                        assert_eq!(
+                            vec![hard_fork_minus_1, first_block_after_hardfork],
+                            blocks,
+                            "Two blocks must be sent to main loop in right order"
+                        );
+                    }
+                    _ => panic!("Did not find msg sent to main task"),
+                };
+
+                // Verify that peer is not sanctioned
+                assert!(!state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .get_peer_standing_from_database(peer_address.ip())
+                    .await
+                    .unwrap()
+                    .standing
+                    .is_negative());
+
+                drop(to_main_rx1);
+            }
         }
     }
 

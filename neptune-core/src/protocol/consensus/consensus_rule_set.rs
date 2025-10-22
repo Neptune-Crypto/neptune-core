@@ -425,7 +425,7 @@ pub(crate) mod tests {
             );
 
             // hard fork minus 1
-            let block_c = next_block(bob.clone()).await;
+            let block_c = next_block(bob.clone(), block_b.clone()).await;
             assert!(block_c.has_proof_of_work(network, block_b.header()));
             assert!(block_c.pow_verify(
                 block_b.header().difficulty.target(),
@@ -448,7 +448,7 @@ pub(crate) mod tests {
             );
 
             // 1st block after hard fork!
-            let block_d = next_block(bob.clone()).await;
+            let block_d = next_block(bob.clone(), block_c.clone()).await;
             assert!(block_d.has_proof_of_work(network, block_c.header()));
             assert!(!block_d.pow_verify(
                 block_c.header().difficulty.target(),
@@ -471,7 +471,7 @@ pub(crate) mod tests {
             );
 
             // 2nd block after hard fork
-            let block_e = next_block(bob.clone()).await;
+            let block_e = next_block(bob.clone(), block_d.clone()).await;
             assert!(block_e.has_proof_of_work(network, block_d.header()));
             assert!(!block_e.pow_verify(
                 block_d.header().difficulty.target(),
@@ -494,7 +494,7 @@ pub(crate) mod tests {
             );
 
             // 3rd block after hard fork
-            let block_f = next_block(bob.clone()).await;
+            let block_f = next_block(bob.clone(), block_e.clone()).await;
             assert!(block_f.has_proof_of_work(network, block_e.header()));
             assert!(!block_f.pow_verify(
                 block_e.header().difficulty.target(),

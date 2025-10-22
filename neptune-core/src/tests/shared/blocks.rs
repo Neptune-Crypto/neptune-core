@@ -55,20 +55,13 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-/// Create a valid block on top of current tip. Returned block is valid in terms
-/// of both block validity and PoW, and is thus the new canonical block of the
-/// chain, assuming that tip is already the most canonical block.
+/// Create a valid block on top of provided block. Returned block is valid in
+/// terms of both block validity and PoW, and is thus the new canonical block of
+/// the chain, assuming that tip is already the most canonical block.
 ///
 /// Returned PoW solution is deterministic, as is the block proof, and
 /// consequently the entire block and its hash.
-pub(crate) async fn next_block(global_state_lock: GlobalStateLock) -> Block {
-    let parent = global_state_lock
-        .lock_guard()
-        .await
-        .chain
-        .light_state()
-        .clone();
-
+pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block) -> Block {
     let network = global_state_lock.cli().network;
     let (child_no_pow, _) = compose_block_helper(
         parent.clone(),
