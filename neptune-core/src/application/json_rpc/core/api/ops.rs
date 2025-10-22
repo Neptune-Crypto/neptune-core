@@ -34,6 +34,9 @@ pub enum RpcMethods {
     Height,
 
     #[namespace(Namespace::Chain)]
+    TipDigest,
+
+    #[namespace(Namespace::Chain)]
     Tip,
 
     #[namespace(Namespace::Chain)]
@@ -53,6 +56,36 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Chain)]
     TipAnnouncements,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockDigest,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockDigests,
+
+    #[namespace(Namespace::Archival)]
+    GetBlock,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockProof,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockKernel,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockHeader,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockBody,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockTransactionKernel,
+
+    #[namespace(Namespace::Archival)]
+    GetBlockAnnouncements,
+
+    #[namespace(Namespace::Archival)]
+    IsBlockCanonical,
 }
 
 #[cfg(test)]

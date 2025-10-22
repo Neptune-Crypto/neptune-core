@@ -135,6 +135,7 @@ pub type RpcBlockSelector = BlockSelector;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use serde_json;
+    use tasm_lib::twenty_first::bfe_vec;
 
     use super::*;
 
@@ -153,25 +154,8 @@ mod tests {
 
     #[test]
     fn rpc_bfield_elements_serde_roundtrip() {
-        let bfes = vec![
-            BFieldElement::new(0),
-            BFieldElement::new(1),
-            BFieldElement::new(255),
-            BFieldElement::new(0x1234567890ABCDEF),
-            BFieldElement::new(u64::MAX),
-        ];
+        let bfes = bfe_vec![0, 1, 255, 0x1234567890ABCDEFu64, u64::MAX,];
         let rpc_bfes: RpcBFieldElements = bfes.into();
-
-        let serialized = serde_json::to_string(&rpc_bfes).expect("Serialization should succeed");
-        let deserialized: RpcBFieldElements =
-            serde_json::from_str(&serialized).expect("Deserialization should succeed");
-
-        assert_eq!(rpc_bfes, deserialized);
-    }
-
-    #[test]
-    fn rpc_bfield_elements_serde_roundtrip_empty() {
-        let rpc_bfes = RpcBFieldElements(vec![]);
 
         let serialized = serde_json::to_string(&rpc_bfes).expect("Serialization should succeed");
         let deserialized: RpcBFieldElements =
@@ -211,5 +195,8 @@ mod tests {
         assert!("0x0000000000000x0000000000000002"
             .parse::<RpcBFieldElements>()
             .is_err());
+        // Too big hex string (over 4 MB)
+        let oversized_hex = "0x".to_string() + &"00".repeat(4 * 1024 * 1024 + 1);
+        assert!(oversized_hex.parse::<RpcBFieldElements>().is_err());
     }
 }

@@ -5,7 +5,7 @@
 //!
 //! (especially since we now have a key type with no corresponding address)
 mod addressable_key;
-pub mod common;
+mod common;
 pub mod encrypted_utxo_notification;
 pub mod generation_address;
 mod receiving_address;

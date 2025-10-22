@@ -22,19 +22,20 @@ use thiserror::Error;
 use super::block_height::BlockHeight;
 use crate::state::GlobalState;
 use crate::twenty_first::prelude::Digest;
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum BlockSelector {
-    Special(BlockSelectorLiteral),
-    Digest(Digest),
-    Height(BlockHeight),
-}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum BlockSelectorLiteral {
     Genesis,
     Tip,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum BlockSelector {
+    Special(BlockSelectorLiteral),
+    Digest(Digest),
+    Height(BlockHeight),
 }
 
 /// BlockSelector can be written out as any of:
@@ -111,5 +112,130 @@ impl BlockSelector {
                     .await
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub mod tests {
+    use super::*;
+    use crate::api::export::Network;
+    use crate::application::config::cli_args;
+    use crate::protocol::consensus::transaction::Transaction;
+    use crate::protocol::consensus::transaction::TransactionProof;
+    use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::strategies::txkernel;
+    use crate::Block;
+
+    #[test]
+    fn block_selector_serde_json() {
+        let test_cases = vec![
+            (
+                r#""genesis""#,
+                BlockSelector::Special(BlockSelectorLiteral::Genesis),
+            ),
+            (
+                r#""tip""#,
+                BlockSelector::Special(BlockSelectorLiteral::Tip),
+            ),
+            (r#"0"#, BlockSelector::Height(BlockHeight::from(0))),
+            (r#"42"#, BlockSelector::Height(BlockHeight::from(42))),
+        ];
+
+        for (json_str, expected) in test_cases {
+            let deserialized: BlockSelector = serde_json::from_str(json_str)
+                .unwrap_or_else(|e| panic!("Failed to deserialize {}: {}", json_str, e));
+
+            assert_eq!(
+                deserialized, expected,
+                "JSON compatibility failed for: {}",
+                json_str
+            );
+        }
+
+        let known_digest = Digest::default();
+        let digest_json = format!("\"{}\"", known_digest.to_hex());
+        let deserialized: BlockSelector =
+            serde_json::from_str(&digest_json).expect("Digest to be deserialized");
+
+        assert_eq!(deserialized, BlockSelector::Digest(known_digest));
+    }
+
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
+    async fn block_selector_consistency_with_new_block(
+        #[strategy(txkernel::with_lengths(0, 2, 2, true))]
+    tx_kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+    ) {
+        let mut global_state_lock = mock_genesis_global_state(
+            2,
+            WalletEntropy::new_random(),
+            cli_args::Args::default_with_network(Network::Main),
+        )
+        .await;
+        let mut state = global_state_lock.lock_guard_mut().await;
+
+        let genesis_digest = state.chain.light_state().hash();
+
+        // Test genesis consistency
+        assert_eq!(
+            BlockSelector::Special(BlockSelectorLiteral::Genesis)
+                .as_digest(&state)
+                .await
+                .unwrap(),
+            genesis_digest
+        );
+        assert_eq!(
+            BlockSelector::Special(BlockSelectorLiteral::Tip)
+                .as_digest(&state)
+                .await
+                .unwrap(),
+            genesis_digest
+        );
+        assert_eq!(
+            BlockSelector::Height(0u64.into())
+                .as_digest(&state)
+                .await
+                .unwrap(),
+            genesis_digest
+        );
+
+        // Add a block (height 1)
+        let genesis = Block::genesis(Network::Main);
+        let tx_block1 = Transaction {
+            kernel: tx_kernel,
+            proof: TransactionProof::invalid(),
+        };
+        let block1 = invalid_block_with_transaction(&genesis, tx_block1);
+        let block1_digest = block1.hash();
+        let block1_height: BlockHeight = 1.into();
+
+        state.set_new_tip(block1.clone()).await.unwrap();
+
+        // Test consistency after adding new block
+        let tip_digest = BlockSelector::Special(BlockSelectorLiteral::Tip)
+            .as_digest(&state)
+            .await
+            .unwrap();
+        let height1_digest = BlockSelector::Height(block1_height)
+            .as_digest(&state)
+            .await
+            .unwrap();
+        let direct_digest = BlockSelector::Digest(block1_digest)
+            .as_digest(&state)
+            .await
+            .unwrap();
+
+        // All selectors for block1 should return the same digest
+        assert_eq!(tip_digest, block1_digest);
+        assert_eq!(height1_digest, block1_digest);
+        assert_eq!(direct_digest, block1_digest);
+
+        // Non-existent height should return None
+        assert!(BlockSelector::Height(2u64.into())
+            .as_digest(&state)
+            .await
+            .is_none());
     }
 }

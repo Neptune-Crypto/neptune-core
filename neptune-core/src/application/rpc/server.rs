@@ -461,6 +461,7 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -484,7 +485,7 @@ pub trait RPC {
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set the way to look up for a block : it can be `Digest`, `Height`, `Genesis`, `Tip`
-    /// let block_selector : BlockSelector = BlockSelector::Genesis;
+    /// let block_selector : BlockSelector = BlockSelector::Special(BlockSelectorLiteral::Genesis);
     ///
     /// // query neptune-core server to get block info
     /// let latest_tip_digests = client.block_info(context::current(), token, block_selector).await??;
@@ -577,6 +578,7 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -600,7 +602,7 @@ pub trait RPC {
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set the way to look up for a block : it can be `Digest`, `Height`, `Genesis`, `Tip`
-    /// let block_selector : BlockSelector = BlockSelector::Tip;
+    /// let block_selector : BlockSelector = BlockSelector::Special(BlockSelectorLiteral::Tip);
     ///
     /// // query neptune-core server to get block digest
     /// let block_digest = client.block_digest(context::current(), token, block_selector).await??;
@@ -661,6 +663,7 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -684,7 +687,7 @@ pub trait RPC {
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set the way to look up for a block : it can be `Digest`, `Height`, `Genesis`, `Tip`
-    /// let block_selector : BlockSelector = BlockSelector::Genesis;
+    /// let block_selector : BlockSelector = BlockSelector::Special(BlockSelectorLiteral::Genesis);
     ///
     /// // query neptune-core server to get block header
     /// let block_header = client.header(context::current(), token, block_selector).await??;
@@ -1480,6 +1483,7 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1503,7 +1507,7 @@ pub trait RPC {
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // sets the last block
-    /// let last_block : BlockSelector = BlockSelector::Genesis;
+    /// let last_block : BlockSelector = BlockSelector::Special(BlockSelectorLiteral::Genesis);
     ///
     /// // set maximum number of blocks to 5 blocks
     /// let max_num_blocks : Option<usize> = Some(5);
