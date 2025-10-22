@@ -734,6 +734,12 @@ impl PeerLoopHandler {
 
                     info!("Got sync challenge from {}", self.peer_address.ip());
 
+                    // Sync challenges are *always* punished to prevent a
+                    // malicious peer from spamming these, as they are expensive
+                    // to respond to.
+                    self.punish(NegativePeerSanction::ReceivedSyncChallenge)
+                        .await?;
+
                     let response = self
                         .global_state_lock
                         .lock_guard()

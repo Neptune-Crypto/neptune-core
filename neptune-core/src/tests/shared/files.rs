@@ -154,7 +154,7 @@ pub(crate) fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, S
             let uri: clienter::Uri = url.into();
 
             let mut http_client = clienter::HttpClient::new();
-            http_client.timeout = Some(Duration::from_secs(10));
+            http_client.timeout = Some(Duration::from_millis(1600));
             http_client.headers = headers_;
             let request = http_client.request(clienter::HttpMethod::GET, uri);
 
