@@ -107,7 +107,6 @@ pub(crate) mod tests {
     use crate::api::export::KeyType;
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::OutputFormat;
-    use crate::api::export::ReceivingAddress;
     use crate::api::export::StateLock;
     use crate::api::export::Timestamp;
     use crate::api::export::Transaction;
@@ -132,6 +131,7 @@ pub(crate) mod tests {
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::next_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
     use crate::tests::tokio_runtime;
 
@@ -350,43 +350,6 @@ pub(crate) mod tests {
         tokio_runtime().block_on(new_blocks_hardfork_alpha(bpw));
 
         async fn new_blocks_hardfork_alpha(block_primitive_witness: BlockPrimitiveWitness) {
-            async fn get_child_with_pow(
-                parent: &Block,
-                guesser_address: ReceivingAddress,
-                global_state_lock: GlobalStateLock,
-            ) -> Block {
-                let network = global_state_lock.cli().network;
-                let (child_no_pow, _) = compose_block_helper(
-                    parent.clone(),
-                    global_state_lock.clone(),
-                    parent.header().timestamp,
-                    TritonVmProofJobOptions::default(),
-                )
-                .await
-                .unwrap();
-
-                let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
-
-                let new_timestamp = parent.header().timestamp + Timestamp::minutes(9);
-                let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
-                guess_nonce(
-                    network,
-                    child_no_pow,
-                    *parent.header(),
-                    guesser_tx,
-                    GuessingConfiguration {
-                        num_guesser_threads: global_state_lock.cli().guesser_threads,
-                        address: guesser_address,
-                        override_rng: Some(deterministic_guesser_rng),
-                        override_timestamp: Some(new_timestamp),
-                    },
-                )
-                .await;
-                let child = *guesser_rx.await.unwrap().block;
-
-                child
-            }
-
             // 1. generate state synced to height
             let mut rng = StdRng::seed_from_u64(55512345);
             let network = Network::Main;
@@ -462,8 +425,7 @@ pub(crate) mod tests {
             );
 
             // hard fork minus 1
-            let block_c =
-                get_child_with_pow(&block_b, guesser_key.to_address().into(), bob.clone()).await;
+            let block_c = next_block(bob.clone()).await;
             assert!(block_c.has_proof_of_work(network, block_b.header()));
             assert!(block_c.pow_verify(
                 block_b.header().difficulty.target(),
@@ -486,8 +448,7 @@ pub(crate) mod tests {
             );
 
             // 1st block after hard fork!
-            let block_d =
-                get_child_with_pow(&block_c, guesser_key.to_address().into(), bob.clone()).await;
+            let block_d = next_block(bob.clone()).await;
             assert!(block_d.has_proof_of_work(network, block_c.header()));
             assert!(!block_d.pow_verify(
                 block_c.header().difficulty.target(),
@@ -510,8 +471,7 @@ pub(crate) mod tests {
             );
 
             // 2nd block after hard fork
-            let block_e =
-                get_child_with_pow(&block_d, guesser_key.to_address().into(), bob.clone()).await;
+            let block_e = next_block(bob.clone()).await;
             assert!(block_e.has_proof_of_work(network, block_d.header()));
             assert!(!block_e.pow_verify(
                 block_d.header().difficulty.target(),
@@ -534,8 +494,7 @@ pub(crate) mod tests {
             );
 
             // 3rd block after hard fork
-            let block_f =
-                get_child_with_pow(&block_e, guesser_key.to_address().into(), bob.clone()).await;
+            let block_f = next_block(bob.clone()).await;
             assert!(block_f.has_proof_of_work(network, block_e.header()));
             assert!(!block_f.pow_verify(
                 block_e.header().difficulty.target(),

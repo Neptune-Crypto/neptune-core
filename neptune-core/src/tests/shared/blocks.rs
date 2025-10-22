@@ -1,3 +1,4 @@
+use futures::channel::oneshot;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -15,9 +16,13 @@ use crate::api::export::Network;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::loops::channel::NewBlockFound;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
+use crate::application::loops::mine_loop::compose_block_helper;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
+use crate::application::loops::mine_loop::guess_nonce;
 use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
+use crate::application::loops::mine_loop::GuessingConfiguration;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::block_appendix::BlockAppendix;
 use crate::protocol::consensus::block::block_body::BlockBody;
@@ -40,6 +45,7 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::verifier::cache_true_claim;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -48,6 +54,60 @@ use crate::tests::shared::Randomness;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+/// Create a valid block on top of current tip. Returned block is valid in terms
+/// of both block validity and PoW, and is thus the new canonical block of the
+/// chain, assuming that tip is already the most canonical block.
+///
+/// Returned PoW solution is deterministic, as is the block proof, and
+/// consequently the entire block and its hash.
+pub(crate) async fn next_block(global_state_lock: GlobalStateLock) -> Block {
+    let parent = global_state_lock
+        .lock_guard()
+        .await
+        .chain
+        .light_state()
+        .clone();
+
+    let network = global_state_lock.cli().network;
+    let (child_no_pow, _) = compose_block_helper(
+        parent.clone(),
+        global_state_lock.clone(),
+        parent.header().timestamp,
+        TritonVmProofJobOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
+
+    let guesser_address = global_state_lock
+        .lock_guard()
+        .await
+        .wallet_state
+        .wallet_entropy
+        .guesser_fee_key()
+        .to_address()
+        .into();
+    let new_timestamp = parent.header().timestamp + Timestamp::minutes(9);
+    let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
+    guess_nonce(
+        network,
+        child_no_pow,
+        *parent.header(),
+        guesser_tx,
+        GuessingConfiguration {
+            num_guesser_threads: global_state_lock.cli().guesser_threads,
+            address: guesser_address,
+            override_rng: Some(deterministic_guesser_rng),
+            override_timestamp: Some(new_timestamp),
+        },
+    )
+    .await;
+    let child = *guesser_rx.await.unwrap().block;
+
+    child
+}
 
 /// Create an invalid block with the provided transaction kernel, using the
 /// provided mutator set as the predessor block's mutator set. Invalid block in
