@@ -4304,6 +4304,7 @@ mod tests {
     use crate::application::config::network::Network;
     use crate::application::database::storage::storage_vec::traits::*;
     use crate::application::rpc::server::NeptuneRPCServer;
+    use crate::protocol::consensus::block::block_selector::BlockSelectorLiteral;
     use crate::protocol::peer::NegativePeerSanction;
     use crate::protocol::peer::PeerSanction;
     use crate::protocol::proof_abstractions::mast_hash::MastHash;
@@ -4535,11 +4536,21 @@ mod tests {
             .unwrap();
         let _ = rpc_server
             .clone()
-            .block_intervals(ctx, token, BlockSelector::Tip, None)
+            .block_intervals(
+                ctx,
+                token,
+                BlockSelector::Special(BlockSelectorLiteral::Tip),
+                None,
+            )
             .await;
         let _ = rpc_server
             .clone()
-            .block_difficulties(ctx, token, BlockSelector::Tip, None)
+            .block_difficulties(
+                ctx,
+                token,
+                BlockSelector::Special(BlockSelectorLiteral::Tip),
+                None,
+            )
             .await;
         let _ = rpc_server
             .clone()
@@ -5189,7 +5200,11 @@ mod tests {
         assert_eq!(
             Block::genesis(network).kernel.mast_hash(),
             rpc_server
-                .block_kernel(ctx, token, BlockSelector::Genesis)
+                .block_kernel(
+                    ctx,
+                    token,
+                    BlockSelector::Special(BlockSelectorLiteral::Genesis)
+                )
                 .await
                 .expect("RPC call must pass")
                 .expect("Must find genesis block")
@@ -5249,7 +5264,11 @@ mod tests {
             genesis_block_info,
             rpc_server
                 .clone()
-                .block_info(ctx, token, BlockSelector::Genesis)
+                .block_info(
+                    ctx,
+                    token,
+                    BlockSelector::Special(BlockSelectorLiteral::Genesis)
+                )
                 .await
                 .unwrap()
                 .unwrap()
@@ -5260,7 +5279,11 @@ mod tests {
             tip_block_info,
             rpc_server
                 .clone()
-                .block_info(ctx, token, BlockSelector::Tip)
+                .block_info(
+                    ctx,
+                    token,
+                    BlockSelector::Special(BlockSelectorLiteral::Tip)
+                )
                 .await
                 .unwrap()
                 .unwrap()
@@ -5401,7 +5424,11 @@ mod tests {
             genesis_hash,
             rpc_server
                 .clone()
-                .block_digest(ctx, token, BlockSelector::Genesis)
+                .block_digest(
+                    ctx,
+                    token,
+                    BlockSelector::Special(BlockSelectorLiteral::Genesis)
+                )
                 .await
                 .unwrap()
                 .unwrap()
@@ -5412,7 +5439,11 @@ mod tests {
             global_state.chain.light_state().hash(),
             rpc_server
                 .clone()
-                .block_digest(ctx, token, BlockSelector::Tip)
+                .block_digest(
+                    ctx,
+                    token,
+                    BlockSelector::Special(BlockSelectorLiteral::Tip)
+                )
                 .await
                 .unwrap()
                 .unwrap()

@@ -29,6 +29,7 @@ use neptune_cash::application::rpc::server::coinbase_output_readable::CoinbaseOu
 use neptune_cash::application::rpc::server::error::RpcError;
 use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
 use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::state::wallet::address::KeyType;
 use neptune_cash::state::wallet::address::ReceivingAddress;
@@ -835,7 +836,11 @@ async fn main() -> Result<()> {
         }
         Command::TipDigest => {
             let head_hash = client
-                .block_digest(ctx, token, BlockSelector::Tip)
+                .block_digest(
+                    ctx,
+                    token,
+                    BlockSelector::Special(BlockSelectorLiteral::Tip),
+                )
                 .await??
                 .unwrap_or_default();
             println!("{head_hash:x}");
@@ -848,7 +853,11 @@ async fn main() -> Result<()> {
         }
         Command::TipHeader => {
             let val = client
-                .header(ctx, token, BlockSelector::Tip)
+                .header(
+                    ctx,
+                    token,
+                    BlockSelector::Special(BlockSelectorLiteral::Tip),
+                )
                 .await??
                 .expect("Tip header should be found");
             println!("{val}")
