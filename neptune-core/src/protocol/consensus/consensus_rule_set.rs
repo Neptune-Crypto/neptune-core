@@ -5,9 +5,13 @@ use crate::api::export::Network;
 use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::BFieldElement;
 
-/// Height of 1st block that follows the alpha consensus ruleset
-pub const BLOCK_HEIGHT_HARDFORK_ALPHA: BlockHeight =
+/// Height of 1st block that follows the alpha consensus ruleset, for main net.
+pub const BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET: BlockHeight =
     BlockHeight::new(BFieldElement::new(15_000u64));
+
+/// Height of 1st block that follows the alpha consensus ruleset, for test net.
+pub const BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(120u64));
 
 /// Enumerates all possible sets of consensus rules.
 ///
@@ -46,7 +50,7 @@ impl ConsensusRuleSet {
     pub(crate) fn infer_from(network: Network, block_height: BlockHeight) -> Self {
         match network {
             Network::Main => {
-                if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA {
+                if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET {
                     ConsensusRuleSet::Reboot
                 } else {
                     ConsensusRuleSet::HardforkAlpha
@@ -55,7 +59,7 @@ impl ConsensusRuleSet {
             Network::TestnetMock => ConsensusRuleSet::HardforkAlpha,
             Network::RegTest => ConsensusRuleSet::HardforkAlpha,
             Network::Testnet(_) => {
-                if block_height < 120u64.into() {
+                if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET {
                     ConsensusRuleSet::Reboot
                 } else {
                     ConsensusRuleSet::HardforkAlpha
