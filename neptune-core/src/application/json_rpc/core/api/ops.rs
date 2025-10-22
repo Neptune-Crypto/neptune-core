@@ -30,6 +30,9 @@ pub enum RpcMethods {
     #[namespace(Namespace::Node)]
     Network,
 
+    #[namespace(Namespace::Node)]
+    CookieHint,
+
     #[namespace(Namespace::Chain)]
     Height,
 
@@ -53,6 +56,21 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Chain)]
     TipAnnouncements,
+
+    #[namespace(Namespace::Chain)]
+    BlockInfo,
+
+    #[namespace(Namespace::Chain)]
+    BlockDigest,
+
+    #[namespace(Namespace::Chain)]
+    BlockDigestsByHeight,
+
+    #[namespace(Namespace::Chain)]
+    LatestTipDigests,
+
+    #[namespace(Namespace::Chain)]
+    Confirmations,
 }
 
 #[cfg(test)]
