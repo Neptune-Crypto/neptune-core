@@ -286,11 +286,7 @@ pub mod tests {
             proof: TransactionProof::invalid(),
         };
         let block1 = invalid_block_with_transaction(&Block::genesis(Network::Main), tx_block1);
-        rpc_server
-            .state
-            .set_new_tip(block1.clone())
-            .await
-            .expect("block to be valid");
+        rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
 
         let block = rpc_server.tip().await.block;
         let proof = rpc_server.tip_proof().await.proof;
@@ -320,11 +316,7 @@ pub mod tests {
             proof: TransactionProof::invalid(),
         };
         let block1 = invalid_block_with_transaction(&Block::genesis(Network::Main), tx_block1);
-        rpc_server
-            .state
-            .set_new_tip(block1.clone())
-            .await
-            .expect("block to be valid");
+        rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
 
         for height in [0, 1] {
             let selector = RpcBlockSelector::Height(height.into());
