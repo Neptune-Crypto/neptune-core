@@ -1926,7 +1926,6 @@ dependencies = [
  "num-bigint",
  "num-rational",
  "num-traits",
- "pin-project-lite",
  "priority-queue",
  "proptest",
  "proptest-arbitrary-interop",
