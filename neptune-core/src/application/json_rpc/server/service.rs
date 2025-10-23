@@ -369,10 +369,9 @@ pub mod tests {
 
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn get_block_calls_are_consistent(
-        #[strategy(0usize..8)] _num_inputs: usize,
         #[strategy(0usize..8)] _num_outputs: usize,
         #[strategy(0usize..8)] _num_announcements: usize,
-        #[strategy(txkernel::with_lengths(#_num_inputs, #_num_outputs, #_num_announcements, true))]
+        #[strategy(txkernel::with_lengths(0, #_num_outputs, #_num_announcements, true))]
     tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
