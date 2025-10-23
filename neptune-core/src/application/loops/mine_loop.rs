@@ -255,6 +255,7 @@ fn guess_worker(
         .build()
         .unwrap();
 
+    let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(
@@ -263,6 +264,7 @@ fn guess_worker(
                     guess_nonce_iteration(
                         &guesser_buffer,
                         &mast_auth_paths,
+                        index_picker_preimage,
                         threshold,
                         rng,
                         &sender,
@@ -331,6 +333,7 @@ impl GuessNonceResult {
 fn guess_nonce_iteration(
     guesser_buffer: &GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }>,
     mast_auth_paths: &PowMastPaths,
+    index_picker_preimage: Digest,
     threshold: Digest,
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
@@ -343,7 +346,13 @@ fn guess_nonce_iteration(
         return GuessNonceResult::Cancelled;
     }
 
-    let result = Pow::guess(guesser_buffer, mast_auth_paths, nonce, threshold);
+    let result = Pow::guess(
+        guesser_buffer,
+        mast_auth_paths,
+        index_picker_preimage,
+        nonce,
+        threshold,
+    );
 
     match result {
         Some(pow) => GuessNonceResult::NonceFound { pow: Box::new(pow) },
@@ -1106,12 +1115,14 @@ pub(crate) mod tests {
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let guesser_buffer =
             block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
+        let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(std_rng_from_thread_rng, |prng, _i| {
                     guess_nonce_iteration(
                         &guesser_buffer,
                         &mast_auth_paths,
+                        index_picker_preimage,
                         threshold,
                         prng,
                         &worker_task_tx,
@@ -2182,9 +2193,18 @@ pub(crate) mod tests {
         let guesser_buffer =
             successor_block.guess_preprocess(None, None, ConsensusRuleSet::default());
         let mast_auth_paths = successor_block.pow_mast_paths();
+        let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
         let target = predecessor_block.header().difficulty.target();
         loop {
-            if BlockPow::guess(&guesser_buffer, &mast_auth_paths, rng.random(), target).is_some() {
+            if BlockPow::guess(
+                &guesser_buffer,
+                &mast_auth_paths,
+                index_picker_preimage,
+                rng.random(),
+                target,
+            )
+            .is_some()
+            {
                 println!("found solution after {counter} guesses.");
                 break;
             }

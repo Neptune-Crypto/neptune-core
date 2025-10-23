@@ -206,7 +206,7 @@ pub struct PowMastPaths {
 }
 
 impl PowMastPaths {
-    pub(super) fn commit(&self) -> Digest {
+    fn commit(&self) -> Digest {
         Tip5::hash_varlen(
             &[
                 self.pow.to_vec(),
@@ -276,17 +276,33 @@ impl<const MERKLE_TREE_HEIGHT: usize> Display for Pow<MERKLE_TREE_HEIGHT> {
 pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
     merkle_tree: MTree,
 
-    hash: Digest,
-
     /// The hash of the parent block of this guesser buffer.
     prev_block_digest: Digest,
+}
+
+impl<const MERKLE_TREE_HEIGHT: usize> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+    /// A commitment that refers to both the Merkle tree of the guesser buffer
+    /// and the current proposal being guessed on, designed in such a way that
+    /// the Merkle tree root must be known before indices can be picked.
+    /// Combined with a nonce, the opened indices can be derived from this
+    /// value.
+    pub fn index_pricker_preimage_from_root(
+        merkle_tree_root: Digest,
+        mast_auth_paths: &PowMastPaths,
+    ) -> Digest {
+        Tip5::hash_pair(merkle_tree_root, mast_auth_paths.commit())
+    }
+
+    /// Like [Self::index_pricker_preimage_from_root]
+    pub fn index_picker_preimage(&self, mast_auth_paths: &PowMastPaths) -> Digest {
+        Self::index_pricker_preimage_from_root(self.merkle_tree.root(), mast_auth_paths)
+    }
 }
 
 impl<const MERKLE_TREE_HEIGHT: usize> Default for GuesserBuffer<MERKLE_TREE_HEIGHT> {
     fn default() -> Self {
         Self {
             merkle_tree: MTree::default(),
-            hash: Default::default(),
             prev_block_digest: Default::default(),
         }
     }
@@ -441,11 +457,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
 
         let merkle_tree = MTree::build_inplace(leafs, internal_nodes, cancel_channel);
 
-        let hash = Tip5::hash_pair(merkle_tree.root(), bud_prefix);
-
         GuesserBuffer::<MERKLE_TREE_HEIGHT> {
             merkle_tree,
-            hash,
             prev_block_digest,
         }
     }
@@ -453,12 +466,13 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
     pub fn guess(
         buffer: &GuesserBuffer<MERKLE_TREE_HEIGHT>,
         mast_auth_paths: &PowMastPaths,
+        index_picker_preimage: Digest,
         nonce: Digest,
         target: Digest,
     ) -> Option<Self> {
         let root = buffer.merkle_tree.root();
 
-        let (index_a, index_b) = Self::indices(buffer.hash, nonce);
+        let (index_a, index_b) = Self::indices(index_picker_preimage, nonce);
 
         let path_a = buffer
             .merkle_tree
@@ -498,8 +512,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             ConsensusRuleSet::Reboot => auth_paths.commit(),
             ConsensusRuleSet::HardforkAlpha => parent_digest,
         };
-        let buffer_hash = Tip5::hash_pair(self.root, leaf_prefix);
-        let (index_a, index_b) = Self::indices(buffer_hash, self.nonce);
+        let index_picker_preimage = Tip5::hash_pair(self.root, auth_paths.commit());
+        let (index_a, index_b) = Self::indices(index_picker_preimage, self.nonce);
 
         let (leaf_a, leaf_b) = if consensus_rule_set == ConsensusRuleSet::Reboot {
             (
@@ -583,6 +597,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::api::export::Network;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
+    use crate::protocol::consensus::block::tests::DIFFICULTY_LIMIT_FOR_TESTS;
     use crate::tests::shared::blocks::invalid_empty_block;
 
     impl MTree {
@@ -718,25 +733,124 @@ pub(crate) mod tests {
             );
 
             for difficulty in [2_u32, 4] {
-                let target = Difficulty::from(difficulty).target();
-                let mut successful_guess = None;
-                'inner_loop: for _ in 0..120 {
-                    let nonce = rng.random();
-                    if let Some(solution) = Pow::guess(&buffer, &auth_paths, nonce, target) {
-                        successful_guess = Some(solution);
-                        break 'inner_loop;
-                    }
-                }
-
-                assert_eq!(
-                    Ok(()),
-                    successful_guess.unwrap().validate(
+                let difficulty = Difficulty::from(difficulty);
+                let successful_guess = solve(&buffer, &auth_paths, difficulty);
+                assert!(successful_guess
+                    .validate(
                         auth_paths,
-                        target,
+                        difficulty.target(),
                         consensus_rule_set,
                         prev_block_digest
                     )
-                );
+                    .is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn indices_depend_on_concrete_proposal_hardfork_alpha() {
+        // Ensure that indices cannot be reused over two proposals that share
+        // the same parent.
+        const MERKLE_TREE_HEIGHT: usize = 10;
+        let mut rng = rng();
+        let prev_block_digest = rng.random();
+
+        let auth_paths1 = rng.random::<PowMastPaths>();
+        let auth_paths2 = rng.random::<PowMastPaths>();
+        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
+            auth_paths1,
+            None,
+            ConsensusRuleSet::HardforkAlpha,
+            prev_block_digest,
+        );
+
+        let indices_1 = Pow::<10>::indices(
+            buffer.index_picker_preimage(&auth_paths1),
+            Digest::default(),
+        );
+        let indices_2 = Pow::<10>::indices(
+            buffer.index_picker_preimage(&auth_paths2),
+            Digest::default(),
+        );
+
+        assert_ne!(indices_1, indices_2);
+    }
+
+    #[test]
+    fn preprocessing_data_can_be_reused_after_hardfork_alpha() {
+        const MERKLE_TREE_HEIGHT: usize = 10;
+        let mut rng = rng();
+        let prev_block_digest = rng.random();
+
+        let auth_paths1 = rng.random::<PowMastPaths>();
+        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
+            auth_paths1,
+            None,
+            ConsensusRuleSet::HardforkAlpha,
+            prev_block_digest,
+        );
+
+        // Verify that 1st block proposal can be solved
+        let difficulty = Difficulty::from(2u32);
+        let correct_guess_1 = solve(&buffer, &auth_paths1, difficulty);
+        assert!(correct_guess_1
+            .validate(
+                auth_paths1,
+                difficulty.target(),
+                ConsensusRuleSet::HardforkAlpha,
+                prev_block_digest
+            )
+            .is_ok());
+
+        // Verify that old solution does not work when auth paths change.
+        let auth_paths2 = rng.random::<PowMastPaths>();
+        assert_ne!(auth_paths2, auth_paths1);
+        assert_eq!(
+            PowValidationError::PathAInvalid,
+            correct_guess_1
+                .validate(
+                    auth_paths2,
+                    difficulty.target(),
+                    ConsensusRuleSet::HardforkAlpha,
+                    prev_block_digest
+                )
+                .unwrap_err(),
+            "2nd set of auth paths must make 1st PoW solution invalid"
+        );
+
+        // Verify that a 2nd proposal can use the same `buffer` value to create
+        // a successful guess, and that only the `auth_paths` value needs to
+        // change.
+        let correct_guess_2 = solve(&buffer, &auth_paths2, difficulty);
+        assert!(correct_guess_2
+            .validate(
+                auth_paths2,
+                difficulty.target(),
+                ConsensusRuleSet::HardforkAlpha,
+                prev_block_digest
+            )
+            .is_ok());
+    }
+
+    fn solve<const N: usize>(
+        buffer: &GuesserBuffer<N>,
+        auth_paths: &PowMastPaths,
+        difficulty: Difficulty,
+    ) -> Pow<N> {
+        assert!(
+            difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
+            "Let's not make tests run too long"
+        );
+
+        let target = difficulty.target();
+        let mut rng = rand::rng();
+        let index_picker_preimage = buffer.index_picker_preimage(auth_paths);
+        loop {
+            let nonce = rng.random();
+            if let Some(solution) =
+                Pow::guess(buffer, auth_paths, index_picker_preimage, nonce, target)
+            {
+                break solution;
             }
         }
     }

@@ -1311,11 +1311,16 @@ pub(crate) mod tests {
             let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);
             let target = Difficulty::from(2u32).target();
             let mut rng = rng();
+            let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
 
             let valid_pow = loop {
-                if let Some(valid_pow) =
-                    Pow::guess(&guesser_buffer, &mast_auth_paths, rng.random(), target)
-                {
+                if let Some(valid_pow) = Pow::guess(
+                    &guesser_buffer,
+                    &mast_auth_paths,
+                    index_picker_preimage,
+                    rng.random(),
+                    target,
+                ) {
                     break valid_pow;
                 }
             };

@@ -5965,11 +5965,16 @@ mod tests {
                 let consensus_rule_set = ConsensusRuleSet::Reboot;
                 let guesser_buffer = block1.guess_preprocess(None, None, consensus_rule_set);
                 let mast_auth_paths = block1.pow_mast_paths();
+                let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
-                    if let Some(valid_pow) =
-                        Pow::guess(&guesser_buffer, &mast_auth_paths, random(), target)
-                    {
+                    if let Some(valid_pow) = Pow::guess(
+                        &guesser_buffer,
+                        &mast_auth_paths,
+                        index_picker_preimage,
+                        random(),
+                        target,
+                    ) {
                         break valid_pow;
                     }
                 };

@@ -76,11 +76,18 @@ impl ProofOfWorkPuzzle {
         info!("Done with PoW preprocessing");
 
         info!("Now attempting to find valid nonce");
+        let index_picker_preimage = guesser_buffer.index_picker_preimage(&self.pow_mast_paths);
         let solution = (0u64..u64::MAX)
             .into_par_iter()
             .map(|i| {
                 let nonce = Digest(bfe_array![0, 0, 0, 0, i]);
-                BlockPow::guess(&guesser_buffer, &self.pow_mast_paths, nonce, self.threshold)
+                BlockPow::guess(
+                    &guesser_buffer,
+                    &self.pow_mast_paths,
+                    index_picker_preimage,
+                    nonce,
+                    self.threshold,
+                )
             })
             .find_map_any(|x| x)
             .expect("Should find solution within 2^{64} attempts");
