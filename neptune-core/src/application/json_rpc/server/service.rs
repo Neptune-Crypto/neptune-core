@@ -127,10 +127,11 @@ impl RpcApi for RpcServer {
     }
     async fn get_block_call(&self, request: GetBlockRequest) -> GetBlockResponse {
         let state = self.state.lock_guard().await;
-        let archival_state = state.chain.archival_state();
 
         let block = match request.selector.as_digest(&state).await {
-            Some(digest) => archival_state
+            Some(digest) => state
+                .chain
+                .archival_state()
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -144,10 +145,11 @@ impl RpcApi for RpcServer {
 
     async fn get_block_proof_call(&self, request: GetBlockProofRequest) -> GetBlockProofResponse {
         let state = self.state.lock_guard().await;
-        let archival_state = state.chain.archival_state();
 
         let proof = match request.selector.as_digest(&state).await {
-            Some(digest) => archival_state
+            Some(digest) => state
+                .chain
+                .archival_state()
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -164,10 +166,11 @@ impl RpcApi for RpcServer {
         request: GetBlockKernelRequest,
     ) -> GetBlockKernelResponse {
         let state = self.state.lock_guard().await;
-        let archival_state = state.chain.archival_state();
 
         let kernel = match request.selector.as_digest(&state).await {
-            Some(digest) => archival_state
+            Some(digest) => state
+                .chain
+                .archival_state()
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -184,10 +187,11 @@ impl RpcApi for RpcServer {
         request: GetBlockHeaderRequest,
     ) -> GetBlockHeaderResponse {
         let state = self.state.lock_guard().await;
-        let archival_state = state.chain.archival_state();
 
         let header = match request.selector.as_digest(&state).await {
-            Some(digest) => archival_state
+            Some(digest) => state
+                .chain
+                .archival_state()
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -201,10 +205,11 @@ impl RpcApi for RpcServer {
 
     async fn get_block_body_call(&self, request: GetBlockBodyRequest) -> GetBlockBodyResponse {
         let state = self.state.lock_guard().await;
-        let archival_state = state.chain.archival_state();
 
         let body = match request.selector.as_digest(&state).await {
-            Some(digest) => archival_state
+            Some(digest) => state
+                .chain
+                .archival_state()
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -221,10 +226,11 @@ impl RpcApi for RpcServer {
         request: GetBlockTransactionKernelRequest,
     ) -> GetBlockTransactionKernelResponse {
         let state = self.state.lock_guard().await;
-        let archival_state = state.chain.archival_state();
 
         let kernel = match request.selector.as_digest(&state).await {
-            Some(digest) => archival_state
+            Some(digest) => state
+                .chain
+                .archival_state()
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -241,10 +247,11 @@ impl RpcApi for RpcServer {
         request: GetBlockAnnouncementsRequest,
     ) -> GetBlockAnnouncementsResponse {
         let state = self.state.lock_guard().await;
-        let archival_state = state.chain.archival_state();
 
         let announcements = match request.selector.as_digest(&state).await {
-            Some(digest) => archival_state
+            Some(digest) => state
+                .chain
+                .archival_state()
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -268,10 +275,11 @@ impl RpcApi for RpcServer {
         request: IsBlockCanonicalRequest,
     ) -> IsBlockCanonicalResponse {
         let state = self.state.lock_guard().await;
-        let archival_state = state.chain.archival_state();
 
         IsBlockCanonicalResponse {
-            canonical: archival_state
+            canonical: state
+                .chain
+                .archival_state()
                 .block_belongs_to_canonical_chain(request.digest)
                 .await,
         }
@@ -281,10 +289,10 @@ impl RpcApi for RpcServer {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
+    use std::collections::HashSet;
+
     use macro_rules_attr::apply;
     use tasm_lib::prelude::Digest;
-
-    use std::collections::HashSet;
 
     use crate::api::export::Network;
     use crate::application::config::cli_args;

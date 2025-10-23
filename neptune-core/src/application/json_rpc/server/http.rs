@@ -7,6 +7,7 @@ use axum::routing::post;
 use axum::Json;
 use axum::Router;
 use tokio::net::TcpListener;
+use tracing::warn;
 
 use crate::application::json_rpc::core::api::ops::Namespace;
 use crate::application::json_rpc::core::api::ops::RpcMethods;
@@ -27,6 +28,24 @@ impl RpcServer {
         Self { state }
     }
 
+    /// Returns the enabled set of RPC namespaces with node configuration check.
+    async fn enabled_namespaces(&self) -> HashSet<Namespace> {
+        let state = self.state.lock_guard().await;
+        let mut namespaces: HashSet<Namespace> =
+            self.state.cli().rpc_modules.iter().copied().collect();
+
+        if namespaces.contains(&Namespace::Archival) {
+            let is_archival = state.chain.is_archival_node();
+
+            if !is_archival {
+                namespaces.remove(&Namespace::Archival);
+                warn!("Node is not archival, cannot enable Archival namespace.");
+            }
+        }
+
+        namespaces
+    }
+
     /// Starts the RPC server.
     ///
     /// All RPC endpoints are accessible via `POST` requests to the root path `/`.
@@ -34,7 +53,7 @@ impl RpcServer {
     /// formatted as `namespace_method`.
     pub async fn serve(&self, listener: TcpListener) {
         let api: Arc<dyn RpcApi> = Arc::new(self.clone());
-        let namespaces: HashSet<Namespace> = self.state.cli().rpc_modules.iter().copied().collect();
+        let namespaces = self.enabled_namespaces().await;
         let router = RpcMethods::new_router(api, namespaces);
 
         let app = Router::new()
