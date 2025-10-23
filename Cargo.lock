@@ -1204,9 +1204,9 @@ dependencies = [
 
 [[package]]
 name = "get-size-derive2"
-version = "0.5.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "028f3cfad7c3e3b1d8d04ef0a1c03576f2d62800803fe1301a4cd262849f2dea"
+checksum = "e3814abc7da8ab18d2fd820f5b540b5e39b6af0a32de1bdd7c47576693074843"
 dependencies = [
  "attribute-derive",
  "quote",
@@ -1215,9 +1215,9 @@ dependencies = [
 
 [[package]]
 name = "get-size2"
-version = "0.5.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a09c2043819a3def7bfbb4927e7df96aab0da4cfd8824484b22d0c94e84458e"
+checksum = "5dfe2cec5b5ce8fb94dcdb16a1708baa4d0609cc3ce305ca5d3f6f2ffb59baed"
 dependencies = [
  "get-size-derive2",
 ]
@@ -1632,9 +1632,9 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
 name = "js-sys"
-version = "0.3.77"
+version = "0.3.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cfaf33c695fc6e08064efbc1f72ec937429614f25eef83af942d0e227c3a28f"
+checksum = "ec48937a97411dcb524a265206ccd4c90bb711fca92b2792c407f268825b9305"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
@@ -2276,9 +2276,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phf"
-version = "0.12.1"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
+checksum = "c1562dc717473dbaa4c1f85a36410e03c047b2e7df7f45ee938fbef64ae7fadf"
 dependencies = [
  "phf_macros",
  "phf_shared",
@@ -2287,9 +2287,9 @@ dependencies = [
 
 [[package]]
 name = "phf_generator"
-version = "0.12.1"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cbb1126afed61dd6368748dae63b1ee7dc480191c6262a3b4ff1e29d86a6c5b"
+checksum = "135ace3a761e564ec88c03a77317a7c6b80bb7f7135ef2544dbe054243b89737"
 dependencies = [
  "fastrand",
  "phf_shared",
@@ -2297,9 +2297,9 @@ dependencies = [
 
 [[package]]
 name = "phf_macros"
-version = "0.12.1"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d713258393a82f091ead52047ca779d37e5766226d009de21696c4e667044368"
+checksum = "812f032b54b1e759ccd5f8b6677695d5268c588701effba24601f6932f8269ef"
 dependencies = [
  "phf_generator",
  "phf_shared",
@@ -2310,9 +2310,9 @@ dependencies = [
 
 [[package]]
 name = "phf_shared"
-version = "0.12.1"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
+checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
  "siphasher",
 ]
@@ -3280,9 +3280,9 @@ dependencies = [
 
 [[package]]
 name = "tasm-lib"
-version = "0.50.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bcdeae1ef4a81e5912be07b67b06859a6f7ebfc4e90c7cce6b73f3f33160839"
+checksum = "ebbfc45d56548bb55036fa64cad69630d43173507257470865062305f3c7346c"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3302,9 +3302,9 @@ dependencies = [
 
 [[package]]
 name = "tasm-object-derive"
-version = "0.50.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87297f19a5dfdc4db91e78c1900e614ad98b7ee01859d7d48f7df6225afd4140"
+checksum = "3277f41070fd40101837e1abb0e24d3e2ed145d613a3373b47712e656b3a2b37"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3757,9 +3757,9 @@ dependencies = [
 
 [[package]]
 name = "triton-air"
-version = "0.50.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "973a0422b170667a558ae36e21643ba827e76d2c663607087f0797888f4c59ad"
+checksum = "8ac8f4ade43166339a0e5ac3c3d56a3675256d25b9e391d884f889a32a488c3b"
 dependencies = [
  "arbitrary",
  "itertools 0.14.0",
@@ -3771,9 +3771,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-builder"
-version = "0.50.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a4ee9a8a64121c0587a73d70dfd018823b47edc4dfadc406a2d7cc1d161e9eb"
+checksum = "f2fe1e21c26e4f3c41164573b14fc83d1c3ddbc6de1a90e810aad0fcbf42d81c"
 dependencies = [
  "itertools 0.14.0",
  "prettyplease",
@@ -3789,9 +3789,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-circuit"
-version = "0.50.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2857263f96bdf71e574b82e41a19115e1c8b88c282251694de6129269c1ef10e"
+checksum = "3107c3169544bc50599c74cb360b1f0caa38e43d4b50743bf4e7f35f66e13965"
 dependencies = [
  "arbitrary",
  "itertools 0.14.0",
@@ -3804,9 +3804,9 @@ dependencies = [
 
 [[package]]
 name = "triton-isa"
-version = "0.50.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80e315f7a07f7e0d44f18841eacf4084bec5fc6a980e9e8f9019299bdc22aaf4"
+checksum = "eab6aa297481933c4dd15c02077e4f8a53ef103d5dd0be206c0e25f70332d28b"
 dependencies = [
  "arbitrary",
  "get-size2",
@@ -3823,9 +3823,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.50.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6014b833c7ec34f72d91b4ddcacbbef29ac63065229f03557b9fa5312df6e4c8"
+checksum = "b5b49f18bdf1c0a0eae1687c57321156c7b495dfe71090391a4673b3521d0c50"
 dependencies = [
  "arbitrary",
  "colored",
@@ -3860,9 +3860,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "0.50.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71bd6472080a84aa3ef60522b4b8b0ccb18341fab059e7abb53938d61b900ba1"
+checksum = "d5d465fb05b5b6d8338770501973ef2b27d984ffb79fe7b0b08644926030ac0e"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",
@@ -4019,21 +4019,22 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.100"
+version = "0.2.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1edc8929d7499fc4e8f0be2262a241556cfc54a0bea223790e71446f2aab1ef5"
+checksum = "c1da10c01ae9f1ae40cbfac0bac3b1e724b320abfcf52229f80b547c0d250e2d"
 dependencies = [
  "cfg-if",
  "once_cell",
  "rustversion",
  "wasm-bindgen-macro",
+ "wasm-bindgen-shared",
 ]
 
 [[package]]
 name = "wasm-bindgen-backend"
-version = "0.2.100"
+version = "0.2.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f0a0651a5c2bc21487bde11ee802ccaf4c51935d0d3d42a6101f98161700bc6"
+checksum = "671c9a5a66f49d8a47345ab942e2cb93c7d1d0339065d4f8139c486121b43b19"
 dependencies = [
  "bumpalo",
  "log",
@@ -4045,9 +4046,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.100"
+version = "0.2.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fe63fc6d09ed3792bd0897b314f53de8e16568c2b3f7982f468c0bf9bd0b407"
+checksum = "7ca60477e4c59f5f2986c50191cd972e3a50d8a95603bc9434501cf156a9a119"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -4055,9 +4056,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.100"
+version = "0.2.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ae87ea40c9f689fc23f209965b6fb8a99ad69aeeb0231408be24920604395de"
+checksum = "9f07d2f20d4da7b26400c9f4a0511e6e0345b040694e8a75bd41d578fa4421d7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4068,9 +4069,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.100"
+version = "0.2.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a05d73b933a847d6cccdda8f838a22ff101ad9bf93e33684f39c1f5f0eece3d"
+checksum = "bad67dc8b2a1a6e5448428adec4c3e84c43e561d8c9ee8a9e5aabeb193ec41d1"
 dependencies = [
  "unicode-ident",
 ]
