@@ -3589,16 +3589,16 @@ mod tests {
                     block_3.clone().try_into().unwrap(),
                 ))),
                 Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
-
-                // Now make the interruption of the block reconciliation process
+                // ____
+                // Now make the interruption of the block reconciliation process.
                 Action::Read(PeerMessage::BlockNotification((&block_5).into())),
-
+                // ____
                 // Complete the block reconciliation process by requesting the last block
                 // in this process, to get back to a mutually known block.
                 Action::Read(PeerMessage::Block(Box::new(
                     block_2.clone().try_into().unwrap(),
                 ))),
-
+                // ____
                 // Then anticipate the request of the block that was announced
                 // in the interruption.
                 // Note that we cannot anticipate the response, as only the main
@@ -3703,13 +3703,10 @@ mod tests {
                     block_3.clone().try_into().unwrap(),
                 ))),
                 Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
-
                 // Now make the interruption of the block reconciliation process
                 Action::Read(PeerMessage::PeerListRequest),
-
                 // Answer the request for a peer list
                 Action::Write(PeerMessage::PeerListResponse(expected_peer_list_resp)),
-                
                 // Complete the block reconciliation process by requesting the last block
                 // in this process, to get back to a mutually known block.
                 Action::Read(PeerMessage::Block(Box::new(
