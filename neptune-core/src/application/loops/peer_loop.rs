@@ -3825,6 +3825,25 @@ mod tests {
                 let first_block_after_hardfork =
                     next_block(state_lock.clone(), hard_fork_minus_1.clone()).await;
 
+                // Verify assumption about block height of hardfork
+                assert!(hard_fork_minus_1.pow_verify(
+                    hard_fork_minus_2.header().difficulty.target(),
+                    ConsensusRuleSet::Reboot
+                ));
+                assert!(!hard_fork_minus_1.pow_verify(
+                    hard_fork_minus_2.header().difficulty.target(),
+                    ConsensusRuleSet::HardforkAlpha
+                ));
+                assert!(first_block_after_hardfork.pow_verify(
+                    hard_fork_minus_2.header().difficulty.target(),
+                    ConsensusRuleSet::HardforkAlpha
+                ));
+                assert!(!first_block_after_hardfork.pow_verify(
+                    hard_fork_minus_2.header().difficulty.target(),
+                    ConsensusRuleSet::Reboot
+                ));
+
+                // Declare expected order of messages
                 let mock = Mock::new(vec![
                     Action::Read(PeerMessage::BlockNotification(
                         (&first_block_after_hardfork).into(),
