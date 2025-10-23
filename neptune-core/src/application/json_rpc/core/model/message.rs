@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 use serde_tuple::Deserialize_tuple;
+use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::application::json_rpc::core::model::block::body::*;
@@ -27,6 +28,16 @@ pub struct HeightRequest {}
 #[serde(rename_all = "camelCase")]
 pub struct HeightResponse {
     pub height: BFieldElement,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct TipDigestRequest {}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TipDigestResponse {
+    pub digest: Digest,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
@@ -97,6 +108,18 @@ pub struct TipAnnouncementsRequest {}
 #[serde(rename_all = "camelCase")]
 pub struct TipAnnouncementsResponse {
     pub announcements: Vec<RpcBFieldElements>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBlockDigestRequest {
+    pub selector: RpcBlockSelector,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBlockDigestResponse {
+    pub digest: Option<Digest>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
@@ -181,4 +204,16 @@ pub struct GetBlockAnnouncementsRequest {
 #[serde(rename_all = "camelCase")]
 pub struct GetBlockAnnouncementsResponse {
     pub announcements: Option<Vec<RpcBFieldElements>>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct IsBlockCanonicalRequest {
+    pub digest: Digest,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IsBlockCanonicalResponse {
+    pub canonical: bool,
 }

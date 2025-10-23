@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use tasm_lib::prelude::Digest;
 
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
 use crate::application::json_rpc::core::model::message::*;
@@ -14,6 +15,11 @@ pub trait RpcApi: Sync + Send {
         self.height_call(HeightRequest {}).await
     }
     async fn height_call(&self, request: HeightRequest) -> HeightResponse;
+
+    async fn tip_digest(&self) -> TipDigestResponse {
+        self.tip_digest_call(TipDigestRequest {}).await
+    }
+    async fn tip_digest_call(&self, request: TipDigestRequest) -> TipDigestResponse;
 
     async fn tip(&self) -> TipResponse {
         self.tip_call(TipRequest {}).await
@@ -57,6 +63,13 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: TipAnnouncementsRequest,
     ) -> TipAnnouncementsResponse;
+
+    async fn get_block_digest(&self, selector: RpcBlockSelector) -> GetBlockDigestResponse {
+        self.get_block_digest_call(GetBlockDigestRequest { selector })
+            .await
+    }
+    async fn get_block_digest_call(&self, request: GetBlockDigestRequest)
+        -> GetBlockDigestResponse;
 
     async fn get_block(&self, selector: RpcBlockSelector) -> GetBlockResponse {
         self.get_block_call(GetBlockRequest { selector }).await
@@ -112,4 +125,13 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: GetBlockAnnouncementsRequest,
     ) -> GetBlockAnnouncementsResponse;
+
+    async fn is_block_canonical(&self, digest: Digest) -> IsBlockCanonicalResponse {
+        self.is_block_canonical_call(IsBlockCanonicalRequest { digest })
+            .await
+    }
+    async fn is_block_canonical_call(
+        &self,
+        request: IsBlockCanonicalRequest,
+    ) -> IsBlockCanonicalResponse;
 }

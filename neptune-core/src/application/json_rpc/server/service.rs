@@ -21,6 +21,15 @@ impl RpcApi for RpcServer {
         }
     }
 
+    async fn tip_digest_call(&self, _: TipDigestRequest) -> TipDigestResponse {
+        let state = self.state.lock_guard().await;
+        let block = state.chain.light_state();
+
+        TipDigestResponse {
+            digest: block.hash(),
+        }
+    }
+
     async fn tip_call(&self, _: TipRequest) -> TipResponse {
         let state = self.state.lock_guard().await;
         let block = state.chain.light_state();
@@ -91,12 +100,23 @@ impl RpcApi for RpcServer {
         }
     }
 
+    async fn get_block_digest_call(
+        &self,
+        request: GetBlockDigestRequest,
+    ) -> GetBlockDigestResponse {
+        let state = self.state.lock_guard().await;
+
+        GetBlockDigestResponse {
+            digest: request.selector.as_digest(&state).await,
+        }
+    }
+
     async fn get_block_call(&self, request: GetBlockRequest) -> GetBlockResponse {
         let state = self.state.lock_guard().await;
+        let archival_state = state.chain.archival_state();
+
         let block = match request.selector.as_digest(&state).await {
-            Some(digest) => state
-                .chain
-                .archival_state()
+            Some(digest) => archival_state
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -110,10 +130,10 @@ impl RpcApi for RpcServer {
 
     async fn get_block_proof_call(&self, request: GetBlockProofRequest) -> GetBlockProofResponse {
         let state = self.state.lock_guard().await;
+        let archival_state = state.chain.archival_state();
+
         let proof = match request.selector.as_digest(&state).await {
-            Some(digest) => state
-                .chain
-                .archival_state()
+            Some(digest) => archival_state
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -130,10 +150,10 @@ impl RpcApi for RpcServer {
         request: GetBlockKernelRequest,
     ) -> GetBlockKernelResponse {
         let state = self.state.lock_guard().await;
+        let archival_state = state.chain.archival_state();
+
         let kernel = match request.selector.as_digest(&state).await {
-            Some(digest) => state
-                .chain
-                .archival_state()
+            Some(digest) => archival_state
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -150,10 +170,10 @@ impl RpcApi for RpcServer {
         request: GetBlockHeaderRequest,
     ) -> GetBlockHeaderResponse {
         let state = self.state.lock_guard().await;
+        let archival_state = state.chain.archival_state();
+
         let header = match request.selector.as_digest(&state).await {
-            Some(digest) => state
-                .chain
-                .archival_state()
+            Some(digest) => archival_state
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -167,10 +187,10 @@ impl RpcApi for RpcServer {
 
     async fn get_block_body_call(&self, request: GetBlockBodyRequest) -> GetBlockBodyResponse {
         let state = self.state.lock_guard().await;
+        let archival_state = state.chain.archival_state();
+
         let body = match request.selector.as_digest(&state).await {
-            Some(digest) => state
-                .chain
-                .archival_state()
+            Some(digest) => archival_state
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -187,10 +207,10 @@ impl RpcApi for RpcServer {
         request: GetBlockTransactionKernelRequest,
     ) -> GetBlockTransactionKernelResponse {
         let state = self.state.lock_guard().await;
+        let archival_state = state.chain.archival_state();
+
         let kernel = match request.selector.as_digest(&state).await {
-            Some(digest) => state
-                .chain
-                .archival_state()
+            Some(digest) => archival_state
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -207,10 +227,10 @@ impl RpcApi for RpcServer {
         request: GetBlockAnnouncementsRequest,
     ) -> GetBlockAnnouncementsResponse {
         let state = self.state.lock_guard().await;
+        let archival_state = state.chain.archival_state();
+
         let announcements = match request.selector.as_digest(&state).await {
-            Some(digest) => state
-                .chain
-                .archival_state()
+            Some(digest) => archival_state
                 .get_block(digest)
                 .await
                 .unwrap()
@@ -228,18 +248,34 @@ impl RpcApi for RpcServer {
 
         GetBlockAnnouncementsResponse { announcements }
     }
+
+    async fn is_block_canonical_call(
+        &self,
+        request: IsBlockCanonicalRequest,
+    ) -> IsBlockCanonicalResponse {
+        let state = self.state.lock_guard().await;
+        let archival_state = state.chain.archival_state();
+
+        IsBlockCanonicalResponse {
+            canonical: archival_state
+                .block_belongs_to_canonical_chain(request.digest)
+                .await,
+        }
+    }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use macro_rules_attr::apply;
+    use tasm_lib::prelude::Digest;
 
     use crate::api::export::Network;
     use crate::application::config::cli_args;
     use crate::application::json_rpc::core::api::rpc::RpcApi;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
     use crate::application::json_rpc::server::http::RpcServer;
+    use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -288,6 +324,9 @@ pub mod tests {
         let block1 = invalid_block_with_transaction(&Block::genesis(Network::Main), tx_block1);
         rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
 
+        let digest = rpc_server.tip_digest().await.digest;
+        assert_eq!(block1.hash(), digest);
+
         let block = rpc_server.tip().await.block;
         let proof = rpc_server.tip_proof().await.proof;
         assert_eq!(block.proof, proof);
@@ -318,8 +357,14 @@ pub mod tests {
         let block1 = invalid_block_with_transaction(&Block::genesis(Network::Main), tx_block1);
         rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
 
-        for height in [0, 1] {
-            let selector = RpcBlockSelector::Height(height.into());
+        for height in [BlockHeight::genesis(), BlockHeight::genesis().next()] {
+            let height_selector = RpcBlockSelector::Height(height);
+            let digest = rpc_server
+                .get_block_digest(height_selector)
+                .await
+                .digest
+                .expect("digest should be available");
+            let selector = RpcBlockSelector::Digest(digest);
 
             let block = rpc_server
                 .get_block(selector)
@@ -344,6 +389,7 @@ pub mod tests {
                 .header
                 .expect("header should exist");
             assert_eq!(kernel.header, header);
+            assert_eq!(header.height, height.into());
 
             let body = rpc_server
                 .get_block_body(selector)
@@ -364,5 +410,26 @@ pub mod tests {
                 .expect("announcements should exist");
             assert_eq!(transaction_kernel.announcements, announcements);
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn verify_is_block_canonical_consistency() {
+        let rpc_server = test_rpc_server().await;
+
+        // Test genesis block is canonical
+        let genesis_digest = rpc_server.tip_digest().await.digest;
+        let is_genesis_canonical = rpc_server
+            .is_block_canonical(genesis_digest)
+            .await
+            .canonical;
+        assert!(is_genesis_canonical, "Genesis block should be canonical");
+
+        // Test non-existent block is not canonical
+        let fake_digest = Digest::default();
+        let is_fake_canonical = rpc_server.is_block_canonical(fake_digest).await.canonical;
+        assert!(
+            !is_fake_canonical,
+            "Non-existent block should not be canonical"
+        );
     }
 }
