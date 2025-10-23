@@ -539,9 +539,9 @@ impl PeerLoopHandler {
         Ok(())
     }
 
-    /// Handle peer messages and returns Ok(true) if connection should be closed.
-    /// Connection should also be closed if an error is returned.
-    /// Otherwise, returns OK(false).
+    /// Handle peer messages and returns `Ok(true)` if connection should be
+    /// closed. Connection should also be closed if an error is returned.
+    /// Otherwise, returns `Ok(false)`.
     ///
     /// Locking:
     ///   * Acquires `global_state_lock` for read.
@@ -575,8 +575,8 @@ impl PeerLoopHandler {
                     log_slow_scope!(fn_name!() + "::PeerMessage::PeerListRequest");
 
                     // We are interested in the address on which peers accept ingoing connections,
-                    // not in the address in which they are connected to us. We are only interested in
-                    // peers that accept incoming connections.
+                    // not in the address in which they are connected to us. We are only interested
+                    // in peers that accept incoming connections.
                     let mut peer_info: Vec<(SocketAddr, u128)> = self
                         .global_state_lock
                         .lock_guard()
@@ -1285,7 +1285,8 @@ impl PeerLoopHandler {
 
                 // 2. If transaction has coinbase, punish.
                 // Transactions received from peers have not been mined yet.
-                // Only the miner is allowed to produce transactions with non-empty coinbase fields.
+                // Only the miner is allowed to produce transactions with non-empty coinbase
+                // fields.
                 if transaction.kernel.coinbase.is_some() {
                     warn!("Received non-mined transaction with coinbase.");
                     self.punish(NegativePeerSanction::NonMinedTransactionHasCoinbase)
@@ -1584,7 +1585,8 @@ impl PeerLoopHandler {
 
                 if let Err(rejection_reason) = is_favorable {
                     match rejection_reason {
-                        // no need to punish and log if the fees are equal.  we just ignore the incoming proposal.
+                        // No need to punish and log if the fees are equal. We just ignore the
+                        // incoming proposal.
                         BlockProposalRejectError::InsufficientFee { current, received }
                             if Some(received) == current =>
                         {
@@ -1646,8 +1648,8 @@ impl PeerLoopHandler {
         debug!("Handling {} message from main in peer loop", msg.get_type());
         match msg {
             MainToPeerTask::Block(block) => {
-                // We don't currently differentiate whether a new block came from a peer, or from our
-                // own miner. It's always shared through this logic.
+                // We don't currently differentiate whether a new block came from a peer, or
+                // from our own miner. It's always shared through this logic.
                 let new_block_height = block.kernel.header.height;
                 if new_block_height > peer_state_info.highest_shared_block_height {
                     debug!("Sending PeerMessage::BlockNotification");
@@ -1848,11 +1850,11 @@ impl PeerLoopHandler {
         Ok(())
     }
 
-    /// Function called before entering the peer loop. Reads the potentially stored
-    /// peer standing from the database and does other book-keeping before entering
-    /// its final resting place: the `peer_loop`. Note that the peer has already been
-    /// accepted for a connection for this loop to be entered. So we don't need
-    /// to check the standing again.
+    /// Function called before entering the peer loop. Reads the potentially
+    /// stored peer standing from the database and does other book-keeping
+    /// before entering its final resting place: the `peer_loop`. Note that
+    /// the peer has already been accepted for a connection for this loop to
+    /// be entered. So we don't need to check the standing again.
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for write
@@ -1915,8 +1917,9 @@ impl PeerLoopHandler {
             }
 
             if peer_map.contains_key(&self.peer_address) {
-                // This shouldn't be possible, unless the peer reports a different instance ID than
-                // for the other connection. Only a malignant client would do that.
+                // This shouldn't be possible, unless the peer reports a different instance ID
+                // than for the other connection. Only a malignant client would
+                // do that.
                 bail!("Already connected to peer. Aborting connection");
             }
 
@@ -1926,7 +1929,8 @@ impl PeerLoopHandler {
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
 
-        // If peer indicates more canonical block, request a block notification to catch up ASAP
+        // If peer indicates more canonical block, request a block notification to catch
+        // up ASAP
         if self.peer_handshake_data.tip_header.cumulative_proof_of_work
             > self
                 .global_state_lock
@@ -1955,8 +1959,8 @@ impl PeerLoopHandler {
 
         debug!("Ending peer loop for {}", self.peer_address);
 
-        // Return any error that `run` returned. Returning and not suppressing errors is a quite nice
-        // feature to have for testing purposes.
+        // Return any error that `run` returned. Returning and not suppressing errors is
+        // a quite nice feature to have for testing purposes.
         res
     }
 
@@ -2338,8 +2342,8 @@ mod tests {
             assert_eq!(1000, state_lock.cli().peer_tolerance);
             let peer_address = get_dummy_socket_address(0);
 
-            // Although the database is empty, `get_latest_block` still returns the genesis block,
-            // since that block is hardcoded.
+            // Although the database is empty, `get_latest_block` still returns the genesis
+            // block, since that block is hardcoded.
             let mut different_genesis_block = state_lock
                 .lock_guard()
                 .await
@@ -2510,8 +2514,9 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn block_without_valid_pow_test() -> Result<()> {
-            // In this scenario, a block without a valid PoW is received. This block should be rejected
-            // by the peer loop and a notification should never reach the main loop.
+            // In this scenario, a block without a valid PoW is received. This block should
+            // be rejected by the peer loop and a notification should never
+            // reach the main loop.
 
             let network = Network::Main;
             let (
@@ -2527,8 +2532,9 @@ mod tests {
             let (block_without_any_pow, block_with_valid_mock_pow, _) =
                 pow_related_blocks(network, &Block::genesis(network)).await;
             for block_without_valid_pow in [block_without_any_pow, block_with_valid_mock_pow] {
-                // Sending an invalid block will not necessarily result in a ban. This depends on the peer
-                // tolerance that is set in the client. For this reason, we include a "Bye" here.
+                // Sending an invalid block will not necessarily result in a ban. This depends
+                // on the peer tolerance that is set in the client. For this
+                // reason, we include a "Bye" here.
                 let mock = Mock::new(vec![
                     Action::Read(PeerMessage::Block(Box::new(
                         block_without_valid_pow.clone().try_into().unwrap(),
@@ -2739,9 +2745,9 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn block_request_batch_in_order_test() -> Result<()> {
-            // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
-            // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
-            // are returned.
+            // Scenario: A fork began at block 2, node knows two blocks of height 2 and two
+            // of height 3. A peer requests a batch of blocks starting from
+            // block 1. Ensure that the correct blocks are returned.
 
             let network = Network::Main;
             let (
@@ -2861,11 +2867,12 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn block_request_batch_out_of_order_test() -> Result<()> {
-            // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
-            // A peer requests a batch of blocks starting from block 1, but the peer supplies their
-            // hashes in a wrong order. Ensure that the correct blocks are returned, in the right order.
-            // The blocks will be supplied in the correct order but starting from the first digest in
-            // the list that is known and canonical.
+            // Scenario: A fork began at block 2, node knows two blocks of height 2 and two
+            // of height 3. A peer requests a batch of blocks starting from
+            // block 1, but the peer supplies their hashes in a wrong order.
+            // Ensure that the correct blocks are returned, in the right order.
+            // The blocks will be supplied in the correct order but starting from the first
+            // digest in the list that is known and canonical.
 
             let network = Network::Main;
             let (
@@ -3003,9 +3010,9 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn find_canonical_chain_when_multiple_blocks_at_same_height_test() -> Result<()> {
-            // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
-            // A peer requests a block at height 2. Verify that the correct block at height 2 is
-            // returned.
+            // Scenario: A fork began at block 2, node knows two blocks of height 2 and two
+            // of height 3. A peer requests a block at height 2. Verify that the
+            // correct block at height 2 is returned.
 
             let network = Network::Main;
             let (
@@ -3301,9 +3308,10 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn prevent_ram_exhaustion_test() -> Result<()> {
-            // In this scenario the peer sends more blocks than the client allows to store in the
-            // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
-            // process as the alternative is that the program will crash because it runs out of RAM.
+            // In this scenario the peer sends more blocks than the client allows to store
+            // in the fork-reconciliation field. This should result in
+            // abandonment of the fork-reconciliation process as the alternative
+            // is that the program will crash because it runs out of RAM.
 
             let network = Network::Main;
             let mut rng = StdRng::seed_from_u64(5550001);
@@ -3540,9 +3548,9 @@ mod tests {
         #[apply(shared_tokio_runtime)]
         async fn test_block_reconciliation_interrupted_by_block_notification() -> Result<()> {
             // In this scenario, the client know the genesis block (block 0) and block 1, it
-            // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
-            // But the requests are interrupted by the peer sending another message: a new block
-            // notification.
+            // then receives block 4, meaning that block 3, 2, and 1 will have to be
+            // requested. But the requests are interrupted by the peer sending
+            // another message: a new block notification.
 
             let network = Network::Main;
             let (
@@ -3581,16 +3589,16 @@ mod tests {
                     block_3.clone().try_into().unwrap(),
                 ))),
                 Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
-                //
+
                 // Now make the interruption of the block reconciliation process
                 Action::Read(PeerMessage::BlockNotification((&block_5).into())),
-                //
+
                 // Complete the block reconciliation process by requesting the last block
                 // in this process, to get back to a mutually known block.
                 Action::Read(PeerMessage::Block(Box::new(
                     block_2.clone().try_into().unwrap(),
                 ))),
-                //
+
                 // Then anticipate the request of the block that was announced
                 // in the interruption.
                 // Note that we cannot anticipate the response, as only the main
@@ -3644,10 +3652,10 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<()> {
-            // In this scenario, the client knows the genesis block (block 0) and block 1, it
-            // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
-            // But the requests are interrupted by the peer sending another message: a request
-            // for a list of peers.
+            // In this scenario, the client knows the genesis block (block 0) and block 1,
+            // it then receives block 4, meaning that block 3, 2, and 1 will
+            // have to be requested. But the requests are interrupted by the
+            // peer sending another message: a request for a list of peers.
 
             let network = Network::Main;
             let (
@@ -3695,13 +3703,13 @@ mod tests {
                     block_3.clone().try_into().unwrap(),
                 ))),
                 Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
-                //
+
                 // Now make the interruption of the block reconciliation process
                 Action::Read(PeerMessage::PeerListRequest),
-                //
+
                 // Answer the request for a peer list
                 Action::Write(PeerMessage::PeerListResponse(expected_peer_list_resp)),
-                //
+                
                 // Complete the block reconciliation process by requesting the last block
                 // in this process, to get back to a mutually known block.
                 Action::Read(PeerMessage::Block(Box::new(
@@ -3892,8 +3900,8 @@ mod tests {
                 .await
                 .unwrap();
 
-            // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
-            // by the `main_loop`.
+            // Transaction must be sent to `main_loop`. The transaction is stored to the
+            // mempool by the `main_loop`.
             match to_main_rx1.recv().await {
                 Some(PeerTaskToMain::Transaction(_)) => (),
                 _ => panic!("Must receive remove of peer block max height"),
@@ -4102,8 +4110,8 @@ mod tests {
                     .await
                     .unwrap();
 
-                // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
-                // by the `main_loop`.
+                // Transaction must be sent to `main_loop`. The transaction is stored to the
+                // mempool by the `main_loop`.
                 match to_main_rx1.recv().await {
                     Some(PeerTaskToMain::Transaction(_)) => (),
                     _ => panic!("Main loop must receive new transaction"),
@@ -4476,7 +4484,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn bad_sync_challenge_height_greater_than_tip() {
-            // Criterium: Challenge height may not exceed that of tip in the request.
+            // Criterion: Challenge height may not exceed that of tip in the request.
 
             let network = Network::Main;
             let (
@@ -4546,7 +4554,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn bad_sync_challenge_genesis_block_doesnt_crash_client() {
-            // Criterium: Challenge may not point to genesis block, or block 1, as tip.
+            // Criterion: Challenge may not point to genesis block, or block 1, as tip.
 
             let network = Network::Main;
             let genesis_block: Block = Block::genesis(network);
