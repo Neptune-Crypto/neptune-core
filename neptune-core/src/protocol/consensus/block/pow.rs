@@ -572,9 +572,13 @@ impl<const MERKLE_TREE_HEIGHT: usize> Distribution<Pow<MERKLE_TREE_HEIGHT>> for 
 pub(crate) mod tests {
     use std::time::Instant;
 
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
     use rand::rng;
     use strum::IntoEnumIterator;
     use tasm_lib::twenty_first::bfe;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::api::export::Network;
@@ -667,6 +671,35 @@ pub(crate) mod tests {
         let block_pow = invalid_block.header().pow;
         let hash_from_fast_mast = invalid_block.pow_mast_paths().fast_mast_hash(block_pow);
         assert_eq!(invalid_block.hash(), hash_from_fast_mast);
+    }
+
+    #[test]
+    fn bitreverse_unit_test() {
+        assert_eq!(7, Pow::<10>::bitreverse(7, 3));
+        assert_eq!(14, Pow::<10>::bitreverse(7, 4));
+        assert_eq!(3, Pow::<10>::bitreverse(7, 2));
+        assert_eq!(1, Pow::<10>::bitreverse(7, 1));
+        assert_eq!(7, Pow::<10>::bitreverse(14, 4));
+        assert_eq!(3, Pow::<10>::bitreverse(12, 4));
+        assert_eq!(19, Pow::<10>::bitreverse(100, 7));
+    }
+
+    #[proptest]
+    fn bitreverse_is_symmetric(#[strategy(arb())] k: u32, #[strategy(1u32..=32)] log2_n: u32) {
+        let mask: u32 = if log2_n == 32 {
+            u32::MAX
+        } else {
+            (1u32 << log2_n) - 1
+        };
+
+        let r = Pow::<10>::bitreverse(k, log2_n);
+
+        // result must be within [0, 2^log2_n)
+        prop_assert!(r <= mask);
+
+        // applying bitreverse again recovers the masked original
+        let rr = Pow::<10>::bitreverse(r, log2_n);
+        prop_assert_eq!(rr, k & mask);
     }
 
     #[test]
