@@ -128,11 +128,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     let mut global_state_lock =
         GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
 
-    // Construct the broadcast channel to communicate from the main task to peer tasks
+    // Construct the broadcast channel to communicate from the main task to peer
+    // tasks
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =
         broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
 
-    // Add the MPSC (multi-producer, single consumer) channel for peer-task-to-main communication
+    // Add the MPSC (multi-producer, single consumer) channel for peer-task-to-main
+    // communication
     let (peer_task_to_main_tx, peer_task_to_main_rx) =
         mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
@@ -177,7 +179,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         .await?;
     info!("UTXO restoration check complete");
 
-    // Bind socket to port on this machine, to handle incoming connections from peers
+    // Bind socket to port on this machine, to handle incoming connections from
+    // peers
     let incoming_peer_listener = if let Some(incoming_peer_listener) = cli_args.own_listen_port() {
         let ret = TcpListener::bind((cli_args.peer_listen_addr, incoming_peer_listener))
            .await
@@ -189,7 +192,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         TcpListener::bind("127.0.0.1:0").await?
     };
 
-    // Connect to peers, and provide each peer task with a thread-safe copy of the state
+    // Connect to peers, and provide each peer task with a thread-safe copy of the
+    // state
     let own_handshake_data: HandshakeData =
         global_state_lock.lock_guard().await.get_own_handshakedata();
     info!(
@@ -235,8 +239,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         info!("Started mining task");
     }
 
-    // Start RPC server for CLI request and more. It's important that this is done as late
-    // as possible, so requests do not hang while initialization code runs.
+    // Start RPC server for CLI request and more. It's important that this is done
+    // as late as possible, so requests do not hang while initialization code
+    // runs.
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
         format!("127.0.0.1:{}", global_state_lock.cli().rpc_port),
         Json::default,
@@ -293,7 +298,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         info!("Started HTTP-JSON RPC server on {}.", addr);
     }
 
-    // Handle incoming connections, messages from peer tasks, and messages from the mining task
+    // Handle incoming connections, messages from peer tasks, and messages from the
+    // mining task
     Ok(MainLoopHandler::new(
         incoming_peer_listener,
         global_state_lock,

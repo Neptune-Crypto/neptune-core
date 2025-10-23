@@ -3,8 +3,7 @@
 //! the correct content of the input/output while executing a Rust function
 //! on the host machine's native architecture (i.e. your machine).
 //!
-//! It has been shamelessly copied from greenhat's omnizk compiler project:
-//! <https://github.com/greenhat/omnizk>
+//! It has been shamelessly copied from greenhat's omnizk compiler project: <https://github.com/greenhat/omnizk>.
 
 use std::cell::RefCell;
 use std::collections::HashMap;

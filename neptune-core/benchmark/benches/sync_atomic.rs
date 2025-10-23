@@ -13,6 +13,7 @@
 //!  2. `lock_mut` and `lock_guard_mut` denote write-lock acquisitions
 //!  3. For mutex, only write-lock acquisitions are possible.
 //!
+//! ```text
 //! sync_atomic              fastest       │ slowest       │ median        │ mean          │ samples │ iters
 //! ├─ lock                                │               │               │               │         │
 //! │  ╰─ rw                               │               │               │               │         │
@@ -22,11 +23,12 @@
 //!    │  ╰─ lock_guard_mut  131.8 µs      │ 217.9 µs      │ 131.8 µs      │ 136.5 µs      │ 100     │ 100
 //!    ╰─ rw                               │               │               │               │         │
 //!       ╰─ lock_guard_mut  131.8 µs      │ 153.8 µs      │ 131.8 µs      │ 132.7 µs      │ 100     │ 100
+//! ```
 //!
 //! Analysis:
 //!  1. RwLock and Mutex write-lock acquisitions are basically the same.
-//!  2. RwLock read-lock acquisitions are about 22% slower than write-lock acquisitions
-//!     which seems acceptable for most uses.
+//!  2. RwLock read-lock acquisitions are about 22% slower than write-lock
+//!     acquisitions which seems acceptable for most uses.
 
 use divan::Bencher;
 use neptune_cash::application::locks::std::AtomicMutex;

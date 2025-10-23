@@ -1724,14 +1724,13 @@ pub(crate) mod tests {
             let (predecesor, time, network, mut block) =
                 deterministic_empty_block1_proposal().await;
 
-            // Block validation fails on manipulated proof
+            // Block validation fails on manipulated proof.
             let BlockProof::SingleProof(block_proof) = &mut block.proof else {
                 panic!("Single proof expected");
             };
             let proof_length = block_proof.0.len();
 
-            let mut rng = rng();
-            let index = rng.random_range(0..proof_length);
+            let index = rng().random_range(0..proof_length);
             block_proof.0.get_mut(index).unwrap().increment();
 
             assert_eq!(

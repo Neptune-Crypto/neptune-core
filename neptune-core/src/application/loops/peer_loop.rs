@@ -4476,8 +4476,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn bad_sync_challenge_height_greater_than_tip() {
-            // Criterium: Challenge height may not exceed that of tip in the
-            // request.
+            // Criterium: Challenge height may not exceed that of tip in the request.
 
             let network = Network::Main;
             let (
@@ -4547,8 +4546,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn bad_sync_challenge_genesis_block_doesnt_crash_client() {
-            // Criterium: Challenge may not point to genesis block, or block 1, as
-            // tip.
+            // Criterium: Challenge may not point to genesis block, or block 1, as tip.
 
             let network = Network::Main;
             let genesis_block: Block = Block::genesis(network);

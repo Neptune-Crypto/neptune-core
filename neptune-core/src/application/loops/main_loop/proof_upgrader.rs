@@ -427,7 +427,7 @@ impl UpgradeJob {
         // process in a loop.  in case a new block comes in while processing
         // the current tx, then we can move on to the next, and so on.
         loop {
-            /* Prepare upgrade */
+            // Prepare upgrade.
             let affected_txids = upgrade_job.affected_txids();
             let mutator_set_for_tx = upgrade_job.mutator_set();
 
@@ -446,7 +446,7 @@ impl UpgradeJob {
                 )
             };
 
-            /* Perform upgrade */
+            // Perform upgrade.
             // No locks may be held here!
             let offchain_notifications = global_state_lock.cli().fee_notification;
             let (upgraded, expected_utxos) = match upgrade_job
@@ -479,7 +479,7 @@ impl UpgradeJob {
                 }
             };
 
-            /* Check if upgrade resulted in valid transaction */
+            // Check if upgrade resulted in valid transaction.
             upgrade_job = {
                 let mut global_state = global_state_lock.lock_guard_mut().await;
                 let tip_mutator_set = global_state
@@ -506,7 +506,7 @@ impl UpgradeJob {
                         return;
                     }
 
-                    /* Handle successful upgrade */
+                    // Handle successful upgrade.
                     // Insert tx into mempool before notifying peers, so we're
                     // sure to have it when they ask.
                     global_state
@@ -697,8 +697,8 @@ impl UpgradeJob {
     ///
     /// Upgrades transactions to a proof of higher quality that is more likely
     /// to be picked up by a miner. Returns the upgraded proof, or an error if
-    /// the prover is already in use and the proof_job_options is set to not wait if
-    /// prover is busy.
+    /// the prover is already in use and the proof_job_options is set to not
+    /// wait if prover is busy.
     ///
     /// Charges a fee for the upgrade task if this is desirable.
     pub(crate) async fn upgrade(

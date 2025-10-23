@@ -215,8 +215,8 @@ impl SyncState {
         current_block_height: BlockHeight,
         now: SystemTime,
     ) -> (Option<SocketAddr>, bool) {
-        // A peer is sanctioned if no answer has been received after N times the sync request
-        // interval.
+        // A peer is sanctioned if no answer has been received after N times the sync
+        // request interval.
         match self.last_sync_request {
             None => {
                 // No sync request has been made since startup of program
@@ -259,7 +259,8 @@ impl PotentialPeerInfo {
     }
 }
 
-/// holds information about a set of potential peers in the process of peer discovery
+/// holds information about a set of potential peers in the process of peer
+/// discovery
 struct PotentialPeersState {
     potential_peers: HashMap<SocketAddr, PotentialPeerInfo>,
 }
@@ -823,8 +824,9 @@ impl MainLoopHandler {
                 let block_hashes = blocks.iter().map(|x| x.hash()).collect_vec();
                 let last_block = blocks.last().unwrap().to_owned();
                 let update_jobs = {
-                    // The peer tasks also check this condition, if block is more canonical than current
-                    // tip, but we have to check it again since the block update might have already been applied
+                    // The peer tasks also check this condition, if block is more canonical than
+                    // current tip, but we have to check it again since the
+                    // block update might have already been applied.
                     // through a message from another peer (or from own miner).
                     let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
@@ -1270,8 +1272,8 @@ impl MainLoopHandler {
 
         // Don't make an outgoing connection if
         // - the peer limit is reached (or exceeded), or
-        // - the peer limit is _almost_ reached; reserve the last slot for an
-        //   incoming connection.
+        // - the peer limit is _almost_ reached; reserve the last slot for an incoming
+        //   connection.
         if num_peers >= max_num_peers || num_peers > 2 && num_peers - 1 == max_num_peers {
             debug!("Connected to {num_peers} peers. The configured max is {max_num_peers} peers.");
             debug!("Skipping peer discovery.");
@@ -1598,7 +1600,8 @@ impl MainLoopHandler {
 
         let task_handles = std::mem::take(&mut self.task_handles);
 
-        // Handle incoming connections, messages from peer tasks, and messages from the mining task
+        // Handle incoming connections, messages from peer tasks, and messages from the
+        // mining task.
         let mut main_loop_state = MutableMainLoopState::new(task_handles);
 
         // Set up various timers.
@@ -1674,18 +1677,17 @@ impl MainLoopHandler {
         #[cfg(not(unix))]
         drop((tx_term, tx_int, tx_quit));
 
-        let exit_code: i32 = loop {
-            // Use a semaphore to limit number of incoming connections. Should
-            // only be relevant as a countermeasure against a DOS. Each
-            // incoming connection must acquire a permit. If none is free,
-            // the below call to `acquire_owned` will only be resolved when an
-            // incoming connection is closed. This value is set much higher
-            // than the configured max number of peers since it's only intended
-            // to be used in case of heavy DOS.
-            let incoming_connections_limit = Arc::new(Semaphore::new(
-                self.global_state_lock.cli().max_num_peers * 2 + 4,
-            ));
+        // Use a semaphore to limit number of incoming connections. Should only be
+        // relevant as a countermeasure against a DOS. Each incoming connection
+        // must acquire a permit. If none is free, the below call to `acquire_owned`
+        // will only be resolved when an incoming connection is closed. This
+        // value is set much higher than the configured max number of peers since it's
+        // only intended to be used in case of heavy DOS.
+        let incoming_connections_limit = Arc::new(Semaphore::new(
+            self.global_state_lock.cli().max_num_peers * 2 + 4,
+        ));
 
+        let exit_code: i32 = loop {
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
@@ -1706,7 +1708,7 @@ impl MainLoopHandler {
                     break SUCCESS_EXIT_CODE;
                 }
 
-                // Handle incoming connections from peer
+                // Handle incoming connections from peer.
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
                     let ip = peer_address.ip();
                     if !precheck_incoming_connection_is_allowed(self.global_state_lock.cli(), ip) {
@@ -1883,8 +1885,8 @@ impl MainLoopHandler {
         Ok(exit_code)
     }
 
-    /// Handle messages from the RPC server. Returns `true` iff the client should shut down
-    /// after handling this message.
+    /// Handle messages from the RPC server. Returns `true` iff the client
+    /// should shut down after handling this message.
     async fn handle_rpc_server_message(
         &mut self,
         msg: RPCServerToMain,
@@ -1938,9 +1940,11 @@ impl MainLoopHandler {
                             .await
                     });
 
+                    // ```
                     // main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
-                    // If transaction could not be shared immediately because
-                    // it contains secret data, upgrade its proof-type.
+                    // ```
+                    // If transaction could not be shared immediately because it
+                    // contains secret data, upgrade its proof-type.
                 }
 
                 // do not shut down
