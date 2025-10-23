@@ -154,13 +154,7 @@ mod tests {
 
     #[test]
     fn rpc_bfield_elements_serde_roundtrip() {
-        let bfes = bfe_vec![
-            BFieldElement::new(0),
-            BFieldElement::new(1),
-            BFieldElement::new(255),
-            BFieldElement::new(0x1234567890ABCDEF),
-            BFieldElement::new(u64::MAX),
-        ];
+        let bfes = bfe_vec![0, 1, 255, 0x1234567890ABCDEFu64, u64::MAX,];
         let rpc_bfes: RpcBFieldElements = bfes.into();
 
         let serialized = serde_json::to_string(&rpc_bfes).expect("Serialization should succeed");

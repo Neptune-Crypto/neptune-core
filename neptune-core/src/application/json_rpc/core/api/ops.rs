@@ -61,6 +61,9 @@ pub enum RpcMethods {
     GetBlockDigest,
 
     #[namespace(Namespace::Archival)]
+    GetBlockDigests,
+
+    #[namespace(Namespace::Archival)]
     GetBlock,
 
     #[namespace(Namespace::Archival)]

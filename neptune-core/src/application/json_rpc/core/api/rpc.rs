@@ -1,15 +1,20 @@
 use async_trait::async_trait;
 use tasm_lib::prelude::Digest;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
 use crate::application::json_rpc::core::model::message::*;
 
 #[async_trait]
 pub trait RpcApi: Sync + Send {
+    /* Node */
+
     async fn network(&self) -> NetworkResponse {
         self.network_call(NetworkRequest {}).await
     }
     async fn network_call(&self, request: NetworkRequest) -> NetworkResponse;
+
+    /* Chain */
 
     async fn height(&self) -> HeightResponse {
         self.height_call(HeightRequest {}).await
@@ -63,6 +68,17 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: TipAnnouncementsRequest,
     ) -> TipAnnouncementsResponse;
+
+    /* Archival */
+
+    async fn get_block_digests(&self, height: BFieldElement) -> GetBlockDigestsResponse {
+        self.get_block_digests_call(GetBlockDigestsRequest { height })
+            .await
+    }
+    async fn get_block_digests_call(
+        &self,
+        request: GetBlockDigestsRequest,
+    ) -> GetBlockDigestsResponse;
 
     async fn get_block_digest(&self, selector: RpcBlockSelector) -> GetBlockDigestResponse {
         self.get_block_digest_call(GetBlockDigestRequest { selector })

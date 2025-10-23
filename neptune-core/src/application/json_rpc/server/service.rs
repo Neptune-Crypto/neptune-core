@@ -111,6 +111,20 @@ impl RpcApi for RpcServer {
         }
     }
 
+    async fn get_block_digests_call(
+        &self,
+        request: GetBlockDigestsRequest,
+    ) -> GetBlockDigestsResponse {
+        let state = self.state.lock_guard().await;
+
+        GetBlockDigestsResponse {
+            digests: state
+                .chain
+                .archival_state()
+                .block_height_to_block_digests(request.height.into())
+                .await,
+        }
+    }
     async fn get_block_call(&self, request: GetBlockRequest) -> GetBlockResponse {
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
@@ -270,6 +284,8 @@ pub mod tests {
     use macro_rules_attr::apply;
     use tasm_lib::prelude::Digest;
 
+    use std::collections::HashSet;
+
     use crate::api::export::Network;
     use crate::application::config::cli_args;
     use crate::application::json_rpc::core::api::rpc::RpcApi;
@@ -345,7 +361,10 @@ pub mod tests {
 
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn get_block_calls_are_consistent(
-        #[strategy(txkernel::with_lengths(0, 2, 2, true))]
+        #[strategy(0usize..8)] _num_inputs: usize,
+        #[strategy(0usize..8)] _num_outputs: usize,
+        #[strategy(0usize..8)] _num_announcements: usize,
+        #[strategy(txkernel::with_lengths(#_num_inputs, #_num_outputs, #_num_announcements, true))]
     tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
@@ -412,8 +431,41 @@ pub mod tests {
         }
     }
 
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
+    async fn get_block_digests_returns_competing_blocks(
+        #[strategy(txkernel::with_lengths(0, 2, 2, true))]
+    tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        #[strategy(txkernel::with_lengths(0, 2, 2, true))]
+    tx_block2: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+    ) {
+        let mut rpc_server = test_rpc_server().await;
+
+        let tx_block1 = Transaction {
+            kernel: tx_block1,
+            proof: TransactionProof::invalid(),
+        };
+        let tx_block2 = Transaction {
+            kernel: tx_block2,
+            proof: TransactionProof::invalid(),
+        };
+        let block1 = invalid_block_with_transaction(&Block::genesis(Network::Main), tx_block1);
+        let block2 = invalid_block_with_transaction(&Block::genesis(Network::Main), tx_block2);
+        rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
+        rpc_server.state.set_new_tip(block2.clone()).await.unwrap();
+
+        let digests = rpc_server
+            .get_block_digests(BlockHeight::genesis().next().into())
+            .await
+            .digests;
+
+        let expected: HashSet<_> = [block1.hash(), block2.hash()].into();
+        let actual: HashSet<_> = digests.into_iter().collect();
+
+        assert_eq!(expected, actual);
+    }
+
     #[apply(shared_tokio_runtime)]
-    async fn verify_is_block_canonical_consistency() {
+    async fn is_block_canonical_consistency() {
         let rpc_server = test_rpc_server().await;
 
         // Test genesis block is canonical

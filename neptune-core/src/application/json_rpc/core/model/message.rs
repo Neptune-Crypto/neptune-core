@@ -124,6 +124,18 @@ pub struct GetBlockDigestResponse {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
+pub struct GetBlockDigestsRequest {
+    pub height: BFieldElement,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBlockDigestsResponse {
+    pub digests: Vec<Digest>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
 pub struct GetBlockRequest {
     pub selector: RpcBlockSelector,
 }
