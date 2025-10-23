@@ -12,7 +12,6 @@ use futures::task::Poll;
 use itertools::Itertools;
 use mock_tx::fake_create_transaction_from_details_for_tests;
 use num_traits::Zero;
-use pin_project_lite::pin_project;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -75,12 +74,9 @@ pub(crate) fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
 // pointer.
 type ActionList<Item> = Box<Vec<Action<Item>>>;
 
-pin_project! {
 #[derive(Debug)]
 pub struct Mock<Item> {
-    #[pin]
     actions: ActionList<Item>,
-}
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
