@@ -199,6 +199,7 @@ pub struct Pow<const MERKLE_TREE_HEIGHT: usize> {
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, BFieldCodec, Default, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct PowMastPaths {
     pub(super) pow: [Digest; BlockHeader::MAST_HEIGHT],
     pub(super) header: [Digest; BlockKernel::MAST_HEIGHT],
@@ -286,16 +287,20 @@ impl<const MERKLE_TREE_HEIGHT: usize> GuesserBuffer<MERKLE_TREE_HEIGHT> {
     /// the Merkle tree root must be known before indices can be picked.
     /// Combined with a nonce, the opened indices can be derived from this
     /// value.
-    pub fn index_pricker_preimage_from_root(
+    fn index_picker_preimage_from_root(
         merkle_tree_root: Digest,
         mast_auth_paths: &PowMastPaths,
     ) -> Digest {
         Tip5::hash_pair(merkle_tree_root, mast_auth_paths.commit())
     }
 
-    /// Like [Self::index_pricker_preimage_from_root]
+    /// A commitment to everything in the block except for the nonce and the
+    /// authentication paths of the pow structure.
+    ///
+    /// The return value is hashed together with the nonce to calculate the
+    /// indices which are opened into the guesser buffer's Merkle tree.
     pub fn index_picker_preimage(&self, mast_auth_paths: &PowMastPaths) -> Digest {
-        Self::index_pricker_preimage_from_root(self.merkle_tree.root(), mast_auth_paths)
+        Self::index_picker_preimage_from_root(self.merkle_tree.root(), mast_auth_paths)
     }
 }
 
@@ -700,12 +705,8 @@ pub(crate) mod tests {
     }
 
     #[proptest]
-    fn bitreverse_is_symmetric(#[strategy(arb())] k: u32, #[strategy(1u32..=32)] log2_n: u32) {
-        let mask: u32 = if log2_n == 32 {
-            u32::MAX
-        } else {
-            (1u32 << log2_n) - 1
-        };
+    fn bitreverse_is_symmetric(k: u32, #[strategy(1u32..=32)] log2_n: u32) {
+        let mask = u32::MAX >> (32 - log2_n);
 
         let r = Pow::<10>::bitreverse(k, log2_n);
 
@@ -747,55 +748,60 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn indices_depend_on_concrete_proposal_hardfork_alpha() {
-        // Ensure that indices cannot be reused over two proposals that share
-        // the same parent.
+    /// Ensure that indices cannot be reused over two proposals that share the
+    /// same parent.
+    #[proptest(cases = 1)]
+    fn indices_depend_on_concrete_proposal_hardfork_alpha(
+        #[strategy(arb())] prev_block_digest: Digest,
+        #[strategy(arb())] auth_paths_1: PowMastPaths,
+        #[strategy(arb())] auth_paths_2: PowMastPaths,
+        #[strategy(arb())] nonce: Digest,
+    ) {
         const MERKLE_TREE_HEIGHT: usize = 10;
-        let mut rng = rng();
-        let prev_block_digest = rng.random();
-
-        let auth_paths1 = rng.random::<PowMastPaths>();
-        let auth_paths2 = rng.random::<PowMastPaths>();
         let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
-            auth_paths1,
+            auth_paths_1,
             None,
             ConsensusRuleSet::HardforkAlpha,
             prev_block_digest,
         );
-
-        let indices_1 = Pow::<10>::indices(
-            buffer.index_picker_preimage(&auth_paths1),
-            Digest::default(),
-        );
-        let indices_2 = Pow::<10>::indices(
-            buffer.index_picker_preimage(&auth_paths2),
-            Digest::default(),
-        );
-
+        let indices_1 =
+            Pow::<MERKLE_TREE_HEIGHT>::indices(buffer.index_picker_preimage(&auth_paths_1), nonce);
+        let indices_2 =
+            Pow::<MERKLE_TREE_HEIGHT>::indices(buffer.index_picker_preimage(&auth_paths_2), nonce);
         assert_ne!(indices_1, indices_2);
     }
 
-    #[test]
-    fn preprocessing_data_can_be_reused_after_hardfork_alpha() {
+    #[proptest(cases = 6)]
+    fn guesser_buffer_can_be_reused_after_hardfork_alpha(
+        #[strategy(arb())] prev_block_digest: Digest,
+        #[strategy(arb())] auth_paths_1: PowMastPaths,
+        #[strategy(arb())] auth_paths_2: PowMastPaths,
+    ) {
         const MERKLE_TREE_HEIGHT: usize = 10;
-        let mut rng = rng();
-        let prev_block_digest = rng.random();
 
-        let auth_paths1 = rng.random::<PowMastPaths>();
         let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
-            auth_paths1,
+            auth_paths_1,
             None,
             ConsensusRuleSet::HardforkAlpha,
             prev_block_digest,
+        );
+        assert_eq!(
+            buffer,
+            Pow::<MERKLE_TREE_HEIGHT>::preprocess(
+                auth_paths_2,
+                None,
+                ConsensusRuleSet::HardforkAlpha,
+                prev_block_digest,
+            ),
+            "After hardfork, buffer must only depend on previous block hash"
         );
 
         // Verify that 1st block proposal can be solved
         let difficulty = Difficulty::from(2u32);
-        let correct_guess_1 = solve(&buffer, &auth_paths1, difficulty);
+        let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty);
         assert!(correct_guess_1
             .validate(
-                auth_paths1,
+                auth_paths_1,
                 difficulty.target(),
                 ConsensusRuleSet::HardforkAlpha,
                 prev_block_digest
@@ -803,28 +809,27 @@ pub(crate) mod tests {
             .is_ok());
 
         // Verify that old solution does not work when auth paths change.
-        let auth_paths2 = rng.random::<PowMastPaths>();
-        assert_ne!(auth_paths2, auth_paths1);
         assert_eq!(
             PowValidationError::PathAInvalid,
             correct_guess_1
                 .validate(
-                    auth_paths2,
+                    auth_paths_2,
                     difficulty.target(),
                     ConsensusRuleSet::HardforkAlpha,
                     prev_block_digest
                 )
                 .unwrap_err(),
-            "2nd set of auth paths must make 1st PoW solution invalid"
+            "2nd set of auth paths must make 1st PoW solution invalid, as pow's\
+            Merkle authentication path becomes invalid"
         );
 
         // Verify that a 2nd proposal can use the same `buffer` value to create
         // a successful guess, and that only the `auth_paths` value needs to
         // change.
-        let correct_guess_2 = solve(&buffer, &auth_paths2, difficulty);
+        let correct_guess_2 = solve(&buffer, &auth_paths_2, difficulty);
         assert!(correct_guess_2
             .validate(
-                auth_paths2,
+                auth_paths_2,
                 difficulty.target(),
                 ConsensusRuleSet::HardforkAlpha,
                 prev_block_digest
