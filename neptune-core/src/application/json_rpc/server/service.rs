@@ -105,10 +105,9 @@ impl RpcApi for RpcServer {
         request: GetBlockDigestRequest,
     ) -> GetBlockDigestResponse {
         let state = self.state.lock_guard().await;
+        let digest = request.selector.as_digest(&state).await;
 
-        GetBlockDigestResponse {
-            digest: request.selector.as_digest(&state).await,
-        }
+        GetBlockDigestResponse { digest }
     }
 
     async fn get_block_digests_call(
@@ -128,7 +127,8 @@ impl RpcApi for RpcServer {
     async fn get_block_call(&self, request: GetBlockRequest) -> GetBlockResponse {
         let state = self.state.lock_guard().await;
 
-        let block = match request.selector.as_digest(&state).await {
+        let digest = request.selector.as_digest(&state).await;
+        let block = match digest {
             Some(digest) => state
                 .chain
                 .archival_state()
@@ -146,7 +146,8 @@ impl RpcApi for RpcServer {
     async fn get_block_proof_call(&self, request: GetBlockProofRequest) -> GetBlockProofResponse {
         let state = self.state.lock_guard().await;
 
-        let proof = match request.selector.as_digest(&state).await {
+        let digest = request.selector.as_digest(&state).await;
+        let proof = match digest {
             Some(digest) => state
                 .chain
                 .archival_state()
@@ -167,7 +168,8 @@ impl RpcApi for RpcServer {
     ) -> GetBlockKernelResponse {
         let state = self.state.lock_guard().await;
 
-        let kernel = match request.selector.as_digest(&state).await {
+        let digest = request.selector.as_digest(&state).await;
+        let kernel = match digest {
             Some(digest) => state
                 .chain
                 .archival_state()
@@ -188,7 +190,8 @@ impl RpcApi for RpcServer {
     ) -> GetBlockHeaderResponse {
         let state = self.state.lock_guard().await;
 
-        let header = match request.selector.as_digest(&state).await {
+        let digest = request.selector.as_digest(&state).await;
+        let header = match digest {
             Some(digest) => state
                 .chain
                 .archival_state()
@@ -206,7 +209,8 @@ impl RpcApi for RpcServer {
     async fn get_block_body_call(&self, request: GetBlockBodyRequest) -> GetBlockBodyResponse {
         let state = self.state.lock_guard().await;
 
-        let body = match request.selector.as_digest(&state).await {
+        let digest = request.selector.as_digest(&state).await;
+        let body = match digest {
             Some(digest) => state
                 .chain
                 .archival_state()
@@ -227,7 +231,8 @@ impl RpcApi for RpcServer {
     ) -> GetBlockTransactionKernelResponse {
         let state = self.state.lock_guard().await;
 
-        let kernel = match request.selector.as_digest(&state).await {
+        let digest = request.selector.as_digest(&state).await;
+        let kernel = match digest {
             Some(digest) => state
                 .chain
                 .archival_state()
@@ -248,7 +253,8 @@ impl RpcApi for RpcServer {
     ) -> GetBlockAnnouncementsResponse {
         let state = self.state.lock_guard().await;
 
-        let announcements = match request.selector.as_digest(&state).await {
+        let digest = request.selector.as_digest(&state).await;
+        let announcements = match digest {
             Some(digest) => state
                 .chain
                 .archival_state()
