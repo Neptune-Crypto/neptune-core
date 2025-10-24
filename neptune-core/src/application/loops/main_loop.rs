@@ -1674,18 +1674,17 @@ impl MainLoopHandler {
         #[cfg(not(unix))]
         drop((tx_term, tx_int, tx_quit));
 
-        let exit_code: i32 = loop {
-            // Use a semaphore to limit number of incoming connections. Should
-            // only be relevant as a countermeasure against a DOS. Each
-            // incoming connection must acquire a permit. If none is free,
-            // the below call to `acquire_owned` will only be resolved when an
-            // incoming connection is closed. This value is set much higher
-            // than the configured max number of peers since it's only intended
-            // to be used in case of heavy DOS.
-            let incoming_connections_limit = Arc::new(Semaphore::new(
-                self.global_state_lock.cli().max_num_peers * 2 + 4,
-            ));
+        // Use a semaphore to limit number of incoming connections. Should only be
+        // relevant as a countermeasure against a DOS. Each incoming connection
+        // must acquire a permit. If none is free, the below call to `acquire_owned`
+        // will only be resolved when an incoming connection is closed. This
+        // value is set much higher than the configured max number of peers since it's
+        // only intended to be used in case of heavy DOS.
+        let incoming_connections_limit = Arc::new(Semaphore::new(
+            self.global_state_lock.cli().max_num_peers * 2 + 4,
+        ));
 
+        let exit_code: i32 = loop {
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
