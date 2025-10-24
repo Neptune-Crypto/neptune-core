@@ -3132,7 +3132,6 @@ mod tests {
     }
 
     mod peer_messages {
-
         use super::*;
 
         #[traced_test]
@@ -3144,7 +3143,10 @@ mod tests {
             use crate::tests::shared::files::unit_test_data_directory;
             use crate::tests::shared::files::wait_for_file_to_exist;
 
+            #[cfg(not(windows))]
             const BLOCK_NOTIFY_SHELL_SCRIPT_NAME: &str = "block_notify_dummy.py";
+            #[cfg(windows)]
+            const BLOCK_NOTIFY_SHELL_SCRIPT_NAME: &str = "block_notify_dummy.bat";
 
             let network = Network::Main;
             let dummy_block = invalid_empty_block(&Block::genesis(network), network);
