@@ -161,6 +161,7 @@ pub(crate) mod tests {
     use crate::protocol::consensus::block::block_header::BlockHeader;
     use crate::protocol::consensus::block::block_kernel::BlockKernel;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
+    use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::BlockProof;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
@@ -280,8 +281,21 @@ pub(crate) mod tests {
                 .current()
         }
 
-        pub(crate) fn arbitrary_with_block_height(
+        pub(crate) fn deterministic_with_block_height_and_difficulty(
             block_height: BlockHeight,
+            difficulty: Difficulty,
+        ) -> Self {
+            let mut test_runner = TestRunner::deterministic();
+
+            Self::arbitrary_with_height_and_difficulty(block_height, difficulty)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current()
+        }
+
+        pub(crate) fn arbitrary_with_height_and_difficulty(
+            block_height: BlockHeight,
+            difficulty: Difficulty,
         ) -> BoxedStrategy<BlockPrimitiveWitness> {
             const NUM_INPUTS: usize = 2;
             let network = Network::Main;
@@ -347,7 +361,10 @@ pub(crate) mod tests {
 
                                 let parent_height = block_height.previous().unwrap();
                                 let parent_header =
-                                    BlockHeader::arbitrary_with_height(parent_height);
+                                    BlockHeader::arbitrary_with_height_and_difficulty(
+                                        parent_height,
+                                        difficulty,
+                                    );
                                 let parent_appendix = arb::<BlockAppendix>();
                                 let parent_body = BlockBody::arbitrary_with_mutator_set_accumulator(
                                     intermediate_mutator_set_accumulator.clone(),
@@ -428,6 +445,17 @@ pub(crate) mod tests {
                             })
                     },
                 )
+                .boxed()
+        }
+
+        pub(crate) fn arbitrary_with_block_height(
+            block_height: BlockHeight,
+        ) -> BoxedStrategy<BlockPrimitiveWitness> {
+            let difficulty = arb::<Difficulty>();
+            difficulty
+                .prop_flat_map(move |difficulty| {
+                    Self::arbitrary_with_height_and_difficulty(block_height, difficulty)
+                })
                 .boxed()
         }
     }
