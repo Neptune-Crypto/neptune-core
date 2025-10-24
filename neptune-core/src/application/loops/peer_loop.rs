@@ -2420,11 +2420,12 @@ mod tests {
         /// Return four blocks:
         /// - one with invalid PoW and invalid mock-PoW
         /// - one with invalid PoW and valid mock-Pow
-        /// - one with valid PoW
+        /// - one with valid reboot PoW
+        /// - one with valid hardfork PoW
         async fn pow_related_blocks(
             network: Network,
             predecessor: &Block,
-        ) -> (Block, Block, Block) {
+        ) -> (Block, Block, Block, Block) {
             let rng = StdRng::seed_from_u64(5550001).random();
             let block = fake_valid_block_proposal_successor_for_test(
                 predecessor,
@@ -2451,10 +2452,17 @@ mod tests {
             assert!(block_with_valid_reboot_pow.is_valid_mock_pow(difficulty.target()));
             assert!(block_with_valid_reboot_pow.has_proof_of_work(network, predecessor.header()));
 
+            let mut block_with_valid_alpha_pow = block.clone();
+            block_with_valid_alpha_pow.satisfy_pow(difficulty, ConsensusRuleSet::HardforkAlpha);
+            assert!(block_with_valid_alpha_pow.is_valid_mock_pow(difficulty.target()));
+            assert!(block_with_valid_alpha_pow
+                .pow_verify(difficulty.target(), ConsensusRuleSet::HardforkAlpha));
+
             (
                 invalid_pow,
                 block_with_valid_mock_pow,
                 block_with_valid_reboot_pow,
+                block_with_valid_alpha_pow,
             )
         }
 
@@ -2492,8 +2500,12 @@ mod tests {
                 1,
             );
 
-            let (block_without_any_pow, block_with_valid_mock_pow, block_with_valid_pow) =
-                pow_related_blocks(network, &genesis).await;
+            let (
+                block_without_any_pow,
+                block_with_valid_mock_pow,
+                valid_pow_reboot,
+                valid_pow_alpha,
+            ) = pow_related_blocks(network, &genesis).await;
             assert!(
                 peer_loop_handler
                     .handle_blocks(vec![block_without_any_pow], genesis.clone())
@@ -2513,11 +2525,19 @@ mod tests {
             assert_eq!(
                 BlockHeight::genesis().next(),
                 peer_loop_handler
-                    .handle_blocks(vec![block_with_valid_pow], genesis.clone())
+                    .handle_blocks(vec![valid_pow_reboot], genesis.clone())
                     .await
                     .unwrap()
                     .unwrap(),
                 "Must return Some(1) on valid Pow"
+            );
+            assert!(
+                peer_loop_handler
+                    .handle_blocks(vec![valid_pow_alpha], genesis.clone())
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "Must return None on hardfork-alpha solution when rule set is reboot"
             );
         }
 
@@ -2538,9 +2558,13 @@ mod tests {
             ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
             let peer_address = get_dummy_socket_address(0);
 
-            let (block_without_any_pow, block_with_valid_mock_pow, _) =
+            let (without_any_pow, with_valid_mock_pow, _, with_valid_hf_alpha_pow) =
                 pow_related_blocks(network, &Block::genesis(network)).await;
-            for block_without_valid_pow in [block_without_any_pow, block_with_valid_mock_pow] {
+            for block_without_valid_pow in [
+                without_any_pow,
+                with_valid_mock_pow,
+                with_valid_hf_alpha_pow,
+            ] {
                 // Sending an invalid block will not necessarily result in a ban. This depends on the peer
                 // tolerance that is set in the client. For this reason, we include a "Bye" here.
                 let mock = Mock::new(vec![
