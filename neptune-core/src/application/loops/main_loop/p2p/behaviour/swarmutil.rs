@@ -26,7 +26,7 @@ fn relay_connect_ifneeded(
                 ) && info.listen_addrs.iter().any(relay_maybe)
             })
             // ~~the only case @skaunov see yet when `peer_pings` can have no `&id` is `ping` `Timeout` and the peer caught disconnecting and to `remove` from infos; so it's ok to just filter him out~~
-            //      hence the `expect` was changed for `filter_`
+            //      hence `expect` was changed for `filter_`
             .filter_map(|(id, info)| peer_pings.get(id).map(|ping| (id, info, ping)))
             .partition::<Vec<_>, _>(|(_, _, ping)| ping.is_some());
         relays.0.sort_unstable_by(|a, b| b.2.cmp(a.2));

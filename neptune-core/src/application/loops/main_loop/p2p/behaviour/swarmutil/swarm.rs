@@ -497,7 +497,7 @@ pub(crate) async fn run(
                                     Ok(Box::pin(futures::future::ready(MessageAcceptance::Ignore)) as Pin<Box<dyn Future<Output = MessageAcceptance> + Send>>)
                                 } else if topic_proposal.hash() == message.topic {bincode::deserialize(message.data.as_slice()).map(|proposal| async {
                                     match super::super::super::super::super::handle_proposal_from_peer::the(
-                                        global_state_lock.clone(), to_main.clone(), crate::api::export::Timestamp::now(), Protocol::P2p(propagation_source).into(), proposal
+                                        global_state_lock.clone(), to_main.clone(), crate::api::export::Timestamp::now(), None, proposal
                                     ).await {
                                         Some(PeerSanction::Positive(_)) => MessageAcceptance::Accept,
                                         Some(PeerSanction::Negative(_)) => MessageAcceptance::Reject,

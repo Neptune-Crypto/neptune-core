@@ -224,7 +224,12 @@ pub struct Args {
 
     /// If set, node will only accept block proposals from these IP addresses.
     ///
-    /// Multiple IP address can be set in which case the node will accept block proposals from any node connected from an IP in this list. Apart
+    /// [Probably](https://github.com/Neptune-Crypto/neptune-core/pull/729#issuecomment-3442674362)
+    /// this won't be adapted to the further changes in the networking, i.e. will be eventually
+    /// **deprecated.** #deprecationComposersAddresses
+    ///
+    /// Multiple IP-address can be set in which case the node will accept block proposals from
+    /// any node connected from an IP in this list. Apart
     /// from ignoring all other block proposals, this argument does not change
     /// the proposal-selection behavior, meaning that the node will still pick
     /// the most favorable block proposal in terms of guesser rewards, as long
@@ -232,20 +237,17 @@ pub struct Args {
     ///
     /// Example: `--whitelisted-composer=8.8.8.8 --whitelisted-composer=8.8.4.4`
     ///          `--whitelisted-composer=2001:db8:3333:4444:5555:6666:7777:8888`
-    /// #[deprecated = "resolve <https://github.com/Neptune-Crypto/neptune-core/pull/729#issuecomment-3385405210> then update (`Multiaddr`) and test the examples accordingly"]
     #[clap(long = "whitelisted-composer")]
-    pub(crate) whitelisted_composers: Vec<Multiaddr>, // Addresses
+    pub(crate) whitelisted_composers: Vec<IpAddr>,
 
     /// If set, all composition from peers will be ignored.
     #[clap(long)]
     pub(crate) ignore_foreign_compositions: bool,
 
-    /// Regulates the fraction of the block subsidy that a composer sends to the
-    /// guesser.
+    /// Regulates the fraction of the block subsidy that a composer sends to the guesser.
     /// Value must be between 0 and 1.
     ///
-    /// The remainder goes to the composer. This flag is ignored if the
-    /// `compose` flag is not set.
+    /// The remainder goes to the composer. This flag is ignored if the `compose` flag is not set.
     #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
     pub guesser_fraction: f64,
 
@@ -666,47 +668,25 @@ impl Args {
         })
     }
 
-    /// Check if block proposal should be accepted from this address.
-    pub(crate) fn accept_block_proposal_from(
+    /// Check if block proposal should be accepted from this IP address.
+    pub(crate) fn check_composer_whitelisted(
         &self,
-        mut peer: Multiaddr,
+        ip_address: IpAddr,
     ) -> Result<(), BlockProposalRejectError> {
-        if self.ignore_foreign_compositions {
-            Err(BlockProposalRejectError::IgnoreAllForeign)
-        } else if self.whitelisted_composers.is_empty() {
-            Ok(())
-        } else {
-            // if let Some(peer_id) = peer.pop() {
-            //     debug_assert!(
-            //         matches!(peer_id, libp2p::multiaddr::Protocol::P2p(_)),
-            //         r#"@skaunov can't find a case when it can come without `PeerId` ending, but if there is one this can be remade as `if let id @  = peer.iter().last()`"#
-            //     );
-            //     let peer_id = peer_id.into();
-            //     if self.whitelisted_composers.iter().any(|w| w.ends_with(&peer_id) || w.ends_with(&peer)) {Ok(())}
-            //     else {Err(BlockProposalRejectError::NotWhiteListed)}
-            // } else {
-            //     tracing::debug!("something is wrong -- this Multiaddr must not be empty; hence rejecting the operation");
-            //     // ~~seems like going with `anyhow` here to bubble up a deeper internal error which isn't critical~~
-            //     Err(BlockProposalRejectError::NotWhiteListed)
-            // }
-            let (peer_id, peer) =
-                super::super::loops::main_loop::p2p::tmp_utils_multiaddr::peerid_split(&mut peer);
-            if self.whitelisted_composers.iter().any(|w| w.ends_with(peer)) {
-                Ok(())
-            } else {
-                if let Some(peer_id) = peer_id {
-                    let peer_id = multiaddr::Protocol::P2p(peer_id).into();
-                    if self
-                        .whitelisted_composers
-                        .iter()
-                        .any(|w| w.ends_with(&peer_id))
-                    {
-                        return Ok(());
-                    }
-                }
-                Err(BlockProposalRejectError::NotWhiteListed)
-            }
+        let ip_address = match ip_address {
+            IpAddr::V4(_) => ip_address,
+            IpAddr::V6(v6) => match v6.to_ipv4() {
+                Some(v4) => std::net::IpAddr::V4(v4),
+                None => ip_address,
+            },
+        };
+        if !self.whitelisted_composers.is_empty()
+            && !self.whitelisted_composers.contains(&ip_address)
+        {
+            return Err(BlockProposalRejectError::NotWhiteListed);
         }
+
+        Ok(())
     }
 
     fn estimate_proving_capability() -> TxProvingCapability {

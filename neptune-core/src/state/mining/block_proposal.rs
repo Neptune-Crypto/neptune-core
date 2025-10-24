@@ -95,10 +95,7 @@ pub(crate) enum BlockProposalRejectError {
         received: NativeCurrencyAmount,
     },
 
-    /// All foreign block proposals are ignored.
-    IgnoreAllForeign,
-
-    /// Block proposal comes from a peer that's not whitelisted.
+    /// Block proposal comes from a peer that's not whitelisted. #deprecationComposersAddresses
     NotWhiteListed,
 
     /// Block proposal is rejected because we already built one locally.
@@ -126,9 +123,6 @@ impl fmt::Display for BlockProposalRejectError {
                     .map(|c| format!("{}", c))
                     .unwrap_or("None".to_string())
             ),
-            BlockProposalRejectError::IgnoreAllForeign => {
-                write!(f, "Ignoring all foreign proposals")
-            }
             BlockProposalRejectError::NotWhiteListed => {
                 write!(f, "Proposal received from non-whitelisted peer")
             }

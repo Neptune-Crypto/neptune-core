@@ -1331,13 +1331,14 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalNotification(block_proposal_notification) => {
-                if self
-                    .global_state_lock
-                    .cli()
-                    .accept_block_proposal_from(self.peer_address.ip().into())
-                    .is_ok()
+                if !self.global_state_lock.cli().ignore_foreign_compositions
+                    && self
+                        .global_state_lock
+                        .cli()
+                        .check_composer_whitelisted(self.peer_address.ip().into())
+                        .is_ok()
                 {
-                    // Avoid acquiring lock if ip validation failed
+                    // Avoid acquiring lock if IP-addr validation failed.
                     match self
                         .global_state_lock
                         .lock_guard()

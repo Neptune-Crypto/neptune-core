@@ -10,6 +10,8 @@ use crate::application::loops::MSG_CONDIT;
 pub mod membership;
 
 /// *destructive:* if ends with `PeerId` that will be popped separately
+///
+/// needs a test by another hand
 pub fn peerid_split(
     couldendwith_peerid: &mut Multiaddr,
 ) -> (Option<libp2p::PeerId>, &mut Multiaddr) {
@@ -44,3 +46,5 @@ pub fn multiaddr_from(sadr: &SocketAddr) -> Multiaddr {
         .with(sadr.ip().into())
         .with(multiaddr::Protocol::Tcp(sadr.port()))
 }
+
+// TODO on <https://github.com/multiformats/rust-multiaddr/pull/128> it'd good to add few `proptest` (and for other utils too)

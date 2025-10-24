@@ -20,6 +20,8 @@ const TX_SINGLEPROOF_SIZE: usize = 3 << 19;
 const TX_PROOFCOL_SIZE: usize = 65 << 20;
 
 /// `false` when the m-addr is on a relay itself or doesn't have `Protocol::Tcp`
+///
+/// needs a test by another hand
 fn relay_maybe(adr: &libp2p::Multiaddr) -> bool {
     !adr.protocol_stack().contains(&Protocol::P2pCircuit.tag()) // a relay *client* m-addr differs basically with this part from a relay
     && adr.protocol_stack().contains(&Protocol::Tcp(0).tag())
