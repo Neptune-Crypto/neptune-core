@@ -1238,7 +1238,8 @@ pub(crate) mod tests {
         }
 
         /// Satisfy PoW for this block. Only to be used for tests since this
-        /// function cannot be cancelled.
+        /// function cannot be cancelled. Deterministic, will always return the
+        /// same solution for the same input.
         pub(crate) fn satisfy_pow(
             &mut self,
             parent_difficulty: Difficulty,

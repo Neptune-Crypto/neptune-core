@@ -63,9 +63,9 @@ impl ProofOfWorkPuzzle {
 
     /// Solve a PoW from a puzzle.
     ///
-    /// Takes a very long time and cannot be cancelled while running.
+    /// Takes a very long time and cannot be cancelled while running. Slow
+    /// implementation, as it only uses one thread.
     pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> BlockPow {
-        use rayon::prelude::*;
         info!("Starting PoW preprocessing");
         let guesser_buffer = BlockPow::preprocess(
             self.pow_mast_paths,
@@ -78,7 +78,6 @@ impl ProofOfWorkPuzzle {
         info!("Now attempting to find valid nonce");
         let index_picker_preimage = guesser_buffer.index_picker_preimage(&self.pow_mast_paths);
         let solution = (0u64..u64::MAX)
-            .into_par_iter()
             .map(|i| {
                 let nonce = Digest(bfe_array![0, 0, 0, 0, i]);
                 BlockPow::guess(
@@ -89,7 +88,7 @@ impl ProofOfWorkPuzzle {
                     self.threshold,
                 )
             })
-            .find_map_any(|x| x)
+            .find_map(|x| x)
             .expect("Should find solution within 2^{64} attempts");
         info!("Found valid nonce! nonce: {}", solution.nonce);
 
