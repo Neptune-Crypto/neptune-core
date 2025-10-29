@@ -140,12 +140,10 @@ libp2p = {version = "*", features = [
     "yamux",
     "serde",
 ]}
+multiaddr = "*"
 
 # align `version` with `libp2p::request_response::cbor::Behaviour`
 # cbor4ii = {version = "1", features = ["serde1"]}
-
-# ~~will be needed for an onion-addr~~
-multiaddr = "*"
 
 [dev-dependencies]
 

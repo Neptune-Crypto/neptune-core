@@ -1,3 +1,6 @@
+//! spawning subtasks here seems to have no advantage as `Runtime` is not single-threaded, and most of the module actions are sequential / potentially depending on a previous message 
+//! in `loop` hence even if something blocks the thread (currently `bincode` feels as a most heavy operation) for a few millisecs -- the other Tokio threads would steal most of the tasks
+
 use std::collections::{HashMap, HashSet};
 
 use futures::StreamExt;
@@ -22,7 +25,7 @@ use crate::application::loops::MSG_CONDIT;
 use crate::protocol::{consensus::block::Block, peer::PeerSanction};
 use crate::state::mining::mining_status::MiningStatus;
 
-pub const FILE_NODEIDPERSISTANCE: &str = ".peer_sk";
+pub const FILENAME_PERSISTANTNODEID: &str = ".peer_sk";
 
 pub(crate) async fn run(
     global_state_lock: crate::state::GlobalStateLock,
@@ -63,7 +66,7 @@ pub(crate) async fn run(
                     .root_dir_path()
             })
             .await
-            .join(std::path::Path::new(FILE_NODEIDPERSISTANCE));
+            .join(std::path::Path::new(FILENAME_PERSISTANTNODEID));
         if global_state_lock.cli().persistent {
             if let Ok(mut f) = File::open(&file_path).await {
                 let mut buf: [u8; 64] = [0; 64];
