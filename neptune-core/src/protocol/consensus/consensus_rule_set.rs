@@ -94,6 +94,8 @@ impl ConsensusRuleSet {
 #[cfg(test)]
 pub(crate) mod tests {
 
+    use std::sync::Arc;
+
     use futures::channel::oneshot;
     use itertools::Itertools;
     use rand::rngs::StdRng;
@@ -107,15 +109,17 @@ pub(crate) mod tests {
     use crate::api::export::KeyType;
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::OutputFormat;
+    use crate::api::export::ReceivingAddress;
     use crate::api::export::StateLock;
     use crate::api::export::Timestamp;
-    use crate::api::export::Transaction;
     use crate::api::export::TransactionProofType;
+    use crate::api::export::TxCreationArtifacts;
     use crate::api::export::TxProvingCapability;
     use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
     use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
     use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
+    use crate::api::tx_initiation::builder::tx_input_list_builder::SortOrder;
     use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
     use crate::application::config::cli_args;
     use crate::application::loops::channel::NewBlockFound;
@@ -139,7 +143,7 @@ pub(crate) mod tests {
         mut state: GlobalStateLock,
         num_outputs: usize,
         timestamp: Timestamp,
-    ) -> Transaction {
+    ) -> TxCreationArtifacts {
         let mut addresses_and_amts = vec![];
         let same_address = state
             .api()
@@ -170,7 +174,7 @@ pub(crate) mod tests {
                     .into_iter()
                     .collect(),
             )
-            .policy(InputSelectionPolicy::ByProvidedOrder)
+            .policy(InputSelectionPolicy::ByUtxoSize(SortOrder::Ascending))
             .spend_amount(tx_outputs.total_native_coins() + fee)
             .build();
         let tx_inputs = tx_inputs.into_iter().collect_vec();
@@ -203,11 +207,16 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-        TransactionBuilder::new()
+        let transaction = TransactionBuilder::new()
             .transaction_details(&tx_details)
             .transaction_proof(proof)
             .build()
-            .unwrap()
+            .unwrap();
+
+        TxCreationArtifacts {
+            transaction: Arc::new(transaction),
+            details: Arc::new(tx_details),
+        }
     }
 
     async fn block_with_n_outputs(
@@ -222,7 +231,7 @@ pub(crate) mod tests {
             me,
             timestamp,
             TritonVmProofJobOptions::default(),
-            TxMergeOrigin::ExplicitList(vec![tx_many_outputs]),
+            TxMergeOrigin::ExplicitList(vec![tx_many_outputs.transaction.into()]),
         )
         .await
         .unwrap();
@@ -341,6 +350,8 @@ pub(crate) mod tests {
     #[test]
     fn hard_fork_alpha() {
         // Start at hard fork block height minus 2
+        // Then mine enough blocks to activate the hard fork. Verify that all
+        // blocks are valid under the expected consensus rule set.
         let init_block_heigth = BlockHeight::from(14998u64);
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
             init_block_heigth,
@@ -376,12 +387,14 @@ pub(crate) mod tests {
                     .await;
 
             // Solve PoW for block_b
-            let guesser_key = bob
+            let guesser_address: ReceivingAddress = bob
                 .lock_guard()
                 .await
                 .wallet_state
                 .wallet_entropy
-                .guesser_fee_key();
+                .guesser_fee_key()
+                .to_address()
+                .into();
             let (guesser_tx_b, guesser_rx_b) = oneshot::channel::<NewBlockFound>();
             let guesser_timestamp_b = block_b_no_pow.header().timestamp;
             guess_nonce(
@@ -391,7 +404,7 @@ pub(crate) mod tests {
                 guesser_tx_b,
                 GuessingConfiguration {
                     num_guesser_threads: cli.guesser_threads,
-                    address: guesser_key.to_address().into(),
+                    address: guesser_address.clone(),
                     // For deterministic pow-guessing, both RNG and timestamp
                     // must be deterministic.
                     override_rng: Some(rng),
@@ -399,9 +412,12 @@ pub(crate) mod tests {
                 },
             )
             .await;
-
             let block_b = *guesser_rx_b.await.unwrap().block;
-
+            assert!(
+                block_b
+                    .is_valid(&block_a, block_b.header().timestamp, network)
+                    .await
+            );
             assert!(block_b.has_proof_of_work(network, block_a.header()));
             assert!(block_b.pow_verify(
                 block_a.header().difficulty.target(),
@@ -426,6 +442,11 @@ pub(crate) mod tests {
 
             // hard fork minus 1
             let block_c = next_block(bob.clone(), block_b.clone()).await;
+            assert!(
+                block_c
+                    .is_valid(&block_b, block_c.header().timestamp, network)
+                    .await
+            );
             assert!(block_c.has_proof_of_work(network, block_b.header()));
             assert!(block_c.pow_verify(
                 block_b.header().difficulty.target(),
@@ -449,6 +470,11 @@ pub(crate) mod tests {
 
             // 1st block after hard fork!
             let block_d = next_block(bob.clone(), block_c.clone()).await;
+            assert!(
+                block_d
+                    .is_valid(&block_c, block_d.header().timestamp, network)
+                    .await
+            );
             assert!(block_d.has_proof_of_work(network, block_c.header()));
             assert!(!block_d.pow_verify(
                 block_c.header().difficulty.target(),
@@ -472,6 +498,11 @@ pub(crate) mod tests {
 
             // 2nd block after hard fork
             let block_e = next_block(bob.clone(), block_d.clone()).await;
+            assert!(
+                block_e
+                    .is_valid(&block_d, block_e.header().timestamp, network)
+                    .await
+            );
             assert!(block_e.has_proof_of_work(network, block_d.header()));
             assert!(!block_e.pow_verify(
                 block_d.header().difficulty.target(),
@@ -495,6 +526,11 @@ pub(crate) mod tests {
 
             // 3rd block after hard fork
             let block_f = next_block(bob.clone(), block_e.clone()).await;
+            assert!(
+                block_f
+                    .is_valid(&block_e, block_f.header().timestamp, network)
+                    .await
+            );
             assert!(block_f.has_proof_of_work(network, block_e.header()));
             assert!(!block_f.pow_verify(
                 block_e.header().difficulty.target(),
@@ -507,6 +543,44 @@ pub(crate) mod tests {
             bob.set_new_tip(block_f.clone()).await.unwrap();
             assert_eq!(
                 15002u64,
+                bob.lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+                    .value()
+            );
+
+            // 4th block after hard fork, with a transaction.
+            // Create transaction
+            let tx_timestamp = block_f.header().timestamp + Timestamp::minutes(6);
+            let tx_artifacts = tx_with_n_outputs(bob.clone(), 2, tx_timestamp).await;
+            bob.api_mut()
+                .tx_initiator_mut()
+                .record_and_broadcast_transaction(&tx_artifacts)
+                .await
+                .unwrap();
+
+            // Create block, with above transaction
+            let block_g = next_block(bob.clone(), block_f.clone()).await;
+            assert!(
+                block_g
+                    .is_valid(&block_f, block_g.header().timestamp, network)
+                    .await
+            );
+            assert!(block_g.has_proof_of_work(network, block_f.header()));
+            assert!(!block_g.pow_verify(
+                block_f.header().difficulty.target(),
+                ConsensusRuleSet::Reboot
+            ));
+            assert!(block_g.pow_verify(
+                block_f.header().difficulty.target(),
+                ConsensusRuleSet::HardforkAlpha
+            ));
+            bob.set_new_tip(block_g.clone()).await.unwrap();
+            assert_eq!(
+                15003u64,
                 bob.lock_guard()
                     .await
                     .chain

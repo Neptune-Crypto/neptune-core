@@ -61,6 +61,10 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 ///
 /// Returned PoW solution is deterministic, as is the block proof, and
 /// consequently the entire block and its hash.
+///
+/// The most valuable synced SingleProof-backed transaction in the mempool will
+/// be included in the block. If mempool is empty a dummy transaction will be
+/// merged with the coinbase transaction to set the merge bit.
 pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block) -> Block {
     let network = global_state_lock.cli().network;
     let (child_no_pow, _) = compose_block_helper(
