@@ -24,13 +24,16 @@ pub(crate) struct RapidBlockDownload {
 }
 
 impl RapidBlockDownload {
+    fn temp_dir() -> PathBuf {
+        let suffix = "rapid-block-download/";
+        std::env::temp_dir().join(suffix)
+    }
     /// Set up a [`RapidBlockDownload`] state.
     async fn new(
         highest_block_already_processed: BlockHeight,
         tip: &Block,
     ) -> Result<Self, RapidBlockDownloadError> {
-        let suffix = "rapid-block-download/";
-        let temp_directory = std::env::temp_dir().join(suffix);
+        let temp_directory = Self::temp_dir();
         let _ = tokio::fs::create_dir(&temp_directory)
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()));
@@ -78,7 +81,7 @@ impl RapidBlockDownload {
 
     /// Get the file name for the block.
     fn file_name(&self, block: &Block) -> PathBuf {
-        block.hash().to_hex().into()
+        self.temp_directory.join(block.hash().to_hex())
     }
 
     /// Store the block in the temp directory and mark it as received.
@@ -91,6 +94,8 @@ impl RapidBlockDownload {
 
         self.index_to_filename
             .insert(block.header().height.value(), file_name);
+
+        self.coverage.set(block.header().height.value());
 
         Ok(())
     }
@@ -170,7 +175,11 @@ enum RapidBlockDownloadError {
 #[cfg(test)]
 mod tests {
     use rand::rng;
+    use rand::rngs::StdRng;
     use rand::Rng;
+    use rand::RngCore;
+    use rand::SeedableRng;
+    use tokio::fs;
 
     use super::*;
 
@@ -187,7 +196,6 @@ mod tests {
         let mut received_heights = vec![];
         for _ in 0..10 {
             let height = rng.random_range(low..high);
-            println!("receiving block: {height}");
             received_heights.push(height);
             let mut block = rng.random::<Block>();
             block.set_header_height(BlockHeight::from(height));
@@ -195,27 +203,34 @@ mod tests {
         }
 
         // get ith
-        for _ in 0..10 {
+        for _ in 0..100 {
             let index = BlockHeight::from(
                 received_heights[rng.random_range(0usize..received_heights.len())],
             );
-            println!("getting block: {index}");
             assert!(rapid_block_download.get_received_block(index).await.is_ok());
         }
 
         // fail to get jth
-        for _ in 0..10 {
-            let jndex =
-                BlockHeight::from(rapid_block_download.coverage().sample(false, rng.random()));
-            println!("failing to get block: {jndex}");
+        for _ in 0..100 {
+            let seed = rng.next_u64();
+            let mut inner_rng = StdRng::seed_from_u64(seed);
+            let jndex = BlockHeight::from(
+                rapid_block_download
+                    .coverage()
+                    .sample(false, inner_rng.random()),
+            );
+            assert!(!rapid_block_download.coverage().contains(jndex.value()));
             assert_eq!(
                 rapid_block_download
                     .get_received_block(jndex)
                     .await
                     .unwrap_err(),
-                RapidBlockDownloadError::NotReceived(jndex)
+                RapidBlockDownloadError::NotReceived(jndex),
             );
         }
+
+        // clean up
+        rapid_block_download.clean_up().await;
     }
 
     #[tokio::test]
