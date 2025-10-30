@@ -531,11 +531,11 @@ impl rand::distr::Distribution<MutatorSetAccumulator> for rand::distr::StandardU
         let random_mmr_accumulator = |seed| {
             use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
-            let mut rng = StdRng::from_seed(seed);
-            let leaf_count = rng.next_u64();
+            let mut inner_rng = StdRng::from_seed(seed);
+            let leaf_count = inner_rng.next_u64();
             let num_peaks = leaf_count.count_ones();
             MmrAccumulator::init(
-                (0..num_peaks).map(|_| rng.random()).collect_vec(),
+                (0..num_peaks).map(|_| inner_rng.random()).collect_vec(),
                 leaf_count,
             )
         };
