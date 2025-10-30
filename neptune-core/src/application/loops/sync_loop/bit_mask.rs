@@ -241,7 +241,7 @@ impl BitMask {
                 return false;
             }
         }
-        return true;
+        true
     }
 }
 
