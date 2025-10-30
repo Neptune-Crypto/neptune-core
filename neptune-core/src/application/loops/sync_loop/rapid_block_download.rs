@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use serde::Deserialize;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::BlockHeight;
@@ -32,7 +31,7 @@ impl RapidBlockDownload {
     ) -> Result<Self, RapidBlockDownloadError> {
         let suffix = "rapid-block-download/";
         let temp_directory = std::env::temp_dir().join(suffix);
-        tokio::fs::create_dir(&temp_directory)
+        let _ = tokio::fs::create_dir(&temp_directory)
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()));
 
@@ -83,7 +82,10 @@ impl RapidBlockDownload {
     }
 
     /// Store the block in the temp directory and mark it as received.
-    async fn receive_block(&mut self, block: &Block) -> Result<(), RapidBlockDownloadError> {
+    pub(crate) async fn receive_block(
+        &mut self,
+        block: &Block,
+    ) -> Result<(), RapidBlockDownloadError> {
         let file_name = self.file_name(block);
         self.store_block(block, &file_name).await?;
 
@@ -106,6 +108,7 @@ impl RapidBlockDownload {
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))
     }
 
+    /// Load the block from the temp directory.
     async fn load_block(&self, file_name: &PathBuf) -> Result<Block, RapidBlockDownloadError> {
         let data = tokio::fs::read(file_name)
             .await
@@ -129,11 +132,14 @@ impl RapidBlockDownload {
     }
 
     /// Read a block from the temp directory.
-    async fn get_block(&self, height: BlockHeight) -> Result<Block, RapidBlockDownloadError> {
+    async fn get_received_block(
+        &self,
+        height: BlockHeight,
+    ) -> Result<Block, RapidBlockDownloadError> {
         let file_name = self
             .index_to_filename
             .get(&height.value())
-            .ok_or(RapidBlockDownloadError::NotReceived(height.value()))?;
+            .ok_or(RapidBlockDownloadError::NotReceived(height))?;
 
         let block = self
             .load_block(file_name)
@@ -151,12 +157,12 @@ impl RapidBlockDownload {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 enum RapidBlockDownloadError {
     #[error("I/O error: {0}")]
     IO(String),
     #[error("Block {0} not received")]
-    NotReceived(u64),
+    NotReceived(BlockHeight),
     #[error("Serialization error: {0}")]
     Serialization(String),
 }
@@ -169,17 +175,48 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn can_get_stored_block() {
+    async fn can_get_stored_block_iff_received() {
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
-        tip.set_header_height(200.into());
-        let mut rapid_block_download = RapidBlockDownload::new(100.into(), tip);
+        let low = 100;
+        let high = 200;
+        tip.set_header_height(high.into());
+        let mut rapid_block_download = RapidBlockDownload::new(low.into(), &tip).await.unwrap();
 
-        todo!()
+        // receive 10 blocks
+        let mut received_heights = vec![];
+        for _ in 0..10 {
+            let height = rng.random_range(low..high);
+            println!("receiving block: {height}");
+            received_heights.push(height);
+            let mut block = rng.random::<Block>();
+            block.set_header_height(BlockHeight::from(height));
+            let _ = rapid_block_download.receive_block(&block).await;
+        }
+
+        // get ith
+        for _ in 0..10 {
+            let index = BlockHeight::from(
+                received_heights[rng.random_range(0usize..received_heights.len())],
+            );
+            println!("getting block: {index}");
+            assert!(rapid_block_download.get_received_block(index).await.is_ok());
+        }
+
+        // fail to get jth
+        for _ in 0..10 {
+            let jndex =
+                BlockHeight::from(rapid_block_download.coverage().sample(false, rng.random()));
+            println!("failing to get block: {jndex}");
+            assert_eq!(
+                rapid_block_download
+                    .get_received_block(jndex)
+                    .await
+                    .unwrap_err(),
+                RapidBlockDownloadError::NotReceived(jndex)
+            );
+        }
     }
-
-    #[tokio::test]
-    async fn cannot_get_unstored_block() {}
 
     #[tokio::test]
     async fn can_make_complete_by_receiving_all_blocks() {}
