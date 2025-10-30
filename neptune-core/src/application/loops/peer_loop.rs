@@ -3950,11 +3950,14 @@ mod tests {
     }
 
     mod transactions {
+        use strum::IntoEnumIterator;
+
         use super::*;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
         use crate::application::triton_vm_job_queue::vm_job_queue;
         use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+        use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
         use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
@@ -4202,26 +4205,21 @@ mod tests {
             // Both ProofCollection and SingleProof backed transactions are
             // tested.
 
-            enum ProofType {
-                ProofCollection,
-                SingleProof,
-            }
-
             let network = Network::Main;
 
-            for proof_type in [ProofType::ProofCollection, ProofType::SingleProof] {
+            for proof_type in TransactionProofQuality::iter() {
                 let proof_job_options = TritonVmProofJobOptions::default();
                 let upgrade =
                     async |primitive_witness: PrimitiveWitness,
                            consensus_rule_set: ConsensusRuleSet| {
                         match proof_type {
-                            ProofType::ProofCollection => {
+                            TransactionProofQuality::ProofCollection => {
                                 PrimitiveWitnessToProofCollection { primitive_witness }
                                     .upgrade(vm_job_queue(), &proof_job_options)
                                     .await
                                     .unwrap()
                             }
-                            ProofType::SingleProof => {
+                            TransactionProofQuality::SingleProof => {
                                 PrimitiveWitnessToSingleProof { primitive_witness }
                                     .upgrade(vm_job_queue(), &proof_job_options, consensus_rule_set)
                                     .await
@@ -4231,10 +4229,10 @@ mod tests {
                     };
 
                 let (
-                    _peer_broadcast_tx,
-                    from_main_rx_clone,
+                    main_to_peer_tx,
+                    from_main_rx,
                     to_main_tx,
-                    mut to_main_rx1,
+                    mut to_main_rx,
                     mut state_lock,
                     _hsd,
                 ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
@@ -4242,7 +4240,7 @@ mod tests {
                     .unwrap();
                 let consensus_rule_set =
                     ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
-                let fee = NativeCurrencyAmount::from_nau(500);
+                let fee: NativeCurrencyAmount = 0.2f64.try_into().unwrap();
                 let pw_genesis =
                     genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
                         .await
@@ -4298,16 +4296,19 @@ mod tests {
 
                 let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
                 peer_loop_handler
-                    .run(mock, from_main_rx_clone, &mut peer_state)
+                    .run(mock, from_main_rx, &mut peer_state)
                     .await
                     .unwrap();
 
                 // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
                 // by the `main_loop`.
-                match to_main_rx1.recv().await {
+                match to_main_rx.recv().await {
                     Some(PeerTaskToMain::Transaction(_)) => (),
                     _ => panic!("Main loop must receive new transaction"),
                 };
+
+                drop(to_main_rx);
+                drop(main_to_peer_tx);
             }
         }
 
