@@ -185,12 +185,17 @@ impl BitMask {
 
     /// Sample an element from the set.
     ///
-    /// In other words, sample an integer whose index is a one-bit.
+    /// In other words, sample an index into the bit array whose indicated
+    /// element matches with value.
     pub(crate) fn sample(&self, value: bool, seed: [u8; 32]) -> u64 {
         let [single_element] = self.sample_many(value, seed);
         single_element
     }
 
+    /// Sample elements from the set.
+    ///
+    /// In other words, sample an index into the bit array whose indicated
+    /// element matches with value. Do this many times.
     pub(crate) fn sample_many<const N: usize>(&self, target: bool, seed: [u8; 32]) -> [u64; N] {
         let mut rng = StdRng::from_seed(seed);
         let mut elements = vec![];
@@ -545,5 +550,21 @@ pub mod test {
                 );
             }
         }
+    }
+
+    #[test]
+    fn can_sample_index_for_zero() {
+        let mut bit_mask = BitMask::new(200);
+        bit_mask.set_range(0, 100);
+        for i in [122, 117, 136, 116, 105, 187, 111, 143, 108, 111] {
+            bit_mask.set(i);
+        }
+
+        let seed = 4552531317295863509_u64;
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let index = bit_mask.sample(false, rng.random());
+
+        assert!(!bit_mask.contains(index));
     }
 }
