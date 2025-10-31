@@ -41,9 +41,9 @@ pub fn json_router_derive(input: TokenStream) -> TokenStream {
             if namespaces.contains(&#namespace) {
                 router.insert(#method_name, |api, params| async move {
                     let req: #req_type = serde_json::from_value(params)
-                        .map_err(|_| RpcError::InvalidParams)?;
-                    let resp: #res_type = api.#call_fn(req).await;
-                    serde_json::to_value(resp).map_err(|_| RpcError::InternalError)
+                        .map_err(|_| JsonError::InvalidParams)?;
+                    let resp: #res_type = api.#call_fn(req).await.map_err(JsonError::from)?;
+                    serde_json::to_value(resp).map_err(|_| JsonError::InternalError)
                 });
             }
         });

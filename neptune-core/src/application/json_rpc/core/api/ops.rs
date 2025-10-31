@@ -3,9 +3,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumString;
 
-use crate::application::json_rpc::core::api::router::RpcRouter;
 use crate::application::json_rpc::core::api::rpc::RpcApi;
-use crate::application::json_rpc::core::error::RpcError;
+use crate::application::json_rpc::core::api::server::router::RpcRouter;
+use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
 
 /// API version.
