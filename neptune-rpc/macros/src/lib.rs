@@ -9,6 +9,6 @@ pub fn json_router_derive(input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_derive(Routes, attributes(namespace))]
-pub fn json_transport_derive(input: TokenStream) -> TokenStream {
+pub fn json_routes_derive(input: TokenStream) -> TokenStream {
     client::json_routes_derive(input)
 }
