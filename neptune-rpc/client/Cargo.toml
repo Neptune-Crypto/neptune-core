@@ -1,0 +1,14 @@
+[package]
+name = "neptune-rpc-client"
+version = "0.4.0"
+edition = "2024"
+
+[dependencies]
+reqwest = { version = "0.12.24", features = ["json"] }
+serde_json = "1.0"
+neptune-cash = { path = "../../neptune-core" }
+async-trait = "0.1.83"
+tokio = { version = "1.41", features = ["full", "tracing"] }
+
+[lints]
+workspace = true

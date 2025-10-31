@@ -120,7 +120,7 @@ rayon = "1.10"
 humantime = "2.1.0"
 neptune-rpc-macros = { path = "../neptune-rpc/macros" }
 axum = "0.8.4"
-serde_tuple = "1.1.2"
+serde_tuple = { git = "https://github.com/KaffinPX/serde_tuple.git", branch = "empty-structs" }
 hex = "0.4.3"
 
 [dev-dependencies]

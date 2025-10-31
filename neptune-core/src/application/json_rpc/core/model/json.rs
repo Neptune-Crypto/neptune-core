@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::application::json_rpc::core::api::rpc::RpcError;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct JsonRequest {
     #[serde(default)]
     pub jsonrpc: Option<String>,
@@ -66,7 +66,7 @@ impl From<RpcError> for JsonError {
         JsonError::Custom {
             code: -32000,
             message: "Server error".to_string(),
-            data: Some(serde_json::to_value(&err).unwrap()),
+            data: Some(serde_json::to_value(err).unwrap()),
         }
     }
 }
