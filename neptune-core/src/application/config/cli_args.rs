@@ -881,6 +881,51 @@ mod tests {
     }
 
     #[test]
+    fn relay_transaction_unit_test() {
+        let cli = Args::default();
+        assert!(
+            !cli.relay_transaction(
+                1,
+                NativeCurrencyAmount::zero(),
+                TransactionProofQuality::ProofCollection
+            ),
+            "proof-collection backed transaction not paying fee is not relayed"
+        );
+        assert!(
+            cli.relay_transaction(
+                1,
+                NativeCurrencyAmount::coins(1),
+                TransactionProofQuality::ProofCollection
+            ),
+            "proof-collection backed transaction paying a high fee is relayed"
+        );
+        assert!(
+            cli.relay_transaction(
+                1,
+                NativeCurrencyAmount::coins(1),
+                TransactionProofQuality::SingleProof
+            ),
+            "single-proof backed transaction paying a high fee is relayed"
+        );
+        assert!(
+            !cli.relay_transaction(
+                300,
+                NativeCurrencyAmount::coins(1000),
+                TransactionProofQuality::ProofCollection
+            ),
+            "proof-collection transaction with too many inputs is never relayed."
+        );
+        assert!(
+            !cli.relay_transaction(
+                u64::MAX,
+                NativeCurrencyAmount::coins(1000),
+                TransactionProofQuality::ProofCollection
+            ),
+            "No crash on overflow"
+        );
+    }
+
+    #[test]
     fn test_parse_range() {
         macro_rules! assert_range_eq {
             ($left:expr, $right:expr) => {{
