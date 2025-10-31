@@ -8,7 +8,7 @@ In the code, the struct `NativeCurrencyAmount` defines the unit. The native curr
 
 ## The Unit
 
-One Neptune Coin equals $10^{30} \times 2^2$ *nau*, which stands for Neptune Atomic Unit. The conversion factor is such that
+One Neptune Coin equals \\(10^{30} \times 2^2 \\) *nau*, which stands for Neptune Atomic Unit. The conversion factor is such that
  - The largest possible amount, corresponding to 42'000'000 Neptune Coins, can be represented in **127** bits.
  - It can represent a number of Neptune Coins with up to 30 decimal symbols after the point exactly.
 
