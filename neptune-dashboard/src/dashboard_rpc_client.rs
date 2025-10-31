@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::ops::Deref;
 
@@ -157,6 +158,23 @@ impl DashboardRpcClient {
             DashboardRpcClient::Authentic(rpcclient) => rpcclient.peer_info(ctx, token).await,
             #[cfg(feature = "mock")]
             DashboardRpcClient::Mock(mock_client) => mock_client.peer_info(ctx, token).await,
+        }
+    }
+
+    pub async fn clear_peer_standing(
+        &self,
+        ctx: ::tarpc::context::Context,
+        token: auth::Token,
+        peer_ip: IpAddr,
+    ) -> ::core::result::Result<RpcResult<()>, ::tarpc::client::RpcError> {
+        match self {
+            DashboardRpcClient::Authentic(rpcclient) => {
+                rpcclient.clear_standing_by_ip(ctx, token, peer_ip).await
+            }
+            #[cfg(feature = "mock")]
+            DashboardRpcClient::Mock(mock_client) => {
+                mock_client.clear_standing_by_ip(ctx, token, peer_ip).await
+            }
         }
     }
 
