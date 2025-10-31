@@ -1,9 +1,12 @@
 use neptune_rpc_macros::Router;
+use neptune_rpc_macros::Routes;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumString;
 
+use crate::application::json_rpc::core::api::client::transport::Transport;
 use crate::application::json_rpc::core::api::rpc::RpcApi;
+use crate::application::json_rpc::core::api::rpc::RpcResult;
 use crate::application::json_rpc::core::api::server::router::RpcRouter;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
@@ -24,7 +27,7 @@ pub enum Namespace {
     Wallet,
 }
 
-#[derive(Router, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Router, Routes, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RpcMethods {
     #[namespace(Namespace::Node)]
