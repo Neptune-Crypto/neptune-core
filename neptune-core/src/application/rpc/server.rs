@@ -2221,7 +2221,7 @@ impl NeptuneRPCServer {
         let latest_block_header = *self.state.lock_guard().await.chain.light_state().header();
 
         proposal.set_header_guesser_address(guesser_address);
-        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header);
+        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
 
         // Record block proposal in case of guesser-success, for later
         // retrieval. But limit number of blocks stored this way.
@@ -3811,7 +3811,7 @@ impl RPC for NeptuneRPCServer {
         };
 
         proposal.set_header_guesser_address(guesser_fee_address);
-        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header);
+        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
 
         Ok(Some((proposal, puzzle)))
     }
@@ -5675,6 +5675,7 @@ mod tests {
         use crate::protocol::consensus::block::block_header::BlockPow;
         use crate::protocol::consensus::block::pow::Pow;
         use crate::protocol::consensus::block::BlockProof;
+        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
         use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
         use crate::state::mining::block_proposal::BlockProposal;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -5691,7 +5692,8 @@ mod tests {
             let guesser_address = GenerationReceivingAddress::derive_from_seed(rng.random());
             block1.set_header_guesser_address(guesser_address.into());
 
-            let guess_challenge = ProofOfWorkPuzzle::new(block1.clone(), *genesis.header());
+            let guess_challenge =
+                ProofOfWorkPuzzle::new(block1.clone(), genesis.header().difficulty);
             assert_eq!(guess_challenge.prev_block, genesis.hash());
 
             let pow: BlockPow = random();
@@ -5779,7 +5781,7 @@ mod tests {
                 "Node must reject new tip with invalid PoW solution."
             );
 
-            let solution = puzzle.solve();
+            let solution = puzzle.solve(ConsensusRuleSet::default());
             assert!(
                 bob.clone()
                     .provide_new_tip(context::current(), bob_token, solution, proposal.clone())
@@ -5949,7 +5951,7 @@ mod tests {
                 );
 
                 let pow: BlockPow = random();
-                let resulting_block_hash = pow_puzzle.auth_paths.fast_mast_hash(pow);
+                let resulting_block_hash = pow_puzzle.pow_mast_paths.fast_mast_hash(pow);
 
                 block1.set_header_pow(pow);
                 block1.set_header_guesser_address(guesser_address.into());
@@ -5960,10 +5962,19 @@ mod tests {
                 );
 
                 // Check that succesful guess is accepted by endpoint.
-                let guesser_buffer = block1.guess_preprocess(None, None);
+                let consensus_rule_set = ConsensusRuleSet::Reboot;
+                let guesser_buffer = block1.guess_preprocess(None, None, consensus_rule_set);
+                let mast_auth_paths = block1.pow_mast_paths();
+                let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
-                    if let Some(valid_pow) = Pow::guess(&guesser_buffer, random(), target) {
+                    if let Some(valid_pow) = Pow::guess(
+                        &guesser_buffer,
+                        &mast_auth_paths,
+                        index_picker_preimage,
+                        random(),
+                        target,
+                    ) {
                         break valid_pow;
                     }
                 };

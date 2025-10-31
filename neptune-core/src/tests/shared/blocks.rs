@@ -1,3 +1,4 @@
+use futures::channel::oneshot;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -15,9 +16,13 @@ use crate::api::export::Network;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::loops::channel::NewBlockFound;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
+use crate::application::loops::mine_loop::compose_block_helper;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
+use crate::application::loops::mine_loop::guess_nonce;
 use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
+use crate::application::loops::mine_loop::GuessingConfiguration;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::block_appendix::BlockAppendix;
 use crate::protocol::consensus::block::block_body::BlockBody;
@@ -34,11 +39,13 @@ use crate::protocol::consensus::block::validity::block_program::BlockProgram;
 use crate::protocol::consensus::block::validity::block_proof_witness::BlockProofWitness;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockProof;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::verifier::cache_true_claim;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -47,6 +54,57 @@ use crate::tests::shared::Randomness;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+/// Create a valid block on top of provided block. Returned block is valid in
+/// terms of both block validity and PoW, and is thus the new canonical block of
+/// the chain, assuming that tip is already the most canonical block.
+///
+/// Returned PoW solution is deterministic, as is the block proof, and
+/// consequently the entire block and its hash.
+///
+/// The most valuable synced SingleProof-backed transaction in the mempool will
+/// be included in the block. If mempool is empty a dummy transaction will be
+/// merged with the coinbase transaction to set the merge bit.
+pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block) -> Block {
+    let network = global_state_lock.cli().network;
+    let (child_no_pow, _) = compose_block_helper(
+        parent.clone(),
+        global_state_lock.clone(),
+        parent.header().timestamp,
+        TritonVmProofJobOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
+
+    let guesser_address = global_state_lock
+        .lock_guard()
+        .await
+        .wallet_state
+        .wallet_entropy
+        .guesser_fee_key()
+        .to_address()
+        .into();
+    let new_timestamp = parent.header().timestamp + Timestamp::minutes(9);
+    let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
+    guess_nonce(
+        network,
+        child_no_pow,
+        *parent.header(),
+        guesser_tx,
+        GuessingConfiguration {
+            num_guesser_threads: global_state_lock.cli().guesser_threads,
+            address: guesser_address,
+            override_rng: Some(deterministic_guesser_rng),
+            override_timestamp: Some(new_timestamp),
+        },
+    )
+    .await;
+    let child = *guesser_rx.await.unwrap().block;
+
+    child
+}
 
 /// Create an invalid block with the provided transaction kernel, using the
 /// provided mutator set as the predessor block's mutator set. Invalid block in
@@ -368,13 +426,13 @@ pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Bloc
 
 /// Return a list of `n` invalid, empty blocks.
 pub(crate) fn invalid_empty_blocks_with_proof_size(
-    ancestor: &Block,
+    parent: &Block,
     n: usize,
     network: Network,
     proof_size: usize,
 ) -> Vec<Block> {
     let mut blocks = vec![];
-    let mut predecessor = ancestor;
+    let mut predecessor = parent;
     for _ in 0..n {
         blocks.push(invalid_empty_block_with_proof_size(
             predecessor,
@@ -440,14 +498,15 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
 
 /// Create a block from a transaction without the hassle of proving but such
 /// that it appears valid.
-pub(crate) async fn fake_valid_block_from_block_tx_for_tests(
+async fn fake_valid_block_from_block_tx_for_tests(
     predecessor: &Block,
     tx: BlockTransaction,
-    seed: [u8; 32],
     network: Network,
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, network).await;
-    block.satisfy_pow(predecessor.header().difficulty, seed);
+    let block_height = predecessor.header().height;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+    block.satisfy_pow(predecessor.header().difficulty, consensus_rule_set);
 
     block
 }
@@ -518,13 +577,7 @@ pub async fn fake_block_successor_with_merged_tx(
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_block_tx_for_tests(
-            predecessor,
-            block_tx,
-            seed_bytes.pop().unwrap(),
-            network,
-        )
-        .await
+        fake_valid_block_from_block_tx_for_tests(predecessor, block_tx, network).await
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx, network).await
     }

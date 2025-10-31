@@ -275,8 +275,9 @@ impl BlockHeaderWithBlockHashWitness {
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 impl BlockHeader {
-    pub(crate) fn arbitrary_with_height(
-        block_height: BlockHeight,
+    pub(crate) fn arbitrary_with_height_and_difficulty(
+        height: BlockHeight,
+        difficulty: Difficulty,
     ) -> proptest::prelude::BoxedStrategy<Self> {
         use proptest::prelude::Strategy;
         use proptest_arbitrary_interop::arb;
@@ -286,7 +287,6 @@ impl BlockHeader {
         let timestamp = arb::<Timestamp>();
         let pow = arb::<BlockPow>();
         let cumulative_proof_of_work = arb::<ProofOfWork>();
-        let difficulty = arb::<Difficulty>();
         let guesser_receiver_data = arb::<GuesserReceiverData>();
 
         (
@@ -295,7 +295,6 @@ impl BlockHeader {
             timestamp,
             pow,
             cumulative_proof_of_work,
-            difficulty,
             guesser_receiver_data,
         )
             .prop_map(
@@ -305,12 +304,11 @@ impl BlockHeader {
                     timestamp,
                     pow,
                     cumulative_proof_of_work,
-                    difficulty,
                     guesser_receiver_data,
                 )| {
                     BlockHeader {
                         version,
-                        height: block_height,
+                        height,
                         prev_block_digest,
                         timestamp,
                         pow,

@@ -46,6 +46,7 @@ use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::difficulty_control::difficulty_control;
 use crate::protocol::consensus::block::pow::GuesserBuffer;
 use crate::protocol::consensus::block::pow::Pow;
+use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::block::*;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
@@ -65,6 +66,8 @@ use crate::COMPOSITION_FAILED_EXIT_CODE;
 pub(crate) struct GuessingConfiguration {
     pub(crate) num_guesser_threads: Option<usize>,
     pub(crate) address: ReceivingAddress,
+    pub(crate) override_rng: Option<StdRng>,
+    pub(crate) override_timestamp: Option<Timestamp>,
 }
 
 /// Creates a block transaction and composes a block from it. Returns the block
@@ -151,12 +154,17 @@ pub(crate) async fn guess_nonce(
             previous_block_header,
             sender,
             guessing_configuration,
-            Timestamp::now(),
             None,
         )
     })
     .await
     .unwrap()
+}
+
+fn std_rng_from_thread_rng() -> StdRng {
+    let mut thread_rng = rand::rng();
+    let seed: [u8; 32] = thread_rng.random();
+    StdRng::from_seed(seed)
 }
 
 /// Guess the nonce in parallel until success.
@@ -166,32 +174,29 @@ fn guess_worker(
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     guessing_configuration: GuessingConfiguration,
-    now: Timestamp,
     override_target_block_interval: Option<Timestamp>,
 ) {
-    let target_block_interval =
-        override_target_block_interval.unwrap_or(network.target_block_interval());
-
     let GuessingConfiguration {
         num_guesser_threads,
         address: guesser_address,
+        override_rng: rng,
+        override_timestamp: now,
     } = guessing_configuration;
 
-    // Following code must match the rules in `[Block::has_proof_of_work]`.
-
-    // a difficulty reset (to min difficulty) occurs on testnet(s)
-    // when the elapsed time between two blocks is greater than a
-    // max interval, defined by the network.  It never occurs for
-    // mainnet.
-    let should_reset_difficulty =
-        Block::should_reset_difficulty(network, now, previous_block_header.timestamp);
+    let now = now.unwrap_or(Timestamp::now());
 
     info!(
         "prev block height: {}, prev block time: {}, now: {}",
         previous_block_header.height, previous_block_header.timestamp, now
     );
 
-    let prev_difficulty = previous_block_header.difficulty;
+    // Following code must match the rules in `[Block::has_proof_of_work]`.
+    // a difficulty reset (to min difficulty) occurs on testnet(s)
+    // when the elapsed time between two blocks is greater than a
+    // max interval, defined by the network.  It never occurs for
+    // mainnet.
+    let should_reset_difficulty =
+        Block::should_reset_difficulty(network, now, previous_block_header.timestamp);
     let new_difficulty = if should_reset_difficulty {
         let new_difficulty = network.genesis_difficulty();
         info!(
@@ -201,6 +206,8 @@ fn guess_worker(
         );
         new_difficulty
     } else {
+        let target_block_interval =
+            override_target_block_interval.unwrap_or(network.target_block_interval());
         difficulty_control(
             now,
             previous_block_header.timestamp,
@@ -210,13 +217,15 @@ fn guess_worker(
         )
     };
 
+    let prev_difficulty = previous_block_header.difficulty;
     let threshold = prev_difficulty.target();
     let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
+    let new_block_height = block.header().height;
     info!(
         "Guessing with {} threads on block {:x} of height {} with {} outputs and difficulty {}. Target: {threshold:x}",
         threads_to_use,
         block.hash(),
-        block.header().height,
+        new_block_height,
         block.body().transaction_kernel.outputs.len(),
         previous_block_header.difficulty,
     );
@@ -231,22 +240,37 @@ fn guess_worker(
     block.set_header_guesser_address(guesser_address);
 
     info!("Start: guess preprocessing.");
-    let guesser_buffer = block.guess_preprocess(Some(&sender), Some(threads_to_use));
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block_height);
+    let guesser_buffer =
+        block.guess_preprocess(Some(&sender), Some(threads_to_use), consensus_rule_set);
     if sender.is_canceled() {
         info!("Guess preprocessing canceled. Stopping guessing task.");
         return;
     }
     info!("Completed: guess preprocessing.");
 
+    let mast_auth_paths = block.pow_mast_paths();
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads_to_use)
         .build()
         .unwrap();
+
+    let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
-            .map_init(rand::rng, |rng, _i| {
-                guess_nonce_iteration(&guesser_buffer, threshold, rng, &sender)
-            })
+            .map_init(
+                || rng.clone().unwrap_or(std_rng_from_thread_rng()),
+                |rng, _i| {
+                    guess_nonce_iteration(
+                        &guesser_buffer,
+                        &mast_auth_paths,
+                        index_picker_preimage,
+                        threshold,
+                        rng,
+                        &sender,
+                    )
+                },
+            )
             .find_any(|r| !r.block_not_found())
             .unwrap()
     });
@@ -308,8 +332,10 @@ impl GuessNonceResult {
 #[inline]
 fn guess_nonce_iteration(
     guesser_buffer: &GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }>,
+    mast_auth_paths: &PowMastPaths,
+    index_picker_preimage: Digest,
     threshold: Digest,
-    rng: &mut rand::rngs::ThreadRng,
+    rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
     let nonce: Digest = rng.random();
@@ -320,7 +346,13 @@ fn guess_nonce_iteration(
         return GuessNonceResult::Cancelled;
     }
 
-    let result = Pow::guess(guesser_buffer, nonce, threshold);
+    let result = Pow::guess(
+        guesser_buffer,
+        mast_auth_paths,
+        index_picker_preimage,
+        nonce,
+        threshold,
+    );
 
     match result {
         Some(pow) => GuessNonceResult::NonceFound { pow: Box::new(pow) },
@@ -656,12 +688,18 @@ pub(crate) async fn mine(
             .reset(tokio::time::Instant::now() + infinite);
 
         let (is_connected, is_syncing) = global_state_lock
-            .lock(|s| (!s.net.peer_map.is_empty(), s.net.sync_anchor.is_some()))
+            .lock(|s| {
+                (
+                    // Prevent isolated mining on main net
+                    !s.net.peer_map.is_empty() || !s.cli().network.is_main(),
+                    s.net.sync_anchor.is_some(),
+                )
+            })
             .await;
         if !is_connected {
             const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
             global_state_lock.set_mining_status_to_inactive().await;
-            warn!("Not mining because client has no connections");
+            warn!("Not mining because main net client has no connections.");
             sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
             continue;
         }
@@ -710,6 +748,8 @@ pub(crate) async fn mine(
                 GuessingConfiguration {
                     num_guesser_threads: cli_args.guesser_threads,
                     address: guesser_key.to_address().into(),
+                    override_rng: None,
+                    override_timestamp: None,
                 },
             );
 
@@ -1067,16 +1107,26 @@ pub(crate) mod tests {
             Some(target_block_interval),
             network,
         );
+        let mast_auth_paths = block.pow_mast_paths();
         let threshold = previous_block.header().difficulty.target();
         let num_iterations_launched = 1_000_000;
         let tick = std::time::SystemTime::now();
 
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
-        let guesser_buffer = block.guess_preprocess(Some(&worker_task_tx), None);
+        let guesser_buffer =
+            block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
+        let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
-                .map_init(rand::rng, |prng, _i| {
-                    guess_nonce_iteration(&guesser_buffer, threshold, prng, &worker_task_tx);
+                .map_init(std_rng_from_thread_rng, |prng, _i| {
+                    guess_nonce_iteration(
+                        &guesser_buffer,
+                        &mast_auth_paths,
+                        index_picker_preimage,
+                        threshold,
+                        prng,
+                        &worker_task_tx,
+                    );
                 })
                 .count();
         drop(worker_task_rx);
@@ -1565,8 +1615,9 @@ pub(crate) mod tests {
             GuessingConfiguration {
                 num_guesser_threads,
                 address: guesser_key.to_address().into(),
+                override_rng: None,
+                override_timestamp: None,
             },
-            Timestamp::now(),
             None,
         );
 
@@ -1648,8 +1699,9 @@ pub(crate) mod tests {
             GuessingConfiguration {
                 num_guesser_threads,
                 address: guesser_key.to_address().into(),
+                override_rng: None,
+                override_timestamp: None,
             },
-            Timestamp::now(),
             None,
         );
 
@@ -1799,8 +1851,9 @@ pub(crate) mod tests {
                 GuessingConfiguration {
                     num_guesser_threads,
                     address: guesser_key.to_address().into(),
+                    override_rng: None,
+                    override_timestamp: None,
                 },
-                Timestamp::now(),
                 Some(target_block_interval),
             );
 
@@ -2137,10 +2190,21 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let guesser_buffer = successor_block.guess_preprocess(None, None);
+        let guesser_buffer =
+            successor_block.guess_preprocess(None, None, ConsensusRuleSet::default());
+        let mast_auth_paths = successor_block.pow_mast_paths();
+        let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
         let target = predecessor_block.header().difficulty.target();
         loop {
-            if BlockPow::guess(&guesser_buffer, rng.random(), target).is_some() {
+            if BlockPow::guess(
+                &guesser_buffer,
+                &mast_auth_paths,
+                index_picker_preimage,
+                rng.random(),
+                target,
+            )
+            .is_some()
+            {
                 println!("found solution after {counter} guesses.");
                 break;
             }
@@ -2426,8 +2490,9 @@ pub(crate) mod tests {
                 GuessingConfiguration {
                     num_guesser_threads,
                     address: guesser_key.to_address().into(),
+                    override_rng: None,
+                    override_timestamp: Some(block_time),
                 },
-                block_time,
                 None,
             );
 

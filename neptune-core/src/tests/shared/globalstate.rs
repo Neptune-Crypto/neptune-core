@@ -165,12 +165,29 @@ pub(crate) async fn get_test_genesis_setup(
     GlobalStateLock,
     HandshakeData,
 )> {
+    let genesis = Block::genesis(network);
+    test_setup_custom_genesis_block(network, peer_count, cli, genesis).await
+}
+
+pub(crate) async fn test_setup_custom_genesis_block(
+    network: Network,
+    peer_count: u8,
+    cli: cli_args::Args,
+    custom_genesis: Block,
+) -> anyhow::Result<(
+    broadcast::Sender<MainToPeerTask>,
+    broadcast::Receiver<MainToPeerTask>,
+    mpsc::Sender<PeerTaskToMain>,
+    mpsc::Receiver<PeerTaskToMain>,
+    GlobalStateLock,
+    HandshakeData,
+)> {
     let (peer_broadcast_tx, from_main_rx) =
         broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
     let (to_main_tx, to_main_rx) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
-    let devnet_wallet = WalletEntropy::devnet_wallet();
-    let state = mock_genesis_global_state(peer_count, devnet_wallet, cli).await;
+    let wallet = WalletEntropy::devnet_wallet();
+    let state = mock_genesis_global_state_with_block(peer_count, wallet, cli, custom_genesis).await;
     Ok((
         peer_broadcast_tx,
         from_main_rx,

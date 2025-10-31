@@ -3136,6 +3136,86 @@ mod tests {
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
+        async fn main_loop_does_not_do_verification() {
+            // Ensure that the main loop does no validation of block validity
+            // or PoW, as these checks belong in the peer loop, or elsewhere.
+            let network = Network::Main;
+            let cli = cli_args::Args::default_with_network(network);
+            let TestSetup {
+                mut main_loop_handler,
+                ..
+            } = setup(1, 1, cli).await;
+            let mut main_loop_state = main_loop_handler.mutable();
+
+            let genesis = Block::genesis(network);
+            let block1 = invalid_empty_block(&genesis, network);
+            assert!(
+                !block1
+                    .is_valid(&genesis, block1.header().timestamp, network)
+                    .await
+            );
+            assert!(!block1.has_proof_of_work(network, genesis.header()));
+
+            let block2 = invalid_empty_block(&block1, network);
+            assert!(
+                !block2
+                    .is_valid(&genesis, block2.header().timestamp, network)
+                    .await
+            );
+            assert!(!block2.has_proof_of_work(network, block1.header()));
+
+            assert_eq!(
+                BlockHeight::genesis(),
+                main_loop_handler
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+            );
+            main_loop_handler
+                .handle_peer_task_message(
+                    PeerTaskToMain::NewBlocks(vec![block1.clone()]),
+                    &mut main_loop_state,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                block1.header().height,
+                main_loop_handler
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+            );
+
+            main_loop_handler
+                .handle_peer_task_message(
+                    PeerTaskToMain::NewBlocks(vec![block1.clone(), block2.clone()]),
+                    &mut main_loop_state,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                block2.header().height,
+                main_loop_handler
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+            );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
         async fn new_block_from_peer_invokes_block_notify() {
             use std::fs;
 

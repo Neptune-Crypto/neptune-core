@@ -9,6 +9,7 @@ use common::logging;
 use neptune_cash::api::export::Network;
 use neptune_cash::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use neptune_cash::protocol::consensus::block::block_header::BlockPow;
+use neptune_cash::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
@@ -82,13 +83,14 @@ pub async fn can_find_valid_pow_solution() {
     proposal.set_header_guesser_address(guesser_address.into());
 
     let latest_block_header = *alice.gsl.lock_guard().await.chain.light_state().header();
-    let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header);
+    let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
     println!("puzzle:\n\n{}", serde_json::to_string(&puzzle).unwrap());
 
+    let consensus_rule_set = ConsensusRuleSet::Reboot;
     let solution = match precalculated_solution() {
         Some(solution) => solution,
         None => {
-            let solution = puzzle.solve();
+            let solution = puzzle.solve(consensus_rule_set);
             let file = File::create(file_path()).unwrap();
             serde_json::to_writer_pretty(file, &solution).unwrap();
 
