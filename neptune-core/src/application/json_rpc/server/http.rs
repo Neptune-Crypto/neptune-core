@@ -11,11 +11,11 @@ use tracing::warn;
 
 use crate::application::json_rpc::core::api::ops::Namespace;
 use crate::application::json_rpc::core::api::ops::RpcMethods;
-use crate::application::json_rpc::core::api::router::RpcRouter;
 use crate::application::json_rpc::core::api::rpc::RpcApi;
-use crate::application::json_rpc::core::error::RpcError;
-use crate::application::json_rpc::core::error::RpcRequest;
-use crate::application::json_rpc::core::error::RpcResponse;
+use crate::application::json_rpc::core::api::server::router::RpcRouter;
+use crate::application::json_rpc::core::model::json::JsonError;
+use crate::application::json_rpc::core::model::json::JsonRequest;
+use crate::application::json_rpc::core::model::json::JsonResponse;
 use crate::state::GlobalStateLock;
 
 #[derive(Clone, Debug)]
@@ -128,16 +128,16 @@ impl RpcServer {
     async fn rpc_handler(
         State(router): State<Arc<RpcRouter>>,
         // An optimization to avoid deserializing 2 times
-        body: Result<Json<RpcRequest>, JsonRejection>,
-    ) -> Json<RpcResponse> {
+        body: Result<Json<JsonRequest>, JsonRejection>,
+    ) -> Json<JsonResponse> {
         let Ok(Json(request)) = body else {
-            return Json(RpcResponse::error(None, RpcError::ParseError));
+            return Json(JsonResponse::error(None, JsonError::ParseError));
         };
 
         let res = router.dispatch(&request.method, request.params).await;
         let response = match res {
-            Ok(result) => RpcResponse::success(request.id, result),
-            Err(error) => RpcResponse::error(request.id, error),
+            Ok(result) => JsonResponse::success(request.id, result),
+            Err(error) => JsonResponse::error(request.id, error),
         };
 
         Json(response)
@@ -157,10 +157,10 @@ mod tests {
 
     use crate::application::json_rpc::core::api::ops::Namespace;
     use crate::application::json_rpc::core::api::ops::RpcMethods;
-    use crate::application::json_rpc::core::api::router::RpcRouter;
-    use crate::application::json_rpc::core::error::RpcError;
-    use crate::application::json_rpc::core::error::RpcRequest;
-    use crate::application::json_rpc::core::error::RpcResponse;
+    use crate::application::json_rpc::core::api::server::router::RpcRouter;
+    use crate::application::json_rpc::core::model::json::JsonError;
+    use crate::application::json_rpc::core::model::json::JsonRequest;
+    use crate::application::json_rpc::core::model::json::JsonResponse;
     use crate::application::json_rpc::server::http::RpcServer;
     use crate::application::json_rpc::server::service::tests::test_rpc_server;
     use crate::tests::shared_tokio_runtime;
@@ -176,8 +176,8 @@ mod tests {
             HashSet::from([Namespace::Node, Namespace::Chain]),
         ));
 
-        async fn make_rpc_request(router: Arc<RpcRouter>, method: &str) -> RpcResponse {
-            let request = RpcRequest {
+        async fn make_rpc_request(router: Arc<RpcRouter>, method: &str) -> JsonResponse {
+            let request = JsonRequest {
                 jsonrpc: Some("2.0".to_string()),
                 method: method.to_string(),
                 params: json!([]),
@@ -190,7 +190,7 @@ mod tests {
 
         let node_network_res = make_rpc_request(router_no_chain.clone(), "node_network").await;
         assert!(
-            matches!(node_network_res, RpcResponse::Success { .. }),
+            matches!(node_network_res, JsonResponse::Success { .. }),
             "Expected success for node_network, got: {:?}",
             node_network_res
         );
@@ -201,8 +201,8 @@ mod tests {
         assert!(
             matches!(
                 chain_height_res_bad,
-                RpcResponse::Error {
-                    error: RpcError::MethodNotFound,
+                JsonResponse::Error {
+                    error: JsonError::MethodNotFound,
                     ..
                 }
             ),
@@ -212,7 +212,7 @@ mod tests {
         let chain_height_res_good =
             make_rpc_request(router_with_chain.clone(), chain_height_method_name).await;
         assert!(
-            matches!(chain_height_res_good, RpcResponse::Success { .. }),
+            matches!(chain_height_res_good, JsonResponse::Success { .. }),
             "Expected success for chain_height, got: {:?}",
             chain_height_res_good
         );

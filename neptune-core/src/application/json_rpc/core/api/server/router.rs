@@ -4,11 +4,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::application::json_rpc::core::api::rpc::RpcApi;
-use crate::application::json_rpc::core::error::RpcError;
-use crate::application::json_rpc::core::error::RpcResult;
+use crate::application::json_rpc::core::model::json::JsonError;
+use crate::application::json_rpc::core::model::json::JsonResult;
 
 type HandlerFn = Box<
-    dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = RpcResult<serde_json::Value>> + Send>>
+    dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = JsonResult<serde_json::Value>> + Send>>
         + Send
         + Sync,
 >;
@@ -33,7 +33,7 @@ where
     pub fn insert<F, Fut>(&mut self, name: &'static str, f: F)
     where
         F: Fn(Arc<A>, serde_json::Value) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = RpcResult<serde_json::Value>> + Send + 'static,
+        Fut: Future<Output = JsonResult<serde_json::Value>> + Send + 'static,
     {
         let api = self.api.clone();
         self.routes.insert(
@@ -46,11 +46,11 @@ where
         &self,
         method: &str,
         params: serde_json::Value,
-    ) -> RpcResult<serde_json::Value> {
+    ) -> JsonResult<serde_json::Value> {
         if let Some(handler) = self.routes.get(method) {
             handler(params).await
         } else {
-            Err(RpcError::MethodNotFound)
+            Err(JsonError::MethodNotFound)
         }
     }
 }
@@ -65,8 +65,8 @@ mod tests {
     use macro_rules_attr::apply;
     use serde_json::json;
 
-    use crate::application::json_rpc::core::api::router::Router;
-    use crate::application::json_rpc::core::error::RpcError;
+    use crate::application::json_rpc::core::api::server::router::Router;
+    use crate::application::json_rpc::core::model::json::JsonError;
     use crate::tests::shared_tokio_runtime;
 
     struct DummyApi;
@@ -92,6 +92,6 @@ mod tests {
         let router = Router::new(api);
 
         let err = router.dispatch("nonexistent", json!({})).await.unwrap_err();
-        assert!(matches!(err, RpcError::MethodNotFound));
+        assert!(matches!(err, JsonError::MethodNotFound));
     }
 }
