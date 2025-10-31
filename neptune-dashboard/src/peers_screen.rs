@@ -217,6 +217,11 @@ impl PeersScreen {
                             if self.set_sort_column(c) {
                                 return None;
                             }
+
+                            if c == 'x' {
+                                self.clear_selected_peer_standing();
+                                return None;
+                            }
                         }
 
                         _ => {
@@ -227,6 +232,46 @@ impl PeersScreen {
             }
         }
         escalate_event
+    }
+
+    /// clear the selected peer standing
+    ///
+    /// spawns a task to call the dashboard rpc client to clear the standing
+    /// for the selected peer.
+    pub fn clear_selected_peer_standing(&self) {
+        let selected_index = match self.events.state.selected() {
+            Some(idx) if idx >= Events::TABLE_HEADER_ROWS => idx,
+            _ => return,
+        };
+
+        let peer_ip = {
+            let items = self.events.items.lock().unwrap();
+            items
+                .get(selected_index - Events::TABLE_HEADER_ROWS)
+                .map(|peer| peer.connected_address().ip())
+        };
+
+        let Some(ip) = peer_ip else { return };
+
+        let (rpc_client, token, data_arc, event_arc) = (
+            self.server.clone(),
+            self.token,
+            self.data.clone(),
+            self.escalatable_event.clone(),
+        );
+
+        tokio::spawn(async move {
+            if rpc_client
+                .clear_peer_standing(context::current(), token, ip)
+                .await
+                .is_ok()
+            {
+                if let Ok(Ok(peer_info)) = rpc_client.peer_info(context::current(), token).await {
+                    *data_arc.lock().unwrap() = peer_info;
+                    *event_arc.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
+                }
+            }
+        });
     }
 }
 
@@ -289,7 +334,7 @@ impl Widget for PeersScreen {
         let num_peers = self.data.lock().unwrap().len();
 
         let peer_count_buf = if self.in_focus {
-            format!("Peers connected: {num_peers}           sort-keys: i, v, c, s, p, r")
+            format!("Peers connected: {num_peers}           sort-keys: i, v, c, s, p, r           clear-peer-standing: x")
         } else {
             format!("Peers connected: {num_peers}           press enter for options")
         };
