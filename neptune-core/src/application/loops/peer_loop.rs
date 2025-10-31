@@ -1249,12 +1249,24 @@ impl PeerLoopHandler {
             PeerMessage::Transaction(transaction) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Transaction");
 
+                let num_inputs: u64 = transaction.kernel.inputs.len().try_into().unwrap();
                 debug!(
-                    "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
-                    transaction.kernel.inputs.len(),
+                    "`peer_loop` received following transaction from peer. {num_inputs} inputs,\
+                     {} outputs. Synced to mutator set hash: {}",
                     transaction.kernel.outputs.len(),
                     transaction.kernel.mutator_set_hash
                 );
+
+                if !self.global_state_lock.cli().relay_transaction(
+                    num_inputs,
+                    transaction.kernel.fee,
+                    transaction.proof.proof_quality(),
+                ) {
+                    warn!("Received transaction not meeting relay criteria");
+                    self.punish(NegativePeerSanction::UnrelayableTransaction)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 let transaction: Transaction = (*transaction).into();
 
@@ -1428,6 +1440,16 @@ impl PeerLoopHandler {
                 // new scope for state read-lock to avoid holding across peer.send()
                 {
                     log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
+
+                    // 0. Check that transaction meets relay criteria
+                    if !self.global_state_lock.cli().relay_transaction(
+                        tx_notification.num_inputs,
+                        tx_notification.fee,
+                        tx_notification.proof_quality,
+                    ) {
+                        debug!("transaction does not meet relay criteria");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
 
                     // 1. Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
@@ -3928,11 +3950,14 @@ mod tests {
     }
 
     mod transactions {
+        use strum::IntoEnumIterator;
+
         use super::*;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
         use crate::application::triton_vm_job_queue::vm_job_queue;
         use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+        use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
         use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
@@ -4180,26 +4205,21 @@ mod tests {
             // Both ProofCollection and SingleProof backed transactions are
             // tested.
 
-            enum ProofType {
-                ProofCollection,
-                SingleProof,
-            }
-
             let network = Network::Main;
 
-            for proof_type in [ProofType::ProofCollection, ProofType::SingleProof] {
+            for proof_type in TransactionProofQuality::iter() {
                 let proof_job_options = TritonVmProofJobOptions::default();
                 let upgrade =
                     async |primitive_witness: PrimitiveWitness,
                            consensus_rule_set: ConsensusRuleSet| {
                         match proof_type {
-                            ProofType::ProofCollection => {
+                            TransactionProofQuality::ProofCollection => {
                                 PrimitiveWitnessToProofCollection { primitive_witness }
                                     .upgrade(vm_job_queue(), &proof_job_options)
                                     .await
                                     .unwrap()
                             }
-                            ProofType::SingleProof => {
+                            TransactionProofQuality::SingleProof => {
                                 PrimitiveWitnessToSingleProof { primitive_witness }
                                     .upgrade(vm_job_queue(), &proof_job_options, consensus_rule_set)
                                     .await
@@ -4209,10 +4229,10 @@ mod tests {
                     };
 
                 let (
-                    _peer_broadcast_tx,
-                    from_main_rx_clone,
+                    main_to_peer_tx,
+                    from_main_rx,
                     to_main_tx,
-                    mut to_main_rx1,
+                    mut to_main_rx,
                     mut state_lock,
                     _hsd,
                 ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
@@ -4220,7 +4240,7 @@ mod tests {
                     .unwrap();
                 let consensus_rule_set =
                     ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
-                let fee = NativeCurrencyAmount::from_nau(500);
+                let fee: NativeCurrencyAmount = 0.2f64.try_into().unwrap();
                 let pw_genesis =
                     genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
                         .await
@@ -4276,17 +4296,124 @@ mod tests {
 
                 let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
                 peer_loop_handler
-                    .run(mock, from_main_rx_clone, &mut peer_state)
+                    .run(mock, from_main_rx, &mut peer_state)
                     .await
                     .unwrap();
 
                 // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
                 // by the `main_loop`.
-                match to_main_rx1.recv().await {
+                match to_main_rx.recv().await {
                     Some(PeerTaskToMain::Transaction(_)) => (),
                     _ => panic!("Main loop must receive new transaction"),
                 };
+
+                drop(to_main_rx);
+                drop(main_to_peer_tx);
             }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn dont_request_pctx_with_low_fee() {
+            let network = Network::Main;
+            let (main_to_peer_tx, from_main_rx_clone, to_main_tx, to_main_rx, state_lock, hsd) =
+                get_test_genesis_setup(network, 1, cli_args::Args::default())
+                    .await
+                    .unwrap();
+            let fee = NativeCurrencyAmount::from_nau(500);
+            let pctx =
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
+                    .await;
+
+            let tx_notification: TransactionNotification = (pctx.as_ref()).try_into().unwrap();
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            // Mock a timestamp to allow transaction to be considered valid
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock,
+                get_dummy_socket_address(0),
+                hsd,
+                true,
+                1,
+            );
+
+            let mut peer_state = MutablePeerState::new(hsd.tip_header.height);
+            peer_loop_handler
+                .run(mock, from_main_rx_clone, &mut peer_state)
+                .await
+                .unwrap();
+
+            drop(to_main_rx);
+            drop(main_to_peer_tx);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn dont_accept_pctx_with_low_fee() {
+            let network = Network::Main;
+            let (main_to_peer_tx, from_main_rx_clone, to_main_tx, mut to_main_rx, state_lock, _) =
+                get_test_genesis_setup(network, 1, cli_args::Args::default())
+                    .await
+                    .unwrap();
+            let fee = NativeCurrencyAmount::from_nau(500);
+            let pctx =
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
+                    .await;
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::Transaction(Box::new(
+                    pctx.as_ref().try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let peer_address = get_dummy_socket_address(0);
+            let peer_hsd = get_dummy_handshake_data_for_genesis(network);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock.clone(),
+                peer_address,
+                peer_hsd,
+                true,
+                1,
+            );
+
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            match to_main_rx.recv().await {
+                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
+                _ => panic!("Must receive remove of peer block max height"),
+            }
+
+            assert_eq!(
+                Err(TryRecvError::Empty),
+                to_main_rx.try_recv(),
+                "Tx must not be sent to main"
+            );
+
+            let latest_sanction = state_lock
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::UnrelayableTransaction,
+                latest_sanction
+                    .latest_punishment
+                    .expect("peer must be sanctioned for sending no-relay tx")
+                    .0
+            );
+
+            drop(to_main_rx);
+            drop(main_to_peer_tx);
         }
     }
 
