@@ -1249,12 +1249,24 @@ impl PeerLoopHandler {
             PeerMessage::Transaction(transaction) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Transaction");
 
+                let num_inputs: u64 = transaction.kernel.inputs.len().try_into().unwrap();
                 debug!(
-                    "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
-                    transaction.kernel.inputs.len(),
+                    "`peer_loop` received following transaction from peer. {num_inputs} inputs,\
+                     {} outputs. Synced to mutator set hash: {}",
                     transaction.kernel.outputs.len(),
                     transaction.kernel.mutator_set_hash
                 );
+
+                if !self.global_state_lock.cli().relay_transaction(
+                    num_inputs,
+                    transaction.kernel.fee,
+                    transaction.proof.proof_quality(),
+                ) {
+                    warn!("Received transaction not meeting relay criteria");
+                    self.punish(NegativePeerSanction::UnrelayableTransaction)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 let transaction: Transaction = (*transaction).into();
 
@@ -1428,6 +1440,16 @@ impl PeerLoopHandler {
                 // new scope for state read-lock to avoid holding across peer.send()
                 {
                     log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
+
+                    // 0. Check that transaction meets relay criteria
+                    if !self.global_state_lock.cli().relay_transaction(
+                        tx_notification.num_inputs,
+                        tx_notification.fee,
+                        tx_notification.proof_quality,
+                    ) {
+                        debug!("transaction does not meet relay criteria");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
 
                     // 1. Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
@@ -2314,10 +2336,20 @@ mod tests {
     }
 
     mod blocks {
+        use futures::channel::oneshot;
         use itertools::Itertools;
 
         use super::*;
+        use crate::application::loops::channel::NewBlockFound;
+        use crate::application::loops::mine_loop::guess_nonce;
+        use crate::application::loops::mine_loop::GuessingConfiguration;
+        use crate::protocol::consensus::block::difficulty_control::Difficulty;
+        use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
+        use crate::tests::shared::blocks::next_block;
+        use crate::tests::shared::globalstate::test_setup_custom_genesis_block;
+        use crate::tests::tokio_runtime;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -2407,14 +2439,15 @@ mod tests {
             Ok(())
         }
 
-        /// Return three blocks:
+        /// Return four blocks:
         /// - one with invalid PoW and invalid mock-PoW
         /// - one with invalid PoW and valid mock-Pow
-        /// - one with valid Pow
+        /// - one with valid reboot PoW
+        /// - one with valid hardfork PoW
         async fn pow_related_blocks(
             network: Network,
             predecessor: &Block,
-        ) -> (Block, Block, Block) {
+        ) -> (Block, Block, Block, Block) {
             let rng = StdRng::seed_from_u64(5550001).random();
             let block = fake_valid_block_proposal_successor_for_test(
                 predecessor,
@@ -2436,12 +2469,23 @@ mod tests {
             assert!(block_with_valid_mock_pow.is_valid_mock_pow(difficulty.target()));
             assert!(!block_with_valid_mock_pow.has_proof_of_work(network, predecessor.header()));
 
-            let mut block_with_valid_pow = block;
-            block_with_valid_pow.satisfy_pow(difficulty, rand::random());
-            assert!(block_with_valid_pow.is_valid_mock_pow(difficulty.target()));
-            assert!(block_with_valid_pow.has_proof_of_work(network, predecessor.header()));
+            let mut block_with_valid_reboot_pow = block.clone();
+            block_with_valid_reboot_pow.satisfy_pow(difficulty, ConsensusRuleSet::Reboot);
+            assert!(block_with_valid_reboot_pow.is_valid_mock_pow(difficulty.target()));
+            assert!(block_with_valid_reboot_pow.has_proof_of_work(network, predecessor.header()));
 
-            (invalid_pow, block_with_valid_mock_pow, block_with_valid_pow)
+            let mut block_with_valid_alpha_pow = block.clone();
+            block_with_valid_alpha_pow.satisfy_pow(difficulty, ConsensusRuleSet::HardforkAlpha);
+            assert!(block_with_valid_alpha_pow.is_valid_mock_pow(difficulty.target()));
+            assert!(block_with_valid_alpha_pow
+                .pow_verify(difficulty.target(), ConsensusRuleSet::HardforkAlpha));
+
+            (
+                invalid_pow,
+                block_with_valid_mock_pow,
+                block_with_valid_reboot_pow,
+                block_with_valid_alpha_pow,
+            )
         }
 
         #[traced_test]
@@ -2478,8 +2522,12 @@ mod tests {
                 1,
             );
 
-            let (block_without_any_pow, block_with_valid_mock_pow, block_with_valid_pow) =
-                pow_related_blocks(network, &genesis).await;
+            let (
+                block_without_any_pow,
+                block_with_valid_mock_pow,
+                valid_pow_reboot,
+                valid_pow_alpha,
+            ) = pow_related_blocks(network, &genesis).await;
             assert!(
                 peer_loop_handler
                     .handle_blocks(vec![block_without_any_pow], genesis.clone())
@@ -2499,11 +2547,19 @@ mod tests {
             assert_eq!(
                 BlockHeight::genesis().next(),
                 peer_loop_handler
-                    .handle_blocks(vec![block_with_valid_pow], genesis.clone())
+                    .handle_blocks(vec![valid_pow_reboot], genesis.clone())
                     .await
                     .unwrap()
                     .unwrap(),
                 "Must return Some(1) on valid Pow"
+            );
+            assert!(
+                peer_loop_handler
+                    .handle_blocks(vec![valid_pow_alpha], genesis.clone())
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "Must return None on hardfork-alpha solution when rule set is reboot"
             );
         }
 
@@ -2524,9 +2580,13 @@ mod tests {
             ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
             let peer_address = get_dummy_socket_address(0);
 
-            let (block_without_any_pow, block_with_valid_mock_pow, _) =
+            let (without_any_pow, with_valid_mock_pow, _, with_valid_hf_alpha_pow) =
                 pow_related_blocks(network, &Block::genesis(network)).await;
-            for block_without_valid_pow in [block_without_any_pow, block_with_valid_mock_pow] {
+            for block_without_valid_pow in [
+                without_any_pow,
+                with_valid_mock_pow,
+                with_valid_hf_alpha_pow,
+            ] {
                 // Sending an invalid block will not necessarily result in a ban. This depends on the peer
                 // tolerance that is set in the client. For this reason, we include a "Bye" here.
                 let mock = Mock::new(vec![
@@ -3747,14 +3807,157 @@ mod tests {
 
             Ok(())
         }
+
+        #[traced_test]
+        #[test]
+        fn hardfork_alpha_happy_case() {
+            // Ensure that valid blocks are all accepted across hardfork alpha.
+            // Scenario: Current height is hardfork minus 2. Then receives peer
+            // notification of first block after hardfork. Must accept all
+            // blocks from peer, not punish peer, and send blocks to main
+            // loop.
+            let init_block_heigth = BlockHeight::from(14999u64);
+            let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
+                init_block_heigth,
+                Difficulty::MINIMUM,
+            );
+
+            tokio_runtime().block_on(runner(bpw));
+            async fn runner(block_primitive_witness: BlockPrimitiveWitness) {
+                let network = Network::Main;
+                let (hard_fork_minus_2, hard_fork_minus_1_no_pow) =
+                    Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
+                        .await;
+
+                let (
+                    _peer_broadcast_tx,
+                    from_main_rx_clone,
+                    to_main_tx,
+                    mut to_main_rx1,
+                    state_lock,
+                    hsd,
+                ) = test_setup_custom_genesis_block(
+                    network,
+                    1,
+                    cli_args::Args::default(),
+                    hard_fork_minus_2.clone(),
+                )
+                .await
+                .unwrap();
+
+                // Solve PoW for 1st block after genesis
+                let (guesser_tx_b, guesser_rx) = oneshot::channel::<NewBlockFound>();
+                let guesser_timestamp = hard_fork_minus_1_no_pow.header().timestamp;
+                let rng = StdRng::seed_from_u64(55512345);
+                guess_nonce(
+                    network,
+                    hard_fork_minus_1_no_pow,
+                    *hard_fork_minus_2.header(),
+                    guesser_tx_b,
+                    GuessingConfiguration {
+                        num_guesser_threads: state_lock.cli().guesser_threads,
+                        address: GenerationReceivingAddress::derive_from_seed(Digest::default())
+                            .into(),
+                        // For deterministic pow-guessing, both RNG and timestamp
+                        // must be deterministic.
+                        override_rng: Some(rng),
+                        override_timestamp: Some(guesser_timestamp),
+                    },
+                )
+                .await;
+
+                let hard_fork_minus_1 = *guesser_rx.await.unwrap().block;
+
+                let first_block_after_hardfork =
+                    next_block(state_lock.clone(), hard_fork_minus_1.clone()).await;
+
+                // Verify assumption about block height of hardfork
+                assert!(hard_fork_minus_1.pow_verify(
+                    hard_fork_minus_2.header().difficulty.target(),
+                    ConsensusRuleSet::Reboot
+                ));
+                assert!(!hard_fork_minus_1.pow_verify(
+                    hard_fork_minus_2.header().difficulty.target(),
+                    ConsensusRuleSet::HardforkAlpha
+                ));
+                assert!(first_block_after_hardfork.pow_verify(
+                    hard_fork_minus_2.header().difficulty.target(),
+                    ConsensusRuleSet::HardforkAlpha
+                ));
+                assert!(!first_block_after_hardfork.pow_verify(
+                    hard_fork_minus_2.header().difficulty.target(),
+                    ConsensusRuleSet::Reboot
+                ));
+
+                // Declare expected order of messages
+                let mock = Mock::new(vec![
+                    Action::Read(PeerMessage::BlockNotification(
+                        (&first_block_after_hardfork).into(),
+                    )),
+                    Action::Write(PeerMessage::BlockRequestByHeight(BlockHeight::from(
+                        15000u64,
+                    ))),
+                    Action::Read(PeerMessage::Block(Box::new(
+                        first_block_after_hardfork.clone().try_into().unwrap(),
+                    ))),
+                    Action::Write(PeerMessage::BlockRequestByHash(hard_fork_minus_1.hash())),
+                    Action::Read(PeerMessage::Block(Box::new(
+                        hard_fork_minus_1.clone().try_into().unwrap(),
+                    ))),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+
+                let peer_address = get_dummy_socket_address(0);
+                let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                    to_main_tx.clone(),
+                    state_lock.clone(),
+                    peer_address,
+                    hsd,
+                    false,
+                    1,
+                    first_block_after_hardfork.header().timestamp,
+                );
+                peer_loop_handler
+                    .run_wrapper(mock, from_main_rx_clone)
+                    .await
+                    .unwrap();
+
+                match to_main_rx1.recv().await {
+                    Some(PeerTaskToMain::NewBlocks(blocks)) => {
+                        assert_eq!(
+                            vec![hard_fork_minus_1, first_block_after_hardfork],
+                            blocks,
+                            "Two blocks must be sent to main loop in right order"
+                        );
+                    }
+                    _ => panic!("Did not find msg sent to main task"),
+                };
+
+                // Verify that peer is not sanctioned
+                assert!(!state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .get_peer_standing_from_database(peer_address.ip())
+                    .await
+                    .unwrap()
+                    .standing
+                    .is_negative());
+
+                drop(to_main_rx1);
+            }
+        }
     }
 
     mod transactions {
+        use strum::IntoEnumIterator;
+
         use super::*;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
         use crate::application::triton_vm_job_queue::vm_job_queue;
         use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+        use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
         use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
@@ -4002,26 +4205,21 @@ mod tests {
             // Both ProofCollection and SingleProof backed transactions are
             // tested.
 
-            enum ProofType {
-                ProofCollection,
-                SingleProof,
-            }
-
             let network = Network::Main;
 
-            for proof_type in [ProofType::ProofCollection, ProofType::SingleProof] {
+            for proof_type in TransactionProofQuality::iter() {
                 let proof_job_options = TritonVmProofJobOptions::default();
                 let upgrade =
                     async |primitive_witness: PrimitiveWitness,
                            consensus_rule_set: ConsensusRuleSet| {
                         match proof_type {
-                            ProofType::ProofCollection => {
+                            TransactionProofQuality::ProofCollection => {
                                 PrimitiveWitnessToProofCollection { primitive_witness }
                                     .upgrade(vm_job_queue(), &proof_job_options)
                                     .await
                                     .unwrap()
                             }
-                            ProofType::SingleProof => {
+                            TransactionProofQuality::SingleProof => {
                                 PrimitiveWitnessToSingleProof { primitive_witness }
                                     .upgrade(vm_job_queue(), &proof_job_options, consensus_rule_set)
                                     .await
@@ -4031,10 +4229,10 @@ mod tests {
                     };
 
                 let (
-                    _peer_broadcast_tx,
-                    from_main_rx_clone,
+                    main_to_peer_tx,
+                    from_main_rx,
                     to_main_tx,
-                    mut to_main_rx1,
+                    mut to_main_rx,
                     mut state_lock,
                     _hsd,
                 ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
@@ -4042,7 +4240,7 @@ mod tests {
                     .unwrap();
                 let consensus_rule_set =
                     ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
-                let fee = NativeCurrencyAmount::from_nau(500);
+                let fee: NativeCurrencyAmount = 0.2f64.try_into().unwrap();
                 let pw_genesis =
                     genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
                         .await
@@ -4098,17 +4296,124 @@ mod tests {
 
                 let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
                 peer_loop_handler
-                    .run(mock, from_main_rx_clone, &mut peer_state)
+                    .run(mock, from_main_rx, &mut peer_state)
                     .await
                     .unwrap();
 
                 // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
                 // by the `main_loop`.
-                match to_main_rx1.recv().await {
+                match to_main_rx.recv().await {
                     Some(PeerTaskToMain::Transaction(_)) => (),
                     _ => panic!("Main loop must receive new transaction"),
                 };
+
+                drop(to_main_rx);
+                drop(main_to_peer_tx);
             }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn dont_request_pctx_with_low_fee() {
+            let network = Network::Main;
+            let (main_to_peer_tx, from_main_rx_clone, to_main_tx, to_main_rx, state_lock, hsd) =
+                get_test_genesis_setup(network, 1, cli_args::Args::default())
+                    .await
+                    .unwrap();
+            let fee = NativeCurrencyAmount::from_nau(500);
+            let pctx =
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
+                    .await;
+
+            let tx_notification: TransactionNotification = (pctx.as_ref()).try_into().unwrap();
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            // Mock a timestamp to allow transaction to be considered valid
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock,
+                get_dummy_socket_address(0),
+                hsd,
+                true,
+                1,
+            );
+
+            let mut peer_state = MutablePeerState::new(hsd.tip_header.height);
+            peer_loop_handler
+                .run(mock, from_main_rx_clone, &mut peer_state)
+                .await
+                .unwrap();
+
+            drop(to_main_rx);
+            drop(main_to_peer_tx);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn dont_accept_pctx_with_low_fee() {
+            let network = Network::Main;
+            let (main_to_peer_tx, from_main_rx_clone, to_main_tx, mut to_main_rx, state_lock, _) =
+                get_test_genesis_setup(network, 1, cli_args::Args::default())
+                    .await
+                    .unwrap();
+            let fee = NativeCurrencyAmount::from_nau(500);
+            let pctx =
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
+                    .await;
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::Transaction(Box::new(
+                    pctx.as_ref().try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let peer_address = get_dummy_socket_address(0);
+            let peer_hsd = get_dummy_handshake_data_for_genesis(network);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock.clone(),
+                peer_address,
+                peer_hsd,
+                true,
+                1,
+            );
+
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            match to_main_rx.recv().await {
+                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
+                _ => panic!("Must receive remove of peer block max height"),
+            }
+
+            assert_eq!(
+                Err(TryRecvError::Empty),
+                to_main_rx.try_recv(),
+                "Tx must not be sent to main"
+            );
+
+            let latest_sanction = state_lock
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::UnrelayableTransaction,
+                latest_sanction
+                    .latest_punishment
+                    .expect("peer must be sanctioned for sending no-relay tx")
+                    .0
+            );
+
+            drop(to_main_rx);
+            drop(main_to_peer_tx);
         }
     }
 

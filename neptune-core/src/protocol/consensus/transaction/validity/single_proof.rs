@@ -281,7 +281,7 @@ pub(crate) async fn produce_single_proof(
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<Proof, CreateProofError> {
     match consensus_rule_set {
-        ConsensusRuleSet::Reboot => {
+        ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
             SingleProof::produce(primitive_witness, triton_vm_job_queue, proof_job_options).await
         }
     }
@@ -297,7 +297,9 @@ pub(crate) fn single_proof_claim(
     consensus_rule_set: ConsensusRuleSet,
 ) -> Claim {
     match consensus_rule_set {
-        ConsensusRuleSet::Reboot => SingleProof::claim(tx_kernel_mast_hash),
+        ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+            SingleProof::claim(tx_kernel_mast_hash)
+        }
     }
 }
 
