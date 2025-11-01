@@ -16,7 +16,7 @@ use tasm_lib::triton_vm::vm::VM;
 use thread_priority::set_current_thread_priority;
 use thread_priority::ThreadPriority;
 
-// Replace by value exposed in Triton VM
+// TODO: Replace by value exposed in Triton VM
 const LDE_TRACE_ENV_VAR: &str = "TVM_LDE_TRACE";
 
 fn set_environment_variables(env_vars: &[(String, String)]) {
@@ -99,7 +99,7 @@ fn execute(
 fn main() {
     // run with a low priority so that neptune-core can remain responsive.
     //
-    // we could accept a thread-prioritycli param (0..100) and
+    // todo: we could accept a thread-prioritycli param (0..100) and
     //       pass it with ThreadPriority::CrossPlatform(x).
     set_current_thread_priority(ThreadPriority::Min).unwrap();
 

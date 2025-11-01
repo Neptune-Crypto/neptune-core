@@ -159,7 +159,7 @@ async fn check_if_connection_is_allowed(
             );
 
             // A “wrong” reason is given because of backwards compatibility.
-            // Use next breaking release to give a more accurate reason here.
+            // todo: Use next breaking release to give a more accurate reason here.
             let reason = ConnectionRefusedReason::MaxPeerNumberExceeded;
             return InternalConnectionStatus::Refused(reason);
         }

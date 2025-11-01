@@ -172,7 +172,7 @@ impl UtxosScreen {
                     match key.code {
                         KeyCode::Down => self.scrollable_table.next(),
                         KeyCode::Up => self.scrollable_table.previous(),
-                        // PgUp,PgDn.  (but how to determine page size?  fixed n?)
+                        // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
                         _ => {
                             escalate_event = Some(event);
                         }
@@ -240,6 +240,7 @@ impl Widget for UtxosScreen {
 
         // chart
         // ?
+        // todo
 
         // table
         let style = Style::default().fg(self.fg).bg(self.bg);

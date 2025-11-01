@@ -1069,26 +1069,26 @@ impl WalletState {
         }
     }
 
-    /// These spending keys should probably be derived dynamically from some
-    /// state in the wallet.
-    ///
-    /// Probably the wallet should keep track of index of latest derived key
-    /// that has been requested by the user for purpose of receiving
-    /// funds.  We could also perform a sequential scan at startup (or import)
-    /// of keys that have received funds, up to some "gap".  In bitcoin/bip32
-    /// this gap is defined as 20 keys in a row that have never received funds.
+    // TODO: These spending keys should probably be derived dynamically from some
+    // state in the wallet.
+    //
+    // Probably the wallet should keep track of index of latest derived key
+    // that has been requested by the user for purpose of receiving
+    // funds.  We could also perform a sequential scan at startup (or import)
+    // of keys that have received funds, up to some "gap".  In bitcoin/bip32
+    // this gap is defined as 20 keys in a row that have never received funds.
     fn get_known_generation_spending_keys(&self) -> impl Iterator<Item = SpendingKey> + '_ {
         self.known_generation_keys.iter().copied()
     }
 
-    /// These spending keys should probably be derived dynamically from some
-    /// state in the wallet.
-    ///
-    /// Probably the wallet should keep track of index of latest derived key
-    /// that has been requested by the user for purpose of receiving
-    /// funds.  We could also perform a sequential scan at startup (or import)
-    /// of keys that have received funds, up to some "gap".  In bitcoin/bip32
-    /// this gap is defined as 20 keys in a row that have never received funds.
+    // TODO: These spending keys should probably be derived dynamically from some
+    // state in the wallet.
+    //
+    // Probably the wallet should keep track of index of latest derived key
+    // that has been requested by the user for purpose of receiving
+    // funds.  We could also perform a sequential scan at startup (or import)
+    // of keys that have received funds, up to some "gap".  In bitcoin/bip32
+    // this gap is defined as 20 keys in a row that have never received funds.
     fn get_known_symmetric_keys(&self) -> impl Iterator<Item = SpendingKey> + '_ {
         self.known_symmetric_keys.iter().copied()
     }
@@ -1563,7 +1563,7 @@ impl WalletState {
             // Batch update removal records to keep them valid after next removal
             RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record);
 
-            // We mark membership proofs as spent, so they can be deleted. But
+            // TODO: We mark membership proofs as spent, so they can be deleted. But
             // how do we ensure that we can recover them in case of a fork? For now we maintain
             // them even if the are spent, and then, later, we can add logic to remove these
             // membership proofs of spent UTXOs once they have been spent for M blocks.

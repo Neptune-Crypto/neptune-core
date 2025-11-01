@@ -1325,7 +1325,7 @@ impl GlobalState {
                     msmp.aocl_leaf_index,
                 ),
                 None => {
-                    // Fix this ugly hack. We probably need AOCL leaf index on the monitored
+                    // TODO: Fix this ugly hack. We probably need AOCL leaf index on the monitored
                     // UTXO structure to do that. And that requires a DB migration :(
                     let Some(new_utxos) = new_utxos.as_mut() else {
                         warn!("Monitored UTXO has no membership proof and no recovery data was provided.");
@@ -1931,7 +1931,7 @@ impl GlobalState {
         }
 
         // request blocks from peers
-        unimplemented!("We don't yet support non-archival nodes");
+        todo!("We don't yet support non-archival nodes");
     }
 
     pub(crate) async fn response_to_sync_challenge(
@@ -4072,7 +4072,7 @@ mod tests {
                 .await
                 .available_confirmed(in_seven_months)
         );
-        // No idea why this isn't working. It's off by 1 NAU?
+        // TODO: No idea why this isn't working. It's off by 1 NAU?
         // {
         //     let expected = NativeCurrencyAmount::coins(74);
         //     let got = premine_receiver

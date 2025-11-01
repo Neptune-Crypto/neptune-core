@@ -241,7 +241,8 @@ mod tests {
         let (block_2, _) = make_mock_block(&block_1, None, bob_key, rng.random(), network).await;
         let (block_3, _) = make_mock_block(&block_2, None, bob_key, rng.random(), network).await;
 
-        // Is this assertion correct? Do we need to check if an auth path is empty?
+        // TODO: Is this assertion correct? Do we need to check if an auth path
+        // is empty?
         assert!(!items_and_msmps_block1.clone().all(|(item, msmp)| block_3
             .mutator_set_accumulator_after()
             .unwrap()

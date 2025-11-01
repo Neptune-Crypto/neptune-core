@@ -225,9 +225,9 @@ where
     /// ALSO: this calls allocates all DB keys.  For large databases
     /// this could be problematic and is best to avoid.
     ///
-    // can we avoid allocating keys with collect()?
-    // can we create a true async iterator?
-    // perhaps refactor neptune, so it does not need/use a level-db iterator.
+    // todo: can we avoid allocating keys with collect()?
+    // todo: can we create a true async iterator?
+    // todo: perhaps refactor neptune, so it does not need/use a level-db iterator.
     pub fn iter(&self) -> Box<dyn Iterator<Item = (Key, Value)> + '_> {
         let inner = self.0.clone();
         let keys: Vec<_> = inner.database.keys_iter(&ReadOptions::new()).collect();
@@ -388,7 +388,7 @@ where
 // and Cache is not `Send`.  We can't do anything about that, so instead we
 // send this OptionsAsync between threads, which does not have a Cache field.
 //
-// add a cache_size option specified in bytes.
+// todo:  add a cache_size option specified in bytes.
 pub(super) struct OptionsAsync {
     pub create_if_missing: bool,
     pub error_if_exists: bool,

@@ -1028,7 +1028,7 @@ pub trait RPC {
     /// ```
     async fn mempool_tx_count(token: auth::Token) -> RpcResult<usize>;
 
-    /// Change to return current size and max size
+    // TODO: Change to return current size and max size
     async fn mempool_size(token: auth::Token) -> RpcResult<usize>;
 
     async fn mempool_tx_ids(token: auth::Token) -> RpcResult<Vec<TransactionKernelId>>;
@@ -1368,7 +1368,7 @@ pub trait RPC {
         guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<(Block, ProofOfWorkPuzzle)>>;
 
-    ///docs.
+    /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::spendable_inputs()]
     async fn spendable_inputs(token: auth::Token) -> RpcResult<TxInputList>;
@@ -1383,7 +1383,7 @@ pub trait RPC {
     ///     ByUtxoSize(SortOrder),
     /// }
     ///
-    ///docs.
+    /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::select_spendable_inputs()]
     async fn select_spendable_inputs(
@@ -1397,7 +1397,7 @@ pub trait RPC {
     /// OutputFormat can be address:amount, address:amount:medium, address:utxo,
     /// address:utxo:medium, tx_output, etc.
     ///
-    ///docs.
+    /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_outputs()]
     async fn generate_tx_outputs(
@@ -1418,7 +1418,7 @@ pub trait RPC {
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TransactionDetails>;
 
-    ///docs.
+    /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_witness_proof()]
     async fn generate_witness_proof(
@@ -1428,7 +1428,7 @@ pub trait RPC {
 
     /// assemble a transaction from TransactionDetails and a TransactionProof.
     ///
-    ///docs.
+    /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction()]
     async fn assemble_transaction(
@@ -1439,7 +1439,7 @@ pub trait RPC {
 
     /// assemble transaction artifacts from TransactionDetails and a TransactionProof.
     ///
-    ///docs.
+    /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction_artifacts()]
     async fn assemble_transaction_artifacts(
@@ -1448,7 +1448,7 @@ pub trait RPC {
         transaction_proof: TransactionProof,
     ) -> RpcResult<TxCreationArtifacts>;
 
-    ///docs.
+    /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::proof_type()]
     async fn proof_type(
@@ -1598,7 +1598,7 @@ pub trait RPC {
 
     /// record transaction and initiate broadcast to peers
     ///
-    ///docs.
+    /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::record_and_broadcast_transaction()]
     async fn record_and_broadcast_transaction(
@@ -6444,7 +6444,7 @@ mod tests {
                     .await;
 
                 let SpendingKey::Generation(key) = wallet_spending_key else {
-                    // make_mock_block should accept a `SpendingKey`.
+                    // todo: make_mock_block should accept a SpendingKey.
                     panic!("must be generation key");
                 };
 

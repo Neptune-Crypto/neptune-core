@@ -1,4 +1,4 @@
-//! spawning subtasks here seems to have no advantage as `Runtime` is not single-threaded, and most of the module actions are sequential / potentially depending on a previous message 
+//! spawning subtasks here seems to have no advantage as `Runtime` is not single-threaded, and most of the module actions are sequential / potentially depending on a previous message
 //! in `loop` hence even if something blocks the thread (currently `bincode` feels as a most heavy operation) for a few millisecs -- the other Tokio threads would steal most of the tasks
 
 use std::collections::{HashMap, HashSet};

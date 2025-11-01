@@ -1478,7 +1478,7 @@ pub(crate) mod tests {
         let a_wallet_secret = WalletEntropy::new_random();
         let a_key = a_wallet_secret.nth_generation_spending_key_for_tests(0);
 
-        // Can this outer-loop be parallelized?
+        // TODO: Can this outer-loop be parallelized?
         for multiplier in [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000] {
             let mut block_prev = Block::genesis(network);
             let mut now = block_prev.kernel.header.timestamp;

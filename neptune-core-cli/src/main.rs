@@ -1183,7 +1183,7 @@ async fn main() -> Result<()> {
                         &data_directory,
                         network,
                         tx_artifacts.all_offchain_notifications(),
-                        None, //  parse receiver tags from cmd-line.
+                        None, // todo:  parse receiver tags from cmd-line.
                     )?
                 }
                 Err(e) => eprintln!("{e}"),
@@ -1415,7 +1415,8 @@ fn process_utxo_notifications(
         println!("\n*** Utxo Transfer Files ***\n");
     }
 
-    // It would be better if this timestamp was read from the created transaction.
+    // TODO: It would be better if this timestamp was read from the created
+    // transaction.
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()

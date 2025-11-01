@@ -18,15 +18,15 @@ pub struct CorrectMutatorSetUpdateWitness {
 
 impl SecretWitness for CorrectMutatorSetUpdateWitness {
     fn nondeterminism(&self) -> NonDeterminism {
-        unimplemented!()
+        todo!()
     }
 
     fn standard_input(&self) -> PublicInput {
-        unimplemented!()
+        todo!()
     }
 
     fn program(&self) -> Program {
-        unimplemented!()
+        todo!()
     }
 }
 
@@ -37,12 +37,25 @@ pub struct CorrectMutatorSetUpdate {
 
 impl ConsensusProgram for CorrectMutatorSetUpdate {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
-        unimplemented!()
+        todo!()
     }
 
     fn hash(&self) -> Digest {
         static HASH: OnceLock<Digest> = OnceLock::new();
 
         *HASH.get_or_init(|| self.program().hash())
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+
+    impl ConsensusProgramSpecification for CorrectMutatorSetUpdate {
+        fn source(&self) {
+            todo!()
+        }
     }
 }

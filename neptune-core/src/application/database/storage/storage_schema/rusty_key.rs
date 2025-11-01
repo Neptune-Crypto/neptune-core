@@ -3,7 +3,7 @@ use leveldb::error::Error;
 use serde::Deserialize;
 use serde::Serialize;
 
-//       consider making RustyKey a newtype for RustyValue and auto derive all its From impls
+// Todo: consider making RustyKey a newtype for RustyValue and auto derive all its From impls
 //       using either `derive_more` or `newtype_derive` crate
 
 /// Represents a database key as bytes

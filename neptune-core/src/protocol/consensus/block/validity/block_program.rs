@@ -461,7 +461,7 @@ pub(crate) mod tests {
         );
     }
 
-    // Add test that verifies that double spends *within* one block is
+    // TODO: Add test that verifies that double spends *within* one block is
     //       disallowed.
 
     #[traced_test]

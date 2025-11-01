@@ -24,7 +24,7 @@ const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.
 const DB_MIGRATION_BACKUPS_DIR: &str = "migration_backups";
 
-/// Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
+// TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataDirectory {
     data_dir: PathBuf,

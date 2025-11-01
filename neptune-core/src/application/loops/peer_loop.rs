@@ -874,7 +874,7 @@ impl PeerLoopHandler {
 
                 match block {
                     None => {
-                        // Consider punishing here
+                        // TODO: Consider punishing here
                         warn!("Peer requested unknown block with hash {:x}", block_digest);
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
@@ -1125,7 +1125,7 @@ impl PeerLoopHandler {
                         .await?
                 } else {
                     // Verify that we are in fact in syncing mode.
-                    // Separate peer messages into those allowed under syncing and those that are not.
+                    // TODO: Separate peer messages into those allowed under syncing and those that are not.
                     if self
                         .global_state_lock
                         .lock_guard()
@@ -3853,7 +3853,7 @@ mod tests {
                 ..Default::default()
             };
             let not_whitelisted = cli_args::Args {
-                whitelisted_composers: ["/ip4/255.254.253.252".parse().unwrap()].into(),
+                whitelisted_composers: ["255.254.253.252".parse().unwrap()].into(),
                 network,
                 ..Default::default()
             };

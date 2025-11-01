@@ -143,7 +143,7 @@ impl PeerInfo {
         !self.connection_is_inbound()
     }
 
-    /// `neptune-core`` version-string reported by the peer.
+    /// `neptune-core` version-string reported by the peer.
     ///
     /// note: the peer might be not honest.
     pub fn version(&self) -> &str {

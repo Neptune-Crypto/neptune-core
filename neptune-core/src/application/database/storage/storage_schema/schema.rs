@@ -78,7 +78,7 @@ pub struct DbtSchema {
     /// Pending writes for all tables in this Schema.
     /// These get written/cleared by StorageWriter::persist()
     ///
-    /// Can we get rid of this lock?
+    /// todo: Can we get rid of this lock?
     pub(super) pending_writes: AtomicRw<PendingWrites>,
 
     /// Database Reader

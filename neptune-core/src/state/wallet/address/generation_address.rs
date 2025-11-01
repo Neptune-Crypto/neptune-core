@@ -68,7 +68,7 @@ pub struct GenerationSpendingKey {
 
 // manually impl Deserialize so we can derive all other fields from the seed.
 impl<'de> serde::de::Deserialize<'de> for GenerationSpendingKey {
-    // is there a more succinct way to impl this fn that works for
+    // todo: is there a more succinct way to impl this fn that works for
     // both sequential and map visitor access patterns?
     //
     // for seq access (bincode, postcard) we can simply do:

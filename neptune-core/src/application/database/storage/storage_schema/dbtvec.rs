@@ -18,7 +18,7 @@ use crate::application::locks::tokio::AtomicRw;
 /// Data stored in a DbtVec gets persisted to a levelDb database.
 #[derive(Debug)]
 pub struct DbtVec<V> {
-    /// merge DbtVecPrivate into DbtVec
+    // todo: merge DbtVecPrivate into DbtVec
     inner: DbtVecPrivate<V>,
 }
 

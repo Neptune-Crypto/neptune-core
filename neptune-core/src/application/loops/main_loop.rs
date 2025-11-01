@@ -407,7 +407,7 @@ fn stay_in_sync_mode(
 }
 
 impl MainLoopHandler {
-    // find a way to avoid triggering lint
+    // todo: find a way to avoid triggering lint
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         incoming_peer_listener: TcpListener,
@@ -942,7 +942,7 @@ impl MainLoopHandler {
                 }
 
                 // Spawn task to handle mempool tx-updating after new blocks.
-                // Do clever trick to collapse all jobs relating to the same transaction,
+                // TODO: Do clever trick to collapse all jobs relating to the same transaction,
                 //       identified by transaction-ID, into *one* update job.
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
@@ -1068,7 +1068,7 @@ impl MainLoopHandler {
                         (&pt2m_transaction.transaction).try_into()?,
                     ));
 
-                    // `Swarm` shares right after sending it here
+                    // `Swarm` have been share already, right after sending that here
                     // self.main_to_peer_broadcast(MainToPeerTask::NewTransaction((&pt2m_transaction.transaction).try_into()?));
                 }
             }
@@ -2408,7 +2408,7 @@ mod tests {
                 );
 
                 if tx_proving_capability != TxProvingCapability::PrimitiveWitness {
-                    //account for the one sent to `Swarm`
+                    // account for the one sent to `Swarm`
                     main_to_peer_rx.recv().await.unwrap();
 
                     let MainToPeerTask::TransactionNotification(tx_notification) =

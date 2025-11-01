@@ -88,6 +88,7 @@ pub(crate) async fn the(
                             )
                     {
                         warn!("Received too old tx");
+                        // "TODO: Consider punishing here" #fromPeerLoop
                         Some(None)
                     } else if transaction.kernel.timestamp
                         >= now + crate::protocol::consensus::block::FUTUREDATING_LIMIT
@@ -97,6 +98,7 @@ pub(crate) async fn the(
                             "Received tx too far into the future. Got timestamp: {:?}",
                             transaction.kernel.timestamp
                         );
+                        // "TODO: Consider punishing here" #fromPeerLoop
                         Some(None)
                     } else {
                         // Otherwise, relay to main.

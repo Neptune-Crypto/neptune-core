@@ -16,7 +16,7 @@ use crate::application::locks::tokio::AtomicRw;
 /// levelDb database.
 #[derive(Debug)]
 pub struct DbtSingleton<V> {
-    /// unify inner.  no longer necessary.
+    // todo: unify inner.  no longer necessary.
     inner: DbtSingletonPrivate<V>,
 }
 

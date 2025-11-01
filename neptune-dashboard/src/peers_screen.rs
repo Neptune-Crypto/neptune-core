@@ -211,7 +211,7 @@ impl PeersScreen {
                     match key.code {
                         KeyCode::Down => self.events.next(),
                         KeyCode::Up => self.events.previous(),
-                        // PgUp,PgDn.  (but how to determine page size?  fixed n?)
+                        // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
                         KeyCode::Char(c) => {
                             if self.set_sort_column(c) {
                                 return None;

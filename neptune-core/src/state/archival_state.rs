@@ -1013,7 +1013,7 @@ impl ArchivalState {
 
     /// Return a boolean indicating if block belongs to most canonical chain.
     ///
-    /// Returns false if either the block is not known, or if it's known but
+    /// Returns `false` if either the block is not known, or if it's known but
     /// has been orphaned.
     pub(crate) async fn block_belongs_to_canonical_chain(&self, block_digest: Digest) -> bool {
         if let Some(block_header) = self.get_block_header(block_digest).await {
@@ -1029,20 +1029,21 @@ impl ArchivalState {
         }
     }
 
-    /// Return a list of digests of the ancestors to the requested digest. Does not include the input
-    /// digest. If no ancestors can be found, returns the empty list. The count is the maximum length
-    /// of the returned list. E.g. if the input digest corresponds to height 2 and count is 5, the
-    /// returned list will contain the digests of block 1 and block 0 (the genesis block).
-    /// The input block must correspond to a known block but it can be the genesis block in which case
-    /// the empty list will be returned.
+    /// Return a list of digests of the ancestors to the requested digest. Does not include the input digest.
+    /// If no ancestors can be found, returns the empty list. The count is the maximum length of the returned list.
+    /// E.g. if the input digest corresponds to height 2 and count is 5, the returned list will contain the digests of block 1 and block 0 (the genesis block).
+    /// The input block must correspond to a known block but it can be the genesis block in which case the empty list will be returned.
     pub(crate) async fn get_ancestor_block_digests(
         &self,
         block_digest: Digest,
         mut count: usize,
     ) -> Vec<Digest> {
-        let input_block_header = self.get_block_header(block_digest).await.unwrap();
-        let mut parent_digest = input_block_header.prev_block_digest;
-        let mut ret = vec![];
+        let mut parent_digest = self
+            .get_block_header(block_digest)
+            .await
+            .unwrap()
+            .prev_block_digest;
+        let mut ret = Vec::with_capacity(count);
         while let Some(parent) = self.get_block_header(parent_digest).await {
             if count == 0 {
                 break;

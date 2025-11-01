@@ -103,7 +103,7 @@ prop_compose! {
     }
 }
 
-/// Change this function into something more meaningful!
+// TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
