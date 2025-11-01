@@ -1,3 +1,4 @@
+pub mod client;
 pub mod ops;
-pub mod router;
 pub mod rpc;
+pub mod server;

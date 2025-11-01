@@ -6,6 +6,7 @@ members = [
     "neptune-core-cli",
     "neptune-dashboard",
     "neptune-rpc/macros",
+    "neptune-rpc/client",
 ]
 
 [workspace.lints.rust]

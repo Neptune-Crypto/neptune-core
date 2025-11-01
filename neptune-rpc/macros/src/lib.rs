@@ -7,3 +7,8 @@ mod server;
 pub fn json_router_derive(input: TokenStream) -> TokenStream {
     server::json_router_derive(input)
 }
+
+#[proc_macro_derive(Routes, attributes(namespace))]
+pub fn json_routes_derive(input: TokenStream) -> TokenStream {
+    client::json_routes_derive(input)
+}

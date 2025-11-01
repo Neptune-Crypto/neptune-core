@@ -1,153 +1,201 @@
 use async_trait::async_trait;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
+use thiserror::Error;
 
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
+use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
+
+#[derive(Debug, Clone, Copy, Error, Serialize, Deserialize)]
+pub enum RpcError {
+    #[error("JSON-RPC server error: {0}")]
+    Server(i32),
+}
+
+impl From<JsonError> for RpcError {
+    fn from(err: JsonError) -> Self {
+        match err {
+            JsonError::Custom {
+                data: Some(value), ..
+            } => serde_json::from_value(value)
+                .unwrap_or_else(|_| RpcError::Server(JsonError::ParseError.code())),
+            err => RpcError::Server(err.code()),
+        }
+    }
+}
+
+pub type RpcResult<T> = Result<T, RpcError>;
 
 #[async_trait]
 pub trait RpcApi: Sync + Send {
     /* Node */
 
-    async fn network(&self) -> NetworkResponse {
+    async fn network(&self) -> RpcResult<NetworkResponse> {
         self.network_call(NetworkRequest {}).await
     }
-    async fn network_call(&self, request: NetworkRequest) -> NetworkResponse;
+    async fn network_call(&self, request: NetworkRequest) -> RpcResult<NetworkResponse>;
 
     /* Chain */
 
-    async fn height(&self) -> HeightResponse {
+    async fn height(&self) -> RpcResult<HeightResponse> {
         self.height_call(HeightRequest {}).await
     }
-    async fn height_call(&self, request: HeightRequest) -> HeightResponse;
+    async fn height_call(&self, request: HeightRequest) -> RpcResult<HeightResponse>;
 
-    async fn tip_digest(&self) -> TipDigestResponse {
+    async fn tip_digest(&self) -> RpcResult<TipDigestResponse> {
         self.tip_digest_call(TipDigestRequest {}).await
     }
-    async fn tip_digest_call(&self, request: TipDigestRequest) -> TipDigestResponse;
+    async fn tip_digest_call(&self, request: TipDigestRequest) -> RpcResult<TipDigestResponse>;
 
-    async fn tip(&self) -> TipResponse {
+    async fn tip(&self) -> RpcResult<TipResponse> {
         self.tip_call(TipRequest {}).await
     }
-    async fn tip_call(&self, request: TipRequest) -> TipResponse;
+    async fn tip_call(&self, request: TipRequest) -> RpcResult<TipResponse>;
 
-    async fn tip_proof(&self) -> TipProofResponse {
+    async fn tip_proof(&self) -> RpcResult<TipProofResponse> {
         self.tip_proof_call(TipProofRequest {}).await
     }
-    async fn tip_proof_call(&self, request: TipProofRequest) -> TipProofResponse;
+    async fn tip_proof_call(&self, request: TipProofRequest) -> RpcResult<TipProofResponse>;
 
-    async fn tip_kernel(&self) -> TipKernelResponse {
+    async fn tip_kernel(&self) -> RpcResult<TipKernelResponse> {
         self.tip_kernel_call(TipKernelRequest {}).await
     }
-    async fn tip_kernel_call(&self, request: TipKernelRequest) -> TipKernelResponse;
+    async fn tip_kernel_call(&self, request: TipKernelRequest) -> RpcResult<TipKernelResponse>;
 
-    async fn tip_header(&self) -> TipHeaderResponse {
+    async fn tip_header(&self) -> RpcResult<TipHeaderResponse> {
         self.tip_header_call(TipHeaderRequest {}).await
     }
-    async fn tip_header_call(&self, request: TipHeaderRequest) -> TipHeaderResponse;
+    async fn tip_header_call(&self, request: TipHeaderRequest) -> RpcResult<TipHeaderResponse>;
 
-    async fn tip_body(&self) -> TipBodyResponse {
+    async fn tip_body(&self) -> RpcResult<TipBodyResponse> {
         self.tip_body_call(TipBodyRequest {}).await
     }
-    async fn tip_body_call(&self, request: TipBodyRequest) -> TipBodyResponse;
+    async fn tip_body_call(&self, request: TipBodyRequest) -> RpcResult<TipBodyResponse>;
 
-    async fn tip_transaction_kernel(&self) -> TipTransactionKernelResponse {
+    async fn tip_transaction_kernel(&self) -> RpcResult<TipTransactionKernelResponse> {
         self.tip_transaction_kernel_call(TipTransactionKernelRequest {})
             .await
     }
     async fn tip_transaction_kernel_call(
         &self,
         request: TipTransactionKernelRequest,
-    ) -> TipTransactionKernelResponse;
+    ) -> RpcResult<TipTransactionKernelResponse>;
 
-    async fn tip_announcements(&self) -> TipAnnouncementsResponse {
+    async fn tip_announcements(&self) -> RpcResult<TipAnnouncementsResponse> {
         self.tip_announcements_call(TipAnnouncementsRequest {})
             .await
     }
     async fn tip_announcements_call(
         &self,
         request: TipAnnouncementsRequest,
-    ) -> TipAnnouncementsResponse;
+    ) -> RpcResult<TipAnnouncementsResponse>;
 
     /* Archival */
 
-    async fn get_block_digests(&self, height: BFieldElement) -> GetBlockDigestsResponse {
+    async fn get_block_digests(&self, height: BFieldElement) -> RpcResult<GetBlockDigestsResponse> {
         self.get_block_digests_call(GetBlockDigestsRequest { height })
             .await
     }
     async fn get_block_digests_call(
         &self,
         request: GetBlockDigestsRequest,
-    ) -> GetBlockDigestsResponse;
+    ) -> RpcResult<GetBlockDigestsResponse>;
 
-    async fn get_block_digest(&self, selector: RpcBlockSelector) -> GetBlockDigestResponse {
+    async fn get_block_digest(
+        &self,
+        selector: RpcBlockSelector,
+    ) -> RpcResult<GetBlockDigestResponse> {
         self.get_block_digest_call(GetBlockDigestRequest { selector })
             .await
     }
-    async fn get_block_digest_call(&self, request: GetBlockDigestRequest)
-        -> GetBlockDigestResponse;
+    async fn get_block_digest_call(
+        &self,
+        request: GetBlockDigestRequest,
+    ) -> RpcResult<GetBlockDigestResponse>;
 
-    async fn get_block(&self, selector: RpcBlockSelector) -> GetBlockResponse {
+    async fn get_block(&self, selector: RpcBlockSelector) -> RpcResult<GetBlockResponse> {
         self.get_block_call(GetBlockRequest { selector }).await
     }
-    async fn get_block_call(&self, request: GetBlockRequest) -> GetBlockResponse;
+    async fn get_block_call(&self, request: GetBlockRequest) -> RpcResult<GetBlockResponse>;
 
-    async fn get_block_proof(&self, selector: RpcBlockSelector) -> GetBlockProofResponse {
+    async fn get_block_proof(
+        &self,
+        selector: RpcBlockSelector,
+    ) -> RpcResult<GetBlockProofResponse> {
         self.get_block_proof_call(GetBlockProofRequest { selector })
             .await
     }
-    async fn get_block_proof_call(&self, request: GetBlockProofRequest) -> GetBlockProofResponse;
+    async fn get_block_proof_call(
+        &self,
+        request: GetBlockProofRequest,
+    ) -> RpcResult<GetBlockProofResponse>;
 
-    async fn get_block_kernel(&self, selector: RpcBlockSelector) -> GetBlockKernelResponse {
+    async fn get_block_kernel(
+        &self,
+        selector: RpcBlockSelector,
+    ) -> RpcResult<GetBlockKernelResponse> {
         self.get_block_kernel_call(GetBlockKernelRequest { selector })
             .await
     }
-    async fn get_block_kernel_call(&self, request: GetBlockKernelRequest)
-        -> GetBlockKernelResponse;
+    async fn get_block_kernel_call(
+        &self,
+        request: GetBlockKernelRequest,
+    ) -> RpcResult<GetBlockKernelResponse>;
 
-    async fn get_block_header(&self, selector: RpcBlockSelector) -> GetBlockHeaderResponse {
+    async fn get_block_header(
+        &self,
+        selector: RpcBlockSelector,
+    ) -> RpcResult<GetBlockHeaderResponse> {
         self.get_block_header_call(GetBlockHeaderRequest { selector })
             .await
     }
-    async fn get_block_header_call(&self, request: GetBlockHeaderRequest)
-        -> GetBlockHeaderResponse;
+    async fn get_block_header_call(
+        &self,
+        request: GetBlockHeaderRequest,
+    ) -> RpcResult<GetBlockHeaderResponse>;
 
-    async fn get_block_body(&self, selector: RpcBlockSelector) -> GetBlockBodyResponse {
+    async fn get_block_body(&self, selector: RpcBlockSelector) -> RpcResult<GetBlockBodyResponse> {
         self.get_block_body_call(GetBlockBodyRequest { selector })
             .await
     }
-    async fn get_block_body_call(&self, request: GetBlockBodyRequest) -> GetBlockBodyResponse;
+    async fn get_block_body_call(
+        &self,
+        request: GetBlockBodyRequest,
+    ) -> RpcResult<GetBlockBodyResponse>;
 
     async fn get_block_transaction_kernel(
         &self,
         selector: RpcBlockSelector,
-    ) -> GetBlockTransactionKernelResponse {
+    ) -> RpcResult<GetBlockTransactionKernelResponse> {
         self.get_block_transaction_kernel_call(GetBlockTransactionKernelRequest { selector })
             .await
     }
     async fn get_block_transaction_kernel_call(
         &self,
         request: GetBlockTransactionKernelRequest,
-    ) -> GetBlockTransactionKernelResponse;
+    ) -> RpcResult<GetBlockTransactionKernelResponse>;
 
     async fn get_block_announcements(
         &self,
         selector: RpcBlockSelector,
-    ) -> GetBlockAnnouncementsResponse {
+    ) -> RpcResult<GetBlockAnnouncementsResponse> {
         self.get_block_announcements_call(GetBlockAnnouncementsRequest { selector })
             .await
     }
     async fn get_block_announcements_call(
         &self,
         request: GetBlockAnnouncementsRequest,
-    ) -> GetBlockAnnouncementsResponse;
+    ) -> RpcResult<GetBlockAnnouncementsResponse>;
 
-    async fn is_block_canonical(&self, digest: Digest) -> IsBlockCanonicalResponse {
+    async fn is_block_canonical(&self, digest: Digest) -> RpcResult<IsBlockCanonicalResponse> {
         self.is_block_canonical_call(IsBlockCanonicalRequest { digest })
             .await
     }
     async fn is_block_canonical_call(
         &self,
         request: IsBlockCanonicalRequest,
-    ) -> IsBlockCanonicalResponse;
+    ) -> RpcResult<IsBlockCanonicalResponse>;
 }
