@@ -79,7 +79,11 @@ impl Serialize for JsonError {
         let mut state = serializer.serialize_struct("JsonError", 3)?;
         state.serialize_field("code", &self.code())?;
         state.serialize_field("message", &self.message())?;
-        state.serialize_field("data", &self.data())?;
+
+        if let Some(data) = self.data() {
+            state.serialize_field("data", data)?;
+        }
+
         state.end()
     }
 }
