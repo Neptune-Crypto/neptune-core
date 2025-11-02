@@ -69,6 +69,17 @@ impl TryFrom<&Transaction> for TransferTransaction {
     }
 }
 
+impl TransferTransactionProof {
+    pub(crate) fn proof_quality(&self) -> TransactionProofQuality {
+        match self {
+            TransferTransactionProof::ProofCollection(_) => {
+                TransactionProofQuality::ProofCollection
+            }
+            TransferTransactionProof::SingleProof(_) => TransactionProofQuality::SingleProof,
+        }
+    }
+}
+
 impl From<TransferTransaction> for Transaction {
     fn from(value: TransferTransaction) -> Self {
         Self {

@@ -186,6 +186,14 @@ impl NativeCurrencyAmount {
 
     /// Multiply the amount by a non-negative 32-bit number.
     ///
+    /// Returns `None` in the case of overflow.
+    pub fn checked_scalar_mul(&self, factor: u32) -> Option<Self> {
+        let factor_as_i128 = i128::from(factor);
+        self.0.checked_mul(factor_as_i128).map(NativeCurrencyAmount)
+    }
+
+    /// Multiply the amount by a non-negative 32-bit number.
+    ///
     /// Crashes in case of overflow.
     pub fn scalar_mul(&self, factor: u32) -> Self {
         let factor_as_i128 = i128::from(factor);

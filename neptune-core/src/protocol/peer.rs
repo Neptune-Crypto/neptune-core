@@ -105,6 +105,7 @@ pub enum NegativePeerSanction {
     /// from same peer, as they're expensive (in disk I/O and networking
     /// bandwidth) to respond to.
     ReceivedSyncChallenge,
+    UnrelayableTransaction,
 }
 
 /// The reason for improving a peer's standing
@@ -177,6 +178,7 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::FishyPowEvolutionChallengeResponse => "fishy pow evolution",
             NegativePeerSanction::FishyDifficultiesChallengeResponse => "fishy difficulties",
             NegativePeerSanction::ReceivedSyncChallenge => "received sync challenge",
+            NegativePeerSanction::UnrelayableTransaction => "unrelayable transaction",
         };
         write!(f, "{string}")
     }
@@ -253,6 +255,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::FishyPowEvolutionChallengeResponse => -51,
             NegativePeerSanction::FishyDifficultiesChallengeResponse => -51,
             NegativePeerSanction::ReceivedSyncChallenge => -50,
+            NegativePeerSanction::UnrelayableTransaction => -10,
         }
     }
 }
