@@ -270,5 +270,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_receive_same_block_twice() {}
+    async fn can_receive_same_block_twice() {
+        let mut rng = rng();
+        let mut tip = rng.random::<Block>();
+        let low = 100;
+        let high = 200;
+        tip.set_header_height(high.into());
+        let mut rapid_block_download = RapidBlockDownload::new(low.into(), &tip).await.unwrap();
+
+        // receive all blocks in random order, with repetitions
+        let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
+        let mut blocks_received = vec![];
+        while !blocks_remaining.is_empty() {
+            let height = if rng.random_bool(0.5f64) && !blocks_received.is_empty() {
+                let i = rng.random_range(0usize..blocks_remaining.len());
+                blocks_remaining[i]
+            } else {
+                let i = rng.random_range(0usize..blocks_remaining.len());
+                let height = blocks_remaining.swap_remove(i);
+                blocks_received.push(height);
+                height
+            };
+
+            let mut block = rng.random::<Block>();
+            block.set_header_height(height);
+            let _ = rapid_block_download.receive_block(&block).await;
+        }
+
+        // verify that we are finished
+        assert!(rapid_block_download.is_complete());
+
+        // clean up
+        rapid_block_download.clean_up().await;
+    }
 }
