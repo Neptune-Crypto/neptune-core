@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use rand::rng;
+use rand::RngCore;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::BlockHeight;
@@ -33,8 +35,8 @@ impl RapidBlockDownload {
         highest_block_already_processed: BlockHeight,
         tip: &Block,
     ) -> Result<Self, RapidBlockDownloadError> {
-        let temp_directory = Self::temp_dir();
-        let _ = tokio::fs::create_dir(&temp_directory)
+        let temp_directory = Self::temp_dir().join(format!("{}/", rng().next_u64()));
+        let _ = tokio::fs::create_dir_all(&temp_directory)
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()));
 
@@ -56,7 +58,16 @@ impl RapidBlockDownload {
     /// Delete the temp directory and its contents.
     async fn clean_up(&self) {
         if let Err(e) = tokio::fs::remove_dir_all(self.temp_directory.clone()).await {
-            tracing::error!("failed to remove temporary directory for rapid block download: {e}");
+            tracing::error!(
+                "failed to remove temporary directory '{}' for rapid block download: {e}",
+                self.temp_directory.clone().to_string_lossy()
+            );
+        }
+        if let Err(e) = tokio::fs::remove_dir(Self::temp_dir()).await {
+            tracing::warn!(
+                "failed to remove temporary directory '{}' for rapid block download: {e}",
+                Self::temp_dir().to_string_lossy()
+            );
         }
     }
 
@@ -70,6 +81,8 @@ impl RapidBlockDownload {
     async fn extend_chain(&mut self, new_block: &Block) -> Result<(), RapidBlockDownloadError> {
         let new_block_height = new_block.header().height;
         assert_eq!(self.tip_height.next(), new_block_height);
+
+        self.coverage = self.coverage.clone().expand(new_block_height.value() + 1);
 
         self.receive_block(new_block).await?;
 
@@ -179,7 +192,9 @@ enum RapidBlockDownloadError {
 
 #[cfg(test)]
 mod tests {
+    use crate::tests::shared_tokio_runtime;
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::rng;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -189,7 +204,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn can_get_stored_block_iff_received() {
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
@@ -239,7 +254,7 @@ mod tests {
         rapid_block_download.clean_up().await;
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn can_make_complete_by_receiving_all_blocks() {
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
@@ -269,7 +284,7 @@ mod tests {
         rapid_block_download.clean_up().await;
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn can_receive_same_block_twice() {
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
@@ -282,19 +297,20 @@ mod tests {
         let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
         let mut blocks_received = vec![];
         while !blocks_remaining.is_empty() {
-            let height = if rng.random_bool(0.5f64) && !blocks_received.is_empty() {
+            if rng.random_bool(0.5f64) && !blocks_received.is_empty() {
                 let i = rng.random_range(0usize..blocks_remaining.len());
-                blocks_remaining[i]
+                let mut block = rng.random::<Block>();
+                block.set_header_height(blocks_remaining[i]);
+                let _ = rapid_block_download.receive_block(&block).await;
             } else {
                 let i = rng.random_range(0usize..blocks_remaining.len());
                 let height = blocks_remaining.swap_remove(i);
                 blocks_received.push(height);
-                height
-            };
 
-            let mut block = rng.random::<Block>();
-            block.set_header_height(height);
-            let _ = rapid_block_download.receive_block(&block).await;
+                let mut block = rng.random::<Block>();
+                block.set_header_height(height);
+                let _ = rapid_block_download.receive_block(&block).await;
+            };
         }
 
         // verify that we are finished
@@ -302,5 +318,56 @@ mod tests {
 
         // clean up
         rapid_block_download.clean_up().await;
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn can_track_new_tip() {
+        let mut outer_rng = rng();
+        for seed in [17711521671747587153]
+            .into_iter()
+            .chain((0..10).map(|_| outer_rng.next_u64()))
+        {
+            println!("seed: {seed}");
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut tip = rng.random::<Block>();
+            let low = 100;
+            let mut high = 200;
+            tip.set_header_height(high.into());
+            let mut rapid_block_download = RapidBlockDownload::new(low.into(), &tip).await.unwrap();
+
+            // receive all blocks in random order, with repetitions
+            let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
+            let mut blocks_received = vec![];
+            while !blocks_remaining.is_empty() {
+                if rng.random_bool(0.5f64) && blocks_received.len() % 5 == 0 {
+                    high += 1;
+                    let height = BlockHeight::from(high);
+                    let mut block = rng.random::<Block>();
+                    block.set_header_height(height);
+                    let extend_result = rapid_block_download.extend_chain(&block).await;
+                    assert!(extend_result.is_ok());
+                    continue;
+                }
+                let height = if rng.random_bool(0.5f64) && !blocks_received.is_empty() {
+                    let i = rng.random_range(0usize..blocks_remaining.len());
+                    blocks_remaining[i]
+                } else {
+                    let i = rng.random_range(0usize..blocks_remaining.len());
+                    let height = blocks_remaining.swap_remove(i);
+                    blocks_received.push(height);
+                    height
+                };
+
+                let mut block = rng.random::<Block>();
+                block.set_header_height(height);
+                let _ = rapid_block_download.receive_block(&block).await;
+            }
+
+            // verify that we are finished
+            assert!(rapid_block_download.is_complete());
+
+            // clean up
+            rapid_block_download.clean_up().await;
+        }
     }
 }
