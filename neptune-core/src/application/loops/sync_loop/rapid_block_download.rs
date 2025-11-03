@@ -160,6 +160,11 @@ impl RapidBlockDownload {
     fn coverage(&self) -> BitMask {
         self.coverage.clone()
     }
+
+    /// Determine whether all blocks have been received.
+    pub fn is_complete(&self) -> bool {
+        self.coverage().is_complete()
+    }
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -174,6 +179,7 @@ enum RapidBlockDownloadError {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use rand::rng;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -234,7 +240,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_make_complete_by_receiving_all_blocks() {}
+    async fn can_make_complete_by_receiving_all_blocks() {
+        let mut rng = rng();
+        let mut tip = rng.random::<Block>();
+        let low = 100;
+        let high = 200;
+        tip.set_header_height(high.into());
+        let mut rapid_block_download = RapidBlockDownload::new(low.into(), &tip).await.unwrap();
+
+        // receive all blocks in random order
+        let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
+        while !blocks_remaining.is_empty() {
+            let i = rng.random_range(0usize..blocks_remaining.len());
+            let height = blocks_remaining.swap_remove(i);
+
+            // verify that we are not finished yet
+            assert!(!rapid_block_download.is_complete());
+
+            let mut block = rng.random::<Block>();
+            block.set_header_height(height);
+            let _ = rapid_block_download.receive_block(&block).await;
+        }
+
+        // verify that we are finished
+        assert!(rapid_block_download.is_complete());
+
+        // clean up
+        rapid_block_download.clean_up().await;
+    }
 
     #[tokio::test]
     async fn can_receive_same_block_twice() {}
