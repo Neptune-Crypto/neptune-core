@@ -8,6 +8,7 @@ use rand::SeedableRng;
 /// enumerated in principle, but some elements are present, and some are not.
 #[derive(Debug, Clone)]
 pub(crate) struct BitMask {
+    // exclusive
     upper_bound: u64,
     limbs: Vec<u32>,
 }
@@ -17,7 +18,7 @@ impl PartialEq for BitMask {
         if self.upper_bound != other.upper_bound {
             return false;
         }
-        if self.upper_bound % 32 == 0 {
+        if self.upper_bound.is_multiple_of(32) {
             return self.limbs == other.limbs;
         }
         let last = (self.upper_bound / 32) as usize;
@@ -33,18 +34,30 @@ impl PartialEq for BitMask {
         }
         let shamt = self.upper_bound % 32;
         let mask = (1u32 << shamt) - 1;
-        return (self.limbs[last] ^ other.limbs[last]) & mask == 0;
+        (self.limbs[last] ^ other.limbs[last]) & mask == 0
     }
 }
 impl Eq for BitMask {}
 
 impl BitMask {
+    fn num_limbs(max_bit_index: u64) -> usize {
+        (if (max_bit_index + 1).is_multiple_of(32) {
+            (max_bit_index + 1) / 32
+        } else {
+            (max_bit_index / 32) + 1
+        }) as usize
+    }
+
     /// Create a new [`BitMask`] object.
     ///
-    /// All bits are initialized to zero.
+    /// All bits are initialized to zero. The argument, `upper_bound` is
+    /// exclusive, meaning that the max index is `upper_bound` - 1.
+    ///
+    /// # Panics
+    ///  - If `upper_bound` == 0
     pub(crate) fn new(upper_bound: u64) -> Self {
-        let num_limbs = upper_bound.div_ceil(32);
-        let limbs = vec![0_u32; num_limbs.try_into().unwrap()];
+        let num_limbs = Self::num_limbs(upper_bound - 1);
+        let limbs = vec![0_u32; num_limbs];
         Self { upper_bound, limbs }
     }
 
@@ -57,7 +70,7 @@ impl BitMask {
     ///  - If the new upper bound is less than the old.
     pub(crate) fn expand(self, new_upper_bound: u64) -> Self {
         assert!(new_upper_bound >= self.upper_bound);
-        let new_num_limbs = new_upper_bound.div_ceil(32);
+        let new_num_limbs = Self::num_limbs(new_upper_bound - 1);
         let extra_limbs = usize::try_from(new_num_limbs).unwrap() - self.limbs.len();
         let new_limbs = [self.limbs, vec![0u32; extra_limbs]].concat();
         Self {
@@ -73,11 +86,11 @@ impl BitMask {
     ///  - If the new upper bound is greater than the old.
     pub(crate) fn shrink(mut self, new_upper_bound: u64) -> Self {
         assert!(new_upper_bound <= self.upper_bound);
-        let new_num_limbs = new_upper_bound.div_ceil(32);
-        while self.limbs.len() > new_num_limbs.try_into().unwrap() {
+        let new_num_limbs = Self::num_limbs(new_upper_bound - 1);
+        while self.limbs.len() > new_num_limbs {
             self.limbs.pop();
         }
-        for index in new_upper_bound..(32 * new_num_limbs) {
+        for index in new_upper_bound..(32 * (new_num_limbs as u64)) {
             self.unset(index);
         }
         self.upper_bound = new_upper_bound;
@@ -135,7 +148,7 @@ impl BitMask {
     pub(crate) fn to_vec(&self) -> Vec<u64> {
         let mut offset = 0;
         let mut elements = vec![];
-        for limb in self.limbs.iter() {
+        for limb in &self.limbs {
             if *limb == 0 {
                 offset += 32;
                 continue;
@@ -161,7 +174,7 @@ impl BitMask {
     pub(crate) fn to_vec_complement(&self) -> Vec<u64> {
         let mut offset = 0;
         let mut elements = vec![];
-        for limb in self.limbs.iter() {
+        for limb in &self.limbs {
             if *limb == u32::MAX {
                 offset += 32;
                 continue;
@@ -241,7 +254,7 @@ impl BitMask {
                 return false;
             }
         }
-        for i in 0..(self.upper_bound % 32) {
+        for i in 0..((self.upper_bound - 1) % 32) {
             if (1 << i) & *self.limbs.last().unwrap() == 0 {
                 return false;
             }
