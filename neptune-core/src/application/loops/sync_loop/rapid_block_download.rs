@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use rand::rng;
 use rand::RngCore;
-use tasm_lib::prelude::Digest;
 
 use crate::api::export::BlockHeight;
 use crate::application::loops::sync_loop::bit_mask::BitMask;
@@ -21,7 +20,6 @@ pub(crate) struct RapidBlockDownload {
     coverage: BitMask,
     index_to_filename: HashMap<u64, PathBuf>,
 
-    target_digest: Digest,
     target_height: BlockHeight,
 }
 
@@ -33,7 +31,7 @@ impl RapidBlockDownload {
     /// Set up a [`RapidBlockDownload`] state.
     pub(crate) async fn new(
         highest_block_already_processed: BlockHeight,
-        target: &Block,
+        target_height: BlockHeight,
     ) -> Result<Self, RapidBlockDownloadError> {
         let temp_directory = Self::temp_dir().join(format!("{}/", rng().next_u64()));
         let _ = tokio::fs::create_dir_all(&temp_directory)
@@ -41,16 +39,13 @@ impl RapidBlockDownload {
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
 
         let index_to_filename = HashMap::new();
-        let target_height = target.header().height;
         let mut coverage = BitMask::new(target_height.next().value());
         coverage.set_range(0, highest_block_already_processed.value());
-        let target_digest = target.hash();
 
         Ok(Self {
             temp_directory,
             coverage,
             index_to_filename,
-            target_digest,
             target_height,
         })
     }
@@ -86,7 +81,6 @@ impl RapidBlockDownload {
 
         self.receive_block(new_block).await?;
 
-        self.target_digest = new_block.hash();
         self.target_height = self.target_height.next();
 
         Ok(())
@@ -245,7 +239,9 @@ mod tests {
         let low = 100;
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download = RapidBlockDownload::new(low.into(), &tip).await.unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(low.into(), BlockHeight::from(high))
+            .await
+            .unwrap();
 
         // receive 10 blocks
         let mut received_heights = vec![];
@@ -295,7 +291,9 @@ mod tests {
         let low = 100;
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download = RapidBlockDownload::new(low.into(), &tip).await.unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(low.into(), BlockHeight::from(high))
+            .await
+            .unwrap();
 
         // receive all blocks in random order
         let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
@@ -321,11 +319,11 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn can_receive_same_block_twice() {
         let mut rng = rng();
-        let mut tip = rng.random::<Block>();
         let low = 100;
         let high = 200;
-        tip.set_header_height(high.into());
-        let mut rapid_block_download = RapidBlockDownload::new(low.into(), &tip).await.unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(low.into(), BlockHeight::from(high))
+            .await
+            .unwrap();
 
         // receive all blocks in random order, with repetitions
         let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
@@ -363,11 +361,12 @@ mod tests {
         {
             println!("seed: {seed}");
             let mut rng = StdRng::seed_from_u64(seed);
-            let mut tip = rng.random::<Block>();
             let low = 100;
             let mut high = 200;
-            tip.set_header_height(high.into());
-            let mut rapid_block_download = RapidBlockDownload::new(low.into(), &tip).await.unwrap();
+            let mut rapid_block_download =
+                RapidBlockDownload::new(low.into(), BlockHeight::from(high))
+                    .await
+                    .unwrap();
 
             // receive all blocks in random order, with repetitions
             let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
