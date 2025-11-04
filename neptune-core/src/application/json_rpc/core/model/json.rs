@@ -57,12 +57,27 @@ impl JsonError {
     }
 }
 
+#[allow(unreachable_patterns)] // Currently there is only one variant in enum.
 impl From<RpcError> for JsonError {
     fn from(err: RpcError) -> Self {
-        JsonError::Custom {
-            code: -32000,
-            message: "RPC error".to_string(),
-            data: Some(serde_json::to_value(err).unwrap()),
+        match err {
+            RpcError::Server(error) => error,
+            _ => JsonError::Custom {
+                code: -32000,
+                message: "RPC error".to_string(),
+                data: Some(serde_json::to_value(err).unwrap()),
+            },
+        }
+    }
+}
+
+impl From<JsonError> for RpcError {
+    fn from(err: JsonError) -> Self {
+        match err {
+            JsonError::Custom {
+                data: Some(value), ..
+            } => serde_json::from_value(value).unwrap_or(RpcError::Server(JsonError::ParseError)),
+            err => RpcError::Server(err),
         }
     }
 }
@@ -113,15 +128,17 @@ impl<'de> Deserialize<'de> for JsonError {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum JsonResponse {
     Success {
+        #[serde(skip_deserializing)]
         jsonrpc: &'static str,
         id: Option<Value>,
         result: Value,
     },
     Error {
+        #[serde(skip_deserializing)]
         jsonrpc: &'static str,
         id: Option<Value>,
         error: JsonError,
@@ -158,7 +175,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rpc_error_serialization() {
+    fn json_error_serialization() {
         let error = JsonError::MethodNotFound;
         let serialized = serde_json::to_string(&error).unwrap();
         assert_eq!(
@@ -168,7 +185,18 @@ mod tests {
     }
 
     #[test]
-    fn rpc_response_success() {
+    fn json_rpc_error_roundtrip() {
+        let error = JsonError::MethodNotFound;
+
+        let rpc_error: RpcError = error.clone().into();
+        assert_eq!(rpc_error, RpcError::Server(error.clone()));
+
+        let json_error: JsonError = rpc_error.into();
+        assert_eq!(json_error, error);
+    }
+
+    #[test]
+    fn json_response_success() {
         let response = JsonResponse::success(Some(json!(1)), json!({"success": true}));
 
         let serialized = serde_json::to_string(&response).unwrap();
@@ -176,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn rpc_response_error() {
+    fn json_response_error() {
         let response = JsonResponse::error(Some(json!("1")), JsonError::InvalidParams);
 
         let serialized = serde_json::to_string(&response).unwrap();
@@ -186,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn rpc_request_deserialization() {
+    fn json_request_deserialization() {
         let json_data = r#"{
             "jsonrpc": "2.0",
             "method": "test",
@@ -203,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn rpc_response_with_null_id() {
+    fn json_response_with_null_id() {
         let success = JsonResponse::success(None, json!(true));
         let error = JsonResponse::error(None, JsonError::InternalError);
 

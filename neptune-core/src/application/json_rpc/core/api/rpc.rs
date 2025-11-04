@@ -9,22 +9,10 @@ use crate::application::json_rpc::core::model::common::RpcBlockSelector;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
 
-#[derive(Debug, Clone, Error, Serialize, Deserialize)]
+#[derive(Debug, Clone, Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RpcError {
     #[error("JSON-RPC server error: {0}")]
     Server(JsonError),
-}
-
-impl From<JsonError> for RpcError {
-    fn from(err: JsonError) -> Self {
-        match err {
-            JsonError::Custom {
-                data: Some(value), ..
-            } => serde_json::from_value(value)
-                .unwrap_or_else(|_| RpcError::Server(JsonError::ParseError)),
-            err => RpcError::Server(err),
-        }
-    }
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;

@@ -2225,6 +2225,7 @@ dependencies = [
  "neptune-cash",
  "reqwest",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
