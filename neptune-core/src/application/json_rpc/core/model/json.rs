@@ -4,6 +4,7 @@ use serde::Deserializer;
 use serde::Serialize;
 use serde::Serializer;
 use serde_json::Value;
+use thiserror::Error;
 
 use crate::application::json_rpc::core::api::rpc::RpcError;
 
@@ -16,17 +17,23 @@ pub struct JsonRequest {
     pub id: Option<Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum JsonError {
+    #[error("Parse error")]
     ParseError,
+    #[error("Invalid request")]
     InvalidRequest,
+    #[error("Method not found")]
     MethodNotFound,
+    #[error("Invalid params")]
     InvalidParams,
+    #[error("Internal error")]
     InternalError,
+    #[error("Server error")]
     Custom {
         code: i32,
         message: String,
-        data: Option<serde_json::Value>,
+        data: Option<Value>,
     },
 }
 
@@ -42,17 +49,6 @@ impl JsonError {
         }
     }
 
-    pub fn message(&self) -> &str {
-        match self {
-            Self::ParseError => "Parse error",
-            Self::InvalidRequest => "Invalid Request",
-            Self::MethodNotFound => "Method not found",
-            Self::InvalidParams => "Invalid params",
-            Self::InternalError => "Internal error",
-            Self::Custom { message, .. } => message,
-        }
-    }
-
     pub fn data(&self) -> Option<&serde_json::Value> {
         match self {
             Self::Custom { data, .. } => data.as_ref(),
@@ -65,7 +61,7 @@ impl From<RpcError> for JsonError {
     fn from(err: RpcError) -> Self {
         JsonError::Custom {
             code: -32000,
-            message: "Server error".to_string(),
+            message: "RPC error".to_string(),
             data: Some(serde_json::to_value(err).unwrap()),
         }
     }
@@ -78,7 +74,7 @@ impl Serialize for JsonError {
     {
         let mut state = serializer.serialize_struct("JsonError", 3)?;
         state.serialize_field("code", &self.code())?;
-        state.serialize_field("message", &self.message())?;
+        state.serialize_field("message", &self.to_string())?;
 
         if let Some(data) = self.data() {
             state.serialize_field("data", data)?;
@@ -167,7 +163,7 @@ mod tests {
         let serialized = serde_json::to_string(&error).unwrap();
         assert_eq!(
             serialized,
-            r#"{"code":-32601,"message":"Method not found/unavailable"}"#
+            r#"{"code":-32601,"message":"Method not found"}"#
         );
     }
 
