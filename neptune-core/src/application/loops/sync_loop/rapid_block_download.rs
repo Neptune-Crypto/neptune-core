@@ -21,8 +21,8 @@ pub(crate) struct RapidBlockDownload {
     coverage: BitMask,
     index_to_filename: HashMap<u64, PathBuf>,
 
-    tip_digest: Digest,
-    tip_height: BlockHeight,
+    target_digest: Digest,
+    target_height: BlockHeight,
 }
 
 impl RapidBlockDownload {
@@ -31,32 +31,32 @@ impl RapidBlockDownload {
         std::env::temp_dir().join(suffix)
     }
     /// Set up a [`RapidBlockDownload`] state.
-    async fn new(
+    pub(crate) async fn new(
         highest_block_already_processed: BlockHeight,
-        tip: &Block,
+        target: &Block,
     ) -> Result<Self, RapidBlockDownloadError> {
         let temp_directory = Self::temp_dir().join(format!("{}/", rng().next_u64()));
         let _ = tokio::fs::create_dir_all(&temp_directory)
             .await
-            .map_err(|e| RapidBlockDownloadError::IO(e.to_string()));
+            .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
 
         let index_to_filename = HashMap::new();
-        let tip_height = tip.header().height;
-        let mut coverage = BitMask::new(tip_height.next().value());
+        let target_height = target.header().height;
+        let mut coverage = BitMask::new(target_height.next().value());
         coverage.set_range(0, highest_block_already_processed.value());
-        let tip_digest = tip.hash();
+        let target_digest = target.hash();
 
         Ok(Self {
             temp_directory,
             coverage,
             index_to_filename,
-            tip_digest,
-            tip_height,
+            target_digest,
+            target_height,
         })
     }
 
     /// Delete the temp directory and its contents.
-    async fn clean_up(&self) {
+    pub(crate) async fn clean_up(&self) {
         if let Err(e) = tokio::fs::remove_dir_all(self.temp_directory.clone()).await {
             tracing::error!(
                 "failed to remove temporary directory '{}' for rapid block download: {e}",
@@ -80,14 +80,14 @@ impl RapidBlockDownload {
     ///    one.
     async fn extend_chain(&mut self, new_block: &Block) -> Result<(), RapidBlockDownloadError> {
         let new_block_height = new_block.header().height;
-        assert_eq!(self.tip_height.next(), new_block_height);
+        assert_eq!(self.target_height.next(), new_block_height);
 
         self.coverage = self.coverage.clone().expand(new_block_height.value() + 1);
 
         self.receive_block(new_block).await?;
 
-        self.tip_digest = new_block.hash();
-        self.tip_height = self.tip_height.next();
+        self.target_digest = new_block.hash();
+        self.target_height = self.target_height.next();
 
         Ok(())
     }
@@ -141,7 +141,7 @@ impl RapidBlockDownload {
     /// If we have already downloaded all the blocks we need, this function
     /// returns `None`. Otherwise, it returns the sampled block height but
     /// wrapped in a `Some`.
-    fn sample_missing_block_height(&self, seed: [u8; 32]) -> Option<BlockHeight> {
+    pub(crate) fn sample_missing_block_height(&self, seed: [u8; 32]) -> Option<BlockHeight> {
         if self.coverage().is_complete() {
             None
         } else {
@@ -175,13 +175,48 @@ impl RapidBlockDownload {
     }
 
     /// Determine whether all blocks have been received.
-    pub fn is_complete(&self) -> bool {
-        self.coverage().is_complete()
+    pub(crate) fn is_complete(&self) -> bool {
+        self.coverage.is_complete()
+    }
+
+    /// Determine whether the given block was received already.
+    pub(crate) fn have_received(&self, block_height: BlockHeight) -> bool {
+        self.coverage.contains(block_height.value())
+    }
+
+    /// Load the block from disk, delete the file, and return the block.
+    pub(crate) async fn get_and_free(
+        &self,
+        height: BlockHeight,
+    ) -> Result<Block, RapidBlockDownloadError> {
+        let block = self.get_received_block(height).await?;
+
+        if let Err(e) = self.delete_block(height).await {
+            tracing::warn!("Could not delete block {height} from temp dir: {e}");
+        }
+
+        Ok(block)
+    }
+
+    /// Delete the block from the temp dir.
+    ///
+    /// Saves disk / RAM space. However, according to the bit mask, the block
+    /// is there. So things go wrong if you ask for the block (which the bit
+    /// mask says is there) and it was deleted. Be careful not to do that.
+    async fn delete_block(&self, height: BlockHeight) -> Result<(), RapidBlockDownloadError> {
+        let file_name = self
+            .index_to_filename
+            .get(&height.value())
+            .ok_or(RapidBlockDownloadError::NotReceived(height))?;
+        tokio::fs::remove_file(file_name)
+            .await
+            .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
+        Ok(())
     }
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-enum RapidBlockDownloadError {
+pub(crate) enum RapidBlockDownloadError {
     #[error("I/O error: {0}")]
     IO(String),
     #[error("Block {0} not received")]
@@ -200,7 +235,6 @@ mod tests {
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
-    use tokio::fs;
 
     use super::*;
 
