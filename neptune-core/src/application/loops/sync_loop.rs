@@ -16,7 +16,6 @@ use crate::application::loops::sync_loop::channel::MainToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownload;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownloadError;
-use crate::protocol::consensus::block::Block;
 
 pub(crate) mod bit_mask;
 pub(crate) mod channel;
@@ -43,7 +42,7 @@ pub(crate) struct SyncLoop {
     tip_height: BlockHeight,
     download_state: RapidBlockDownload,
     peers: HashMap<PeerHandle, PeerSyncState>,
-    target: Block,
+    target_height: BlockHeight,
     main_channel_sender: Sender<SyncToMain>,
     main_channel_receiver: Receiver<MainToSync>,
 }
@@ -51,10 +50,10 @@ pub(crate) struct SyncLoop {
 impl SyncLoop {
     pub(crate) async fn new(
         tip_height: BlockHeight,
-        target: &Block,
+        target_height: BlockHeight,
     ) -> Result<(Self, Sender<MainToSync>, Receiver<SyncToMain>), RapidBlockDownloadError> {
         const CHANNEL_CAPACITY: usize = 100;
-        let download_state = RapidBlockDownload::new(tip_height, target).await?;
+        let download_state = RapidBlockDownload::new(tip_height, target_height).await?;
         let (main_to_sync_sender, main_to_sync_receiver) =
             mpsc::channel::<MainToSync>(CHANNEL_CAPACITY);
         let (sync_to_main_sender, sync_to_main_receiver) =
@@ -64,7 +63,7 @@ impl SyncLoop {
                 tip_height,
                 download_state,
                 peers: HashMap::new(),
-                target: target.clone(),
+                target_height,
                 main_channel_sender: sync_to_main_sender,
                 main_channel_receiver: main_to_sync_receiver,
             },
@@ -140,7 +139,7 @@ impl SyncLoop {
                     // not doing anything any more and it should be terminated.
                     let now = SystemTime::now();
                     if now
-                        .duration_since(most_recent_receipt.unwrap())
+                        .duration_since(most_recent_receipt.unwrap_or(now))
                         .ok()
                         .is_none_or(|timestamp| timestamp > ANY_RESPONSE_TIMEOUT) {
                         finished = self.download_state.is_complete();
@@ -168,6 +167,13 @@ impl SyncLoop {
         }
 
         if finished {
+            // Tell main loop we are done.
+            if let Err(e) = self.main_channel_sender.send(SyncToMain::Finished).await {
+                tracing::error!(
+                    "Failed to send message from sync loop to main loop that job is done."
+                );
+            }
+
             // Clean up the temp directory.
             self.download_state.clean_up().await;
         }
@@ -185,6 +191,7 @@ impl SyncLoop {
             );
             return;
         };
+        tracing::info!("requesting block {height} from peer {peer_handle}");
 
         // Send a request to the peer for that block.
         if let Err(e) = self
@@ -251,4 +258,219 @@ pub(crate) enum SyncLoopError {
     RapidBlockDownloadError(RapidBlockDownloadError),
     #[error("SendError: {0}")]
     SendError(tokio::sync::mpsc::error::SendError<SyncToMain>),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv6Addr;
+
+    use macro_rules_attr::apply;
+    use rand::RngCore;
+
+    use crate::{protocol::consensus::block::Block, tests::shared_tokio_runtime};
+
+    use super::*;
+
+    struct MockMainLoop {
+        peers: HashMap<PeerHandle, MockPeer>,
+        main_to_sync_sender: Sender<MainToSync>,
+        sync_to_main_receiver: Receiver<SyncToMain>,
+        current_tip_height: BlockHeight,
+        sync_target_height: BlockHeight,
+        finished: bool,
+    }
+
+    impl MockMainLoop {
+        fn new(
+            main_to_sync_sender: Sender<MainToSync>,
+            sync_to_main_receiver: Receiver<SyncToMain>,
+            current_tip_height: BlockHeight,
+            sync_target_height: BlockHeight,
+        ) -> Self {
+            Self {
+                peers: HashMap::default(),
+                main_to_sync_sender,
+                sync_to_main_receiver,
+                current_tip_height,
+                sync_target_height,
+                finished: false,
+            }
+        }
+
+        async fn connect(&mut self, peer: MockPeer) {
+            let _ = self
+                .main_to_sync_sender
+                .send(MainToSync::AddPeer(peer.handle()))
+                .await
+                .unwrap();
+            self.peers.insert(peer.handle(), peer);
+        }
+
+        async fn disconnect(&mut self, peer_handle: PeerHandle) {
+            let _ = self
+                .main_to_sync_sender
+                .send(MainToSync::RemovePeer(peer_handle))
+                .await
+                .unwrap();
+            self.peers.remove(&peer_handle);
+        }
+
+        fn sync_is_finished(&self) -> bool {
+            self.finished
+        }
+
+        async fn run(&mut self) {
+            while let Some(message) = self.sync_to_main_receiver.recv().await {
+                match message {
+                    SyncToMain::PunishPeer(socket_addr, negative_peer_sanction) => {}
+                    SyncToMain::RewardPeer(socket_addr, positive_peer_sanction) => {}
+                    SyncToMain::Finished => {
+                        if self.current_tip_height == self.sync_target_height {
+                            self.finished = true;
+                        }
+                    }
+                    SyncToMain::TipSuccessor(block) => {
+                        if block.header().height == self.current_tip_height.next() {
+                            self.current_tip_height = block.header().height;
+                        }
+                    }
+                    SyncToMain::RequestBlock {
+                        peer_handle,
+                        height,
+                    } => {
+                        if let Some(peer) = self.peers.get_mut(&peer_handle) {
+                            if let Some(block) = peer.request(height).await {
+                                tracing::info!("received response block with height {} from peer, passing on to sync loop", block.header().height);
+                                self.main_to_sync_sender
+                                    .send(MainToSync::ReceiveBlock {
+                                        peer_handle,
+                                        block: Box::new(block),
+                                    })
+                                    .await
+                                    .unwrap();
+                            }
+                        }
+                    }
+                    SyncToMain::Error => todo!(),
+                }
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    enum MockPeer {
+        GoodPeer(GoodPeer),
+    }
+
+    impl MockPeer {
+        async fn request(&mut self, block_height: BlockHeight) -> Option<Block> {
+            tracing::info!(
+                "peer {} received request for block {block_height}",
+                self.handle()
+            );
+            match self {
+                MockPeer::GoodPeer(good_peer) => good_peer.request(block_height).await,
+            }
+        }
+
+        fn handle(&self) -> PeerHandle {
+            match self {
+                MockPeer::GoodPeer(good_peer) => good_peer.handle(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct GoodPeer {
+        peer_handle: PeerHandle,
+    }
+
+    impl GoodPeer {
+        fn new() -> Self {
+            Self {
+                peer_handle: random_peer_handle(),
+            }
+        }
+        async fn request(&mut self, block_height: BlockHeight) -> Option<Block> {
+            let mut block = rng().random::<Block>();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            block.set_header_height(block_height);
+            Some(block)
+        }
+
+        fn handle(&self) -> PeerHandle {
+            self.peer_handle
+        }
+    }
+
+    fn random_peer_handle() -> PeerHandle {
+        PeerHandle::new(
+            std::net::IpAddr::V6(Ipv6Addr::from_bits(rng().random())),
+            rng().random(),
+        )
+    }
+
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_sync_from_one_good_peer() {
+        let mut rng = rng();
+        tracing::info!("starting test ...");
+        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let sync_target_height =
+            BlockHeight::from(current_tip_height.value() + rng.random_range(0..500));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
+            SyncLoop::new(current_tip_height, sync_target_height)
+                .await
+                .unwrap();
+        let mut main_loop = MockMainLoop::new(
+            main_to_sync_sender,
+            sync_to_main_receiver,
+            current_tip_height,
+            sync_target_height,
+        );
+
+        main_loop.connect(MockPeer::GoodPeer(GoodPeer::new())).await;
+        let _sync_loop_handle = sync_loop.start();
+        main_loop.run().await;
+        assert!(
+            main_loop.sync_is_finished(),
+            "current tip height {} versus sync target height {}",
+            main_loop.current_tip_height,
+            main_loop.sync_target_height
+        );
+    }
+
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_sync_from_many_good_peers() {
+        let mut rng = rng();
+        tracing::info!("starting test ...");
+        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let sync_target_height =
+            BlockHeight::from(current_tip_height.value() + rng.random_range(0..500));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
+            SyncLoop::new(current_tip_height, sync_target_height)
+                .await
+                .unwrap();
+        let mut main_loop = MockMainLoop::new(
+            main_to_sync_sender,
+            sync_to_main_receiver,
+            current_tip_height,
+            sync_target_height,
+        );
+
+        main_loop.connect(MockPeer::GoodPeer(GoodPeer::new())).await;
+        main_loop.connect(MockPeer::GoodPeer(GoodPeer::new())).await;
+        main_loop.connect(MockPeer::GoodPeer(GoodPeer::new())).await;
+        main_loop.connect(MockPeer::GoodPeer(GoodPeer::new())).await;
+        main_loop.connect(MockPeer::GoodPeer(GoodPeer::new())).await;
+        let _sync_loop_handle = sync_loop.start();
+        main_loop.run().await;
+        assert!(
+            main_loop.sync_is_finished(),
+            "current tip height {} versus sync target height {}",
+            main_loop.current_tip_height,
+            main_loop.sync_target_height
+        );
+    }
 }
