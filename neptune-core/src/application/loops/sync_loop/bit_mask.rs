@@ -100,6 +100,10 @@ impl BitMask {
     /// Determine whether the ith bit is set.
     pub(crate) fn contains(&self, index: u64) -> bool {
         let limb_index = usize::try_from(index / 32).unwrap();
+        if limb_index >= self.limbs.len() {
+            return false;
+        }
+
         let shift_amount = index % 32;
         let mask = 1_u32 << shift_amount;
         self.limbs[limb_index] & mask != 0
@@ -254,7 +258,7 @@ impl BitMask {
                 return false;
             }
         }
-        for i in 0..((self.upper_bound - 1) % 32) {
+        for i in 0..=((self.upper_bound - 1) % 32) {
             if (1 << i) & *self.limbs.last().unwrap() == 0 {
                 return false;
             }

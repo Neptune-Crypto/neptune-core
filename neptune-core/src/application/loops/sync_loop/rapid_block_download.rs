@@ -34,7 +34,7 @@ impl RapidBlockDownload {
         target_height: BlockHeight,
     ) -> Result<Self, RapidBlockDownloadError> {
         let temp_directory = Self::temp_dir().join(format!("{}/", rng().next_u64()));
-        let _ = tokio::fs::create_dir_all(&temp_directory)
+        tokio::fs::create_dir_all(&temp_directory)
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
 
