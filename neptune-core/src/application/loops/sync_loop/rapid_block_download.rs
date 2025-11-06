@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use rand::rng;
 use rand::RngCore;
+use tokio::fs;
 
 use crate::api::export::BlockHeight;
 use crate::application::loops::sync_loop::bit_mask::BitMask;
@@ -32,15 +33,51 @@ impl RapidBlockDownload {
     pub(crate) async fn new(
         highest_block_already_processed: BlockHeight,
         target_height: BlockHeight,
+        resume_if_possible: bool,
     ) -> Result<Self, RapidBlockDownloadError> {
-        let temp_directory = Self::temp_dir().join(format!("{}/", rng().next_u64()));
-        tokio::fs::create_dir_all(&temp_directory)
-            .await
-            .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
+        let temp_directory = match Self::try_resume_directory(resume_if_possible).await {
+            Some(d) => d,
+            None => {
+                let temp_directory = Self::temp_dir().join(format!("{}/", rng().next_u64()));
+                tokio::fs::create_dir_all(&temp_directory)
+                    .await
+                    .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
+                temp_directory
+            }
+        };
 
-        let index_to_filename = HashMap::new();
+        let mut index_to_filename = HashMap::new();
         let mut coverage = BitMask::new(target_height.next().value());
         coverage.set_range(0, highest_block_already_processed.value());
+
+        // Read and process all the files in the temp directory.
+        // There is only something to iterate over if we are resuming from an
+        // aborted state.
+        let mut number_blocks_recovered = 0;
+        let mut entry_iterator = fs::read_dir(&temp_directory)
+            .await
+            .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
+        while let Some(entry) = entry_iterator
+            .next_entry()
+            .await
+            .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?
+        {
+            if let Ok(block) = Self::load_block(&entry.path()).await.inspect_err(|e| {
+                tracing::warn!(
+                    "Could not read Block from file '{}': {e}",
+                    entry.path().to_string_lossy()
+                );
+            }) {
+                coverage.set(block.header().height.value());
+                index_to_filename.insert(block.header().height.value(), entry.path());
+                number_blocks_recovered += 1;
+            }
+        }
+        if number_blocks_recovered != 0 {
+            tracing::info!(
+                "Resuming sync from previous state with {number_blocks_recovered} stored blocks."
+            );
+        }
 
         Ok(Self {
             temp_directory,
@@ -48,6 +85,89 @@ impl RapidBlockDownload {
             index_to_filename,
             target_height,
         })
+    }
+
+    /// Return the directory used by a previous Rapid Block Download run, if
+    /// it was aborted.
+    ///
+    /// If it was aborted, the files should still be there. No need to download
+    /// them again.
+    async fn try_resume_directory(resume_if_possible: bool) -> Option<PathBuf> {
+        if !resume_if_possible {
+            return None;
+        }
+
+        let temp_dir = Self::temp_dir();
+        let mut info = tokio::fs::read_dir(&temp_dir)
+            .await
+            .inspect_err(|e| {
+                // Failure to read the directory is a benign error. Likely means
+                // that there was no aborted sync to resume from.
+                tracing::info!(
+                    "Cannot resume sync because directory {} cannot be read: {e}",
+                    temp_dir.to_string_lossy()
+                );
+            })
+            .ok()?;
+
+        let Some(first_entry) = info
+            .next_entry()
+            .await
+            .inspect_err(|e| {
+                // Failure to read the directory is a benign error, but there is
+                // no reason why this one would be triggered as opposed to the
+                // previous one. Better to log a message just in case.
+                tracing::warn!(
+                    "Cannot resume sync because directory {} cannot be read: {e}",
+                    temp_dir.to_string_lossy()
+                );
+            })
+            .ok()?
+        else {
+            // Empty temp dir. Fishy because it should have been removed by
+            // clean up.
+            tracing::warn!(
+                "Cannot resume sync because directory {} is empty.",
+                temp_dir.to_string_lossy()
+            );
+            return None;
+        };
+
+        let file_name = first_entry.file_name();
+        let file_name_as_string = file_name
+            .clone()
+            .into_string()
+            .unwrap_or_else(|e| format!("{e:?}"))
+            .to_string();
+
+        let metadata = first_entry
+            .metadata()
+            .await
+            .inspect_err(|e| {
+                // First entry exists but cannot get metadata. Error.
+                tracing::warn!(
+                    "Cannot resume sync because cannot get metadata of first entry '{}' in directory {}. Error: {e}",
+                    file_name_as_string,
+                    temp_dir.to_string_lossy()
+                );
+            })
+            .ok()?;
+
+        if !metadata.is_dir() {
+            tracing::warn!(
+                "Cannot resume sync because first entry '{}' in directory {} is not a directory.",
+                file_name_as_string,
+                temp_dir.to_string_lossy()
+            );
+            return None;
+        }
+
+        let directory = temp_dir.join(file_name);
+        tracing::info!(
+            "Resuming sync from directory {}.",
+            directory.to_string_lossy()
+        );
+        Some(directory)
     }
 
     /// Delete the temp directory and its contents.
@@ -121,7 +241,7 @@ impl RapidBlockDownload {
     }
 
     /// Load the block from the temp directory.
-    async fn load_block(&self, file_name: &PathBuf) -> Result<Block, RapidBlockDownloadError> {
+    async fn load_block(file_name: &PathBuf) -> Result<Block, RapidBlockDownloadError> {
         let data = tokio::fs::read(file_name)
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
@@ -144,7 +264,7 @@ impl RapidBlockDownload {
     }
 
     /// Read a block from the temp directory.
-    async fn get_received_block(
+    pub(crate) async fn get_received_block(
         &self,
         height: BlockHeight,
     ) -> Result<Block, RapidBlockDownloadError> {
@@ -153,8 +273,7 @@ impl RapidBlockDownload {
             .get(&height.value())
             .ok_or(RapidBlockDownloadError::NotReceived(height))?;
 
-        let block = self
-            .load_block(file_name)
+        let block = Self::load_block(file_name)
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
 
@@ -178,26 +297,15 @@ impl RapidBlockDownload {
         self.coverage.contains(block_height.value())
     }
 
-    /// Load the block from disk, delete the file, and return the block.
-    pub(crate) async fn get_and_free(
-        &self,
-        height: BlockHeight,
-    ) -> Result<Block, RapidBlockDownloadError> {
-        let block = self.get_received_block(height).await?;
-
-        if let Err(e) = self.delete_block(height).await {
-            tracing::warn!("Could not delete block {height} from temp dir: {e}");
-        }
-
-        Ok(block)
-    }
-
     /// Delete the block from the temp dir.
     ///
     /// Saves disk / RAM space. However, according to the bit mask, the block
     /// is there. So things go wrong if you ask for the block (which the bit
     /// mask says is there) and it was deleted. Be careful not to do that.
-    async fn delete_block(&self, height: BlockHeight) -> Result<(), RapidBlockDownloadError> {
+    pub(crate) async fn delete_block(
+        &self,
+        height: BlockHeight,
+    ) -> Result<(), RapidBlockDownloadError> {
         let file_name = self
             .index_to_filename
             .get(&height.value())
@@ -239,9 +347,10 @@ mod tests {
         let low = 100;
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download = RapidBlockDownload::new(low.into(), BlockHeight::from(high))
-            .await
-            .unwrap();
+        let mut rapid_block_download =
+            RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
+                .await
+                .unwrap();
 
         // receive 10 blocks
         let mut received_heights = vec![];
@@ -291,9 +400,10 @@ mod tests {
         let low = 100;
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download = RapidBlockDownload::new(low.into(), BlockHeight::from(high))
-            .await
-            .unwrap();
+        let mut rapid_block_download =
+            RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
+                .await
+                .unwrap();
 
         // receive all blocks in random order
         let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
@@ -316,14 +426,78 @@ mod tests {
         rapid_block_download.clean_up().await;
     }
 
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_resume_block_download_from_saved_state() {
+        let mut rng = rng();
+        let mut tip = rng.random::<Block>();
+        let low = 100;
+        let high = 200;
+        tip.set_header_height(high.into());
+
+        let mut rapid_block_download_a =
+            RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
+                .await
+                .unwrap();
+
+        // receive half the blocks in random order
+        let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
+        for _ in 0..((high - low) / 2) {
+            let i = rng.random_range(0usize..blocks_remaining.len());
+            let height = blocks_remaining.swap_remove(i);
+
+            // verify that we are not finished yet
+            assert!(!rapid_block_download_a.is_complete());
+
+            let mut block = rng.random::<Block>();
+            block.set_header_height(height);
+            let _ = rapid_block_download_a.receive_block(&block).await;
+        }
+
+        assert!(!rapid_block_download_a.is_complete());
+
+        // setup new rapid block download state
+        let mut rapid_block_download_b =
+            RapidBlockDownload::new(low.into(), BlockHeight::from(high), true)
+                .await
+                .unwrap();
+        assert!(!rapid_block_download_b.is_complete());
+
+        assert!(!blocks_remaining.is_empty());
+
+        // complete block download with second download state
+        while !blocks_remaining.is_empty() {
+            let i = rng.random_range(0usize..blocks_remaining.len());
+            let height = blocks_remaining.swap_remove(i);
+
+            // verify that we are not finished yet
+            assert!(!rapid_block_download_b.is_complete());
+
+            let mut block = rng.random::<Block>();
+            block.set_header_height(height);
+            let _ = rapid_block_download_b.receive_block(&block).await;
+        }
+
+        // verify that we are finished
+        assert!(
+            rapid_block_download_b.is_complete(),
+            "missing blocks: {}",
+            rapid_block_download_b.coverage.sample(false, rng.random())
+        );
+
+        // clean up
+        rapid_block_download_b.clean_up().await;
+    }
+
     #[apply(shared_tokio_runtime)]
     async fn can_receive_same_block_twice() {
         let mut rng = rng();
         let low = 100;
         let high = 200;
-        let mut rapid_block_download = RapidBlockDownload::new(low.into(), BlockHeight::from(high))
-            .await
-            .unwrap();
+        let mut rapid_block_download =
+            RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
+                .await
+                .unwrap();
 
         // receive all blocks in random order, with repetitions
         let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
@@ -364,7 +538,7 @@ mod tests {
             let low = 100;
             let mut high = 200;
             let mut rapid_block_download =
-                RapidBlockDownload::new(low.into(), BlockHeight::from(high))
+                RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
                     .await
                     .unwrap();
 
