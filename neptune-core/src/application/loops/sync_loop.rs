@@ -406,8 +406,6 @@ mod tests {
             while let Some(message) = self.sync_to_main_receiver.recv().await {
                 tracing::debug!("mock main loop: got message!");
                 match message {
-                    SyncToMain::PunishPeer(socket_addr, negative_peer_sanction) => {}
-                    SyncToMain::RewardPeer(socket_addr, positive_peer_sanction) => {}
                     SyncToMain::Finished => {
                         if self.current_tip_height == self.sync_target_height {
                             self.finished = true;
@@ -703,9 +701,6 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
         sync_loop_handle.abort();
         main_loop_handle.abort();
-
-        tracing::debug!("");
-        tracing::debug!("");
 
         // start second attempt
         // Reuse tip height from previous attempt, with one block margin due to
