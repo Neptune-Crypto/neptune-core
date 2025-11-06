@@ -53,9 +53,11 @@ impl SyncLoop {
     pub(crate) async fn new(
         tip_height: BlockHeight,
         target_height: BlockHeight,
+        resume_if_possible: bool,
     ) -> Result<(Self, Sender<MainToSync>, Receiver<SyncToMain>), RapidBlockDownloadError> {
         const CHANNEL_CAPACITY: usize = 10;
-        let download_state = RapidBlockDownload::new(tip_height, target_height).await?;
+        let download_state =
+            RapidBlockDownload::new(tip_height, target_height, resume_if_possible).await?;
         let (main_to_sync_sender, main_to_sync_receiver) =
             mpsc::channel::<MainToSync>(CHANNEL_CAPACITY);
         let (sync_to_main_sender, sync_to_main_receiver) =
@@ -291,9 +293,9 @@ impl SyncLoop {
         while download_state.have_received(tip_height.next()) {
             // get successor block
             let successor = download_state
-                .get_and_free(tip_height.next())
+                .get_received_block(tip_height.next())
                 .await.map_err(|e| {
-                    tracing::error!("Could not get block from temp directory even though the block was received: {e} Terminating sync mode.");
+                    tracing::error!("Could not get block from temp directory even though the block was received: {e}. Terminating sync mode.");
                     SyncLoopError::RapidBlockDownloadError(e)
                 })?;
 
@@ -303,6 +305,11 @@ impl SyncLoop {
                     tracing::warn!("Could not send block from sync loop to main loop: {e}. Terminating sync mode.");
                     SyncLoopError::SendError(e)
                 })?;
+
+            // delete the block after the main loop successfully received it
+            if let Err(e) = download_state.delete_block(tip_height.next()).await {
+                tracing::warn!("Could not delete block from temp directory even though the block was received: {e}. Not critical.");
+            }
 
             // update tip height
             tip_height = tip_height.next();
@@ -333,10 +340,11 @@ pub(crate) enum SyncLoopError {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
+    use std::{net::Ipv6Addr, sync::Arc};
 
     use macro_rules_attr::apply;
     use rand::RngCore;
+    use tokio::sync::Mutex;
 
     use crate::{protocol::consensus::block::Block, tests::shared_tokio_runtime};
 
@@ -349,6 +357,7 @@ mod tests {
         current_tip_height: BlockHeight,
         sync_target_height: BlockHeight,
         finished: bool,
+        tip_tracker: Option<Arc<Mutex<BlockHeight>>>,
     }
 
     impl MockMainLoop {
@@ -365,7 +374,12 @@ mod tests {
                 current_tip_height,
                 sync_target_height,
                 finished: false,
+                tip_tracker: None,
             }
+        }
+
+        fn set_tip_tracker(&mut self, tip_tracker: Arc<Mutex<BlockHeight>>) {
+            self.tip_tracker = Some(tip_tracker);
         }
 
         async fn connect(&mut self, peer: MockPeer) {
@@ -403,6 +417,9 @@ mod tests {
                     SyncToMain::TipSuccessor(block) => {
                         if block.header().height == self.current_tip_height.next() {
                             self.current_tip_height = block.header().height;
+                            if let Some(tip_tracker) = &self.tip_tracker {
+                                *tip_tracker.lock().await = block.header().height;
+                            }
                         }
                     }
                     SyncToMain::RequestBlock {
@@ -526,9 +543,9 @@ mod tests {
         tracing::info!("starting test ...");
         let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..500));
+            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
         let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height)
+            SyncLoop::new(current_tip_height, sync_target_height, false)
                 .await
                 .unwrap();
         let mut main_loop = MockMainLoop::new(
@@ -556,9 +573,9 @@ mod tests {
         tracing::info!("starting test ...");
         let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..500));
+            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
         let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height)
+            SyncLoop::new(current_tip_height, sync_target_height, false)
                 .await
                 .unwrap();
         let mut main_loop = MockMainLoop::new(
@@ -592,7 +609,7 @@ mod tests {
         let sync_target_height =
             BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
         let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height)
+            SyncLoop::new(current_tip_height, sync_target_height, false)
                 .await
                 .unwrap();
         let mut main_loop = MockMainLoop::new(
@@ -621,9 +638,9 @@ mod tests {
 
         let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
+            BlockHeight::from(current_tip_height.value() + rng.random_range(0..100));
         let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height)
+            SyncLoop::new(current_tip_height, sync_target_height, false)
                 .await
                 .unwrap();
         let mut main_loop = MockMainLoop::new(
@@ -650,7 +667,81 @@ mod tests {
 
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn can_resume_from_saved_state() {}
+    async fn can_resume_sync_from_saved_state() {
+        let mut rng = rng();
+        tracing::info!("starting test ...");
+
+        let mut current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let sync_target_height =
+            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
+
+        // set up first attempt
+        let (sync_loop_a, main_to_sync_sender_a, sync_to_main_receiver_a) =
+            SyncLoop::new(current_tip_height, sync_target_height, false)
+                .await
+                .unwrap();
+        let mut main_loop = MockMainLoop::new(
+            main_to_sync_sender_a,
+            sync_to_main_receiver_a,
+            current_tip_height,
+            sync_target_height,
+        );
+
+        // keep track of tip height
+        let tip_tracker = Arc::new(Mutex::new(current_tip_height));
+        main_loop.set_tip_tracker(tip_tracker.clone());
+
+        // run
+        main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
+        main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
+        let sync_loop_handle = sync_loop_a.start();
+        let main_loop_handle = tokio::spawn(async move {
+            main_loop.run().await;
+        });
+
+        // after one second, interrupt
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        sync_loop_handle.abort();
+        main_loop_handle.abort();
+
+        tracing::debug!("");
+        tracing::debug!("");
+
+        // start second attempt
+        // Reuse tip height from previous attempt, with one block margin due to
+        // race conditions.
+        current_tip_height = *tip_tracker.lock().await;
+        let (sync_loop_b, main_to_sync_sender_b, sync_to_main_receiver_b) =
+            SyncLoop::new(current_tip_height, sync_target_height, true)
+                .await
+                .unwrap();
+        let mut main_loop_b = MockMainLoop::new(
+            main_to_sync_sender_b,
+            sync_to_main_receiver_b,
+            current_tip_height,
+            sync_target_height,
+        );
+
+        assert!(
+            !main_loop_b.sync_is_finished(),
+            "current tip height {} versus sync target height {}",
+            main_loop_b.current_tip_height,
+            main_loop_b.sync_target_height
+        );
+
+        // run
+        main_loop_b.connect(MockPeer::Flaky(FlakyPeer::new())).await;
+        main_loop_b.connect(MockPeer::Flaky(FlakyPeer::new())).await;
+        let _sync_loop_handle = sync_loop_b.start();
+        main_loop_b.run().await;
+
+        assert!(
+            main_loop_b.sync_is_finished(),
+            "current tip height {} versus sync target height {}",
+            main_loop_b.current_tip_height,
+            main_loop_b.sync_target_height
+        );
+    }
 
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
@@ -659,4 +750,8 @@ mod tests {
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn can_sync_with_moving_target() {}
+
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_sync_from_syncing_peers() {}
 }
