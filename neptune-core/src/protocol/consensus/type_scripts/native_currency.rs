@@ -532,7 +532,7 @@ impl ConsensusProgram for NativeCurrency {
             hint coinbase = stack[0..4]
             // _ [txkmh] *ncw *fee [total_input] [total_output] [timelocked_amount] [coinbase]
 
-            /* If coinbase is non-zero assert that at least half output is timelocked */
+            /* If coinbase is non-zero assert that at least half of total output is timelocked */
             push 0
             push 0
             push 0
@@ -922,7 +922,8 @@ pub mod tests {
                 "fee exceeds amount upper bound"
             );
 
-            // if coinbase is set, verify that half of it is time-locked
+            // if coinbase is set, verify that half of total output is
+            // time-locked.
             if some_coinbase.is_positive() {
                 let mut required_timelocked = total_output;
                 required_timelocked.div_two();
@@ -1425,11 +1426,16 @@ pub mod tests {
         mut primitive_witness: PrimitiveWitness,
         #[strategy(arb())] delta: NativeCurrencyAmount,
     ) {
-        // Modify the kernel so as to increase the coinbase but not the fee. The
+        assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(
+            primitive_witness.clone(),
+        ))?;
+
+        // Modify the kernel so as to change the coinbase but not the fee. The
         // resulting transaction is imbalanced. The amount timelocked is
-        // correct, so this run must fail on the no inflation violation. The
-        // no inflation check disallows *any* imbalance, so total output amount
-        // can neither be too big, nor too small.
+        // correct, since required timelocked amount is calculated by dividing
+        // total output with 2. So this run must fail on the no inflation
+        // violation. The no inflation check disallows *any* imbalance, so total
+        // output amount can neither be too big, nor too small.
 
         // Another test handles negative coinbase amounts.
         let coinbase = primitive_witness.kernel.coinbase.unwrap();
