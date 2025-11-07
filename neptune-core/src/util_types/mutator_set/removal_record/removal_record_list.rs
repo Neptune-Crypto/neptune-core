@@ -943,6 +943,10 @@ impl RemovalRecord {
 
         const ROOT_INDEX: u64 = 1_u64;
 
+        println!("RemovalRecord::arbitrary_synchronized_set");
+        println!("num_leafs_aocl: {num_leafs_aocl}");
+        println!("num_records: {num_records}");
+
         let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(num_leafs_aocl);
         let mmr_heights = get_peak_heights(num_leafs_swbfi);
         let mmr_max_height = mmr_heights

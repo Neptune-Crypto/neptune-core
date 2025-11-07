@@ -285,6 +285,7 @@ pub mod neptune_arbitrary {
     use proptest::prelude::Strategy;
     use proptest::prelude::*;
     use proptest::strategy::BoxedStrategy;
+    use tasm_lib::prelude::Tip5;
 
     use super::*;
 
@@ -328,6 +329,10 @@ pub mod neptune_arbitrary {
                 .new_tree(&mut runner)
                 .unwrap()
                 .current();
+            println!(
+                "TransactionKernel::arbitrary_with_fee: inputs hash: {:x}",
+                Tip5::hash(&inputs)
+            );
             let outputs: Vec<AdditionRecord> = (0..num_outputs)
                 .map(|_| u.arbitrary().unwrap())
                 .collect_vec();
