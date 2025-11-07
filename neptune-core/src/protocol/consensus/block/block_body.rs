@@ -253,11 +253,11 @@ mod tests {
                                 block_mmr_accumulator,
                             )| {
                                 println!(
-                                    "transaction_kernel MAST sequences:\n[{}]",
+                                    "transaction_kernel MAST sequence hashes:\n[{}]",
                                     transaction_kernel
                                         .mast_sequences()
                                         .iter()
-                                        .map(|x| x.iter().join(","))
+                                        .map(|x| Tip5::hash(x))
                                         .join("\n")
                                 );
                                 println!(
