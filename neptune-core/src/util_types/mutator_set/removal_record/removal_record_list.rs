@@ -949,6 +949,7 @@ impl RemovalRecord {
 
         let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(num_leafs_aocl);
         let mmr_heights = get_peak_heights(num_leafs_swbfi);
+        println!("hash mmr_heights: {}", Tip5::hash(&mmr_heights));
         let mmr_max_height = mmr_heights
             .iter()
             .copied()
@@ -979,6 +980,7 @@ impl RemovalRecord {
                             )
                         })
                         .collect_vec();
+                    println!("hash absolute_index_sets: {}", Tip5::hash(&absolute_index_sets));
 
                     let all_absolute_indices =
                         absolute_index_sets.iter().flat_map(|ais| ais.to_vec());
@@ -990,6 +992,7 @@ impl RemovalRecord {
                         .sorted()
                         .dedup()
                         .collect_vec();
+                    println!("hash all_chunk_indices: {}", Tip5::hash(&all_chunk_indices));
 
                     let mmr_heights = mmr_heights.clone(); // avoid move/ownership issue
                     (
@@ -1001,6 +1004,8 @@ impl RemovalRecord {
                         ),
                     )
                         .prop_map(move |(indices_for_chunks, mut digests)| {
+                             println!("hash indices_for_chunks: {}", Tip5::hash(&indices_for_chunks));
+                             println!("hash digests: {}", Tip5::hash(&digests));
                             // compile list of chunks with chunk indices
                             let indexed_chunks = indices_for_chunks
                                 .iter()
@@ -1014,6 +1019,7 @@ impl RemovalRecord {
                                     )
                                 })
                                 .collect_vec();
+                            println!("hash indexed_chunks: {}", Tip5::hash(&indexed_chunks));
 
                             // populate sparse mmr with enough digests,
                             // overwriting if necessary
@@ -1036,6 +1042,12 @@ impl RemovalRecord {
                                 );
 
                                 sparse_mmr.entry((tree_height, merkle_tree_node_index ^ 1)).or_insert_with(|| digests.pop().unwrap());
+                            }
+
+                            {
+                                let mut sparse_mmr_entries: Vec<_> = sparse_mmr.clone().into_iter().collect();
+                                sparse_mmr_entries.sort_unstable_by_key(|x| x.0);
+                                println!("1: hash sparse_mmr_entries: {}", Tip5::hash(&sparse_mmr_entries));
                             }
 
                             // complete paths to roots
@@ -1084,6 +1096,12 @@ impl RemovalRecord {
                                         sparse_mmr.insert((tree_height, parent), parent_digest);
                                     }
                                 }
+                            }
+
+                            {
+                                let mut sparse_mmr_entries: Vec<_> = sparse_mmr.clone().into_iter().collect();
+                                sparse_mmr_entries.sort_unstable_by_key(|x| x.0);
+                                println!("2: hash sparse_mmr_entries: {}", Tip5::hash(&sparse_mmr_entries));
                             }
 
                             // decorate chunks with authentication paths
