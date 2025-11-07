@@ -210,6 +210,7 @@ pub(crate) mod tests {
 
                 let proof_job_options = TritonVmProofJobOptions::from(TritonVmJobPriority::default());
 
+                println!("Before single proof");
                 let single_proof_coinbase = rt
                     .block_on(produce_single_proof(
                         &primwit_coinbase,

@@ -272,7 +272,10 @@ pub(crate) mod tests {
         // asynchronously with the helper function.
 
         let init_block_heigth = BlockHeight::from(10_000u64);
+        println!("Before bpw");
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height(init_block_heigth);
+        println!("After bpw");
+        println!("{}", bpw.transaction().kernel.txid());
 
         tokio_runtime().block_on(new_blocks_at_block_height_10_000_async(bpw));
     }

@@ -241,12 +241,29 @@ impl SingleProof {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Proof, CreateProofError> {
+        println!(
+            "SP produce: kernel txid: {}",
+            primitive_witness.kernel.txid()
+        );
+        println!(
+            "kernel fields: [{}]",
+            primitive_witness
+                .kernel
+                .mast_sequences()
+                .iter()
+                .map(|x| x.iter().join(","))
+                .join("]\n[")
+        );
         let proof_collection = ProofCollection::produce(
             primitive_witness,
             triton_vm_job_queue.clone(),
             proof_job_options.clone(),
         )
         .await?;
+        println!("After proof_collection construction");
+        panic!("Done!");
+
+        println!("Before SP witness");
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
 
