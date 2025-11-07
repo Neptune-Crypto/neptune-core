@@ -301,6 +301,9 @@ pub(crate) mod tests {
             const NUM_INPUTS: usize = 2;
             let network = Network::Main;
 
+            println!("hi from: arbitrary_with_height_and_difficulty");
+            println!("block_height, difficulty = ({block_height}, {difficulty})");
+
             (
                 NativeCurrencyAmount::arbitrary_non_negative(),
                 vec(0f64..1f64, NUM_INPUTS - 1),
@@ -318,6 +321,12 @@ pub(crate) mod tests {
                         receiver_preimages,
                         aocl_size,
                     )| {
+                        println!("total_input: {total_input}");
+                        println!("input_distribution: {input_distribution:?}");
+                        println!("hash_lock_keys: {hash_lock_keys:?}");
+                        println!("sender_randomnesses: {sender_randomnesses:?}");
+                        println!("receiver_preimages: {receiver_preimages:?}");
+                        println!("aocl_size: {aocl_size}");
                         let mut input_amounts = input_distribution
                             .into_iter()
                             .map(|fraction| total_input.lossy_f64_fraction_mul(fraction))
@@ -350,6 +359,10 @@ pub(crate) mod tests {
                         .collect_vec();
                         MsaAndRecords::arbitrary_with((removables.clone(), aocl_size))
                             .prop_flat_map(move |msa_and_records| {
+                                println!(
+                                    "msa_and_records.mutator_set_accumulator.hash() : {}",
+                                    msa_and_records.mutator_set_accumulator.hash()
+                                );
                                 let unpacked_removal_records =
                                     msa_and_records.unpacked_removal_records();
                                 let membership_proofs = msa_and_records.membership_proofs;

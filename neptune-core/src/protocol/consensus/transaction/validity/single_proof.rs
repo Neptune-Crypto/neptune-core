@@ -246,7 +246,7 @@ impl SingleProof {
             primitive_witness.kernel.txid()
         );
         println!(
-            "kernel fields: [{}]",
+            "kernel fields:\n[{}]",
             primitive_witness
                 .kernel
                 .mast_sequences()
