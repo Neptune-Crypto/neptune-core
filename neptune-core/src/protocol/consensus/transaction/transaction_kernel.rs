@@ -315,6 +315,7 @@ pub mod neptune_arbitrary {
 
             // Get some seed bytes from the unstructured input
             let seed = u.bytes(32)?; // choose an appropriate length
+            println!("rng seed: {}", seed.iter().join(","));
 
             // Create a proptest RNG from the seed
             let rng = proptest::test_runner::TestRng::from_seed(
