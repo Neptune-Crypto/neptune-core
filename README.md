@@ -31,10 +31,7 @@ Neptune-core is the reference implementation for the [Neptune Cash](https://nept
 - Enter the repository: `cd neptune-core`
 - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development*
   branch, skip this step.)
-- Build for release and put the binaries in your local path (`~/.cargo/bin/`):
-  ```
-  make install-linux
-  ```
+- Build for release and put the binaries in your local path (`~/.cargo/bin/`): `make install-linux`
 
 > [!IMPORTANT]
 > Any commit except the one tagged `release` is considered an _unstable development_ commit and thus carries a
@@ -62,7 +59,7 @@ Windows should just work out-of-the-box with cargo build etc.
   cargo install --locked --path neptune-dashboard
   ```
 
-  ### MacOS
+### MacOS
 
  - Open a terminal to run the following commands.
  - Make sure you have `Homebrew` installed. If not, install it from [here](https://brew.sh/).
