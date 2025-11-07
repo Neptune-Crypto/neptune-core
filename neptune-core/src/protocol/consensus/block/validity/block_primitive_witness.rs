@@ -363,6 +363,7 @@ pub(crate) mod tests {
                                     "msa_and_records.mutator_set_accumulator.hash() : {}",
                                     msa_and_records.mutator_set_accumulator.hash()
                                 );
+                                println!("msa_and_records:\n{msa_and_records:#?}");
                                 let unpacked_removal_records =
                                     msa_and_records.unpacked_removal_records();
                                 let membership_proofs = msa_and_records.membership_proofs;
@@ -435,6 +436,13 @@ pub(crate) mod tests {
                                             unpacked_removal_records,
                                             membership_proofs,
                                         );
+                                        println!(
+                                            "msa_and_records_after_block.mutator_set_accumulator.hash() : {}",
+                                            msa_and_records_after_block
+                                                .mutator_set_accumulator
+                                                .hash()
+                                        );
+                                        println!("msa_and_records_after_block:\n{msa_and_records_after_block:#?}");
                                         arbitrary_block_transaction_from_msa_and_records(
                                             2,
                                             2,
