@@ -172,6 +172,7 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::protocol::proof_abstractions::mast_hash::MastHash;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -363,7 +364,14 @@ pub(crate) mod tests {
                                     "msa_and_records.mutator_set_accumulator.hash() : {}",
                                     msa_and_records.mutator_set_accumulator.hash()
                                 );
-                                println!("msa_and_records:\n{msa_and_records:#?}");
+                                println!(
+                                    "Tip5::hash(&msa_and_records.removal_records): {}",
+                                    Tip5::hash(&msa_and_records.removal_records)
+                                );
+                                println!(
+                                    "Tip5::hash(&msa_and_records.membership_proofs): {}",
+                                    Tip5::hash(&msa_and_records.membership_proofs)
+                                );
                                 let unpacked_removal_records =
                                     msa_and_records.unpacked_removal_records();
                                 let membership_proofs = msa_and_records.membership_proofs;
@@ -386,16 +394,22 @@ pub(crate) mod tests {
                                 );
                                 (parent_header, parent_body, parent_appendix).prop_flat_map(
                                     move |(header, body, appendix)| {
+                                        println!("parent_body sequences:\n[{}]", body.mast_sequences().iter().map(|x| x.iter().join(",")).join("]\n["));
+                                        println!("parent header mast hash: {}", header.mast_hash());
+                                        println!("parent body mast hash: {}", body.mast_hash());
+                                        println!("parent appendix hash: {}", Tip5::hash(&appendix));
                                         let parent_kernel = BlockKernel {
                                             header,
                                             body: body.clone(),
                                             appendix: appendix.clone(),
                                         };
+                                        println!("parent_kernel.hash(): {}", parent_kernel.mast_hash());
                                         let predecessor_block = Block {
                                             kernel: parent_kernel,
                                             proof: BlockProof::Invalid,
                                             digest: OnceLock::new(),
                                         };
+                                        println!("predecessor_block.hash(): {}", predecessor_block.hash());
 
                                         let coinbase_amount = Block::block_subsidy(
                                             predecessor_block.header().height.next(),
@@ -406,6 +420,7 @@ pub(crate) mod tests {
                                         let miner_fee_records = predecessor_block
                                             .guesser_fee_addition_records()
                                             .unwrap();
+                                        println!("miner_fee_records: [{}]", miner_fee_records.iter().join(","));
 
                                         let mut mutator_set_accumulator_after_block =
                                             intermediate_mutator_set_accumulator.clone();
@@ -414,6 +429,7 @@ pub(crate) mod tests {
                                             unpacked_removal_records.clone();
 
                                         for addition_record in &miner_fee_records {
+                                            println!("adding {addition_record}");
                                             MsMembershipProof::batch_update_from_addition(
                                                 &mut membership_proofs.iter_mut().collect_vec(),
                                                 &own_items.clone(),
@@ -429,6 +445,7 @@ pub(crate) mod tests {
                                             );
                                             mutator_set_accumulator_after_block
                                                 .add(addition_record);
+                                            println!("new msa hash after addition: {}", mutator_set_accumulator_after_block.hash());
                                         }
 
                                         let msa_and_records_after_block = MsaAndRecords::new(
@@ -436,13 +453,19 @@ pub(crate) mod tests {
                                             unpacked_removal_records,
                                             membership_proofs,
                                         );
+
                                         println!(
                                             "msa_and_records_after_block.mutator_set_accumulator.hash() : {}",
-                                            msa_and_records_after_block
-                                                .mutator_set_accumulator
-                                                .hash()
+                                            msa_and_records_after_block.mutator_set_accumulator.hash()
                                         );
-                                        println!("msa_and_records_after_block:\n{msa_and_records_after_block:#?}");
+                                        println!(
+                                            "Tip5::hash(&msa_and_records_after_block.removal_records): {}",
+                                            Tip5::hash(&msa_and_records_after_block.removal_records)
+                                        );
+                                        println!(
+                                            "Tip5::hash(&msa_and_records_after_block.membership_proofs): {}",
+                                            Tip5::hash(&msa_and_records_after_block.membership_proofs)
+                                        );
                                         arbitrary_block_transaction_from_msa_and_records(
                                             2,
                                             2,

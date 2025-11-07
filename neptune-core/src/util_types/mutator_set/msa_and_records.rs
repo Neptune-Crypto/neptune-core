@@ -12,7 +12,7 @@ pub struct MsaAndRecords {
     pub mutator_set_accumulator: MutatorSetAccumulator,
 
     /// Not packed removal records
-    removal_records: Vec<RemovalRecord>,
+    pub removal_records: Vec<RemovalRecord>,
     pub membership_proofs: Vec<MsMembershipProof>,
 }
 
