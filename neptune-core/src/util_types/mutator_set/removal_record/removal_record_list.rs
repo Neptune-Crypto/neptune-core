@@ -1039,6 +1039,7 @@ impl RemovalRecord {
                                 loop {
                                     let current_tree_all_node_indices = sparse_mmr
                                         .keys()
+                                        .sorted()
                                         .filter(|(height, _node_index)| tree_height == *height)
                                         .map(|(_height, node_index)| *node_index)
                                         .collect_vec();
@@ -1326,6 +1327,22 @@ mod tests {
             &removal_records,
             num_leafs_aocl
         ));
+    }
+
+    #[test]
+    fn arbitrary_synced_at_consistency() {
+        // Ensure agreement across OS'. See #760.
+        let mut test_runner = TestRunner::deterministic();
+        let num_leafs_aocl = arb::<u64>().new_tree(&mut test_runner).unwrap().current() & 0xffff;
+        let removal_records = RemovalRecord::arbitrary_synchronized_set(num_leafs_aocl, 5)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+        assert_eq!(
+            "39d8a5663518122b292dcf32bf64cbea85934f49ca26695a8b0b5242272beb5853f4e4a6eda6f3aa",
+            Tip5::hash(&removal_records).to_hex()
+        );
     }
 
     #[test]
