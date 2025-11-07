@@ -248,6 +248,10 @@ mod tests {
                                 block_mmr_accumulator,
                             )| {
                                 println!(
+                                    "transaction_kernel MAST hash before packing inputs: {}",
+                                    transaction_kernel.mast_hash()
+                                );
+                                println!(
                                     "not packed inputs hash: {:x}",
                                     Tip5::hash(&transaction_kernel.inputs)
                                 );
