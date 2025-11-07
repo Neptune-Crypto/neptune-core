@@ -1055,6 +1055,7 @@ impl RemovalRecord {
                                 loop {
                                     let current_tree_all_node_indices = sparse_mmr
                                         .keys()
+                                        .sorted()
                                         .filter(|(height, _node_index)| tree_height == *height)
                                         .map(|(_height, node_index)| *node_index)
                                         .collect_vec();
@@ -1073,6 +1074,8 @@ impl RemovalRecord {
                                         .map(|(nil, _)| nil >> 1)
                                         .filter(|ni| !current_tree_all_node_indices.contains(ni))
                                         .collect_vec();
+                                    println!("hash single_childs: {}", Tip5::hash(&single_childs));
+                                    println!("hash absent_parents: {}", Tip5::hash(&absent_parents));
 
                                     for single_child in single_childs {
                                         if single_child == ROOT_INDEX {
@@ -1081,7 +1084,6 @@ impl RemovalRecord {
                                         let sibling = digests.pop().unwrap();
                                         sparse_mmr.insert((tree_height, single_child^1), sibling);
                                         absent_parents.push(single_child >> 1);
-
                                     }
 
 
