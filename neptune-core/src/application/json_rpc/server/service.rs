@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
-use crate::application::json_rpc::core::api::rpc::{RpcApi, RpcResult};
+use crate::application::json_rpc::core::api::rpc::RpcApi;
+use crate::application::json_rpc::core::api::rpc::RpcResult;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::server::http::RpcServer;
