@@ -247,10 +247,15 @@ mod tests {
                                 lock_free_mmr_accumulator,
                                 block_mmr_accumulator,
                             )| {
-                                let inputs =
+                                println!(
+                                    "not packed inputs hash: {:x}",
+                                    Tip5::hash(&transaction_kernel.inputs)
+                                );
+                                let packed_inputs =
                                     RemovalRecordList::pack(transaction_kernel.inputs.clone());
+                                println!("packed_inputs hash: {:x}", Tip5::hash(&packed_inputs));
                                 let transaction_kernel = TransactionKernelModifier::default()
-                                    .inputs(inputs)
+                                    .inputs(packed_inputs)
                                     .modify(transaction_kernel);
                                 BlockBody {
                                     transaction_kernel,

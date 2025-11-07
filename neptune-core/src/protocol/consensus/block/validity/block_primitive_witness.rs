@@ -384,6 +384,7 @@ pub(crate) mod tests {
                                             "parent tx-k inputs hash: {}",
                                             Tip5::hash(&body.transaction_kernel.inputs)
                                         );
+                                        panic!("done");
                                         let parent_kernel = BlockKernel {
                                             header,
                                             body: body.clone(),
