@@ -33,9 +33,7 @@ Neptune-core is the reference implementation for the [Neptune Cash](https://nept
   branch, skip this step.)
 - Build for release and put the binaries in your local path (`~/.cargo/bin/`):
   ```
-  cargo install --locked --path neptune-core
-  cargo install --locked --path neptune-core-cli
-  cargo install --locked --path neptune-dashboard
+  make install-linux
   ```
 
 > [!IMPORTANT]
@@ -63,6 +61,21 @@ Windows should just work out-of-the-box with cargo build etc.
   cargo install --locked --path neptune-core-cli
   cargo install --locked --path neptune-dashboard
   ```
+
+  ### MacOS
+
+ - Open a terminal to run the following commands.
+ - Make sure you have `Homebrew` installed. If not, install it from [here](https://brew.sh/).
+ - Install curl: `brew install curl`
+ - Install the rust compiler and accessories: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+ - Source the rust environment: `source "$HOME/.cargo/env"`
+ - Install Xcode command line tools: `xcode-select --install`
+ - Install LevelDB: `brew install leveldb`
+ - Install cmake: `brew install cmake`
+ - Install git: `brew install git`
+ - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
+ - Enter the repository: `cd neptune-core`
+ - Build for release and put the binaries in your local path: `make install`
 
 ## Running & Connecting
 
