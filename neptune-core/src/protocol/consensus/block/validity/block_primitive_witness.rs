@@ -372,18 +372,6 @@ pub(crate) mod tests {
                                 );
                                 (parent_header, parent_body, parent_appendix).prop_flat_map(
                                     move |(header, body, appendix)| {
-                                        println!(
-                                            "parent body tx kernel mast sequences:\n[{}]",
-                                            body.transaction_kernel
-                                                .mast_sequences()
-                                                .iter()
-                                                .map(|x| x.iter().join(","))
-                                                .join("]\n[")
-                                        );
-                                        println!(
-                                            "parent tx-k inputs hash: {}",
-                                            Tip5::hash(&body.transaction_kernel.inputs)
-                                        );
                                         panic!("done");
                                         let parent_kernel = BlockKernel {
                                             header,

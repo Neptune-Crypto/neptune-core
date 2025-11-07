@@ -232,6 +232,11 @@ mod tests {
         ) -> BoxedStrategy<BlockBody> {
             (NativeCurrencyAmount::arbitrary_non_negative())
                 .prop_flat_map(move |fee| {
+                    println!(
+                        "mutator_set_accumulator.hash(): {:x}",
+                        mutator_set_accumulator.hash()
+                    );
+                    println!("fee: {fee}",);
                     let transaction_kernel_strategy = TransactionKernel::strategy_with_fee(fee);
                     let lock_free_mmr_accumulator_strategy = arb::<MmrAccumulator>();
                     let block_mmr_accumulator_strategy = arb::<MmrAccumulator>();
@@ -247,6 +252,14 @@ mod tests {
                                 lock_free_mmr_accumulator,
                                 block_mmr_accumulator,
                             )| {
+                                println!(
+                                    "transaction_kernel MAST sequences:\n[{}]",
+                                    transaction_kernel
+                                        .mast_sequences()
+                                        .iter()
+                                        .map(|x| x.iter().join(","))
+                                        .join("\n")
+                                );
                                 println!(
                                     "transaction_kernel MAST hash before packing inputs: {}",
                                     transaction_kernel.mast_hash()
