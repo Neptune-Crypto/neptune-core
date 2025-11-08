@@ -251,4 +251,25 @@ impl MockRpcClient {
         let state = self.state.lock().unwrap();
         Ok(Ok(state.utxos.clone()))
     }
+
+    pub async fn clear_standing_by_ip(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+        peer_ip: IpAddr,
+    ) -> ::core::result::Result<RpcResult<()>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        // can't modify PeerInfo from outside neptune-core crate since all fields and
+        // constructors are pub(crate). to show any ui behavior, we just replace the peer with a new random one
+        let mut state = self.state.lock().unwrap();
+        if let Some(idx) = state
+            .peers
+            .iter()
+            .position(|p| p.connected_address().ip() == peer_ip)
+        {
+            let mut rng = StdRng::from_seed(rng().random());
+            state.peers[idx] = rng.random();
+        }
+        Ok(Ok(()))
+    }
 }
