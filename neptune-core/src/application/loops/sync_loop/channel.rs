@@ -1,19 +1,20 @@
-use tasm_lib::twenty_first::prelude::MmrMembershipProof;
-
 use crate::api::export::BlockHeight;
 use crate::protocol::consensus::block::Block;
 
 use super::PeerHandle;
+
+#[derive(Debug, Clone)]
+pub(crate) struct BlockRequest {
+    pub(crate) peer_handle: PeerHandle,
+    pub(crate) height: BlockHeight,
+}
 
 /// Messages sent from the sync loop to the main loop.
 #[derive(Debug, Clone)]
 pub(crate) enum SyncToMain {
     Finished,
     TipSuccessor(Box<Block>),
-    RequestBlock {
-        peer_handle: PeerHandle,
-        height: BlockHeight,
-    },
+    RequestBlocks(Vec<BlockRequest>),
     Error,
 }
 
