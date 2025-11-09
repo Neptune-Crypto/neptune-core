@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 
 use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::ChangePolicy;
@@ -25,195 +26,43 @@ use neptune_cash::state::wallet::address::generation_address::GenerationReceivin
 use rand::rng;
 use rand::rngs::StdRng;
 use rand::Rng;
-use rand::RngCore;
 use rand::SeedableRng;
 use tasm_lib::prelude::Digest;
 
 #[derive(Debug, Clone)]
 pub(crate) struct MockRpcClient {
-    seed: [u8; 32],
+    state: Arc<Mutex<MockState>>,
+}
+
+#[derive(Debug, Clone)]
+struct MockState {
+    peers: Vec<PeerInfo>,
+    utxos: Vec<UiUtxo>,
+    known_keys: Vec<SpendingKey>,
+    history: Vec<(Digest, BlockHeight, Timestamp, NativeCurrencyAmount)>,
+    mempool_transactions: Vec<MempoolTransactionInfo>,
+    overview_data: OverviewData,
+    listen_address: Option<SocketAddr>,
+    generation_address: ReceivingAddress,
+    symmetric_address: ReceivingAddress,
 }
 
 impl MockRpcClient {
     pub(crate) fn new() -> Self {
         Self {
-            seed: rng().random(),
+            state: Arc::new(Mutex::new(Self::init_mock_data())),
         }
     }
 
-    pub async fn network(
-        &self,
-        _ctx: ::tarpc::context::Context,
-    ) -> ::core::result::Result<RpcResult<Network>, ::tarpc::client::RpcError> {
-        tokio::task::yield_now().await;
-        Ok(Ok(Network::Main))
-    }
-
-    pub async fn own_listen_address_for_peers(
-        &self,
-        _ctx: ::tarpc::context::Context,
-        _token: auth::Token,
-    ) -> ::core::result::Result<RpcResult<Option<SocketAddr>>, ::tarpc::client::RpcError> {
-        fn random_socket_addr() -> SocketAddr {
-            let mut rng = rng();
-            let ip = IpAddr::V4(Ipv4Addr::new(
-                rng.random(),
-                rng.random(),
-                rng.random(),
-                rng.random(),
-            ));
-            let port = rng.random_range(1..65535);
-            SocketAddr::new(ip, port)
-        }
-        tokio::task::yield_now().await;
-        Ok(Ok(Some(random_socket_addr())))
-    }
-
-    pub(crate) async fn dashboard_overview_data(
-        &self,
-        _ctx: ::tarpc::context::Context,
-        _token: auth::Token,
-    ) -> ::core::result::Result<RpcResult<OverviewData>, ::tarpc::client::RpcError> {
-        let mut rng = StdRng::from_seed(self.seed);
-        let data = rng.random();
-        tokio::task::yield_now().await;
-        Ok(RpcResult::Ok(data))
-    }
-
-    pub async fn known_keys(
-        &self,
-        _ctx: ::tarpc::context::Context,
-        _token: auth::Token,
-    ) -> ::core::result::Result<RpcResult<Vec<SpendingKey>>, ::tarpc::client::RpcError> {
-        let mut rng = StdRng::from_seed(self.seed);
-        tokio::task::yield_now().await;
-        let mut known_keys = vec![];
-        for _ in 0..rng.random_range(1..100) {
-            match rng.random_range(0..2) {
-                0 => {
-                    known_keys.push(SpendingKey::from(GenerationSpendingKey::derive_from_seed(
-                        rng.random(),
-                    )));
-                }
-                1 => {
-                    known_keys.push(SpendingKey::from(SymmetricKey::from_seed(rng.random())));
-                }
-                _ => {
-                    unreachable!()
-                }
-            }
-        }
-        Ok(Ok(known_keys))
-    }
-
-    pub async fn history(
-        &self,
-        _ctx: ::tarpc::context::Context,
-        _token: auth::Token,
-    ) -> ::core::result::Result<
-        RpcResult<Vec<(Digest, BlockHeight, Timestamp, NativeCurrencyAmount)>>,
-        ::tarpc::client::RpcError,
-    > {
-        let mut rng = StdRng::from_seed(self.seed);
-        tokio::task::yield_now().await;
-        let mut history = vec![];
-
-        for _ in 0..rng.random_range(0..100) {
-            let digest = rng.random::<Digest>();
-            let block_height = rng.random::<BlockHeight>();
-            let timestamp = rng.random::<Timestamp>();
-            let native_currency_amount = rng
-                .random::<NativeCurrencyAmount>()
-                .lossy_f64_fraction_mul(0.0001);
-            history.push((digest, block_height, timestamp, native_currency_amount));
-        }
-
-        Ok(Ok(history))
-    }
-
-    pub async fn mempool_overview(
-        &self,
-        _ctx: ::tarpc::context::Context,
-        _token: auth::Token,
-        page_start: usize,
-        page_size: usize,
-    ) -> ::core::result::Result<RpcResult<Vec<MempoolTransactionInfo>>, ::tarpc::client::RpcError>
-    {
-        let mut rng = StdRng::from_seed(self.seed);
-        let total_num_entries = rng.random_range(5..100);
-        let mut rng = StdRng::seed_from_u64(rng.next_u64().wrapping_add(page_start as u64));
-
-        tokio::task::yield_now().await;
-        let mut mempool_transactions = vec![];
-
-        let range_start = usize::min(page_start * page_size, total_num_entries);
-        let range_stop = usize::min((page_start + 1) * page_size, total_num_entries);
-        for _ in range_start..range_stop {
-            mempool_transactions.push(rng.random());
-        }
-
-        Ok(Ok(mempool_transactions))
-    }
-
-    pub async fn peer_info(
-        &self,
-        _ctx: ::tarpc::context::Context,
-        _token: auth::Token,
-    ) -> ::core::result::Result<RpcResult<Vec<PeerInfo>>, ::tarpc::client::RpcError> {
-        let mut rng = StdRng::from_seed(self.seed);
-        tokio::task::yield_now().await;
+    fn init_mock_data() -> MockState {
+        let mut rng = StdRng::from_seed(rng().random());
 
         let num_peers = rng.random_range(1..10);
-        let mut peers = vec![];
-        for _ in 0..num_peers {
-            peers.push(rng.random());
-        }
-
-        Ok(Ok(peers))
-    }
-
-    pub async fn next_receiving_address(
-        &self,
-        _ctx: ::tarpc::context::Context,
-        _token: auth::Token,
-        address_type: KeyType,
-    ) -> ::core::result::Result<RpcResult<ReceivingAddress>, ::tarpc::client::RpcError> {
-        let mut rng = StdRng::from_seed(self.seed);
-        tokio::task::yield_now().await;
-        let receiving_address = match address_type {
-            KeyType::Generation => {
-                ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.random()))
-            }
-            KeyType::Symmetric => ReceivingAddress::from(SymmetricKey::from_seed(rng.random())),
-        };
-        Ok(Ok(receiving_address))
-    }
-
-    pub async fn send(
-        &self,
-        _ctx: ::tarpc::context::Context,
-        _token: auth::Token,
-        _outputs: Vec<OutputFormat>,
-        _change_policy: ChangePolicy,
-        _fee: NativeCurrencyAmount,
-    ) -> ::core::result::Result<RpcResult<TxCreationArtifacts>, ::tarpc::client::RpcError> {
-        // thank you!
-        tokio::task::yield_now().await;
-        Ok(Err(RpcError::Failed("cannot send; mocking".to_string())))
-    }
-
-    pub async fn list_utxos(
-        &self,
-        _ctx: ::tarpc::context::Context,
-        _token: auth::Token,
-    ) -> ::core::result::Result<RpcResult<Vec<UiUtxo>>, ::tarpc::client::RpcError> {
-        let mut rng = StdRng::from_seed(self.seed);
-        tokio::task::yield_now().await;
+        let peers: Vec<PeerInfo> = (0..num_peers).map(|_| rng.random()).collect();
 
         let num_utxos = rng.random_range(1..20);
-        let mut utxos = vec![];
-        for _ in 0..num_utxos {
-            let utxo = UiUtxo {
+        let utxos: Vec<UiUtxo> = (0..num_utxos)
+            .map(|_| UiUtxo {
                 amount: rng
                     .random::<NativeCurrencyAmount>()
                     .lossy_f64_fraction_mul(0.0001),
@@ -229,9 +78,198 @@ impl MockRpcClient {
                     None
                 },
                 spent: rng.random(),
-            };
-            utxos.push(utxo);
+            })
+            .collect();
+
+        let num_keys = rng.random_range(1..100);
+        let known_keys: Vec<SpendingKey> = (0..num_keys)
+            .map(|_| match rng.random_range(0..2) {
+                0 => SpendingKey::from(GenerationSpendingKey::derive_from_seed(rng.random())),
+                1 => SpendingKey::from(SymmetricKey::from_seed(rng.random())),
+                _ => unreachable!(),
+            })
+            .collect();
+
+        let num_history = rng.random_range(0..100);
+        let history: Vec<(Digest, BlockHeight, Timestamp, NativeCurrencyAmount)> = (0..num_history)
+            .map(|_| {
+                let digest = rng.random::<Digest>();
+                let block_height = rng.random::<BlockHeight>();
+                let timestamp = rng.random::<Timestamp>();
+                let native_currency_amount = rng
+                    .random::<NativeCurrencyAmount>()
+                    .lossy_f64_fraction_mul(0.0001);
+                (digest, block_height, timestamp, native_currency_amount)
+            })
+            .collect();
+
+        let total_num_entries = rng.random_range(5..100);
+        let mempool_transactions: Vec<MempoolTransactionInfo> =
+            (0..total_num_entries).map(|_| rng.random()).collect();
+
+        let overview_data: OverviewData = rng.random();
+
+        let listen_address = Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(
+                rng.random(),
+                rng.random(),
+                rng.random(),
+                rng.random(),
+            )),
+            rng.random_range(1..65535),
+        ));
+
+        let generation_address =
+            ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.random()));
+        let symmetric_address = ReceivingAddress::from(SymmetricKey::from_seed(rng.random()));
+
+        MockState {
+            peers,
+            utxos,
+            known_keys,
+            history,
+            mempool_transactions,
+            overview_data,
+            listen_address,
+            generation_address,
+            symmetric_address,
         }
-        Ok(Ok(utxos))
+    }
+    pub async fn network(
+        &self,
+        _ctx: ::tarpc::context::Context,
+    ) -> ::core::result::Result<RpcResult<Network>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        Ok(Ok(Network::Main))
+    }
+
+    pub async fn own_listen_address_for_peers(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+    ) -> ::core::result::Result<RpcResult<Option<SocketAddr>>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        let state = self.state.lock().unwrap();
+        Ok(Ok(state.listen_address))
+    }
+
+    pub(crate) async fn dashboard_overview_data(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+    ) -> ::core::result::Result<RpcResult<OverviewData>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        let state = self.state.lock().unwrap();
+        Ok(Ok(state.overview_data.clone()))
+    }
+
+    pub async fn known_keys(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+    ) -> ::core::result::Result<RpcResult<Vec<SpendingKey>>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        let state = self.state.lock().unwrap();
+        Ok(Ok(state.known_keys.clone()))
+    }
+
+    pub async fn history(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+    ) -> ::core::result::Result<
+        RpcResult<Vec<(Digest, BlockHeight, Timestamp, NativeCurrencyAmount)>>,
+        ::tarpc::client::RpcError,
+    > {
+        tokio::task::yield_now().await;
+        let state = self.state.lock().unwrap();
+        Ok(Ok(state.history.clone()))
+    }
+
+    pub async fn mempool_overview(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+        page_start: usize,
+        page_size: usize,
+    ) -> ::core::result::Result<RpcResult<Vec<MempoolTransactionInfo>>, ::tarpc::client::RpcError>
+    {
+        tokio::task::yield_now().await;
+        let state = self.state.lock().unwrap();
+
+        let total_num_entries = state.mempool_transactions.len();
+        let range_start = usize::min(page_start * page_size, total_num_entries);
+        let range_stop = usize::min((page_start + 1) * page_size, total_num_entries);
+
+        let result = state.mempool_transactions[range_start..range_stop].to_vec();
+        Ok(Ok(result))
+    }
+
+    pub async fn peer_info(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+    ) -> ::core::result::Result<RpcResult<Vec<PeerInfo>>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        let state = self.state.lock().unwrap();
+        Ok(Ok(state.peers.clone()))
+    }
+
+    pub async fn next_receiving_address(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+        address_type: KeyType,
+    ) -> ::core::result::Result<RpcResult<ReceivingAddress>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        let state = self.state.lock().unwrap();
+        let receiving_address = match address_type {
+            KeyType::Generation => state.generation_address.clone(),
+            KeyType::Symmetric => state.symmetric_address.clone(),
+        };
+        Ok(Ok(receiving_address))
+    }
+
+    pub async fn send(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+        _outputs: Vec<OutputFormat>,
+        _change_policy: ChangePolicy,
+        _fee: NativeCurrencyAmount,
+    ) -> ::core::result::Result<RpcResult<TxCreationArtifacts>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        Ok(Err(RpcError::Failed("cannot send; mocking".to_string())))
+    }
+
+    pub async fn list_utxos(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+    ) -> ::core::result::Result<RpcResult<Vec<UiUtxo>>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        let state = self.state.lock().unwrap();
+        Ok(Ok(state.utxos.clone()))
+    }
+
+    pub async fn clear_standing_by_ip(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+        peer_ip: IpAddr,
+    ) -> ::core::result::Result<RpcResult<()>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        // can't modify PeerInfo from outside neptune-core crate since all fields and
+        // constructors are pub(crate). to show any ui behavior, we just replace the peer with a new random one
+        let mut state = self.state.lock().unwrap();
+        if let Some(idx) = state
+            .peers
+            .iter()
+            .position(|p| p.connected_address().ip() == peer_ip)
+        {
+            let mut rng = StdRng::from_seed(rng().random());
+            state.peers[idx] = rng.random();
+        }
+        Ok(Ok(()))
     }
 }
