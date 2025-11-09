@@ -178,6 +178,23 @@ impl DashboardRpcClient {
         }
     }
 
+    pub async fn latest_address(
+        &self,
+        ctx: ::tarpc::context::Context,
+        token: auth::Token,
+        address_type: KeyType,
+    ) -> ::core::result::Result<RpcResult<ReceivingAddress>, ::tarpc::client::RpcError> {
+        match self {
+            DashboardRpcClient::Authentic(rpcclient) => {
+                rpcclient.latest_address(ctx, token, address_type).await
+            }
+            #[cfg(feature = "mock")]
+            DashboardRpcClient::Mock(mock_client) => {
+                mock_client.latest_address(ctx, token, address_type).await
+            }
+        }
+    }
+
     pub async fn next_receiving_address(
         &self,
         ctx: ::tarpc::context::Context,

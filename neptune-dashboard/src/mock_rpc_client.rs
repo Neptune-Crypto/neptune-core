@@ -215,7 +215,7 @@ impl MockRpcClient {
         Ok(Ok(state.peers.clone()))
     }
 
-    pub async fn next_receiving_address(
+    pub async fn latest_address(
         &self,
         _ctx: ::tarpc::context::Context,
         _token: auth::Token,
@@ -226,6 +226,30 @@ impl MockRpcClient {
         let receiving_address = match address_type {
             KeyType::Generation => state.generation_address.clone(),
             KeyType::Symmetric => state.symmetric_address.clone(),
+        };
+        Ok(Ok(receiving_address))
+    }
+
+    pub async fn next_receiving_address(
+        &self,
+        _ctx: ::tarpc::context::Context,
+        _token: auth::Token,
+        address_type: KeyType,
+    ) -> ::core::result::Result<RpcResult<ReceivingAddress>, ::tarpc::client::RpcError> {
+        tokio::task::yield_now().await;
+        let mut state = self.state.lock().unwrap();
+        let receiving_address = match address_type {
+            KeyType::Generation => {
+                state.generation_address =
+                    GenerationReceivingAddress::derive_from_seed(rng().random()).into();
+                state.generation_address.clone()
+            }
+            KeyType::Symmetric => {
+                state.symmetric_address = neptune_cash::api::export::ReceivingAddress::Symmetric(
+                    SymmetricKey::from_seed(rng().random()),
+                );
+                state.symmetric_address.clone()
+            }
         };
         Ok(Ok(receiving_address))
     }
