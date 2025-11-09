@@ -189,13 +189,12 @@ impl PeersScreen {
         }
     }
 
-    fn set_sort_column(&mut self, c: char) -> bool {
+    /// Set sort column to the column indicated by the given char. Also reverse
+    /// the order.
+    fn set_sort_column(&mut self, c: char) {
         if let Some(column) = Self::char_to_column(c) {
             self.sort_column = column;
             self.sort_order.reverse();
-            true
-        } else {
-            false
         }
     }
 
@@ -213,17 +212,14 @@ impl PeersScreen {
                         KeyCode::Down => self.events.next(),
                         KeyCode::Up => self.events.previous(),
                         // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
-                        KeyCode::Char(c) => {
-                            if self.set_sort_column(c) {
-                                return None;
-                            }
-
-                            if c == 'x' {
-                                self.clear_selected_peer_standing();
-                                return None;
-                            }
+                        KeyCode::Char(c) if Self::char_to_column(c).is_some() => {
+                            self.set_sort_column(c);
+                            return None;
                         }
-
+                        KeyCode::Char('x') => {
+                            self.clear_selected_peer_standing();
+                            return None;
+                        }
                         _ => {
                             escalate_event = Some(event);
                         }
