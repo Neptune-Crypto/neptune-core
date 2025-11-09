@@ -182,8 +182,11 @@ impl SyncLoop {
                                 }));
                             }
 
-                            // Add new block request to queue.
-                            pending_block_requests.push(peer_handle);
+                            // If there are still blocks outstanding, add a
+                            // block request to the queue.
+                            if !self.download_state.is_complete() {
+                                pending_block_requests.push(peer_handle);
+                            }
                         }
                     }
                 }
@@ -202,12 +205,14 @@ impl SyncLoop {
                     // not doing anything any more and it should be terminated.
                     // However, if there are messages on the channel that have
                     // not been read yet, read those first -- maybe they contain
-                    // the blocks we are waiting for.
+                    // the blocks we are waiting for. Also, the successors sub-
+                    // task might still be running, so check for that too.
                     if now
                         .duration_since(most_recent_receipt.unwrap_or(now))
                         .ok()
                         .is_none_or(|timestamp| timestamp > ANY_RESPONSE_TIMEOUT)
-                    && self.main_channel_receiver.is_empty() {
+                    && self.main_channel_receiver.is_empty()
+                    && maybe_successors_subtask.is_none() {
                         tracing::warn!("Most recent block was received a while ago; terminating sync loop.");
                         finished = self.download_state.is_complete();
                         break;
@@ -350,11 +355,29 @@ impl SyncLoop {
                 })?;
 
             // send to main
-            channel_to_main
-                .send(SyncToMain::TipSuccessor(Box::new(successor))).await.map_err(|e|{
-                    tracing::warn!("Could not send block from sync loop to main loop: {e}. Terminating sync mode.");
-                    SyncLoopError::SendError(e)
-                })?;
+            // important payload, so report on delays
+            let mut counter = 0;
+            let max = 100;
+            for _ in 0..max {
+                match channel_to_main
+                    .try_send(SyncToMain::TipSuccessor(Box::new(successor.clone())))
+                {
+                    Ok(_) => break,
+                    Err(_) => {
+                        tracing::warn!("Could not send tip-successor block from sync loop to main loop; main loop appears busy ...");
+                        counter += 1;
+                        tokio::time::sleep(Duration::from_millis(counter));
+                    }
+                }
+            }
+            if counter == max {
+                tracing::error!("Failed to send tip-successor block from sync loop to main loop. Aborting sync mode.");
+                return Err(SyncLoopError::SendError(
+                    tokio::sync::mpsc::error::SendError(SyncToMain::TipSuccessor(Box::new(
+                        successor,
+                    ))),
+                ));
+            }
 
             // delete the block after the main loop successfully received it
             if let Err(e) = download_state.delete_block(tip_height.next()).await {
