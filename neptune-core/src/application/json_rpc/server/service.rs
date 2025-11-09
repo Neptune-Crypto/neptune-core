@@ -301,6 +301,43 @@ impl RpcApi for RpcServer {
                 .await,
         })
     }
+
+    async fn get_utxo_digest_call(
+        &self,
+        request: GetUtxoDigestRequest,
+    ) -> RpcResult<GetUtxoDigestResponse> {
+        let state = self.state.lock_guard().await;
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+
+        Ok(GetUtxoDigestResponse {
+            digest: match request.index > 0 && request.index < aocl.num_leafs().await {
+                true => Some(aocl.get_leaf_async(request.index).await),
+                false => None,
+            },
+        })
+    }
+
+    async fn find_utxo_origin_call(
+        &self,
+        request: FindUtxoOriginRequest,
+    ) -> RpcResult<FindUtxoOriginResponse> {
+        let allowed_search_depth = if self.unrestricted {
+            request.search_depth
+        } else {
+            Some(request.search_depth.unwrap_or(100).min(100))
+        };
+
+        let state = self.state.lock_guard().await;
+        let block = state
+            .chain
+            .archival_state()
+            .find_canonical_block_with_output(request.addition_record.into(), allowed_search_depth)
+            .await;
+
+        Ok(FindUtxoOriginResponse {
+            origin_block: block.map(|block| block.hash()),
+        })
+    }
 }
 
 #[cfg(test)]
