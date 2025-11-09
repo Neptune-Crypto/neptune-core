@@ -4,7 +4,7 @@ use crate::application::json_rpc::core::api::rpc::RpcApi;
 use crate::application::json_rpc::core::api::rpc::RpcResult;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
-use crate::application::json_rpc::server::http::RpcServer;
+use crate::application::json_rpc::server::rpc::RpcServer;
 
 #[async_trait]
 impl RpcApi for RpcServer {
@@ -315,7 +315,7 @@ pub mod tests {
     use crate::application::config::cli_args;
     use crate::application::json_rpc::core::api::rpc::RpcApi;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
-    use crate::application::json_rpc::server::http::RpcServer;
+    use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
@@ -336,7 +336,7 @@ pub mod tests {
         )
         .await;
 
-        RpcServer::new(global_state_lock)
+        RpcServer::new(global_state_lock, None)
     }
 
     #[apply(shared_tokio_runtime)]

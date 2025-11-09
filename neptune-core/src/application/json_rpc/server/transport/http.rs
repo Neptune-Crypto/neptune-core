@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::extract::rejection::JsonRejection;
@@ -7,51 +6,22 @@ use axum::routing::post;
 use axum::Json;
 use axum::Router;
 use tokio::net::TcpListener;
-use tracing::warn;
 
-use crate::application::json_rpc::core::api::ops::Namespace;
 use crate::application::json_rpc::core::api::ops::RpcMethods;
 use crate::application::json_rpc::core::api::rpc::RpcApi;
 use crate::application::json_rpc::core::api::server::router::RpcRouter;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::json::JsonRequest;
 use crate::application::json_rpc::core::model::json::JsonResponse;
-use crate::state::GlobalStateLock;
-
-#[derive(Clone, Debug)]
-pub struct RpcServer {
-    pub(crate) state: GlobalStateLock,
-}
+use crate::application::json_rpc::server::rpc::RpcServer;
 
 impl RpcServer {
-    pub fn new(state: GlobalStateLock) -> Self {
-        Self { state }
-    }
-
-    /// Returns the enabled set of RPC namespaces with node configuration check.
-    async fn enabled_namespaces(&self) -> HashSet<Namespace> {
-        let state = self.state.lock_guard().await;
-        let mut namespaces: HashSet<Namespace> =
-            self.state.cli().rpc_modules.iter().copied().collect();
-
-        if namespaces.contains(&Namespace::Archival) {
-            let is_archival = state.chain.is_archival_node();
-
-            if !is_archival {
-                namespaces.remove(&Namespace::Archival);
-                warn!("Node is not archival, cannot enable Archival namespace.");
-            }
-        }
-
-        namespaces
-    }
-
-    /// Starts the RPC server.
+    /// Starts the HTTP RPC server.
     ///
     /// All RPC endpoints are accessible via `POST` requests to the root path `/`.
     /// The specific method is selected using the `method` field in the JSON request body,
     /// formatted as `namespace_method`.
-    pub async fn serve(&self, listener: TcpListener) {
+    pub async fn serve_http(&self, listener: TcpListener) {
         let api: Arc<dyn RpcApi> = Arc::new(self.clone());
         let namespaces = self.enabled_namespaces().await;
         let router = RpcMethods::new_router(api, namespaces);
@@ -161,7 +131,7 @@ mod tests {
     use crate::application::json_rpc::core::model::json::JsonError;
     use crate::application::json_rpc::core::model::json::JsonRequest;
     use crate::application::json_rpc::core::model::json::JsonResponse;
-    use crate::application::json_rpc::server::http::RpcServer;
+    use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::application::json_rpc::server::service::tests::test_rpc_server;
     use crate::tests::shared_tokio_runtime;
 
