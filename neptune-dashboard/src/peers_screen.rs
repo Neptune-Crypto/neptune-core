@@ -624,6 +624,8 @@ impl Events {
     }
 
     /// Jump the selector down by a page.
+    ///
+    /// By convention, one page is half the number of visible rows.
     pub fn next_page(&mut self) {
         let offset = Self::TABLE_HEADER_ROWS;
         let num_rows = Self::terminal_height() as usize
@@ -641,6 +643,8 @@ impl Events {
     }
 
     // Jump the selector up by a page.
+    ///
+    /// By convention, one page is half the number of visible rows.
     pub fn previous_page(&mut self) {
         let offset = Self::TABLE_HEADER_ROWS;
         let num_rows = Self::terminal_height() as usize

@@ -57,7 +57,7 @@ impl MockRpcClient {
     fn init_mock_data() -> MockState {
         let mut rng = StdRng::from_seed(rng().random());
 
-        let num_peers = 100 + rng.random_range(1..10);
+        let num_peers = 100;
         let peers: Vec<PeerInfo> = (0..num_peers).map(|_| rng.random()).collect();
 
         let num_utxos = rng.random_range(1..20);
