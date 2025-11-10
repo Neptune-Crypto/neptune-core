@@ -234,7 +234,7 @@ pub struct IsBlockCanonicalResponse {
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct GetUtxoDigestRequest {
-    pub index: u64,
+    pub leaf_index: u64,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

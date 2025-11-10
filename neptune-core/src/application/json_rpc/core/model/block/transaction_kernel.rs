@@ -51,8 +51,8 @@ impl From<RemovalRecord> for RpcRemovalRecord {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RpcAdditionRecord(pub Digest);
 
-impl From<&AdditionRecord> for RpcAdditionRecord {
-    fn from(record: &AdditionRecord) -> Self {
+impl From<AdditionRecord> for RpcAdditionRecord {
+    fn from(record: AdditionRecord) -> Self {
         Self(record.canonical_commitment)
     }
 }
@@ -95,7 +95,7 @@ impl From<&TransactionKernel> for RpcTransactionKernel {
     fn from(kernel: &TransactionKernel) -> Self {
         Self {
             inputs: kernel.inputs.clone().into_iter().map(Into::into).collect(),
-            outputs: kernel.outputs.iter().map(Into::into).collect(),
+            outputs: kernel.outputs.iter().copied().map(Into::into).collect(),
             announcements: kernel
                 .announcements
                 .iter()

@@ -310,10 +310,7 @@ impl RpcApi for RpcServer {
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
 
         Ok(GetUtxoDigestResponse {
-            digest: match request.index > 0 && request.index < aocl.num_leafs().await {
-                true => Some(aocl.get_leaf_async(request.index).await),
-                false => None,
-            },
+            digest: aocl.try_get_leaf(request.leaf_index).await,
         })
     }
 
@@ -568,7 +565,7 @@ pub mod tests {
         let mut rpc_server = test_rpc_server().await;
 
         // Before new block check size of aocl leaves so we can know exact index of new outputs
-        let aocl_leaves = rpc_server
+        let num_aocl_leaves = rpc_server
             .state
             .lock_guard()
             .await
@@ -588,7 +585,7 @@ pub mod tests {
         rpc_server.state.set_new_tip(block.clone()).await.unwrap();
 
         for (i, output) in block.body().transaction_kernel().outputs.iter().enumerate() {
-            let utxo_index = aocl_leaves + i as u64;
+            let utxo_index = num_aocl_leaves + i as u64;
             let digest_entry = rpc_server
                 .get_utxo_digest(utxo_index)
                 .await
@@ -603,7 +600,7 @@ pub mod tests {
 
             // Check origin of UTXO
             let origin_response = rpc_server
-                .find_utxo_origin(output.into(), None)
+                .find_utxo_origin((*output).into(), None)
                 .await
                 .expect("find_utxo_origin RPC failed");
 

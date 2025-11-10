@@ -559,10 +559,15 @@ pub struct Args {
     )]
     pub rpc_modules: Vec<Namespace>,
 
-    /// Allow unsafe RPC methods over all transports (e.g., HTTP).
+    /// Enable unsafe RPC methods over all transports (e.g., HTTP).
     ///
-    /// WARNING: Enabling this will expose dangerous RPC methods,
-    /// Use this only in isolated, controlled environments.
+    /// WARNING: Enabling this exposes dangerous RPC behavior and should only be used in
+    /// isolated, controlled environments.
+    ///
+    /// This may result in:
+    /// - Denial of Service (DoS) by triggering heavy or expensive computations.
+    /// - Exposure of internal node state or metrics that could aid an attacker.
+    /// - Misconfigurations leading to unexpected or unsafe behavior.
     #[clap(long)]
     pub unsafe_rpc: bool,
 }
