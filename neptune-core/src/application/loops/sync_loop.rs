@@ -126,23 +126,41 @@ impl SyncLoop {
                 }, if maybe_successors_subtask.is_some() => {
                     match successor_task_result.unwrap() {
                         Ok(Ok(SyncLoopReturnCode::Finished)) => {
-                            finished = true;
-                            break;
+                            // The successors subtask claims it is finished, but
+                            // it can only support this claim with an outdated
+                            // view of the download state. In the mean time,
+                            // a new block may have come in. So double-check the
+                            // download state and start a new run of the subtask
+                            // if necessary.
+                            if self.download_state.is_complete() {
+                                finished = true;
+                                break;
+                            }
+
+                            let moved_tip_height = self.tip_height;
+                            let moved_download_state = self.download_state.clone();
+                            let moved_sender = self.main_channel_sender.clone();
+                            maybe_successors_subtask = Some(tokio::spawn(async move {
+                                Self::process_successors_of_tip(moved_tip_height, moved_download_state, moved_sender).await
+                            }));
                         }
                         Ok(Ok(SyncLoopReturnCode::Continue{tip_height})) => {
+                            maybe_successors_subtask = None;
                             self.tip_height = tip_height;
                         }
                         Ok(Err(SyncLoopError::RapidBlockDownloadError(e))) => {
+                            maybe_successors_subtask = None;
                             tracing::error!("Rapid block download error while sending tip-successors to main loop: {e}");
                         }
                         Ok(Err(SyncLoopError::SendError(e))) => {
+                            maybe_successors_subtask = None;
                             tracing::error!("Could not send tip-successor block to main loop: {e}");
                         }
                         Err(e) => {
+                            maybe_successors_subtask = None;
                             tracing::error!("Tokio error while sending tip-successors to main loop: {e}");
                         }
                     }
-                    maybe_successors_subtask = None;
                 }
 
                 // event: message from sync loop
@@ -187,6 +205,16 @@ impl SyncLoop {
                             if !self.download_state.is_complete() {
                                 pending_block_requests.push(peer_handle);
                             }
+                        }
+                        MainToSync::ExtendChain(block) => {
+                            if let Err(e) = self.download_state.extend_chain(&block).await {
+                                tracing::error!(
+                                    "Could not extend chain of download state with new block og height {} and digest {:x}; got error: {e}",
+                                    block.header().height, block.hash()
+                                );
+                                continue;
+                            }
+                            most_recent_receipt = Some(SystemTime::now());
                         }
                     }
                 }
@@ -423,10 +451,18 @@ mod tests {
 
     use super::*;
 
+    /// A channel for informing the [MockMainLoop] about peer (dis)connections.
     #[derive(Debug, Clone)]
     enum PeerControl {
         AddPeer(MockPeer),
         RemovePeer(PeerHandle),
+    }
+
+    /// A channel for informing the [MockMainLoop] about new blocks on the
+    /// network.
+    #[derive(Debug, Clone)]
+    enum BlockchainTipControl {
+        NewBlock(Block),
     }
 
     struct MockMainLoop {
@@ -439,6 +475,8 @@ mod tests {
         peer_control_sender: Sender<PeerControl>,
         finished: bool,
         tip_tracker: Option<Arc<Mutex<BlockHeight>>>,
+        blockchain_tip_control_receiver: Receiver<BlockchainTipControl>,
+        blockchain_tip_control_sender: Sender<BlockchainTipControl>,
     }
 
     impl MockMainLoop {
@@ -449,6 +487,8 @@ mod tests {
             sync_target_height: BlockHeight,
         ) -> Self {
             let (peer_control_sender, peer_control_receiver) = mpsc::channel::<PeerControl>(10);
+            let (blockchain_tip_control_sender, blockchain_tip_control_receiver) =
+                mpsc::channel::<BlockchainTipControl>(10);
             Self {
                 peers: HashMap::default(),
                 main_to_sync_sender,
@@ -459,11 +499,17 @@ mod tests {
                 tip_tracker: None,
                 peer_control_receiver,
                 peer_control_sender,
+                blockchain_tip_control_receiver,
+                blockchain_tip_control_sender,
             }
         }
 
         fn peer_control_sender(&self) -> Sender<PeerControl> {
             self.peer_control_sender.clone()
+        }
+
+        fn blockchain_tip_control_sender(&self) -> Sender<BlockchainTipControl> {
+            self.blockchain_tip_control_sender.clone()
         }
 
         fn set_tip_tracker(&mut self, tip_tracker: Arc<Mutex<BlockHeight>>) {
@@ -576,6 +622,16 @@ mod tests {
                             PeerControl::RemovePeer(handle) => {
                                 tracing::info!("removing peer {}", handle);
                                 self.disconnect(handle).await;
+                            }
+                        }
+                    }
+
+                    Some(message) = self.blockchain_tip_control_receiver.recv() => {
+                        match message {
+                            BlockchainTipControl::NewBlock(block) => {
+                                tracing::info!("new block was mined; expanding sync target accordingly ******");
+                                self.sync_target_height = self.sync_target_height.next();
+                                self.main_to_sync_sender.send(MainToSync::ExtendChain(block)).await.unwrap();
                             }
                         }
                     }
@@ -937,7 +993,79 @@ mod tests {
 
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn can_sync_with_moving_target() {}
+    async fn can_sync_with_moving_target() {
+        async fn disseminate_new_block(
+            target_height: Arc<Mutex<BlockHeight>>,
+            tip_control_sender: Sender<BlockchainTipControl>,
+            rng: &mut StdRng,
+        ) {
+            let mut block = rng.random::<Block>();
+            let mut target_height_lock = target_height.lock_owned().await;
+            let old_height: BlockHeight = *target_height_lock;
+            let new_height = old_height.next();
+            block.set_header_height(new_height);
+            *target_height_lock = new_height;
+            tip_control_sender
+                .send(BlockchainTipControl::NewBlock(block))
+                .await
+                .unwrap();
+        }
+
+        let mut rng = StdRng::seed_from_u64(rng().next_u64());
+        tracing::info!("starting test ...");
+
+        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let original_sync_target_height =
+            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
+            SyncLoop::new(current_tip_height, original_sync_target_height, false)
+                .await
+                .unwrap();
+        let mut main_loop = MockMainLoop::new(
+            main_to_sync_sender,
+            sync_to_main_receiver,
+            current_tip_height,
+            original_sync_target_height,
+        );
+
+        main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
+        main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
+        main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
+        main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
+        main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
+        let _sync_loop_handle = sync_loop.start();
+
+        let blockchain_tip_control_sender = main_loop.blockchain_tip_control_sender();
+        let updated_sync_target_height = Arc::new(Mutex::new(original_sync_target_height));
+        let moved_updated_sync_target_height = updated_sync_target_height.clone();
+        let new_blocks_handle = tokio::spawn(async move {
+            for _ in 0..100 {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                disseminate_new_block(
+                    moved_updated_sync_target_height.clone(),
+                    blockchain_tip_control_sender.clone(),
+                    &mut rng,
+                )
+                .await;
+            }
+        });
+
+        main_loop.run().await;
+
+        new_blocks_handle.abort();
+
+        assert!(
+            main_loop.sync_is_finished(),
+            "current tip height {} versus sync target height {}",
+            main_loop.current_tip_height,
+            main_loop.sync_target_height
+        );
+
+        assert_eq!(
+            main_loop.sync_target_height,
+            *updated_sync_target_height.lock().await
+        );
+    }
 
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
