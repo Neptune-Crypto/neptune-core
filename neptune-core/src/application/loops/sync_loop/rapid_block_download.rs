@@ -193,7 +193,10 @@ impl RapidBlockDownload {
     ///
     ///  - If the height of the new block does not equal current tip height plus
     ///    one.
-    async fn extend_chain(&mut self, new_block: &Block) -> Result<(), RapidBlockDownloadError> {
+    pub(crate) async fn extend_chain(
+        &mut self,
+        new_block: &Block,
+    ) -> Result<(), RapidBlockDownloadError> {
         let new_block_height = new_block.header().height;
         assert_eq!(self.target_height.next(), new_block_height);
 

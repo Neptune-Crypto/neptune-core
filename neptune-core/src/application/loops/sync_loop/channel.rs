@@ -27,4 +27,5 @@ pub(crate) enum MainToSync {
         peer_handle: PeerHandle,
         block: Box<Block>,
     },
+    ExtendChain(Block),
 }
