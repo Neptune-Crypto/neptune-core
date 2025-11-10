@@ -3,10 +3,12 @@ use std::process;
 use anyhow::Result;
 use clap::Parser;
 use neptune_cash::application::config::cli_args;
+use neptune_cash::display_banner;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::FmtSubscriber;
 
 pub fn main() -> Result<()> {
+    display_banner();
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
