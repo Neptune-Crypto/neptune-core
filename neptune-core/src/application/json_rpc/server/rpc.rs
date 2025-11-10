@@ -36,7 +36,9 @@ impl RpcServer {
             }
         }
 
-        // TODO: warn if its restricted but networking etc. is enabled
+        if !self.unrestricted && namespaces.contains(&Namespace::Networking) {
+            warn!("Networking module is enabled without unsafe mode - this may expose sensitive data.")
+        }
 
         namespaces
     }
