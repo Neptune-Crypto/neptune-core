@@ -43,3 +43,35 @@ impl RpcServer {
         namespaces
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use macro_rules_attr::apply;
+
+    use crate::api::export::Network;
+    use crate::application::config::cli_args;
+    use crate::application::json_rpc::server::rpc::RpcServer;
+    use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared_tokio_runtime;
+
+    #[apply(shared_tokio_runtime)]
+    async fn rpc_respects_safety_configuration() {
+        let global_state_lock = mock_genesis_global_state(
+            2,
+            WalletEntropy::new_random(),
+            cli_args::Args::default_with_network(Network::Main),
+        )
+        .await;
+
+        // By default, the RPC server should run in restricted (safe) mode
+        let server = RpcServer::new(global_state_lock.clone(), None);
+        assert!(!server.unrestricted);
+
+        // When explicitly requested, the RPC server should allow unrestricted (unsafe) mode
+        // This can be used in transports where UX is prioritized over security
+        let server = RpcServer::new(global_state_lock, Some(true));
+        assert!(server.unrestricted);
+    }
+}
