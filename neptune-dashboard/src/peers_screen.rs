@@ -189,13 +189,12 @@ impl PeersScreen {
         }
     }
 
-    fn set_sort_column(&mut self, c: char) -> bool {
+    /// Set sort column to the column indicated by the given char. Also reverse
+    /// the order.
+    fn set_sort_column(&mut self, c: char) {
         if let Some(column) = Self::char_to_column(c) {
             self.sort_column = column;
             self.sort_order.reverse();
-            true
-        } else {
-            false
         }
     }
 
@@ -212,18 +211,16 @@ impl PeersScreen {
                     match key.code {
                         KeyCode::Down => self.events.next(),
                         KeyCode::Up => self.events.previous(),
-                        // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
-                        KeyCode::Char(c) => {
-                            if self.set_sort_column(c) {
-                                return None;
-                            }
-
-                            if c == 'x' {
-                                self.clear_selected_peer_standing();
-                                return None;
-                            }
+                        KeyCode::PageDown => self.events.next_page(),
+                        KeyCode::PageUp => self.events.previous_page(),
+                        KeyCode::Char(c) if Self::char_to_column(c).is_some() => {
+                            self.set_sort_column(c);
+                            return None;
                         }
-
+                        KeyCode::Char('x') => {
+                            self.clear_selected_peer_standing();
+                            return None;
+                        }
                         _ => {
                             escalate_event = Some(event);
                         }
@@ -578,6 +575,11 @@ impl Events {
     // ratatui seems to be redesigning scrollable widgets at present.
     const TABLE_HEADER_ROWS: usize = 3;
 
+    /// Number of rows in the dashboard, not counting the rows allocated to the
+    /// screen. Phrased differently, subtracting this number from the terminal
+    /// height gives the screen height.
+    const DASHBOARD_HEADER_FOOTER_ROWS: usize = 3;
+
     // Select the next item. This will not be reflected until the widget is drawn
     // with `Frame::render_stateful_widget`.
     pub fn next(&mut self) {
@@ -607,6 +609,50 @@ impl Events {
                     i - 1
                 }
             }
+            None => offset,
+        };
+        self.state.select(Some(i));
+    }
+
+    /// Get the height of the terminal.
+    fn terminal_height() -> u16 {
+        if let Ok((_cols, rows)) = crossterm::terminal::size() {
+            rows
+        } else {
+            1
+        }
+    }
+
+    /// Jump the selector down by a page.
+    ///
+    /// By convention, one page is half the number of visible rows.
+    pub fn next_page(&mut self) {
+        let offset = Self::TABLE_HEADER_ROWS;
+        let num_rows = Self::terminal_height() as usize
+            - Self::TABLE_HEADER_ROWS
+            - Self::DASHBOARD_HEADER_FOOTER_ROWS;
+        let jump_height = usize::max(1, num_rows / 2);
+        let i = match self.state.selected() {
+            Some(i) => usize::min(
+                self.items.lock().unwrap().len() + offset - 1,
+                i + jump_height,
+            ),
+            None => offset,
+        };
+        self.state.select(Some(i));
+    }
+
+    // Jump the selector up by a page.
+    ///
+    /// By convention, one page is half the number of visible rows.
+    pub fn previous_page(&mut self) {
+        let offset = Self::TABLE_HEADER_ROWS;
+        let num_rows = Self::terminal_height() as usize
+            - Self::TABLE_HEADER_ROWS
+            - Self::DASHBOARD_HEADER_FOOTER_ROWS;
+        let jump_height = usize::max(1, num_rows / 2);
+        let i = match self.state.selected() {
+            Some(i) => usize::max(offset, i.saturating_sub(jump_height)),
             None => offset,
         };
         self.state.select(Some(i));
