@@ -230,3 +230,30 @@ pub struct IsBlockCanonicalRequest {
 pub struct IsBlockCanonicalResponse {
     pub canonical: bool,
 }
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUtxoDigestRequest {
+    pub leaf_index: u64,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUtxoDigestResponse {
+    pub digest: Option<Digest>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct FindUtxoOriginRequest {
+    pub addition_record: RpcAdditionRecord,
+
+    #[serde(default)]
+    pub search_depth: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindUtxoOriginResponse {
+    pub block: Option<Digest>,
+}

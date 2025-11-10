@@ -558,6 +558,18 @@ pub struct Args {
         value_name = "NAMESPACES"
     )]
     pub rpc_modules: Vec<Namespace>,
+
+    /// Enable unsafe RPC methods over all transports (e.g., HTTP).
+    ///
+    /// WARNING: Enabling this exposes dangerous RPC behavior and should only be used in
+    /// isolated, controlled environments.
+    ///
+    /// This may result in:
+    /// - Denial of Service (DoS) by triggering heavy or expensive computations.
+    /// - Exposure of internal node state or metrics that could aid an attacker.
+    /// - Misconfigurations leading to unexpected or unsafe behavior.
+    #[clap(long)]
+    pub unsafe_rpc: bool,
 }
 
 impl Default for Args {

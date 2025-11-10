@@ -5,6 +5,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
+use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
@@ -186,4 +187,29 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: IsBlockCanonicalRequest,
     ) -> RpcResult<IsBlockCanonicalResponse>;
+
+    async fn get_utxo_digest(&self, leaf_index: u64) -> RpcResult<GetUtxoDigestResponse> {
+        self.get_utxo_digest_call(GetUtxoDigestRequest { leaf_index })
+            .await
+    }
+    async fn get_utxo_digest_call(
+        &self,
+        request: GetUtxoDigestRequest,
+    ) -> RpcResult<GetUtxoDigestResponse>;
+
+    async fn find_utxo_origin(
+        &self,
+        addition_record: RpcAdditionRecord,
+        search_depth: Option<u64>,
+    ) -> RpcResult<FindUtxoOriginResponse> {
+        self.find_utxo_origin_call(FindUtxoOriginRequest {
+            addition_record,
+            search_depth,
+        })
+        .await
+    }
+    async fn find_utxo_origin_call(
+        &self,
+        request: FindUtxoOriginRequest,
+    ) -> RpcResult<FindUtxoOriginResponse>;
 }

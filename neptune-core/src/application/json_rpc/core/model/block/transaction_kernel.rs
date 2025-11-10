@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
+use crate::api::export::AdditionRecord;
 use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
@@ -47,11 +48,28 @@ impl From<RemovalRecord> for RpcRemovalRecord {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct RpcAdditionRecord(pub Digest);
+
+impl From<AdditionRecord> for RpcAdditionRecord {
+    fn from(record: AdditionRecord) -> Self {
+        Self(record.canonical_commitment)
+    }
+}
+
+impl From<RpcAdditionRecord> for AdditionRecord {
+    fn from(record: RpcAdditionRecord) -> Self {
+        Self {
+            canonical_commitment: record.0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcTransactionKernel {
     pub inputs: Vec<RpcRemovalRecord>,
-    pub outputs: Vec<Digest>,
+    pub outputs: Vec<RpcAdditionRecord>,
     pub announcements: Vec<RpcBFieldElements>,
     pub fee: RpcNativeCurrencyAmount,
     pub coinbase: Option<RpcNativeCurrencyAmount>,
@@ -77,11 +95,7 @@ impl From<&TransactionKernel> for RpcTransactionKernel {
     fn from(kernel: &TransactionKernel) -> Self {
         Self {
             inputs: kernel.inputs.clone().into_iter().map(Into::into).collect(),
-            outputs: kernel
-                .outputs
-                .iter()
-                .map(|r| r.canonical_commitment)
-                .collect(),
+            outputs: kernel.outputs.iter().copied().map(Into::into).collect(),
             announcements: kernel
                 .announcements
                 .iter()

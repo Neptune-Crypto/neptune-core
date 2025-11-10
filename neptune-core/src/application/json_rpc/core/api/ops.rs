@@ -89,6 +89,12 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Archival)]
     IsBlockCanonical,
+
+    #[namespace(Namespace::Archival)]
+    GetUtxoDigest,
+
+    #[namespace(Namespace::Archival)]
+    FindUtxoOrigin,
 }
 
 #[cfg(test)]
