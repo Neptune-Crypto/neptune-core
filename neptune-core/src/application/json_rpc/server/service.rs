@@ -335,7 +335,7 @@ impl RpcApi for RpcServer {
             .await;
 
         Ok(FindUtxoOriginResponse {
-            origin_block: block.map(|block| block.hash()),
+            block: block.map(|block| block.hash()),
         })
     }
 }
@@ -423,9 +423,8 @@ pub mod tests {
 
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn get_block_calls_are_consistent(
-        #[strategy(0usize..8)] _num_outputs: usize,
         #[strategy(0usize..8)] _num_announcements: usize,
-        #[strategy(txkernel::with_lengths(0, #_num_outputs, #_num_announcements, true))]
+        #[strategy(txkernel::with_lengths(0, 2, #_num_announcements, true))]
     tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
@@ -558,5 +557,66 @@ pub mod tests {
             !is_fake_canonical,
             "Non-existent block should not be canonical"
         );
+    }
+
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
+    async fn utxo_calls_are_consistent(
+        #[strategy(0usize..8)] _num_outputs: usize,
+        #[strategy(txkernel::with_lengths(0usize, #_num_outputs, 0usize, true))]
+        transaction_kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+    ) {
+        let mut rpc_server = test_rpc_server().await;
+
+        // Before new block check size of aocl leaves so we can know exact index of new outputs
+        let aocl_leaves = rpc_server
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .num_leafs()
+            .await;
+
+        let transaction = Transaction {
+            kernel: transaction_kernel,
+            proof: TransactionProof::invalid(),
+        };
+        let block = invalid_block_with_transaction(&Block::genesis(Network::Main), transaction);
+        rpc_server.state.set_new_tip(block.clone()).await.unwrap();
+
+        for (i, output) in block.body().transaction_kernel().outputs.iter().enumerate() {
+            let utxo_index = aocl_leaves + i as u64;
+            let digest_entry = rpc_server
+                .get_utxo_digest(utxo_index)
+                .await
+                .expect("failed to get utxo digest");
+
+            let digest = digest_entry.digest.expect("missing digest for utxo output");
+
+            assert_eq!(
+                output.canonical_commitment, digest,
+                "canonical commitment mismatch for utxo at index {utxo_index}"
+            );
+
+            // Check origin of UTXO
+            let origin_response = rpc_server
+                .find_utxo_origin(output.into(), None)
+                .await
+                .expect("find_utxo_origin RPC failed");
+
+            let origin_block = origin_response.block;
+            assert!(
+                origin_block.is_some(),
+                "expected origin block for utxo {utxo_index}"
+            );
+            assert_eq!(
+                origin_block.unwrap(),
+                block.hash(),
+                "origin block mismatch for utxo {utxo_index}"
+            );
+        }
     }
 }

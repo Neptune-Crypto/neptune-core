@@ -255,5 +255,5 @@ pub struct FindUtxoOriginRequest {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FindUtxoOriginResponse {
-    pub origin_block: Option<Digest>,
+    pub block: Option<Digest>,
 }
