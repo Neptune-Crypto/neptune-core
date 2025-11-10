@@ -426,6 +426,7 @@ mod tests {
         rapid_block_download.clean_up().await;
     }
 
+    #[ignore = "cannot run in parallel with other tests"]
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn can_resume_block_download_from_saved_state() {

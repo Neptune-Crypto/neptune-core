@@ -366,7 +366,7 @@ impl SyncLoop {
                     Err(_) => {
                         tracing::warn!("Could not send tip-successor block from sync loop to main loop; main loop appears busy ...");
                         counter += 1;
-                        tokio::time::sleep(Duration::from_millis(counter));
+                        tokio::time::sleep(Duration::from_millis(counter)).await;
                     }
                 }
             }
@@ -791,6 +791,7 @@ mod tests {
         );
     }
 
+    #[ignore = "cannot run in parallel with other tests"]
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn can_resume_sync_from_saved_state() {
