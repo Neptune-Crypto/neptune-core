@@ -868,7 +868,7 @@ impl SyncChallengeResponse {
                     (stop_height - start_height)
                         .try_into()
                         .expect("difference of block heights guaranteed to be non-negative"),
-                    network.target_block_interval(),
+                    network.target_block_interval(own_tip_height),  // todo hduoc: check
                     network.minimum_block_time(),
                 );
                 // cpow must increase for each block, and is upward-bounded. But
@@ -935,7 +935,7 @@ impl SyncChallengeResponse {
                     start.1,
                     start.2,
                     (stop.0 - start.0).try_into().unwrap(),
-                    network.target_block_interval(),
+                    network.target_block_interval(own_tip_height), // todo hduoc: check
                     network.minimum_block_time(),
                 );
                 debug!(

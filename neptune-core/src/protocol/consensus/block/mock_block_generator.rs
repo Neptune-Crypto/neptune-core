@@ -40,12 +40,13 @@ impl MockBlockGenerator {
         network: Network,
     ) -> Block {
         let timestamp = block_tx.kernel.timestamp;
+        let height = predecessor.header().height; // todo hduoc: check
 
         let primitive_witness = BlockPrimitiveWitness::new(predecessor, block_tx, network);
 
         let body = primitive_witness.body().to_owned();
         let mut header =
-            primitive_witness.header(timestamp, Network::RegTest.target_block_interval());
+            primitive_witness.header(timestamp, Network::RegTest.target_block_interval(height));
         header.guesser_receiver_data.receiver_digest = guesser_address.privacy_digest();
         header.guesser_receiver_data.lock_script_hash = guesser_address.lock_script_hash();
 

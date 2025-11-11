@@ -196,7 +196,7 @@ fn guess_worker(
     // max interval, defined by the network.  It never occurs for
     // mainnet.
     let should_reset_difficulty =
-        Block::should_reset_difficulty(network, now, previous_block_header.timestamp);
+        Block::should_reset_difficulty(network, now, previous_block_header.timestamp, previous_block_header.height); // todo hduoc: check this
     let new_difficulty = if should_reset_difficulty {
         let new_difficulty = network.genesis_difficulty();
         info!(
@@ -207,7 +207,7 @@ fn guess_worker(
         new_difficulty
     } else {
         let target_block_interval =
-            override_target_block_interval.unwrap_or(network.target_block_interval());
+            override_target_block_interval.unwrap_or(network.target_block_interval(previous_block_header.height));  // todo hduoc: check this
         difficulty_control(
             now,
             previous_block_header.timestamp,
@@ -1921,10 +1921,10 @@ pub(crate) mod tests {
         // It's crucial that the hash rate is independent of the size of the
         // block, since miners are otherwise heavily incentivized to mine small
         // or empty blocks.
-        let hash_rate_empty_tx = estimate_own_hash_rate(network.target_block_interval(), 0).await;
+        let hash_rate_empty_tx = estimate_own_hash_rate(network.target_block_interval(BlockHeight::genesis()), 0).await;
         println!("hash_rate_empty_tx: {hash_rate_empty_tx}");
 
-        let hash_rate_big_tx = estimate_own_hash_rate(network.target_block_interval(), 10000).await;
+        let hash_rate_big_tx = estimate_own_hash_rate(network.target_block_interval(BlockHeight::genesis()), 10000).await;
         println!("hash_rate_big_tx: {hash_rate_big_tx}");
 
         assert!(
@@ -2446,7 +2446,7 @@ pub(crate) mod tests {
 
             // height 1 resets because interval since genesis block is large.
             // 5,10,15 we choose arbitrarily.
-            let reset_interval = network.difficulty_reset_interval().unwrap();
+            let reset_interval = network.difficulty_reset_interval(BlockHeight::new((i as u64).into())).unwrap();
             let (block_interval, should_reset) = if [1, 5, 10, 15].contains(&i) {
                 (reset_interval, true)
             } else {

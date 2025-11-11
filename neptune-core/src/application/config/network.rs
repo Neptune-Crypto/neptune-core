@@ -5,8 +5,9 @@ use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-
+use crate::api::export::BlockHeight;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 #[derive(
@@ -75,9 +76,9 @@ impl Network {
     ///
     /// - testnet, testnet-mock: Some(19.6 minutes)
     /// - mainnet, others: None
-    pub fn difficulty_reset_interval(&self) -> Option<Timestamp> {
+    pub fn difficulty_reset_interval(&self, block_height: BlockHeight) -> Option<Timestamp> {
         match *self {
-            Self::TestnetMock => Some(self.target_block_interval() * 2),
+            Self::TestnetMock => Some(self.target_block_interval(block_height) * 2),
             _ => None,
         }
     }
@@ -119,10 +120,21 @@ impl Network {
     ///
     /// - for regtest: 100 milliseconds.
     /// - for mainnet and others: 300000 milliseconds equals 5 minutes.
-    pub fn target_block_interval(&self) -> Timestamp {
-        match *self {
-            Self::RegTest => Timestamp::millis(100),
-            Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(300000),
+    pub fn target_block_interval(&self, block_height: BlockHeight) -> Timestamp {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(*self, block_height);
+        match consensus_rule_set {
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                match *self {
+                    Self::RegTest => Timestamp::millis(100),
+                    Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(588000),
+                }
+            }
+            ConsensusRuleSet::HardforkBeta => {
+                match *self {
+                    Self::RegTest => Timestamp::millis(100),
+                    Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(300000),
+                }
+            }
         }
     }
 

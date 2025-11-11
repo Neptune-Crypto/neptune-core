@@ -43,7 +43,7 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 // PartialEq should be derived manually to ignore maybe_body.
 #[derive(Clone, Debug)]
 pub(crate) struct BlockPrimitiveWitness {
-    pub(super) predecessor_block: Block,
+    pub(crate) predecessor_block: Block,
 
     transaction: BlockTransaction,
 
@@ -386,7 +386,7 @@ pub(crate) mod tests {
                                             predecessor_block.header().height.next(),
                                         );
                                         let timestamp = predecessor_block.header().timestamp
-                                            + network.target_block_interval();
+                                            + network.target_block_interval(predecessor_block.header().height);
 
                                         let miner_fee_records = predecessor_block
                                             .guesser_fee_addition_records()

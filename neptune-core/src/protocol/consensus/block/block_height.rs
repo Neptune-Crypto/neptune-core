@@ -41,9 +41,9 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct BlockHeight(BFieldElement);
 
-// Assuming a block time of 588 seconds, and a halving every three years,
-// the number of blocks per halving cycle is 160815.
-pub const BLOCKS_PER_GENERATION: u64 = 160815;
+// Assuming a block time of 300 seconds, and a halving every three years,
+// the number of blocks per halving cycle is 315198.
+pub const BLOCKS_PER_GENERATION_BEFORE_BETA: u64 = 315198;
 pub const NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT: u64 = 21310;
 
 impl BlockHeight {
@@ -58,10 +58,11 @@ impl BlockHeight {
     }
 
     pub fn get_generation(&self) -> u64 {
+        // todo hduoc: change this
         self.0
             .value()
             .saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT)
-            / BLOCKS_PER_GENERATION
+            / BLOCKS_PER_GENERATION_BEFORE_BETA
     }
 
     pub fn next(&self) -> Self {
@@ -178,6 +179,7 @@ mod tests {
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::Network;
     use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
+    use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
@@ -193,7 +195,7 @@ mod tests {
     fn block_interval_times_generation_count_is_three_years() {
         let network = Network::Main;
         let calculated_halving_time =
-            network.target_block_interval() * (BLOCKS_PER_GENERATION as usize);
+            network.target_block_interval(BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET) * (BLOCKS_PER_GENERATION_BEFORE_BETA as usize);
         let calculated_halving_time = calculated_halving_time.to_millis();
         let three_years = Timestamp::years(3);
         let three_years = three_years.to_millis();
@@ -214,7 +216,7 @@ mod tests {
         let total_skipped_subsidies_generation_0 = generation_0_subsidy
             .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
         let mineable_amount = generation_0_subsidy
-            .scalar_mul(BLOCKS_PER_GENERATION as u32)
+            .scalar_mul(BLOCKS_PER_GENERATION_BEFORE_BETA as u32)
             .scalar_mul(2)
             .checked_sub(&generation_0_subsidy)
             .unwrap()

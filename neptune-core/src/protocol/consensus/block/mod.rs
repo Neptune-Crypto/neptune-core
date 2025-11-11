@@ -226,8 +226,12 @@ impl Block {
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         let network = proof_job_options.job_settings.network;
+
         let body = primitive_witness.body().to_owned();
-        let header = primitive_witness.header(timestamp, network.target_block_interval());
+        let header = primitive_witness.header(
+            timestamp,
+            network.target_block_interval(primitive_witness.predecessor_block.header().height),
+        );
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
@@ -752,6 +756,7 @@ impl Block {
             network,
             self.header().timestamp,
             previous_block.header().timestamp,
+            previous_block.header().height, // todo hduoc: check this
         ) {
             network.genesis_difficulty()
         } else {
@@ -759,8 +764,8 @@ impl Block {
                 self.header().timestamp,
                 previous_block.header().timestamp,
                 previous_block.header().difficulty,
-                network.target_block_interval(),
-                previous_block.header().height,
+                network.target_block_interval(previous_block.header().height),
+                previous_block.header().height, // todo hduoc: check this
             )
         };
 
@@ -904,8 +909,9 @@ impl Block {
         network: Network,
         current_block_timestamp: Timestamp,
         previous_block_timestamp: Timestamp,
+        block_height: BlockHeight,
     ) -> bool {
-        let Some(reset_interval) = network.difficulty_reset_interval() else {
+        let Some(reset_interval) = network.difficulty_reset_interval(block_height) else {
             return false;
         };
         let elapsed_interval = current_block_timestamp - previous_block_timestamp;
@@ -926,6 +932,7 @@ impl Block {
             network,
             self.header().timestamp,
             previous_block_header.timestamp,
+            self.header().height,
         ) && self.header().difficulty == network.genesis_difficulty()
         {
             return true;
@@ -1194,8 +1201,8 @@ pub(crate) mod tests {
         ) -> Block {
             let primitive_witness =
                 BlockPrimitiveWitness::new(predecessor.to_owned(), block_transaction, network);
-            let target_block_interval =
-                override_target_block_interval.unwrap_or(network.target_block_interval());
+            let target_block_interval = override_target_block_interval
+                .unwrap_or(network.target_block_interval(predecessor.header().height));
             Self::block_template_invalid_proof_from_witness(
                 primitive_witness,
                 block_timestamp,
@@ -1451,7 +1458,8 @@ pub(crate) mod tests {
                 BlockPrimitiveWitness::new(genesis.clone(), coinbase_transaction, network);
             let block_proof_witness = BlockProofWitness::produce(block_primitive_witness.clone());
             let block1 = Block::new(
-                block_primitive_witness.header(now, network.target_block_interval()),
+                block_primitive_witness
+                    .header(now, network.target_block_interval(BlockHeight::default())),
                 block_primitive_witness.body().to_owned(),
                 block_proof_witness.appendix(),
                 BlockProof::Invalid,
@@ -1524,7 +1532,7 @@ pub(crate) mod tests {
                     block.kernel.header.timestamp,
                     block_prev.header().timestamp,
                     block_prev.header().difficulty,
-                    network.target_block_interval(),
+                    network.target_block_interval(block.header().height),
                     block_prev.header().height,
                 );
                 assert_eq!(block.kernel.header.difficulty, control);
@@ -2014,7 +2022,6 @@ pub(crate) mod tests {
     /// All operations that create or modify a Block should
     /// have a test here.
     mod digest_encapsulation {
-
         use super::*;
         use crate::api::export::NeptuneProof;
 
@@ -2064,7 +2071,7 @@ pub(crate) mod tests {
         #[test]
         fn set_header_pow() {
             let gblock = Block::genesis(Network::RegTest);
-            let mut rng = rand::rng();
+            let mut rng = rng();
 
             let mut new_block = gblock.clone();
             new_block.set_header_pow(rng.random());
@@ -2075,7 +2082,7 @@ pub(crate) mod tests {
         #[test]
         fn set_block() {
             let gblock = Block::genesis(Network::RegTest);
-            let mut rng = rand::rng();
+            let mut rng = rng();
 
             let mut unique_block = gblock.clone();
             unique_block.set_header_pow(rng.random());
@@ -2126,7 +2133,7 @@ pub(crate) mod tests {
             // records are consistent.
 
             let network = Network::Main;
-            let mut rng = rand::rng();
+            let mut rng = rng();
             let genesis_block = Block::genesis(network);
             let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
             let guesser_address = GenerationReceivingAddress::derive_from_seed(rng.random());
@@ -2179,7 +2186,7 @@ pub(crate) mod tests {
 
             let mut block = invalid_block_with_transaction(&genesis_block, transaction);
 
-            let guesser_key = GenerationSpendingKey::derive_from_seed(rand::rng().random());
+            let guesser_key = GenerationSpendingKey::derive_from_seed(rng().random());
             let guesser_address = guesser_key.to_address();
             block.set_header_guesser_address(guesser_address.into());
 
@@ -2201,7 +2208,7 @@ pub(crate) mod tests {
             // This test must live in block/mod.rs because it relies on access to
             // private fields on `BlockBody`.
 
-            let mut rng = rand::rng();
+            let mut rng = rng();
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
             assert!(
@@ -2345,7 +2352,8 @@ pub(crate) mod tests {
         let launch_date = network.launch_date();
         let mut now = launch_date + Timestamp::months(6);
         for i in 1..3 {
-            now += network.target_block_interval();
+            let block_height = blocks.last().unwrap().header().height;
+            now += network.target_block_interval(block_height);
 
             // create coinbase transaction
             let (transaction, _) = make_coinbase_transaction_from_state(
@@ -2358,7 +2366,6 @@ pub(crate) mod tests {
             .unwrap();
             let mut transaction = BlockOrRegularTransaction::from(transaction);
 
-            let block_height = blocks.last().unwrap().header().height;
             let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
 
             // for all own UTXOs, spend to self
