@@ -118,11 +118,11 @@ impl Network {
     /// desired/average time between blocks.
     ///
     /// - for regtest: 100 milliseconds.
-    /// - for mainnet and others: 588000 milliseconds equals 9.8 minutes.
+    /// - for mainnet and others: 300000 milliseconds equals 5 minutes.
     pub fn target_block_interval(&self) -> Timestamp {
         match *self {
             Self::RegTest => Timestamp::millis(100),
-            Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(588000),
+            Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(300000),
         }
     }
 
