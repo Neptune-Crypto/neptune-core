@@ -13,7 +13,7 @@ then
 fi
 
 
-NETWORK="testnet"
+NETWORK="testnet-mock"
 NIGHTLY=""
 RELEASE=""
 FEATURES=""

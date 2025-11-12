@@ -7,7 +7,7 @@ The *block header* has constant size and consists of:
  - `height` the block height represented as a `BFieldElement`
  - `prev_block_digest` the hash of the block's predecessor
  - `timestamp` when the block was found
- - `nonce` randomness for proof-of-work
+ - `pow` the [proof-of-work data](mining)
  - `cumulative_proof_of_work` approximate number of hashes computed in the block's entire lineage
  - `difficulty` approximate number of hashes required to find a block
  - `guesser_digest` the lock prevents any but the guesser from spending guesser fees.
@@ -24,7 +24,7 @@ Besides the kernel, blocks also contain proofs. The block proof is a STARK proof
 
 ## Validity
 
-**Note:** this section describes the validity rules for blocks at some future point when we have succinctness, not the current validity rules (although there is a significant overlap).
+**Note:** this section describes two distinct things. First is the validity rules for blocks currently in effect on the network. Second is the validity rules as they are intended to be after some consensus rule change, for instance the one that introduces [succinctness](succinctness.md).
 
 A block is *valid* if (any of):
  - ***a)*** it is the genesis block
@@ -37,23 +37,41 @@ The genesis block is hardcoded in the source code, see `genesis_block` in `block
 
 ### B: Incremental Validity
 
-A block is incrementally valid if (all of):
- - ***a)*** the transaction is valid
- - ***b)*** the transaction's coinbase conforms with the block subsidy schedule
- - ***c)*** all the inputs in the transaction either live in the lock-free UTXO MMR or have at least one index that is absent from the mutator set SWBF
- - ***d)*** the `mutator_set_accumulator` results from applying all removal records and then all addition records to the previous block's `mutator_set_accumulator`
- - ***e)*** the `block_mmr_accumulator` results from appending the previous block's hash to the previous block's `block_mmr_accumulator`
- - ***f)*** there is an ancestor block `luca` of the current block such that for each uncle block `uncle`
-   - `uncle` is valid
-   - `luca` is an ancestor of `uncle`
-   - neither `luca` nor any of the blocks between `luca` and the current block list `uncle` as an uncle block
- - ***g)*** the `version` matches that of its predecessor or is member of a predefined list of exceptions
- - ***h)*** the `height` is one greater than that of its predecessor
- - ***i)*** the `timestamp` is greater than that of its predecssor
- - ***j)*** the network statistics trackers are updated correctly
- - ***k)*** the variable network parameters are updated correctly.
+The term "incremental validity" reflects the relativity of the predicate: a block can only be incrementally valid *relative to* a predecessor block that is assumed to be valid.
+
+A block is incrementally valid, relative to a predecessor block, iff (all of):
+
+ 0. The block's relation to its predecessor is correct, specifically (all of):
+     - a) The block height is that of its predecessor plus one.
+     - b) The `prev_block_digest` of the header equals the hash of the given predecessor block.
+     - c) The `prev_block_digest` is the most recently accumulated element in the `block_mmr_accumulator`.
+     - d) The block timestamp must be later than that of the predecessor plus the minimum block time. The minimum block time is set to 60 seconds.
+     - e) The target difficulty was updated in accordance with the <span style="color:red">difficulty control algorithm</span>.
+     - f) The current block's cumulative proof-of-work number equals that of the predecessor plus the predecessor's difficulty.
+     - g) The block timestamp is not set further in the future, relative to the host machine's clock, than the futuredating limit, which is 5 minutes.
+ 1. The block's stand-alone non-transaction data is correct, specifically (all of):
+     - a) The block appendix contains the expected claims. At present, the list of expected claims contains only one item: the claim that the block's transaction is valid.
+     - b) The block appendix does not contain too many claims. The limit is 500.
+     - c) The block proof is of the right type, namely `SingleProof`. (This variant lives on `BlockProof` and is distinct from the like-named variant living on `TransactionProof`.) The alternatives are `Genesis` and `Invalid`.
+     - d) The proof passes Triton VM verification. The input for the claim is the block mast hash; the output is the (concatenation of) hashes of claims in the appendix; and the program is the `BlockProgram`. The `BlockProgram` merely proves the integral verification of all claims in the appendix.
+     - e) The block does not exceed the maximum size, which is set to 1'000'000 `BFieldElement`s, or 8 MB.
+ 2. The block's transaction is correct, specifically (all of):
+     - a) The removal records can be *unpacked*. Phrased differently, failure to unpack the removal records results in a format error.
+     - b) All removal records must be *removable* from the mutator set as it was after the predecessor block.
+     - c) The absolute index sets of all removal records must be unique.
+     - d) The transaction, along with the block's guesser fee addition records, gives rise to a valid mutator set update. This step can fail, for instance, if the transaction fee is negative.
+     - e) This mutator set update can be applied to the mutator set as it was after the previous block.
+     - f) The transaction timestamp does not exceed the block timestamp.
+     - g) The coinbase amount does not exceed the [block subsidy](mining) for this height.
+     - h) The coinbase amoune is not negative.
+     - i) The fee must not be negative.
+     - j) The number of inputs is not too large. The limit is set to 16384.
+     - k) The number of outputs is not too large. The limit is set to 16384.
+     - l) The number of announcements is not too large. The limit is set to 16384.
 
 ### C: Mmr Membership
+
+**Note:** This section describes an intended future rule for block validity. It is not currently supported.
 
 A block is valid if it lives in the `block_mmr_accumulator` of a valid block. This feature ensures several things.
  1. It is possible to prove that one block is an ancestor of another.
@@ -65,8 +83,8 @@ A block is valid if it lives in the `block_mmr_accumulator` of a valid block. Th
 
 A block is *confirmable* if (all of):
  - ***a)*** it is valid
- - ***b)*** its timestamp is less than 5 minutes into the future
- - ***c)*** its size is less than the `MAX_BLOCK_SIZE` in `BFieldElement`s
+ - ***b)*** its timestamp is less than the futuredating limit (5 minutes) into the future
+ - ***c)*** its size is less than the `MAX_BLOCK_SIZE` (1'000'000) in `BFieldElement`s
  - ***d)*** its hash is less than the previous block's `target_difficulty`.
 
 Confirmability is not something that can be proven. It must be checked explicitly by the node upon receiving the block.

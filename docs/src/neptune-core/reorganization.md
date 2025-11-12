@@ -1,15 +1,10 @@
 # Reorganization
 
-Neptune is a blockchain which features recursive STARK proofs as part of its
-consensus mechanism. This implies that participants can synchronize trustlessly
-by simply downloading the latest block and verifying this. Unlike most other
-blockchains, it is not necessary to download all historical blocks to get a
-cryptographically verified view of the state of the blockchain.
+## Archival versus Succinct
 
-It is possible, though, to run an archival node that downloads all historical
-blocks. This archival node comes with additional functionality such as being
-able to reconstruct transaction's membership proofs, provide some historical
-transaction statistics, and allow other archival nodes to synchronize.
+By default, `neptune-core` implements an *archival node*, which is one that stores all historical blocks as well as an archival mutator set and an archival block MMR. Besides *storing* historical data, the archival node supports additional functionalities such as being able to reconstruct transaction membership proofs, provide historical statistics, and enabling other (archival) nodes to synchronize.
+
+In the future we intend to achieve [*succinctness*](../consensus/succinctness.md) through *recursive block validation*. At this point, users can synchronize trustlessly simply by downloading the latest block and verifying it. Storing historical data will be optional.
 
 This document provides an overview of how different parts of the client's state
 handle reorganizations.

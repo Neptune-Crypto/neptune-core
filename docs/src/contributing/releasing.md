@@ -166,14 +166,15 @@ Edit them until you are happy, then push the tag(s) to GitHub.
  - To show tags: `git tag --list`
  - To push a tag: `git push origin [tag_name]`
 
-### Set Branch `release`
+### Set Tag `release`
 
-By convention, branch `release` should always point to the latest stable commit compatible with the latest release.
+By convention, tag `release` should always point to the latest stable commit compatible with the latest release.
 
 ```sh
-git checkout release
-git reset --hard master
-git push --force-with-lease
+git tag -d release
+git tag release
+git push --delete origin release
+git push origin release
 ```
 
 ### Check Release Artifacts & Page

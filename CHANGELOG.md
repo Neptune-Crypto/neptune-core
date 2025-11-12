@@ -1,4 +1,448 @@
 
+## [0.5.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.4.0..v0.5.0) - 2025-10-31
+
+### 🔱 Fork
+- (!) Change PoW algorithm to make proposal-switching free, from block height 15.000 ([85e6799c](https://github.com/Neptune-Crypto/neptune-core/commit/85e6799c))
+
+### ✨ Features
+
+- Add `block-notify` CLI flag option ([79bf1883](https://github.com/Neptune-Crypto/neptune-core/commit/79bf1883))
+- Allow ignoring foreign block proposals ([e7c1cee1](https://github.com/Neptune-Crypto/neptune-core/commit/e7c1cee1))
+- Never overwrite own block proposal ([204dab7e](https://github.com/Neptune-Crypto/neptune-core/commit/204dab7e))
+- *(rpc_server)* Allow overriding the default coinbase distribution ([87649308](https://github.com/Neptune-Crypto/neptune-core/commit/87649308))
+- *(mutator_set)* Privacy-preserving membership recovery ([a384f655](https://github.com/Neptune-Crypto/neptune-core/commit/a384f655))
+- *(dashboard)* Add UTXOs screen ([404d70ee](https://github.com/Neptune-Crypto/neptune-core/commit/404d70ee))
+- *(RPC)* Add endpoint `list-utxos` ([ea1d3921](https://github.com/Neptune-Crypto/neptune-core/commit/ea1d3921))
+- *(peer_loop)* Avoid local IPs in peer discovery ([620d86b0](https://github.com/Neptune-Crypto/neptune-core/commit/620d86b0))
+- *(rpc_server)* Add endpoint to return latest address ([489853b6](https://github.com/Neptune-Crypto/neptune-core/commit/489853b6))
+- Refuse connection on bad timestamp ([bc59aee1](https://github.com/Neptune-Crypto/neptune-core/commit/bc59aee1))
+- HTTP-JSON RPC framework ([b5eb3f4d](https://github.com/Neptune-Crypto/neptune-core/commit/b5eb3f4d))
+- *(json_rpc)* Use hex separately on BFEs and add more tests ([342e4a58](https://github.com/Neptune-Crypto/neptune-core/commit/342e4a58))
+- (!) Simplify block_selector ([0582128c](https://github.com/Neptune-Crypto/neptune-core/commit/0582128c))
+- *(cli_args)* Add min relay per input for pc-backed txs ([65a935c1](https://github.com/Neptune-Crypto/neptune-core/commit/65a935c1))
+
+### 🐛 Bug Fixes
+
+- *(dashboard)* Correct sign error in mempool transactions ([2f8d3dc6](https://github.com/Neptune-Crypto/neptune-core/commit/2f8d3dc6))
+- Ensure block data written before db ([#703](https://github.com/Neptune-Crypto/neptune-core/issues/703)) ([85f62003](https://github.com/Neptune-Crypto/neptune-core/commit/85f62003))
+- *(mutator_set)* Undo destruction of AMS' batch_remove ([7e4b0813](https://github.com/Neptune-Crypto/neptune-core/commit/7e4b0813))
+- *(Mempool)* Cover edge case for initiating Update ([91b9a3d6](https://github.com/Neptune-Crypto/neptune-core/commit/91b9a3d6))
+- *(dashboard)* Don't bump key index when opening dashboard ([9c351360](https://github.com/Neptune-Crypto/neptune-core/commit/9c351360))
+
+### 🚀 Performance
+
+- *(archival_mutator_set)* Use batch-removal method to update archival mutator set ([105969b6](https://github.com/Neptune-Crypto/neptune-core/commit/105969b6))
+
+### 📚 Documentation
+
+- Update release protocol ([1dc5d787](https://github.com/Neptune-Crypto/neptune-core/commit/1dc5d787))
+- Fix links ([688a4db4](https://github.com/Neptune-Crypto/neptune-core/commit/688a4db4))
+- Fix links ([478ae60e](https://github.com/Neptune-Crypto/neptune-core/commit/478ae60e))
+- *(rpc_server)* Add motivation for `generate_tx_details` endpoint ([f7759d78](https://github.com/Neptune-Crypto/neptune-core/commit/f7759d78))
+- Add docstring explaining function signature ([a8d999c1](https://github.com/Neptune-Crypto/neptune-core/commit/a8d999c1))
+- Update install instructions for the CLI ([e6cf54ff](https://github.com/Neptune-Crypto/neptune-core/commit/e6cf54ff))
+- *(cli_args)* Fix wrong documentation of `block_notify` CLI flag ([60bf5899](https://github.com/Neptune-Crypto/neptune-core/commit/60bf5899))
+
+### ♻️ Refactor
+
+- *(dashboard)* Simplify mempool screen ([27f8b236](https://github.com/Neptune-Crypto/neptune-core/commit/27f8b236))
+- *(peer_loop)* Reduce block batch size ([7e7091ba](https://github.com/Neptune-Crypto/neptune-core/commit/7e7091ba))
+- *(`GuesserBuffer`)* Exfiltrate field `mast_auth_paths` ([84103015](https://github.com/Neptune-Crypto/neptune-core/commit/84103015))
+- *(mine_loop)* Allow mining without peers if not on main net ([0b073146](https://github.com/Neptune-Crypto/neptune-core/commit/0b073146))
+
+### ✅ Testing
+
+- Verify that custom coinbase distribution is caught by wallet ([38ab4fa3](https://github.com/Neptune-Crypto/neptune-core/commit/38ab4fa3))
+- *(dashboard)* Mock RPC interface from dashboard ([3f1c4e5b](https://github.com/Neptune-Crypto/neptune-core/commit/3f1c4e5b))
+- *(native_currency)* Snippet used in total amount calculation ([7f68176b](https://github.com/Neptune-Crypto/neptune-core/commit/7f68176b))
+- Reduce timeout of proof fetching from server ([85c3cf21](https://github.com/Neptune-Crypto/neptune-core/commit/85c3cf21))
+- Verify node can handle hardfork-alpha transition ([3b7164f6](https://github.com/Neptune-Crypto/neptune-core/commit/3b7164f6))
+- *(peer_loop)* Add hardfork-alpha test to peer_loop ([d13dba57](https://github.com/Neptune-Crypto/neptune-core/commit/d13dba57))
+- Ensure main loop does not do verification ([63e35dc7](https://github.com/Neptune-Crypto/neptune-core/commit/63e35dc7))
+- Verify bitreverse algorithm ([90662142](https://github.com/Neptune-Crypto/neptune-core/commit/90662142))
+- *(peer_loop)* Harden harfork-alpha-related test ([cb8cbe9d](https://github.com/Neptune-Crypto/neptune-core/commit/cb8cbe9d))
+- *(peer_loop)* Add two negative pow-related tests ([591520a1](https://github.com/Neptune-Crypto/neptune-core/commit/591520a1))
+- *(pow)* Make pow-solver for tests deterministic ([33f473c7](https://github.com/Neptune-Crypto/neptune-core/commit/33f473c7))
+- Verify that transactions work on HF-a rule set ([02c6a6d4](https://github.com/Neptune-Crypto/neptune-core/commit/02c6a6d4))
+- Verify sanity of `relay_transaction` check ([e195382a](https://github.com/Neptune-Crypto/neptune-core/commit/e195382a))
+
+### 🎨 Styling
+
+- Delete a few redundant `From` implementations ([fb6e4ec1](https://github.com/Neptune-Crypto/neptune-core/commit/fb6e4ec1))
+
+### ⚙️ Miscellaneous
+
+- Add script to graph difficulties ([c401db32](https://github.com/Neptune-Crypto/neptune-core/commit/c401db32))
+- Restructure directories related to benchmarks (1/2) ([a3ba7758](https://github.com/Neptune-Crypto/neptune-core/commit/a3ba7758))
+- Move directory `models/state/` out one level ([6d465773](https://github.com/Neptune-Crypto/neptune-core/commit/6d465773))
+- Move `config_models/` to `application/config/` ([e8ac131d](https://github.com/Neptune-Crypto/neptune-core/commit/e8ac131d))
+- Move `database/` to `application/database/` ([41cc1397](https://github.com/Neptune-Crypto/neptune-core/commit/41cc1397))
+- Move `job_queue/` to `application/job_queue/` ([d9b38edf](https://github.com/Neptune-Crypto/neptune-core/commit/d9b38edf))
+- Move `locks/` to `application/locks/` ([cb170028](https://github.com/Neptune-Crypto/neptune-core/commit/cb170028))
+- Create directory `application/control/` ([01a86542](https://github.com/Neptune-Crypto/neptune-core/commit/01a86542))
+- Move RPC-related files to `application/rpc/` ([73adf2cd](https://github.com/Neptune-Crypto/neptune-core/commit/73adf2cd))
+- Move files related to mining state to `state/mining/` ([4c92d610](https://github.com/Neptune-Crypto/neptune-core/commit/4c92d610))
+- Create directory `state/transaction/` ([b2cce022](https://github.com/Neptune-Crypto/neptune-core/commit/b2cce022))
+- Rename directory `application/control/` to `application/loops/` ([14769d80](https://github.com/Neptune-Crypto/neptune-core/commit/14769d80))
+- Rename `models/` to `protocol/` and `blockchain/` to `consensus/` ([d4c6f94e](https://github.com/Neptune-Crypto/neptune-core/commit/d4c6f94e))
+- Kill type alias for `Tip5` ([85448e07](https://github.com/Neptune-Crypto/neptune-core/commit/85448e07))
+- Move `database.rs` to `state/` ([1510ef6a](https://github.com/Neptune-Crypto/neptune-core/commit/1510ef6a))
+- Move `channel.rs` to `application/loops/` ([ee7fce2e](https://github.com/Neptune-Crypto/neptune-core/commit/ee7fce2e))
+- Git-ignore developer-specific config file ([c217991e](https://github.com/Neptune-Crypto/neptune-core/commit/c217991e))
+- Make `was_guessed_by` pub ([b3f5c2ad](https://github.com/Neptune-Crypto/neptune-core/commit/b3f5c2ad))
+- Fix cmake version problem ([f3ede9e0](https://github.com/Neptune-Crypto/neptune-core/commit/f3ede9e0))
+- Make const for premine size public ([c6b9a502](https://github.com/Neptune-Crypto/neptune-core/commit/c6b9a502))
+- Update `dist` version and settings ([57e56462](https://github.com/Neptune-Crypto/neptune-core/commit/57e56462))
+- Update release workflow files ([de14b622](https://github.com/Neptune-Crypto/neptune-core/commit/de14b622))
+
+### 🪵 Log
+
+- Log IP on malformed handshake ([f80e1a8a](https://github.com/Neptune-Crypto/neptune-core/commit/f80e1a8a))
+
+### 🚥 Developer Experience
+
+- Only depend on unstable tokio behind feature flags ([877b2c01](https://github.com/Neptune-Crypto/neptune-core/commit/877b2c01))
+- Faster compilation by lowering some `opt-level`s ([efac89bb](https://github.com/Neptune-Crypto/neptune-core/commit/efac89bb))
+- Add Makefile target for rustc incremental compiler bug ([25e307cd](https://github.com/Neptune-Crypto/neptune-core/commit/25e307cd))
+
+### Network-security
+
+- Don't allocate error on bad incoming connections ([567ce562](https://github.com/Neptune-Crypto/neptune-core/commit/567ce562))
+- Add timeout to handshake ([730b6498](https://github.com/Neptune-Crypto/neptune-core/commit/730b6498))
+- Add DOS protection against many incoming connections ([c0169711](https://github.com/Neptune-Crypto/neptune-core/commit/c0169711))
+- Check for banned peer before sending handshake ([aa3485c0](https://github.com/Neptune-Crypto/neptune-core/commit/aa3485c0))
+- Prevent infinite sync challenges ([b2f10e37](https://github.com/Neptune-Crypto/neptune-core/commit/b2f10e37))
+
+
+## [0.4.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.2.2..v0.4.0) - 2025-09-05
+
+### ✨ Features
+
+- *(mine)* Threshold value for guessing ([7e3c5909](https://github.com/Neptune-Crypto/neptune-core/commit/7e3c5909))
+- *(guessing)* Only switch proposals when reward delta meets threshold ([f341f159](https://github.com/Neptune-Crypto/neptune-core/commit/f341f159))
+- *(mine_loop)* Update tx if no synced in mempool ([ab781c2b](https://github.com/Neptune-Crypto/neptune-core/commit/ab781c2b))
+- Padded height specific tvm env vars ([bbe04bc1](https://github.com/Neptune-Crypto/neptune-core/commit/bbe04bc1))
+- *(rpc_server)* Add CLI command and endpoint for upgrading specified mempool-tx ([ebe4970f](https://github.com/Neptune-Crypto/neptune-core/commit/ebe4970f))
+- *(rpc_server)* Add command to list all tx-ids in mempool ([c6f0ea58](https://github.com/Neptune-Crypto/neptune-core/commit/c6f0ea58))
+- *(rpc_server)* Add endpoint for info about best block proposal ([d76fd76d](https://github.com/Neptune-Crypto/neptune-core/commit/d76fd76d))
+- *(rpc_server)* Add an endpoint for broadcasting block proposal ([ce95b746](https://github.com/Neptune-Crypto/neptune-core/commit/ce95b746))
+- *(mempool)* Add new mempool field for preserving merge-inputs ([2e2f649a](https://github.com/Neptune-Crypto/neptune-core/commit/2e2f649a))
+- *(API)* Build infrastructure for transparent transactions ([9185b9c2](https://github.com/Neptune-Crypto/neptune-core/commit/9185b9c2))
+- Add RPC endpoint for addition records with AOCL indices ([b89e7e69](https://github.com/Neptune-Crypto/neptune-core/commit/b89e7e69))
+- Initiate transparent transactions ([48ece4b2](https://github.com/Neptune-Crypto/neptune-core/commit/48ece4b2))
+- Add flag --restrict-peers-to-list ([185df933](https://github.com/Neptune-Crypto/neptune-core/commit/185df933))
+- *(cli_args)* Whitelist composer IPs ([2015f11b](https://github.com/Neptune-Crypto/neptune-core/commit/2015f11b))
+- *(rpc_server)* Allow pausing state updates ([4e12aee1](https://github.com/Neptune-Crypto/neptune-core/commit/4e12aee1))
+- Set tip to stored block ([9b33ee42](https://github.com/Neptune-Crypto/neptune-core/commit/9b33ee42))
+- *(rpc_server)* Allow full export of block/pow puzzle ([fedbb987](https://github.com/Neptune-Crypto/neptune-core/commit/fedbb987))
+- Add tx filter for proof upgrading ([406167f1](https://github.com/Neptune-Crypto/neptune-core/commit/406167f1))
+
+### 🐛 Bug Fixes
+
+- *(RegTest)* Allow pow mocking ([d91ecbe4](https://github.com/Neptune-Crypto/neptune-core/commit/d91ecbe4))
+- *(`mine_loop`)* Stop guessing task when aborted during preprocessing ([bdbb048a](https://github.com/Neptune-Crypto/neptune-core/commit/bdbb048a))
+- *(wallet)* Announced UTXOs are never guesser fees ([4c75d0d4](https://github.com/Neptune-Crypto/neptune-core/commit/4c75d0d4))
+- *(`Pow`)* Avoid out-of-bounds error when aborting preprocess ([672ec868](https://github.com/Neptune-Crypto/neptune-core/commit/672ec868))
+- *(mempool)* Never return empty tx for update job ([67cc78df](https://github.com/Neptune-Crypto/neptune-core/commit/67cc78df))
+- *(mempool)* Return removal event when insertion overwrites existing tx ([feb354ee](https://github.com/Neptune-Crypto/neptune-core/commit/feb354ee))
+- Pack removal records list in bechmark helper function ([4b3df100](https://github.com/Neptune-Crypto/neptune-core/commit/4b3df100))
+- *(scan_mode)* Bump known keys cache correctly ([ba680fe5](https://github.com/Neptune-Crypto/neptune-core/commit/ba680fe5))
+
+### 🚀 Performance
+
+- *(main_loop)* Don't hold lock when sending msg to peer loops ([d3fd60b0](https://github.com/Neptune-Crypto/neptune-core/commit/d3fd60b0))
+- *(mempool)* Use hash map to track conflicts ([d444f36b](https://github.com/Neptune-Crypto/neptune-core/commit/d444f36b))
+- *(wallet)* Don't clone transaction kernel needlessly ([b997e322](https://github.com/Neptune-Crypto/neptune-core/commit/b997e322))
+- *(wallet)* Use hash map for spent UTXOs ([9611199b](https://github.com/Neptune-Crypto/neptune-core/commit/9611199b))
+- Wallet updates without MSMP maintenance ([4fa3da4b](https://github.com/Neptune-Crypto/neptune-core/commit/4fa3da4b))
+
+### 📚 Documentation
+
+- Update to match rebooted network ([0d3eb5ad](https://github.com/Neptune-Crypto/neptune-core/commit/0d3eb5ad))
+- *(`README.md`)* Drop mention of testnet ([ede59ba4](https://github.com/Neptune-Crypto/neptune-core/commit/ede59ba4))
+- Fix some block-related doc strings ([42a552ff](https://github.com/Neptune-Crypto/neptune-core/commit/42a552ff))
+
+### ♻️ Refactor
+
+- *(main_loop)* Avoid relaying empty transactions ([5082dba5](https://github.com/Neptune-Crypto/neptune-core/commit/5082dba5))
+- *(mine_loop)* Fix block timestamp ([c8004dc2](https://github.com/Neptune-Crypto/neptune-core/commit/c8004dc2))
+- *(proof_upgrader)* Get 'update' job from global state ([5819905f](https://github.com/Neptune-Crypto/neptune-core/commit/5819905f))
+- Factor out inner prove function for testability ([79f1cc67](https://github.com/Neptune-Crypto/neptune-core/commit/79f1cc67))
+- Rename `listen_addr` to `peer_listen_addr` ([24cecab3](https://github.com/Neptune-Crypto/neptune-core/commit/24cecab3))
+- Remove unfinished RPC endpoint ([c218ab42](https://github.com/Neptune-Crypto/neptune-core/commit/c218ab42))
+- *(mempool)* Only transmit transaction kernels in mempool events ([4cc3262c](https://github.com/Neptune-Crypto/neptune-core/commit/4cc3262c))
+- *(mempool)* Normalize mempool events ([76a519ef](https://github.com/Neptune-Crypto/neptune-core/commit/76a519ef))
+- *(mempool)* Use MSA tip digest to check for MSA-updated txs ([c32cdafb](https://github.com/Neptune-Crypto/neptune-core/commit/c32cdafb))
+- *(mempool)* Check conflict cache before accepting tx ([775e04fd](https://github.com/Neptune-Crypto/neptune-core/commit/775e04fd))
+- Move transparency helper structs out of `api/` directory ([caefb469](https://github.com/Neptune-Crypto/neptune-core/commit/caefb469))
+- Rename transparent-transaction struct -`Details` -> -`Info` ([5832e708](https://github.com/Neptune-Crypto/neptune-core/commit/5832e708))
+- *(`OutputFormat`)* Add variant with time-lock ([060b747b](https://github.com/Neptune-Crypto/neptune-core/commit/060b747b))
+- Make RegTest launch data constant ([92ecaed0](https://github.com/Neptune-Crypto/neptune-core/commit/92ecaed0))
+- *(wallet)* Return potential duplicates from helper function ([8e5c9acd](https://github.com/Neptune-Crypto/neptune-core/commit/8e5c9acd))
+- *(wallet)* Split helper function into two ([d9d9b705](https://github.com/Neptune-Crypto/neptune-core/commit/d9d9b705))
+- *(connect_to_peers)* Perform pre-check on incoming connections ([c70131fc](https://github.com/Neptune-Crypto/neptune-core/commit/c70131fc))
+- Change default gobbling fraction from 20 % to 60 % ([5f112c8f](https://github.com/Neptune-Crypto/neptune-core/commit/5f112c8f))
+
+### ✅ Testing
+
+- Re-enable test that first blk-file contains valid blocks ([a6ce30cb](https://github.com/Neptune-Crypto/neptune-core/commit/a6ce30cb))
+- Add wallet-state update check ([7aae3166](https://github.com/Neptune-Crypto/neptune-core/commit/7aae3166))
+- Restore state from two blk files ([fd17cd72](https://github.com/Neptune-Crypto/neptune-core/commit/fd17cd72))
+- *(Block)* Fix generator for specified block height ([3e9d05b4](https://github.com/Neptune-Crypto/neptune-core/commit/3e9d05b4))
+- Ensure deterministic STARK proofs ([2273b9a0](https://github.com/Neptune-Crypto/neptune-core/commit/2273b9a0))
+- Verify setting tvm env vars works ([1a05f0ab](https://github.com/Neptune-Crypto/neptune-core/commit/1a05f0ab))
+- Fix some flaky integration tests ([dec1f267](https://github.com/Neptune-Crypto/neptune-core/commit/dec1f267))
+- *(mempool)* Ensure stability under insertions of merged txs ([65f6c870](https://github.com/Neptune-Crypto/neptune-core/commit/65f6c870))
+- Validate transparent transaction ([bcc7153f](https://github.com/Neptune-Crypto/neptune-core/commit/bcc7153f))
+- Add test suite for `TransparentTransactionInfo` ([9f513340](https://github.com/Neptune-Crypto/neptune-core/commit/9f513340))
+- *(`GenerationReceivingAddress`)* Add regression test ([ec5ef875](https://github.com/Neptune-Crypto/neptune-core/commit/ec5ef875))
+- Add integration test of time-locked expenditure ([9eeca034](https://github.com/Neptune-Crypto/neptune-core/commit/9eeca034))
+- *(`TxOutput`)* Add test for `with_timelock` ([b0313a8f](https://github.com/Neptune-Crypto/neptune-core/commit/b0313a8f))
+- Clean up `flaky_mutator_set` somewhat ([d744fb63](https://github.com/Neptune-Crypto/neptune-core/commit/d744fb63))
+- Faster test-case generation for negative block validity tests ([1e2b260b](https://github.com/Neptune-Crypto/neptune-core/commit/1e2b260b))
+- Add PoW-related integration test ([d7cfe931](https://github.com/Neptune-Crypto/neptune-core/commit/d7cfe931))
+- Cover bump_derivation_counter by an existing test ([425dc231](https://github.com/Neptune-Crypto/neptune-core/commit/425dc231))
+- Proper testing of scan mode-related function ([f305ed1b](https://github.com/Neptune-Crypto/neptune-core/commit/f305ed1b))
+- *(wallet)* Verify no double-registration when not maintaining MSMPs ([3c95a9a9](https://github.com/Neptune-Crypto/neptune-core/commit/3c95a9a9))
+- *(CLI)* Test parsing `HexDigest`s ([cae809bf](https://github.com/Neptune-Crypto/neptune-core/commit/cae809bf))
+- *(peer_loop)* Harden check that blocks with invalid PoW are rejected ([bd1f0a98](https://github.com/Neptune-Crypto/neptune-core/commit/bd1f0a98))
+- *(mempool)* Verify upgrade filter behavior on "raise" ([188103a6](https://github.com/Neptune-Crypto/neptune-core/commit/188103a6))
+
+### 🎨 Styling
+
+- Display digests as hex ([5610ff0a](https://github.com/Neptune-Crypto/neptune-core/commit/5610ff0a))
+
+### ⚙️ Miscellaneous
+
+- Skip flaky async tests ([a3b3ad2c](https://github.com/Neptune-Crypto/neptune-core/commit/a3b3ad2c))
+- Upgrade dependencies ([acb0ec8f](https://github.com/Neptune-Crypto/neptune-core/commit/acb0ec8f))
+- *(`release.yml`)* Fix syntax ([2dc409eb](https://github.com/Neptune-Crypto/neptune-core/commit/2dc409eb))
+- Update tvm-benchmarks results ([48e37ee6](https://github.com/Neptune-Crypto/neptune-core/commit/48e37ee6))
+- Display TVM-specific env variables at startup ([2d3cab77](https://github.com/Neptune-Crypto/neptune-core/commit/2d3cab77))
+- *(neptune_cli)* Fix typo in "broadcast" ([a9dc965e](https://github.com/Neptune-Crypto/neptune-core/commit/a9dc965e))
+- Export useful structs ([cfebda38](https://github.com/Neptune-Crypto/neptune-core/commit/cfebda38))
+- Synchronize `bech32` dependency ([796d539b](https://github.com/Neptune-Crypto/neptune-core/commit/796d539b))
+- Public nonce field ([5ad764a0](https://github.com/Neptune-Crypto/neptune-core/commit/5ad764a0))
+- Make lossy_f64_fraction_mul pub ([aff0982f](https://github.com/Neptune-Crypto/neptune-core/commit/aff0982f))
+
+### 🪵 Log
+
+- Reduce number of `info` logs ([7e030db9](https://github.com/Neptune-Crypto/neptune-core/commit/7e030db9))
+- Reduce number of `info` messages ([dd123c99](https://github.com/Neptune-Crypto/neptune-core/commit/dd123c99))
+- Reduce severity of multiple messages ([fbabe6ad](https://github.com/Neptune-Crypto/neptune-core/commit/fbabe6ad))
+- Use std-err for log purposes in spawned TVM prover ([143a7d93](https://github.com/Neptune-Crypto/neptune-core/commit/143a7d93))
+- Better log on rejected block proposal ([1800bce2](https://github.com/Neptune-Crypto/neptune-core/commit/1800bce2))
+- Less noisy rejection of incoming connection ([d6001758](https://github.com/Neptune-Crypto/neptune-core/commit/d6001758))
+
+### 🚥 Developer Experience
+
+- Report guesser fee fraction ([d4383a70](https://github.com/Neptune-Crypto/neptune-core/commit/d4383a70))
+- Add two Makefile targets ([df0a59a3](https://github.com/Neptune-Crypto/neptune-core/commit/df0a59a3))
+
+### Dx
+
+- Remove husky ([0d7dc895](https://github.com/Neptune-Crypto/neptune-core/commit/0d7dc895))
+
+
+## [0.3.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.2.2..v0.3.0) - 2025-08-05
+
+### ✨ Features
+
+- Make PoW preprocessing cancelable ([1b37599b](https://github.com/Neptune-Crypto/neptune-core/commit/1b37599b))
+- *(`Pow`)* Make Merkle tree construction cancelable ([ed5f5ebc](https://github.com/Neptune-Crypto/neptune-core/commit/ed5f5ebc))
+
+### 🐛 Bug Fixes
+
+- *(`mine_loop`)* Stop guessing task when aborted during preprocessing ([bdbb048a](https://github.com/Neptune-Crypto/neptune-core/commit/bdbb048a))
+- *(wallet)* Announced UTXOs are never guesser fees ([4c75d0d4](https://github.com/Neptune-Crypto/neptune-core/commit/4c75d0d4))
+
+### 🚀 Performance
+
+- *(`Pow`)* Unsafely avoid memory-copies in `preprocess` ([66522fb4](https://github.com/Neptune-Crypto/neptune-core/commit/66522fb4))
+- *(`Pow`)* Free memory as soon as possible ([4094aef1](https://github.com/Neptune-Crypto/neptune-core/commit/4094aef1))
+- Drop reliance on `twenty_first`'s Merkle tree ([0fdaa8be](https://github.com/Neptune-Crypto/neptune-core/commit/0fdaa8be))
+
+### 📚 Documentation
+
+- *(merge_branch)* Clarify two non-trivial things ([a7f5d995](https://github.com/Neptune-Crypto/neptune-core/commit/a7f5d995))
+- *(`README.md`)* Correct CLI arg: `--peers` -> `--peer` ([5a7238e1](https://github.com/Neptune-Crypto/neptune-core/commit/5a7238e1))
+
+### ♻️ Refactor
+
+- *(HeaderToBlockHashWitness)* Add missing proof hash ([4a56f776](https://github.com/Neptune-Crypto/neptune-core/commit/4a56f776))
+- Rename `peers` to `peer` when specifying through CLI ([284773b1](https://github.com/Neptune-Crypto/neptune-core/commit/284773b1))
+- *(proof_upgrader)* Don't timelock half of gobbled fee ([e89645dc](https://github.com/Neptune-Crypto/neptune-core/commit/e89645dc))
+
+### ✅ Testing
+
+- Delete deprecated BlockKernel-hash test ([2a5f0de9](https://github.com/Neptune-Crypto/neptune-core/commit/2a5f0de9))
+- Fix potential empty range error in proptest ([d7cad741](https://github.com/Neptune-Crypto/neptune-core/commit/d7cad741))
+- Fix test related to new block hash definition ([9d34ae7c](https://github.com/Neptune-Crypto/neptune-core/commit/9d34ae7c))
+- Verify that block hash depends on block proof ([21c01914](https://github.com/Neptune-Crypto/neptune-core/commit/21c01914))
+- Fix test related to premine size check ([c08f2216](https://github.com/Neptune-Crypto/neptune-core/commit/c08f2216))
+- *(coinbase_amount)* Verify crash on negative amount ([93b11f24](https://github.com/Neptune-Crypto/neptune-core/commit/93b11f24))
+- *(native_currency)* Add two no-inflation violation tests ([e58dc806](https://github.com/Neptune-Crypto/neptune-core/commit/e58dc806))
+- *(mutator_set)* Fix flaky test ([fee1b405](https://github.com/Neptune-Crypto/neptune-core/commit/fee1b405))
+- Verify native currency hash always present in UTXO helper function ([df3086a7](https://github.com/Neptune-Crypto/neptune-core/commit/df3086a7))
+- Fix hardcoded program hash ([26e6f566](https://github.com/Neptune-Crypto/neptune-core/commit/26e6f566))
+- *(`Pow`)* Verify that `preprocess` can be canceled within 1 s ([5859879f](https://github.com/Neptune-Crypto/neptune-core/commit/5859879f))
+- Fix proof-upgrader gobbling fee test ([e5a018ba](https://github.com/Neptune-Crypto/neptune-core/commit/e5a018ba))
+
+### 🎨 Styling
+
+- *(collect_type_scripts)* Rename variable ([d7249bf2](https://github.com/Neptune-Crypto/neptune-core/commit/d7249bf2))
+
+### ⚙️ Miscellaneous
+
+- Release v0.3.0-alpha.1 ([44c96540](https://github.com/Neptune-Crypto/neptune-core/commit/44c96540))
+- *(`Block`)* Add UTXO redemption claim to genesis block ([079e730d](https://github.com/Neptune-Crypto/neptune-core/commit/079e730d))
+- *(`Block`)* Add UTXO redemption claim to genesis ([821848e4](https://github.com/Neptune-Crypto/neptune-core/commit/821848e4))
+- *(`Block`)* Add UTXO redemption to genesis ([d17edc5b](https://github.com/Neptune-Crypto/neptune-core/commit/d17edc5b))
+- *(`Block`)* Add UTXO redemption claim to genesis ([4deaa961](https://github.com/Neptune-Crypto/neptune-core/commit/4deaa961))
+
+### 🪵 Log
+
+- Add an info message for each block on bootstrap ([c925263a](https://github.com/Neptune-Crypto/neptune-core/commit/c925263a))
+- Add log message for preprocessing ([64d65f29](https://github.com/Neptune-Crypto/neptune-core/commit/64d65f29))
+- Reduce number of `info` logs ([7e030db9](https://github.com/Neptune-Crypto/neptune-core/commit/7e030db9))
+- Reduce number of `info` messages ([dd123c99](https://github.com/Neptune-Crypto/neptune-core/commit/dd123c99))
+- Reduce severity of multiple messages ([fbabe6ad](https://github.com/Neptune-Crypto/neptune-core/commit/fbabe6ad))
+- Reduce number of info log messages ([f0fc780a](https://github.com/Neptune-Crypto/neptune-core/commit/f0fc780a))
+- Adjust some log messages ([e1c36d04](https://github.com/Neptune-Crypto/neptune-core/commit/e1c36d04))
+
+### 🕵️ Privacy
+
+- *(mine_loop)* Never add zero-valued composer outputs ([825a3b2f](https://github.com/Neptune-Crypto/neptune-core/commit/825a3b2f))
+
+### Harden
+
+- *(collect_type_scripts)* Ensure all pointer jumps are forward ([b87bc2cb](https://github.com/Neptune-Crypto/neptune-core/commit/b87bc2cb))
+- *(PrimitiveWitness)* Verify not too many type script witnesses ([fa3fe55a](https://github.com/Neptune-Crypto/neptune-core/commit/fa3fe55a))
+- *(collect_type_scripts)* Add extra check that witness lives in ND-memory region ([cfc13b6f](https://github.com/Neptune-Crypto/neptune-core/commit/cfc13b6f))
+- *(collect_type_scripts)* Bound num inputs/outputs and num coins ([7c097730](https://github.com/Neptune-Crypto/neptune-core/commit/7c097730))
+- Verify sane end-state after consensus program ([e9c5c0b8](https://github.com/Neptune-Crypto/neptune-core/commit/e9c5c0b8))
+- *(kernel_to_outputs)* Add some extra checks ([8a25bb46](https://github.com/Neptune-Crypto/neptune-core/commit/8a25bb46))
+- *(new_claim)* Ensure claim bound to one memory page ([57982703](https://github.com/Neptune-Crypto/neptune-core/commit/57982703))
+
+### Joy
+
+- Update genesis parameters to reboot ([8b155690](https://github.com/Neptune-Crypto/neptune-core/commit/8b155690))
+
+### Ux
+
+- *(`Pow`)* Check cancel channel periodically during `preprocess` ([be1d09d2](https://github.com/Neptune-Crypto/neptune-core/commit/be1d09d2))
+- *(guess-preprocess)* Respect user-defined parallelism limit ([e5966931](https://github.com/Neptune-Crypto/neptune-core/commit/e5966931))
+
+
+## [0.3.0-alpha.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.2.2..v0.3.0-alpha.1) - 2025-08-01
+
+### ✨ Features
+
+- Pub api layer, regtest mode, integration tests, ([69e28671](https://github.com/Neptune-Crypto/neptune-core/commit/69e28671))
+- Handle panics in job-queue jobs ([d84c2162](https://github.com/Neptune-Crypto/neptune-core/commit/d84c2162))
+- Implement mockable proofs for regtest mode ([811b0b06](https://github.com/Neptune-Crypto/neptune-core/commit/811b0b06))
+- Add TritonVmProofJobOptionsBuilder ([cc737c88](https://github.com/Neptune-Crypto/neptune-core/commit/cc737c88))
+- Backup wallet DB before migrating ([4cdce6ea](https://github.com/Neptune-Crypto/neptune-core/commit/4cdce6ea))
+- *(ArchivalState)* Read blocks from file without db for indexing ([5708850c](https://github.com/Neptune-Crypto/neptune-core/commit/5708850c))
+- *(GlobalState)* Restore state from block files ([1019ac46](https://github.com/Neptune-Crypto/neptune-core/commit/1019ac46))
+- Bootstrap from directory of blocks ([8ada417d](https://github.com/Neptune-Crypto/neptune-core/commit/8ada417d))
+- Add option to ignore block-validation on block-bootstrapping ([b898f33b](https://github.com/Neptune-Crypto/neptune-core/commit/b898f33b))
+- Add RPC APIs for block kernel and mempool_tx ([c31ca08d](https://github.com/Neptune-Crypto/neptune-core/commit/c31ca08d))
+- Add public TransactionKernel for BlockBody ([088d7ebf](https://github.com/Neptune-Crypto/neptune-core/commit/088d7ebf))
+- Bootstrap flushing period ([#608](https://github.com/Neptune-Crypto/neptune-core/issues/608)) ([cf87679a](https://github.com/Neptune-Crypto/neptune-core/commit/cf87679a))
+- *(mempool)* Track tip's mutator set digest ([7d82d3bd](https://github.com/Neptune-Crypto/neptune-core/commit/7d82d3bd))
+- *(mempool)* Always preserve primitive witness if available ([5adddda5](https://github.com/Neptune-Crypto/neptune-core/commit/5adddda5))
+- *(cli_args)* Add option `tx_proof_upgrading` ([70645311](https://github.com/Neptune-Crypto/neptune-core/commit/70645311))
+- *(archival_state)* Add function to get historical MS data ([6fe9862e](https://github.com/Neptune-Crypto/neptune-core/commit/6fe9862e))
+- *(mempool)* Get most valuable update job ([427ca211](https://github.com/Neptune-Crypto/neptune-core/commit/427ca211))
+- *(mining)* Add CLI argument to set num merged transactions ([7f762b42](https://github.com/Neptune-Crypto/neptune-core/commit/7f762b42))
+- Compressed encoding of `RemovalRecord`s ([65dc2166](https://github.com/Neptune-Crypto/neptune-core/commit/65dc2166))
+- Version consensus programs ([73794cd9](https://github.com/Neptune-Crypto/neptune-core/commit/73794cd9))
+- *(mutator_set)* New SWBF representation, with TASM snippet! ([15b78246](https://github.com/Neptune-Crypto/neptune-core/commit/15b78246))
+
+### 🐛 Bug Fixes
+
+- *(`PrimitiveWitness`)* Ensure presence of `NativeCurrency` hash ([f9c936be](https://github.com/Neptune-Crypto/neptune-core/commit/f9c936be))
+- *(RemovalRecord)* Fix off-by-one error in `can_remove` ([33a23259](https://github.com/Neptune-Crypto/neptune-core/commit/33a23259))
+
+### 🚀 Performance
+
+- Only flush once when applying multiple blocks ([647c0224](https://github.com/Neptune-Crypto/neptune-core/commit/647c0224))
+- *(mempool)* Early return on state update when mempool is empty ([fd02d4f6](https://github.com/Neptune-Crypto/neptune-core/commit/fd02d4f6))
+- *(wallet)* Only do extra MSMP verification in debug mode ([ac85b228](https://github.com/Neptune-Crypto/neptune-core/commit/ac85b228))
+- Use archival mutator set to resync wallet ([#616](https://github.com/Neptune-Crypto/neptune-core/issues/616)) ([c841cf51](https://github.com/Neptune-Crypto/neptune-core/commit/c841cf51))
+
+### 📚 Documentation
+
+- Expunge "caller" in src/api ([5a541c5c](https://github.com/Neptune-Crypto/neptune-core/commit/5a541c5c))
+- Add work-in-progress note. ([b06094e5](https://github.com/Neptune-Crypto/neptune-core/commit/b06094e5))
+- Improve docs in regtest_impl ([65507fb8](https://github.com/Neptune-Crypto/neptune-core/commit/65507fb8))
+- Clarify ByUtxoSize means byte-size. ([69abb3f8](https://github.com/Neptune-Crypto/neptune-core/commit/69abb3f8))
+- Add explanations in NativeCurrencyAmount ([03d943df](https://github.com/Neptune-Crypto/neptune-core/commit/03d943df))
+- Add TransactionDetails diagram ([dee8fc30](https://github.com/Neptune-Crypto/neptune-core/commit/dee8fc30))
+- Drop unnecessary explicit links ([23124e78](https://github.com/Neptune-Crypto/neptune-core/commit/23124e78))
+- Fix docs re default notify medium ([5c6e6911](https://github.com/Neptune-Crypto/neptune-core/commit/5c6e6911))
+- Add donation address ([d0b88f05](https://github.com/Neptune-Crypto/neptune-core/commit/d0b88f05))
+- Clarify tx proof builder evaluation ([88d16a8a](https://github.com/Neptune-Crypto/neptune-core/commit/88d16a8a))
+- Specify mock proofs disallowed on Mainnet ([010965e6](https://github.com/Neptune-Crypto/neptune-core/commit/010965e6))
+- Clarify valid/invalid mock in builder ([955a6ef4](https://github.com/Neptune-Crypto/neptune-core/commit/955a6ef4))
+- Clarify docs for primitive_witness method() ([806d542b](https://github.com/Neptune-Crypto/neptune-core/commit/806d542b))
+- Fix cargo doc warnings and CI ([03d061de](https://github.com/Neptune-Crypto/neptune-core/commit/03d061de))
+- Warn harder about using `master` branch ([b2698926](https://github.com/Neptune-Crypto/neptune-core/commit/b2698926))
+- Add docstring to MSMP resync function ([5c6b30a8](https://github.com/Neptune-Crypto/neptune-core/commit/5c6b30a8))
+- Correct obsolete comment ([c67037c8](https://github.com/Neptune-Crypto/neptune-core/commit/c67037c8))
+- Add docstring to statistics test ([4a7cccff](https://github.com/Neptune-Crypto/neptune-core/commit/4a7cccff))
+- Document bootstrapping from raw block data ([a841f2a0](https://github.com/Neptune-Crypto/neptune-core/commit/a841f2a0))
+- Fix doctest for format_human_duration() ([57516c82](https://github.com/Neptune-Crypto/neptune-core/commit/57516c82))
+- Add link to latest snapshot torrent ([e78ccf5b](https://github.com/Neptune-Crypto/neptune-core/commit/e78ccf5b))
+- *(`GetSwbfIndicesNew`)* Explain mechanics of encoding step ([c7a5bf89](https://github.com/Neptune-Crypto/neptune-core/commit/c7a5bf89))
+- *(mutator_set)* Clarify importance of `can_remove` ([77e8366a](https://github.com/Neptune-Crypto/neptune-core/commit/77e8366a))
+
+### 🔒️ Security
+
+- Pass network to proof verify function ([74084ea6](https://github.com/Neptune-Crypto/neptune-core/commit/74084ea6))
+
+### ⏳ Benchmark
+
+- Add a benchmark for wallet-state updating ([14a593de](https://github.com/Neptune-Crypto/neptune-core/commit/14a593de))
+
+### 🎨 Styling
+
+- Clarify function only intended for own transactions ([8630faab](https://github.com/Neptune-Crypto/neptune-core/commit/8630faab))
+- *(`TransactionDetailsBuilder`)* Supply many, not one, `PublicAnnouncement`s ([0c9450a9](https://github.com/Neptune-Crypto/neptune-core/commit/0c9450a9))
+- (!) Rename "public announcement" to "announcement" ([6e96c7d9](https://github.com/Neptune-Crypto/neptune-core/commit/6e96c7d9))
+
+### ⚙️ Miscellaneous
+
+- Restart network because of above bug fixes
+- Add PrimitiveWitness::is_valid() -> bool ([70c0e8bc](https://github.com/Neptune-Crypto/neptune-core/commit/70c0e8bc))
+- Add TxCreationArtifacts::is_valid() ([3ac62570](https://github.com/Neptune-Crypto/neptune-core/commit/3ac62570))
+- Rename MockableProof to NeptuneProof ([c5524079](https://github.com/Neptune-Crypto/neptune-core/commit/c5524079))
+- Add ProofBuilder doctest example ([75ecd10b](https://github.com/Neptune-Crypto/neptune-core/commit/75ecd10b))
+- Rename is_vm_proof() --> executes_in_vm() ([080b81fc](https://github.com/Neptune-Crypto/neptune-core/commit/080b81fc))
+- (!) Upgrade dependency “Triton VM” ([cd1aad2b](https://github.com/Neptune-Crypto/neptune-core/commit/cd1aad2b))
+- *(peer)* Mark `PeerMessage` as non-exhaustive ([10112671](https://github.com/Neptune-Crypto/neptune-core/commit/10112671))
+- Add UTXO redemption claim to genesis block ([9673abd5](https://github.com/Neptune-Crypto/neptune-core/commit/9673abd5))
+- Hardcode genesis' `pow.root` to specific value ([c6508705](https://github.com/Neptune-Crypto/neptune-core/commit/c6508705))
+- Update release workflow files ([3d21c9aa](https://github.com/Neptune-Crypto/neptune-core/commit/3d21c9aa))
+- Upgrade version of twenty-first ([ec62f400](https://github.com/Neptune-Crypto/neptune-core/commit/ec62f400))
+
+### 🚥 Developer Experience
+
+- Report guesser fee fraction ([d4383a70](https://github.com/Neptune-Crypto/neptune-core/commit/d4383a70))
+
+### 🕵️ Privacy
+
+- *(mine_loop)* Never add zero-valued composer outputs ([825a3b2f](https://github.com/Neptune-Crypto/neptune-core/commit/825a3b2f))
+
+### Harden
+
+- *(collect_type_scripts)* Ensure all pointer jumps are forward ([b87bc2cb](https://github.com/Neptune-Crypto/neptune-core/commit/b87bc2cb))
+- *(PrimitiveWitness)* Verify not too many type script witnesses ([fa3fe55a](https://github.com/Neptune-Crypto/neptune-core/commit/fa3fe55a))
+- *(collect_type_scripts)* Add extra check that witness lives in ND-memory region ([cfc13b6f](https://github.com/Neptune-Crypto/neptune-core/commit/cfc13b6f))
+- *(collect_type_scripts)* Bound num inputs/outputs and num coins ([7c097730](https://github.com/Neptune-Crypto/neptune-core/commit/7c097730))
+
+
 ## [0.2.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.2.1..v0.2.2) - 2025-04-01
 
 ### 🐛 Bug Fixes

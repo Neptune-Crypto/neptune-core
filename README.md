@@ -5,9 +5,7 @@
 [![crates.io](https://img.shields.io/crates/v/neptune-cash.svg)](https://crates.io/crates/neptune-cash)
 [![Coverage Status](https://coveralls.io/repos/github/Neptune-Crypto/neptune-core/badge.svg?branch=master)](https://coveralls.io/github/Neptune-Crypto/neptune-core?branch=master)
 
-Neptune-core is the reference implementation for the [Neptune](https://neptune.cash/) protocol. The
-implementation is not complete yet, but already supports many integral components and mainnet is
-live.
+Neptune-core is the reference implementation for the [Neptune Cash](https://neptune.cash/) protocol.
 
 ## Disclaimer
 
@@ -16,7 +14,7 @@ live.
 > you can afford to lose.
 
 > [!IMPORTANT]
-> If a catastrophic vulnerability is discovered in the protocol, it will restart from genesis.
+> If a catastrophic vulnerability is discovered in the protocol, it might be restarted from genesis.
 
 ## Installing
 
@@ -33,12 +31,12 @@ live.
 - Enter the repository: `cd neptune-core`
 - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development*
   branch, skip this step.)
-- Build for release and put the binaries in your local path (`~/.cargo/bin/`):
-  `cargo install --locked --path .` (needs at least 3 GB of RAM and a few minutes)
+- Build for release and put the binaries in your local path (`~/.cargo/bin/`): `make install-linux`
 
 > [!IMPORTANT]
-> Any branch except `release` is considered an _unstable development_ branch. Should you choose to use
-> such a branch, you risk database corruption, loss of funds, crashing user interfaces, _etc_.
+> Any commit except the one tagged `release` is considered an _unstable development_ commit and thus carries a
+> higher risk of database corruption and/or loss of funds. However, known bug fixes make their way into `master`
+> before being part of a release.
 
 ### Windows
 
@@ -54,18 +52,36 @@ Windows should just work out-of-the-box with cargo build etc.
 - Enter the repository: `cd neptune-core`
 - Checkout the release branch `git checkout release`. (Alternatively, for an *unstable development*
   branch, skip this step.)
+- Build for release and put the binaries in your local path (`~/.cargo/bin/`):
+  ```
+  cargo install --locked --path neptune-core
+  cargo install --locked --path neptune-core-cli
+  cargo install --locked --path neptune-dashboard
+  ```
 
-- Run `cargo install --locked --path .`
+### MacOS
+
+ - Open a terminal to run the following commands.
+ - Make sure you have `Homebrew` installed. If not, install it from [here](https://brew.sh/).
+ - Install curl: `brew install curl`
+ - Install the rust compiler and accessories: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+ - Source the rust environment: `source "$HOME/.cargo/env"`
+ - Install Xcode command line tools: `xcode-select --install`
+ - Install LevelDB: `brew install leveldb`
+ - Install cmake: `brew install cmake`
+ - Install git: `brew install git`
+ - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
+ - Enter the repository: `cd neptune-core`
+ - Build for release and put the binaries in your local path: `make install`
 
 ## Running & Connecting
 
 - Generate a wallet file: `neptune-cli generate-wallet`
 - Run neptune-core daemon: `neptune-core` with flags
-    - `--peers [ip_address:port]` to connect to a given peer, for instance
-      `--peers 51.15.139.238:9798` or `--peers 139.162.193.206:9798` or
-      `--peers [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798`.
-    - `--compose --guess` to mine — if you want to generate testnet coins to test sending and
-      receiving
+    - `--peer [ip_address:port]` to connect to a given peer, for instance
+      `--peer 51.15.139.238:9798` or `--peer 139.162.193.206:9798` or
+      `--peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798`.
+    - `--compose --guess` to mine — if you want to generate coins
     - `--help` to get a list of available command-line arguments
 
 If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience
@@ -196,8 +212,9 @@ changes to the code, you can run through the following checks
 
 If any cryptographic data ends up in an invalid state, and the note crashes as a result, please copy
 your entire data directory (except `wallet.dat`, `incoming_randomness.dat`, and
-`outgoing_randomness.dat`) and share it publicly. If you're not on `main` net, which hasn't been
-released yet, it should be OK to share `wallet.dat`, which contains your secret key, as well.
+`outgoing_randomness.dat`) and share it publicly. If you're not on `main` net it should be OK to
+share `wallet.dat`, which contains your secret key, as well. If you are on mainnet, don't share any
+of these files with anyone because doing so will put your funds at risk.
 
 ## Restarting Node from the Genesis Block
 

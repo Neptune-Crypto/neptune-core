@@ -1,0 +1,24 @@
+[
+  {
+    "name": "neptune_transaction_hash_removal_record_index_sets_2",
+    "benchmark_result": {
+      "clock_cycle_count": 940,
+      "hash_table_height": 352,
+      "u32_table_height": 292,
+      "op_stack_table_height": 725,
+      "ram_table_height": 237
+    },
+    "case": "CommonCase"
+  },
+  {
+    "name": "neptune_transaction_hash_removal_record_index_sets_2",
+    "benchmark_result": {
+      "clock_cycle_count": 8716,
+      "hash_table_height": 1684,
+      "u32_table_height": 1421,
+      "op_stack_table_height": 6845,
+      "ram_table_height": 2325
+    },
+    "case": "WorstCase"
+  }
+]

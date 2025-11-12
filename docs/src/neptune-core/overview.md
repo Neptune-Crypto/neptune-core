@@ -8,7 +8,7 @@ There are four classes of tasks:
 - `main`: handles init and `main_loop`
 - `peer[]`: handles `connect_to_peers` and `peer_loop`
 - `mining`: runs `miner_loop`, has a worker and a monitor task
-- `rpc_server[]`: handles `rpc_server` for incoming RPC requests
+- `server[]`: handles `server` for incoming RPC requests
 
 ## Channels
 Long-lived tasks can communicate with each other through channels provided by the tokio framework. All communication goes through the main task. Eg, there is no way for the miner task to communicate with peer tasks.

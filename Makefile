@@ -31,14 +31,22 @@ ctags:
 	rusty-tags vi
 
 format:
-	cargo fmt --all --check
+	cargo fmt --all -- --check
 
-install-linux:
-	cargo install --path .
+happy: clippy format
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items
+	cargo test --doc
+
+install:
+	cargo install --force --locked --path neptune-core/
+	cargo install --force --locked --path neptune-core-cli/
+	cargo install --force --locked --path neptune-dashboard/
+
+install-linux: install
 	@echo "\n\nPlease run:\n./scripts/linux/install-bash-completions.sh\nto install bash-completions for Neptune-core's CLI."
 
-lint:
-	cargo clippy --all-targets
+clippy:
+	cargo clippy --all-targets -- -D warnings
 
 # Get a stack trace upon kernel panic (may slow down implementation)
 run: export RUST_BACKTRACE = 1
@@ -68,6 +76,11 @@ help:
 
 restart:
 	@rm -rf ~/.local/share/neptune-integration-test
+
+clear-incremental:
+	@rm -rf target/debug/incremental
+	@rm -rf target/release/incremental
+	@rm -rf "$CARGO_TARGET_DIR/debug/incremental"
 
 clean:
 	@echo "      ._.  ██    ██  ███  ██ ██ █████    ████ ██    █████  ███  ██  ██"

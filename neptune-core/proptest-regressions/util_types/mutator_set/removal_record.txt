@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc beb87393cd159b94e90456b0d4ed98d512823341049f1e2470baf26dc6444b05 # shrinks to input = _RemovalRecordMissingChunkElementIsInvalidPbtArgs { initial_additions: 33, index_to_drop: 14, to_remove_rand: 94615430264692362 }
+cc 188cbdc2fcf5f21fdde330e2184199074a1488a21447491a0a2a6659913eda64 # shrinks to input = _RemovalRecordMissingChunkElementIsInvalidPbtArgs { initial_additions: 38, index_to_drop: 2, to_remove_rand: 792244780276861568 }
+cc 43e028e16e3a6e23838fdb9ab81b37b5e6b06979332cd7661363e7f42bfa4e00 # shrinks to input = _RemovalRecordMissingChunkElementIsInvalidPbtArgs { initial_additions: 68, index_to_drop: 4, to_remove_rand: 22 }
