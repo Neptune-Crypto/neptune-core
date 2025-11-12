@@ -4,6 +4,10 @@ use std::fmt::Display;
 use std::ops::Add;
 use std::ops::Sub;
 
+use crate::api::export::Network;
+use crate::protocol::consensus::consensus_rule_set::{
+    ConsensusRuleSet, BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET, BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
+};
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
@@ -18,8 +22,6 @@ use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use crate::api::export::Network;
-use crate::protocol::consensus::consensus_rule_set::{ConsensusRuleSet, BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET, BLOCK_HEIGHT_HARDFORK_BETA_TESTNET};
 
 /// The distance, in number of blocks, to the genesis block.
 ///
@@ -66,23 +68,26 @@ impl BlockHeight {
     pub fn get_generation(&self, network: Network) -> u64 {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, *self);
 
-        let before_beta_gen = (self.0
-            .value()
-            .saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT) as f64)
-            / (BLOCKS_PER_GENERATION_BEFORE_BETA as f64);
         match consensus_rule_set {
             ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
-                before_beta_gen as u64
+                self.0
+                    .value()
+                    .saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT)
+                    / BLOCKS_PER_GENERATION_BEFORE_BETA
             }
             ConsensusRuleSet::HardforkBeta => {
                 let hard_fork_block = match network {
                     Network::Testnet(_) => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
                     _ => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
-                };
-                let from_beta_gen = (self.0
-                    .value()
-                    .saturating_sub(hard_fork_block.value()) as f64)
+                }
+                .value()
+                    - 1;
+                let before_beta_gen =
+                    (hard_fork_block.saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT) as f64)
+                        / (BLOCKS_PER_GENERATION_BEFORE_BETA as f64);
+                let from_beta_gen = (self.0.value().saturating_sub(hard_fork_block) as f64)
                     / (BLOCKS_PER_GENERATION_FROM_BETA as f64);
+
                 (before_beta_gen + from_beta_gen) as u64
             }
         }
@@ -217,8 +222,9 @@ mod tests {
     #[test]
     fn block_interval_times_generation_count_is_three_years() {
         let network = Network::Main;
-        let calculated_halving_time =
-            network.target_block_interval(BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET) * (BLOCKS_PER_GENERATION_BEFORE_BETA as usize);
+        let calculated_halving_time = network
+            .target_block_interval(BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET)
+            * (BLOCKS_PER_GENERATION_BEFORE_BETA as usize);
         let calculated_halving_time = calculated_halving_time.to_millis();
         let three_years = Timestamp::years(3);
         let three_years = three_years.to_millis();
@@ -232,7 +238,8 @@ mod tests {
 
     #[test]
     fn asymptotic_limit_is_42_million() {
-        let generation_0_subsidy = Block::block_subsidy(BlockHeight::genesis().next(), Network::Main);
+        let generation_0_subsidy =
+            Block::block_subsidy(BlockHeight::genesis().next(), Network::Main);
 
         // Genesis block does not contain block subsidy so it must be subtracted
         // from total number.
