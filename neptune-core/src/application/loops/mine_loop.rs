@@ -426,7 +426,7 @@ pub(crate) fn prepare_coinbase_transaction_stateless(
     let next_block_height: BlockHeight = latest_block.header().height.next();
     info!("Creating coinbase for block of height {next_block_height}.");
 
-    let coinbase_amount = Block::block_subsidy(next_block_height);
+    let coinbase_amount = Block::block_subsidy(next_block_height, network);
     let composer_outputs = composer_parameters.tx_outputs(coinbase_amount, timestamp);
     let total_composer_fee = composer_outputs.total_native_coins();
 

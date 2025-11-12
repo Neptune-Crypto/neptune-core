@@ -27,7 +27,7 @@ use tracing::debug;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
-
+use crate::api::export::Network;
 use super::address::generation_address;
 use super::address::symmetric_key;
 use super::address::KeyType;
@@ -430,6 +430,7 @@ impl WalletState {
                     &MutatorSetAccumulator::default(),
                     genesis,
                     maintain_mps,
+                    configuration.network()
                 )
                 .await?;
 
@@ -1235,7 +1236,7 @@ impl WalletState {
     ///
     /// Only announced UTXOs actually present in the transaction are returned
     /// here, it's not sufficient that they are announced.
-    async fn recover_by_scanning(&mut self, new_block: &Block) -> Vec<IncomingUtxo> {
+    async fn recover_by_scanning(&mut self, new_block: &Block, network: Network) -> Vec<IncomingUtxo> {
         let Some(scan_mode_configuration) = &self.configuration.scan_mode else {
             return Vec::new();
         };
@@ -1278,7 +1279,7 @@ impl WalletState {
             // if we have the necessary info to claim them
             if let Some(receiver_preimage) = composer_parameters.maybe_receiver_preimage() {
                 // derive the composer fee UTXOs as the own miner would have
-                let coinbase_amount = Block::block_subsidy(new_block.header().height);
+                let coinbase_amount = Block::block_subsidy(new_block.header().height, network);
                 let composer_txos =
                     composer_parameters.tx_outputs(coinbase_amount, new_block.header().timestamp);
 
@@ -1704,6 +1705,7 @@ impl WalletState {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
         maintain_membership_proofs_in_wallet: bool,
+        network: Network
     ) -> Result<Vec<IncomingUtxoRecoveryData>> {
         /// Get potential duplicates, to avoid registering same UTXO twice.
         ///
@@ -1739,7 +1741,7 @@ impl WalletState {
             .scan_for_utxos_announced_to_known_keys(tx_kernel)
             .collect_vec();
 
-        let outputs_recovered_through_scan_mode = self.recover_by_scanning(block).await;
+        let outputs_recovered_through_scan_mode = self.recover_by_scanning(block, network).await;
 
         let MutatorSetUpdate { additions, .. } = block
             .mutator_set_update()
@@ -2840,6 +2842,7 @@ pub(crate) mod tests {
                 &genesis_block.mutator_set_accumulator_after().unwrap(),
                 &block1,
                 true,
+                network
             )
             .await
             .unwrap();
@@ -2863,6 +2866,7 @@ pub(crate) mod tests {
                     &genesis_block.mutator_set_accumulator_after().unwrap(),
                     &block1,
                     wallet_maintains_mp,
+                    network
                 )
                 .await
                 .unwrap();
@@ -2943,6 +2947,7 @@ pub(crate) mod tests {
                     &latest_block.mutator_set_accumulator_after().unwrap(),
                     &new_block,
                     maintain_mps,
+                    network
                 )
                 .await
                 .unwrap();
@@ -3472,7 +3477,7 @@ pub(crate) mod tests {
                 .next_unused_spending_key(KeyType::Generation)
                 .await;
 
-            let coinbase_amt = Block::block_subsidy(BlockHeight::genesis().next());
+            let coinbase_amt = Block::block_subsidy(BlockHeight::genesis().next(), network);
             let mut half_coinbase_amt = coinbase_amt;
             half_coinbase_amt.div_two();
             let send_amt = NativeCurrencyAmount::coins(5);
@@ -4303,7 +4308,7 @@ pub(crate) mod tests {
                 )
                 .await;
             assert_eq!(
-                Block::block_subsidy(1u64.into()),
+                Block::block_subsidy(1u64.into(), network),
                 wallet_status_1a.total_confirmed(),
             );
 
@@ -4460,6 +4465,7 @@ pub(crate) mod tests {
                         &genesis_block.mutator_set_accumulator_after().unwrap(),
                         &block_1,
                         maintain_mps,
+                        network
                     )
                     .await
                     .unwrap();
@@ -4777,6 +4783,7 @@ pub(crate) mod tests {
                     &previous_block.mutator_set_accumulator_after().unwrap(),
                     &new_block,
                     maintain_mps,
+                    network
                 )
                 .await
                 .unwrap();
@@ -4916,6 +4923,7 @@ pub(crate) mod tests {
                     &genesis_block.mutator_set_accumulator_after().unwrap(),
                     &new_block,
                     maintain_mps,
+                    network
                 )
                 .await
                 .unwrap();

@@ -18,6 +18,8 @@ use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use crate::api::export::Network;
+use crate::protocol::consensus::consensus_rule_set::{ConsensusRuleSet, BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET, BLOCK_HEIGHT_HARDFORK_BETA_TESTNET};
 
 /// The distance, in number of blocks, to the genesis block.
 ///
@@ -41,9 +43,13 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct BlockHeight(BFieldElement);
 
+// Assuming a block time of 588 seconds, and a halving every three years,
+// the number of blocks per halving cycle is 160815.
+pub const BLOCKS_PER_GENERATION_BEFORE_BETA: u64 = 160815;
+
 // Assuming a block time of 300 seconds, and a halving every three years,
 // the number of blocks per halving cycle is 315198.
-pub const BLOCKS_PER_GENERATION_BEFORE_BETA: u64 = 315198;
+pub const BLOCKS_PER_GENERATION_FROM_BETA: u64 = 315198;
 pub const NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT: u64 = 21310;
 
 impl BlockHeight {
@@ -57,12 +63,29 @@ impl BlockHeight {
         self.0.value()
     }
 
-    pub fn get_generation(&self) -> u64 {
-        // todo hduoc: change this
-        self.0
+    pub fn get_generation(&self, network: Network) -> u64 {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, *self);
+
+        let before_beta_gen = (self.0
             .value()
-            .saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT)
-            / BLOCKS_PER_GENERATION_BEFORE_BETA
+            .saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT) as f64)
+            / (BLOCKS_PER_GENERATION_BEFORE_BETA as f64);
+        match consensus_rule_set {
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                before_beta_gen as u64
+            }
+            ConsensusRuleSet::HardforkBeta => {
+                let hard_fork_block = match network {
+                    Network::Testnet(_) => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
+                    _ => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
+                };
+                let from_beta_gen = (self.0
+                    .value()
+                    .saturating_sub(hard_fork_block.value()) as f64)
+                    / (BLOCKS_PER_GENERATION_FROM_BETA as f64);
+                (before_beta_gen + from_beta_gen) as u64
+            }
+        }
     }
 
     pub fn next(&self) -> Self {
@@ -128,7 +151,7 @@ impl From<BlockHeight> for u64 {
 
 impl Ord for BlockHeight {
     fn cmp(&self, other: &Self) -> Ordering {
-        (self.0.value()).cmp(&(other.0.value()))
+        self.0.value().cmp(&(other.0.value()))
     }
 }
 
@@ -149,7 +172,7 @@ impl Sub for BlockHeight {
 }
 
 impl PartialOrd for BlockHeight {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -209,7 +232,7 @@ mod tests {
 
     #[test]
     fn asymptotic_limit_is_42_million() {
-        let generation_0_subsidy = Block::block_subsidy(BlockHeight::genesis().next());
+        let generation_0_subsidy = Block::block_subsidy(BlockHeight::genesis().next(), Network::Main);
 
         // Genesis block does not contain block subsidy so it must be subtracted
         // from total number.

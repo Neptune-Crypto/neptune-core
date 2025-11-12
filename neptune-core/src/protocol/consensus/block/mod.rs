@@ -394,9 +394,9 @@ impl Block {
 
     /// The number of coins that can be printed into existence with the mining
     /// a block with this height.
-    pub fn block_subsidy(block_height: BlockHeight) -> NativeCurrencyAmount {
+    pub fn block_subsidy(block_height: BlockHeight, network: Network) -> NativeCurrencyAmount {
         let mut reward: NativeCurrencyAmount = INITIAL_BLOCK_SUBSIDY;
-        let generation = block_height.get_generation();
+        let generation = block_height.get_generation(network);
 
         for _ in 0..generation {
             reward.div_two();
@@ -858,7 +858,7 @@ impl Block {
             return Err(BlockValidationError::TransactionTimestamp);
         }
 
-        let block_subsidy = Self::block_subsidy(self.kernel.header.height);
+        let block_subsidy = Self::block_subsidy(self.kernel.header.height, network);
         let coinbase = self.kernel.body.transaction_kernel.coinbase;
         if let Some(coinbase) = coinbase {
             // 2.g)
@@ -1092,9 +1092,9 @@ impl Block {
     ///
     /// May not be used in any consensus-related setting, as precision is lost
     /// because of the use of floats.
-    pub(crate) fn relative_guesser_reward(&self) -> Result<f64, BlockValidationError> {
+    pub(crate) fn relative_guesser_reward(&self, network: Network) -> Result<f64, BlockValidationError> {
         let guesser_reward = self.body().total_guesser_reward()?;
-        let block_subsidy = Self::block_subsidy(self.header().height);
+        let block_subsidy = Self::block_subsidy(self.header().height, network);
 
         Ok(guesser_reward.to_nau_f64() / block_subsidy.to_nau_f64())
     }
@@ -1344,57 +1344,58 @@ pub(crate) mod tests {
 
     #[test]
     fn halving_happens_when_expected() {
+        let network = Network::Main;
         // 1st halving should happen at block height `BLOCKS_PER_GENERATION` =
         // 160.815, minus `NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT` = 21310. So at
         // block height 139505, with that block being the first to have half the
         // block subsidy of the initial block subsidy. The first block to have a
         // quarter of the initial block subsidy should be of height 300320 =
         // `2 * BLOCKS_PER_GENERATION - NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT`.
-        assert_eq!(INITIAL_BLOCK_SUBSIDY, Block::block_subsidy(bfe!(2).into()));
+        assert_eq!(INITIAL_BLOCK_SUBSIDY, Block::block_subsidy(bfe!(2).into(), network));
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(100_000).into())
+            Block::block_subsidy(bfe!(100_000).into(), network)
         );
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(130_000).into())
+            Block::block_subsidy(bfe!(130_000).into(), network)
         );
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(139_503).into())
+            Block::block_subsidy(bfe!(139_503).into(), network)
         );
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(139_504).into())
+            Block::block_subsidy(bfe!(139_504).into(), network)
         );
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY.half(),
-            Block::block_subsidy(bfe!(139_505).into())
+            Block::block_subsidy(bfe!(139_505).into(), network)
         );
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY.half(),
-            Block::block_subsidy(bfe!(139_506).into())
+            Block::block_subsidy(bfe!(139_506).into(), network)
         );
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY.half(),
-            Block::block_subsidy(bfe!(300_319).into())
+            Block::block_subsidy(bfe!(300_319).into(), network)
         );
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY.half().half(),
-            Block::block_subsidy(bfe!(300_320).into())
+            Block::block_subsidy(bfe!(300_320).into(), network)
         );
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY.half().half(),
-            Block::block_subsidy(bfe!(300_321).into())
+            Block::block_subsidy(bfe!(300_321).into(), network)
         );
     }
 
     proptest::proptest! {
         #[test]
         fn block_subsidy_calculation_terminates(height_arb in arb::<BFieldElement>()) {
-            Block::block_subsidy(BFieldElement::MAX.into());
+            Block::block_subsidy(BFieldElement::MAX.into(), Network::Main);
 
-            Block::block_subsidy(height_arb.into());
+            Block::block_subsidy(height_arb.into(), Network::Main);
         }
     }
 
@@ -1403,7 +1404,7 @@ pub(crate) mod tests {
         let block_height_generation_0 = 199u64.into();
         assert_eq!(
             NativeCurrencyAmount::coins(128),
-            Block::block_subsidy(block_height_generation_0)
+            Block::block_subsidy(block_height_generation_0, Network::Main)
         );
     }
 
@@ -1412,7 +1413,7 @@ pub(crate) mod tests {
         let network = Network::Main;
         for fraction in [0.01, 0.1, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99, 1.0] {
             let block = invalid_empty_block1_with_guesser_fraction(network, fraction).await;
-            assert_eq!(fraction, block.relative_guesser_reward().unwrap());
+            assert_eq!(fraction, block.relative_guesser_reward(network).unwrap());
         }
     }
 

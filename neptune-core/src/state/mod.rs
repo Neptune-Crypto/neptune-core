@@ -932,7 +932,7 @@ impl GlobalState {
         match &self.mining_state.block_proposal {
             BlockProposal::OwnComposition(_) => true,
             BlockProposal::ForeignComposition(block) => block
-                .relative_guesser_reward()
+                .relative_guesser_reward(self.cli.network)
                 .is_ok_and(|x| x >= self.cli.minimum_guesser_fraction),
             BlockProposal::None => false,
         }
@@ -1876,6 +1876,7 @@ impl GlobalState {
                 &parent_ms_accumulator.unwrap_or_default(),
                 &new_tip,
                 maintain_mps_in_wallet,
+                self.cli.network
             )
             .await?;
 

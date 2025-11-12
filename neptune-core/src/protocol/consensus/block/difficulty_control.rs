@@ -798,7 +798,7 @@ mod tests {
         let mut cumulative_pow = cumulative_pow_start;
         let mut difficulty = difficulty_start;
 
-        let target_block_interval = network.target_block_interval();
+        let target_block_interval = network.target_block_interval(BlockHeight::genesis());
         let f = (1.0_f64
             + (target_block_interval.to_millis() - network.minimum_block_time().to_millis())
                 as f64
@@ -830,14 +830,14 @@ mod tests {
             init_cumpow,
             init_difficulty,
             1_000_000_000,
-            network.target_block_interval(),
+            network.target_block_interval(BlockHeight::genesis()),
             network.minimum_block_time(),
         );
         let _calculated_again = max_cumulative_pow_after(
             init_cumpow,
             init_difficulty,
             usize::MAX,
-            network.target_block_interval(),
+            network.target_block_interval(BlockHeight::genesis()),
             network.minimum_block_time(),
         );
     }
@@ -851,7 +851,7 @@ mod tests {
             init_cumpow,
             init_difficulty,
             0,
-            network.target_block_interval(),
+            network.target_block_interval(BlockHeight::genesis()),
             network.minimum_block_time(),
         );
     }
@@ -866,7 +866,7 @@ mod tests {
             init_pow,
             init_difficulty,
             0,
-            network.target_block_interval(),
+            network.target_block_interval(BlockHeight::genesis()),
             network.minimum_block_time(),
         );
         prop_assert!(
@@ -892,7 +892,7 @@ mod tests {
             init_cumpow,
             init_difficulty,
             num_blocks,
-            network.target_block_interval(),
+            network.target_block_interval(BlockHeight::genesis()),
             network.minimum_block_time(),
         );
 
@@ -925,7 +925,7 @@ mod tests {
             init_cumpow,
             init_difficulty,
             num_blocks,
-            network.target_block_interval(),
+            network.target_block_interval(BlockHeight::genesis()),
             network.minimum_block_time(),
         );
         let approximation = max_cumulative_pow_after_iterative_test_impl(

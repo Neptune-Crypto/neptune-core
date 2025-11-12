@@ -8,7 +8,7 @@ use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
-
+use crate::api::export::Network;
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -107,8 +107,8 @@ impl BlockInfo {
     /// note that this calculated value may be more than the coinbase_amount
     /// field because a miner may choose to reward themself less than the
     /// calculated reward amount.
-    pub fn expected_coinbase_amount(&self) -> NativeCurrencyAmount {
-        Block::block_subsidy(self.height)
+    pub fn expected_coinbase_amount(&self, network: Network) -> NativeCurrencyAmount {
+        Block::block_subsidy(self.height, network)
     }
 }
 

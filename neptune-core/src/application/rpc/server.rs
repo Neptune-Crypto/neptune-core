@@ -6610,7 +6610,7 @@ mod tests {
                     let state_lock = rpc_server.state.lock_guard().await;
                     let wallet_status = state_lock.get_wallet_status_for_tip().await;
                     let new_balance = wallet_status.available_confirmed(timestamp);
-                    let mut expected_balance = Block::block_subsidy(block_1.header().height);
+                    let mut expected_balance = Block::block_subsidy(block_1.header().height, network);
                     expected_balance.div_two();
                     assert_eq!(
                         expected_balance, new_balance,

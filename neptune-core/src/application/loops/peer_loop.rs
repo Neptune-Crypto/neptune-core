@@ -4960,7 +4960,7 @@ mod tests {
             // with this block notification.
             let blocks = fake_valid_sequence_of_blocks_for_tests_dyn(
                 &block_1,
-                network.target_block_interval(),
+                network.target_block_interval(block_1.header().height),
                 (0..rng.random_range(ALICE_SYNC_MODE_THRESHOLD + 1..20))
                     .map(|_| rng.random())
                     .collect_vec(),

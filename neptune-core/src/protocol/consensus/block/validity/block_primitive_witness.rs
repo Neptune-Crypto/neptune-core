@@ -384,6 +384,7 @@ pub(crate) mod tests {
 
                                         let coinbase_amount = Block::block_subsidy(
                                             predecessor_block.header().height.next(),
+                                            network
                                         );
                                         let timestamp = predecessor_block.header().timestamp
                                             + network.target_block_interval(predecessor_block.header().height);

@@ -133,6 +133,7 @@ mod tests {
                         &previous_block.mutator_set_accumulator_after().unwrap(),
                         &next_block,
                         maintain_mps,
+                        network
                     )
                     .await
                     .unwrap();
@@ -195,6 +196,7 @@ mod tests {
                 &genesis_block.mutator_set_accumulator_after().unwrap(),
                 &block_1,
                 maintain_mps,
+                network
             )
             .await
             .unwrap();
@@ -254,6 +256,7 @@ mod tests {
                 &block_1.mutator_set_accumulator_after().unwrap(),
                 &block_2,
                 maintain_mps,
+                network
             )
             .await
             .unwrap();
@@ -262,6 +265,7 @@ mod tests {
                 &block_2.mutator_set_accumulator_after().unwrap(),
                 &block_3,
                 maintain_mps,
+                network
             )
             .await
             .unwrap();
@@ -820,6 +824,7 @@ mod tests {
                     .unwrap(),
                 &first_block_continuing_spree,
                 maintain_mps,
+                network
             )
             .await
             .unwrap();
@@ -957,6 +962,7 @@ mod tests {
                 &block_2_b.mutator_set_accumulator_after().unwrap(),
                 &block_3_b,
                 maintain_mps,
+                network
             )
             .await
             .unwrap();
@@ -1014,6 +1020,7 @@ mod tests {
                     .unwrap(),
                 &second_block_continuing_spree,
                 maintain_mps,
+                network
             )
             .await
             .unwrap();
