@@ -29,6 +29,12 @@ impl RapidBlockDownload {
         let suffix = "rapid-block-download/";
         std::env::temp_dir().join(suffix)
     }
+
+    /// The target block height we are syncing to.
+    pub(crate) fn target(&self) -> BlockHeight {
+        self.target_height
+    }
+
     /// Set up a [`RapidBlockDownload`] state.
     pub(crate) async fn new(
         highest_block_already_processed: BlockHeight,
@@ -286,7 +292,7 @@ impl RapidBlockDownload {
     /// Get the [`BitMask`] corresponding to covered blocks (blocks we have,
     /// whether cached or in the database). The complement of this bit mask
     /// indicates which blocks we do not yet have.
-    fn coverage(&self) -> BitMask {
+    pub(crate) fn coverage(&self) -> BitMask {
         self.coverage.clone()
     }
 
