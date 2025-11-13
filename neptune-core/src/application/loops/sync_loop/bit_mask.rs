@@ -1,3 +1,6 @@
+use std::ops::BitOr;
+use std::ops::Not;
+
 use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -38,6 +41,45 @@ impl PartialEq for BitMask {
     }
 }
 impl Eq for BitMask {}
+
+impl Not for BitMask {
+    type Output = BitMask;
+
+    fn not(self) -> Self::Output {
+        let mut limbs = self.limbs.iter().map(|limb| !*limb).collect_vec();
+        if let Some(limb) = limbs.last_mut() {
+            let bound = self.upper_bound % 32;
+            if bound != 0 {
+                for i in bound..32 {
+                    *limb &= !(1 << i);
+                }
+            }
+        }
+        BitMask {
+            upper_bound: self.upper_bound,
+            limbs,
+        }
+    }
+}
+
+impl BitOr for BitMask {
+    type Output = BitMask;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        let upper_bound = u64::max(self.upper_bound, rhs.upper_bound);
+        let limbs = self
+            .limbs
+            .into_iter()
+            .zip_longest(rhs.limbs.into_iter())
+            .map(|x| match x {
+                itertools::EitherOrBoth::Both(left, right) => left | right,
+                itertools::EitherOrBoth::Left(left) => left,
+                itertools::EitherOrBoth::Right(right) => right,
+            })
+            .collect_vec();
+        BitMask { upper_bound, limbs }
+    }
+}
 
 impl BitMask {
     fn num_limbs(max_bit_index: u64) -> usize {
@@ -132,6 +174,7 @@ impl BitMask {
 
     /// Set bits min through max (ends inclusive).
     pub(crate) fn set_range(&mut self, min: u64, max: u64) {
+        assert!(max >= min);
         let first_full_limb = min.div_ceil(32);
         let first_index_in_full_limb = min.div_ceil(32) * 32;
         let successor_of_last_full_limb = max / 32;
@@ -265,6 +308,13 @@ impl BitMask {
         }
         true
     }
+
+    /// Calculate the proportion of ones to zeros, of bits from zero to the
+    /// upper bound (exclusive).
+    pub(crate) fn proportion(&self) -> f64 {
+        let num_ones = self.limbs.iter().map(|l| l.count_ones()).sum::<u32>();
+        f64::from(num_ones) / (self.upper_bound as f64)
+    }
 }
 
 #[cfg(test)]
@@ -274,7 +324,51 @@ pub mod test {
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
+    use rand::rng;
+    use rand::RngCore;
+    use std::hint::black_box;
     use test_strategy::proptest;
+
+    impl BitMask {
+        pub(crate) fn random(lower_bound: u64, upper_bound: u64) -> Self {
+            assert!(upper_bound >= lower_bound);
+
+            let mut bit_mask = BitMask::new(upper_bound);
+
+            bit_mask.set_range(0, lower_bound);
+
+            let mut rng = rng();
+            let first_full_limb = lower_bound.div_ceil(32);
+            let first_index_in_full_limb = lower_bound.div_ceil(32) * 32;
+            let successor_of_last_full_limb = (upper_bound - 1) / 32;
+            let first_index_after_last_full_limb = successor_of_last_full_limb * 32;
+
+            for limb_i in first_full_limb..successor_of_last_full_limb {
+                bit_mask.limbs[limb_i as usize] = rng.next_u32();
+            }
+            for index in lower_bound..u64::min(upper_bound, first_index_in_full_limb) {
+                if rng.random_bool(0.5_f64) {
+                    bit_mask.set(index);
+                }
+            }
+            for index in u64::max(lower_bound, first_index_after_last_full_limb)..upper_bound {
+                if rng.random_bool(0.5_f64) {
+                    bit_mask.set(index);
+                }
+            }
+            bit_mask
+        }
+    }
+
+    #[proptest]
+    fn can_sample_random_bitmask(
+        #[strategy(0_u64..(1<<15))] lower_bound: u64,
+        #[strategy(0u64..(1<<8))] length: u64,
+    ) {
+        let upper_bound = lower_bound + length;
+        let bit_mask = BitMask::random(lower_bound, upper_bound);
+        black_box(bit_mask);
+    }
 
     #[proptest]
     fn set_indices_are_set_and_unset_remain_unset(
