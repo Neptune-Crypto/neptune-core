@@ -13,11 +13,14 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 use crate::api::export::BlockHeight;
+use crate::application::loops::sync_loop::bit_mask::BitMask;
 use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::MainToSync;
+use crate::application::loops::sync_loop::channel::SuccessorsToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownload;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownloadError;
+use crate::protocol::consensus::block::Block;
 
 pub(crate) mod bit_mask;
 pub(crate) mod channel;
@@ -42,6 +45,9 @@ type PeerHandle = SocketAddr;
 pub(crate) struct PeerSyncState {
     num_blocks_contributed: usize,
     last_request: Option<SystemTime>,
+
+    /// None if peer is synced. Some(bitmask) if peer is syncing.
+    coverage: Option<BitMask>,
 }
 
 /// Holds state for the synchronization event loop.
@@ -89,18 +95,16 @@ impl SyncLoop {
 
     /// Run the event loop.
     async fn run(mut self) {
-        let mut finished = false;
+        let mut finished_downloading = false;
+        let mut finished_processing = false;
 
         // Create an interval timer, triggering a tick event regularly.
         let mut ticker = interval(TICK_PERIOD);
 
-        // Join handle for an asynchronous task that sends tip-successors to the
-        // main loop one-by-one. This task must be asynchronous because it can
-        // take a while and we do not want it to halt iteration of the event
-        // loop.
-        let mut maybe_successors_subtask: Option<
-            JoinHandle<Result<SyncLoopReturnCode, SyncLoopError>>,
-        > = None;
+        // The tip-successors subtask sends tip-successors to the main loop one
+        // by one. Its return value comes to the sync loop over this channel.
+        let mut maybe_successors_subtask: Option<JoinHandle<()>> = None;
+        let (successors_sender, mut successors_receiver) = mpsc::channel(1);
 
         // Track the timestamp of the most recent block to be received.
         let mut most_recent_receipt = None;
@@ -117,62 +121,67 @@ impl SyncLoop {
             tokio::select! {
 
                 // event: successors subtask finished
-                successor_task_result = async {
-                    if let Some(handle) = &mut maybe_successors_subtask {
-                        Some(handle.await)
-                    } else {
-                        None
-                    }
-                }, if maybe_successors_subtask.is_some() => {
-                    match successor_task_result.unwrap() {
-                        Ok(Ok(SyncLoopReturnCode::Finished)) => {
+                Some(successor_task_result) = successors_receiver.recv() => {
+                    match successor_task_result {
+                        SuccessorsToSync::Finished{ block_height: tip_height } => {
+                            tracing::debug!("successors subtask finished ({}), and it looks like we're done ...", tip_height);
+                            self.tip_height = tip_height;
+
                             // The successors subtask claims it is finished, but
                             // it can only support this claim with an outdated
                             // view of the download state. In the mean time,
-                            // a new block may have come in. So double-check the
-                            // download state and start a new run of the subtask
-                            // if necessary.
-                            if self.download_state.is_complete() {
-                                finished = true;
+                            // a new block may have come in, possibly still in
+                            // still in the channel but not read yet. So double-
+                            // check the download state and channel, and start a
+                            // new run of the subtask if necessary.
+                            if self.main_channel_receiver.is_empty() && self.download_state.is_complete() && self.download_state.target() == tip_height {
+                                finished_processing = true;
                                 break;
+                            } else if !self.main_channel_receiver.is_empty() {
+                                tracing::debug!("aha, not done: we have {} messages from main loop to process", self.main_channel_receiver.len());
+                            } else if self.download_state.target() != tip_height  {
+                                tracing::debug!("aha, not done: we behind target.");
                             }
-
-                            let moved_tip_height = self.tip_height;
-                            let moved_download_state = self.download_state.clone();
-                            let moved_sender = self.main_channel_sender.clone();
-                            maybe_successors_subtask = Some(tokio::spawn(async move {
-                                Self::process_successors_of_tip(moved_tip_height, moved_download_state, moved_sender).await
-                            }));
                         }
-                        Ok(Ok(SyncLoopReturnCode::Continue{tip_height})) => {
-                            maybe_successors_subtask = None;
+                        SuccessorsToSync::Continue{ block_height: tip_height } => {
                             self.tip_height = tip_height;
+                            tracing::debug!("successors subtask finished ({}), but not done yet ...", tip_height);
                         }
-                        Ok(Err(SyncLoopError::RapidBlockDownloadError(e))) => {
-                            maybe_successors_subtask = None;
-                            tracing::error!("Rapid block download error while sending tip-successors to main loop: {e}");
+                        SuccessorsToSync::RapidBlockDownloadError => {
+                            tracing::error!("Rapid block download error while sending tip-successors to main loop. Terminating sync loop.");
+                            break;
                         }
-                        Ok(Err(SyncLoopError::SendError(e))) => {
-                            maybe_successors_subtask = None;
-                            tracing::error!("Could not send tip-successor block to main loop: {e}");
-                        }
-                        Err(e) => {
-                            maybe_successors_subtask = None;
-                            tracing::error!("Tokio error while sending tip-successors to main loop: {e}");
+                        SuccessorsToSync::SendError => {
+                            tracing::error!("Could not send tip-successor block to main loop. Terminating sync loop.");
+                            break;
                         }
                     }
+
+                    let moved_tip_height = self.tip_height;
+                    let moved_download_state = self.download_state.clone();
+                    let moved_main_channel_sender = self.main_channel_sender.clone();
+                    let moved_return_sender = successors_sender.clone();
+                    maybe_successors_subtask = Some(tokio::spawn(async move {
+                        Self::process_successors_of_tip(moved_tip_height, moved_download_state, moved_main_channel_sender, moved_return_sender).await
+                    }));
                 }
 
                 // event: message from sync loop
                 Some(message_from_main) = self.main_channel_receiver.recv() => {
+                    tracing::debug!("sync loop: read one message from main");
                     match message_from_main {
                         MainToSync::AddPeer(peer_handle) => {
+                            tracing::debug!("sync loop got new peer");
                             self.peers.insert(peer_handle, PeerSyncState::default());
 
-                            // Add new block request to queue.
-                            pending_block_requests.push(peer_handle);
+                            // Add new block request to queue, if we are still
+                            // downloading.
+                            if !finished_downloading {
+                                pending_block_requests.push(peer_handle);
+                            }
                         }
                         MainToSync::RemovePeer(peer_handle) => {
+                            tracing::debug!("sync loop dropped peer");
                             self.peers.remove(&peer_handle);
                             last_peer_disconnect_time = Some(SystemTime::now());
                         }
@@ -194,19 +203,24 @@ impl SyncLoop {
                             if maybe_successors_subtask.is_none() {
                                 let moved_tip_height = self.tip_height;
                                 let moved_download_state = self.download_state.clone();
-                                let moved_sender = self.main_channel_sender.clone();
+                                let moved_main_channel_sender = self.main_channel_sender.clone();
+                                let moved_return_channel_sender = successors_sender.clone();
                                 maybe_successors_subtask = Some(tokio::spawn(async move {
-                                    Self::process_successors_of_tip(moved_tip_height, moved_download_state, moved_sender).await
+                                    Self::process_successors_of_tip(moved_tip_height, moved_download_state, moved_main_channel_sender, moved_return_channel_sender).await
                                 }));
                             }
 
-                            // If there are still blocks outstanding, add a
+                            // If we are done downloading, transition to
+                            // finished-downloading state. Otherwise, add a
                             // block request to the queue.
-                            if !self.download_state.is_complete() {
+                            if self.download_state.is_complete() {
+                                finished_downloading = true;
+                            } else {
                                 pending_block_requests.push(peer_handle);
                             }
                         }
                         MainToSync::ExtendChain(block) => {
+                            tracing::debug!("sync loop: extending chain to new target height {}", block.header().height);
                             if let Err(e) = self.download_state.extend_chain(&block).await {
                                 tracing::error!(
                                     "Could not extend chain of download state with new block og height {} and digest {:x}; got error: {e}",
@@ -214,7 +228,41 @@ impl SyncLoop {
                                 );
                                 continue;
                             }
+                            assert_eq!(self.download_state.target(), block.header().height);
                             most_recent_receipt = Some(SystemTime::now());
+
+                            // In the special case that the incoming target
+                            // block is one ahead of the tip (the block height
+                            // we already synchronized to), process it directly,
+                            // without going through the tip-successors subtask.
+                            // Save valuable setup-time.
+                            if self.tip_height.next() == block.header().height {
+                                tracing::debug!("by-passing tip-successors subtask; processing tip-successor {} directly ...", block.header().height);
+                                self.tip_height = block.header().height;
+                                if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block).await {
+                                    tracing::error!("Could not send tip-successor to main loop. Terminating sync loop.");
+                                    break;
+                                }
+
+                                if self.main_channel_receiver.is_empty() {
+                                    finished_processing = true;
+                                    break;
+                                }
+                            }
+                        }
+                        MainToSync::SyncCoverage{peer_handle, coverage } => {
+                            // Record peer's status.
+                            let Some(peer) = self.peers.get_mut(&peer_handle) else {
+                                tracing::error!("Inconsistent peer dictionary in sync loop: peer {peer_handle} not present.");
+                                continue;
+                            };
+                            peer.coverage = Some(coverage);
+
+                            // If there are still blocks outstanding, add a
+                            // block request to the queue.
+                            if !self.download_state.is_complete() {
+                                pending_block_requests.push(peer_handle);
+                            }
                         }
                     }
                 }
@@ -222,10 +270,34 @@ impl SyncLoop {
                 // event: timer ticks
                 _ = ticker.tick() => {
 
+                    let proportion = self.download_state.coverage().proportion();
+                    tracing::debug!("tick! syncing is {} done", proportion);
+
+                    if proportion == 1.0 && !finished_downloading {
+                        tracing::debug!("sync loop inconsistent state: all blocks were downloaded but we are not finished yet.");
+                        break;
+                    }
+
+                    // If we are finished and there are no messages waiting to
+                    // be read, then we can exit.
+                    if finished_processing && self.main_channel_receiver.is_empty() {
+                        tracing::info!("Sync loop is finished, exiting loop.");
+                        break;
+                    } else if finished_processing {
+                        tracing::info!(
+                            "Sync loop finished downloading and processing, \
+                            but there are {} unread messages on the channel; \
+                            flushing queue first.",
+                            self.main_channel_receiver.len()
+                        );
+                        continue;
+                    }
+
                     // If we have not been connected to peers long enough,
                     // terminate.
                     let now = SystemTime::now();
                     if self.peers.is_empty() && last_peer_disconnect_time.and_then(|t| now.duration_since(t).ok()).is_some_and(|d| d > Duration::from_secs(10)) {
+                        tracing::warn!("Sync loop not connected to peers for too long; terminating.");
                         break;
                     }
 
@@ -242,68 +314,110 @@ impl SyncLoop {
                     && self.main_channel_receiver.is_empty()
                     && maybe_successors_subtask.is_none() {
                         tracing::warn!("Most recent block was received a while ago; terminating sync loop.");
-                        finished = self.download_state.is_complete();
                         break;
                     }
 
-                    // Check all peers for timeouts.
-                    let mut timeouts = vec![];
-                    for (peer_handle, peer_state) in &self.peers {
-                        if peer_state
-                        .last_request
-                        .and_then(|timestamp| now.duration_since(timestamp).ok())
-                        .is_none_or(|duration| duration > PEER_RESPONSE_TIMEOUT) {
-                            timeouts.push(*peer_handle);
+                    if !finished_downloading {
+                        tracing::debug!("not finished downloading yet ...");
+
+                        // Check all peers for timeouts.
+                        let mut timeouts = vec![];
+                        for (peer_handle, peer_state) in &self.peers {
+                            if peer_state
+                            .last_request
+                            .and_then(|timestamp| now.duration_since(timestamp).ok())
+                            .is_none_or(|duration| duration > PEER_RESPONSE_TIMEOUT) {
+                                timeouts.push(*peer_handle);
+                            }
                         }
-                    }
 
-                    // If timeout, add those peers to queue of block requests.
-                    pending_block_requests.sort();
-                    for peer in timeouts {
-                        tracing::warn!("{peer} peer timed out; sending new random block request.");
-                        if !pending_block_requests.contains(&peer) {
-                            pending_block_requests.push(peer);
+                        // If timeout, add those peers to queue of block requests.
+                        pending_block_requests.sort();
+                        for peer in timeouts {
+                            tracing::warn!("{peer} peer timed out; sending new random block request.");
+                            if !pending_block_requests.contains(&peer) {
+                                pending_block_requests.push(peer);
+                            }
                         }
-                    }
 
-                    // Flush queue of pending block requests.
-                    self.request_random_blocks(&pending_block_requests).await;
-                    pending_block_requests = vec![];
-
-                    // There is a race condition in which the block-download
-                    // finishes while an old successors subtask is running. In
-                    // this case, that successors subtask will finish according
-                    // to its outdated view of the available blocks. But since
-                    // no new blocks come in, they will not trigger a new
-                    // successors subtask. So we must trigger it through this
-                    // backstop.
-                    if maybe_successors_subtask.is_none() && self.download_state.is_complete() {
-                        let moved_tip_height = self.tip_height;
-                        let moved_download_state = self.download_state.clone();
-                        let moved_sender = self.main_channel_sender.clone();
-                        maybe_successors_subtask = Some(tokio::spawn(async move {
-                            Self::process_successors_of_tip(moved_tip_height, moved_download_state, moved_sender).await
-                        }));
+                        // Flush queue of pending block requests.
+                        self.request_random_blocks(&pending_block_requests).await;
+                        pending_block_requests = vec![];
                     }
 
                 }
             }
         }
 
-        // Tell main loop we are done, but with a success or error code.
-        let return_code = if finished {
-            SyncToMain::Finished
+        // Determine which return code is appropriate.
+        let return_code = if finished_processing {
+            tracing::info!("Sync loop is finished downloading and finished processing.");
+            SyncToMain::Finished(self.download_state.target())
         } else {
+            if !finished_downloading {
+                tracing::warn!("Sync loop did not finish downloading.");
+            }
+            tracing::warn!("Sync loop did not finish processing.");
             SyncToMain::Error
         };
-        if let Err(e) = self.main_channel_sender.send(return_code).await {
-            tracing::error!(
-                "Failed to send message from sync loop to main loop that job is done: {e}."
-            );
+
+        // Tell main loop we are done. Ensure delivery.
+        let mut send_success = false;
+        let mut num_send_attempts = 1000;
+        loop {
+            let send_result = self.main_channel_sender.try_send(return_code.clone());
+            if send_result.is_ok() {
+                send_success = true;
+                break;
+            }
+            num_send_attempts += 1;
+            if num_send_attempts >= 1000 {
+                break;
+            }
+            tracing::warn!("Sync loop: could not send return code to main loop. Is it busy?");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if !send_success {
+            tracing::error!("Failed to send message from sync loop to main loop that job is done.");
         }
 
         // Clean up the temp directory.
         self.download_state.clean_up().await;
+    }
+
+    /// Sample one appropriate missing block height for each peer.
+    fn sample_heights(
+        peers: HashMap<PeerHandle, PeerSyncState>,
+        own_coverage: BitMask,
+        peer_handles: Vec<PeerHandle>,
+    ) -> Vec<BlockRequest> {
+        let mut block_requests = vec![];
+        for peer_handle in peer_handles {
+            let Some(peer) = peers.get(&peer_handle) else {
+                // Peer disconnected in between being added to the queue and
+                // this function being executed. No cause for concern. And also:
+                // nothing we can do.
+                tracing::warn!("Cannot use peer {peer_handle} for syncing; ignoring.");
+                continue;
+            };
+
+            // Otherwise, compute the distribution of blocks to sample from.
+            let mut distribution = own_coverage.clone();
+            if let Some(coverage) = peer.coverage.clone() {
+                distribution = distribution | !coverage;
+            }
+
+            // Sample and collect block request, if possible.
+            if distribution.is_complete() {
+                continue;
+            }
+            let height = distribution.sample(false, rng().random());
+            block_requests.push(BlockRequest {
+                peer_handle,
+                height: BlockHeight::from(height),
+            });
+        }
+        block_requests
     }
 
     /// Request random (but missing) blocks from the given peer.
@@ -312,28 +426,26 @@ impl SyncLoop {
             return;
         }
 
-        tracing::debug!("sampling missing block heights ...");
-        let mut block_requests = vec![];
-        for peer_handle in peer_handles {
-            // Sample a random missing block height.
-            let Some(height) = self
-                .download_state
-                .sample_missing_block_height(rng().random())
-            else {
-                tracing::error!(
-                    "Cannot request random block from peer because all blocks are in already."
-                );
-                return;
-            };
-
-            block_requests.push(BlockRequest {
-                peer_handle: *peer_handle,
-                height,
-            });
-
-            // Yield in between height samplers.
-            tokio::task::yield_now().await;
+        // If we are finished already, abort.
+        if self.download_state.is_complete() {
+            tracing::error!(
+                "Cannot request random block from peer because all blocks are in already."
+            );
+            return;
         }
+
+        tracing::debug!("sampling missing block heights ...");
+        let moved_peers = self.peers.clone();
+        let own_coverage = self.download_state.coverage();
+        let moved_peer_handles = peer_handles.to_vec();
+        let Ok(block_requests) = tokio::task::spawn_blocking(move || {
+            Self::sample_heights(moved_peers, own_coverage, moved_peer_handles)
+        })
+        .await
+        else {
+            tracing::error!("Could not sample block heights due tokio/concurrency error.");
+            return;
+        };
         tracing::info!(
             "requesting blocks [{}] from peers",
             block_requests.iter().map(|br| br.height.value()).join(", ")
@@ -362,49 +474,61 @@ impl SyncLoop {
         }
     }
 
+    /// Send a tip-successor block to the main channel, and ensure it is
+    /// received. If the channel is out-of-capacity, report and keep retrying.
+    /// Return false if 100 tries fail; true otherwise.
+    async fn ensure_send_tip_successor(
+        channel_to_main: &Sender<SyncToMain>,
+        successor: Block,
+    ) -> bool {
+        // send to main
+        // important payload, so report on delays
+        let max = 100;
+        for i in 0..max {
+            match channel_to_main.try_send(SyncToMain::TipSuccessor(Box::new(successor.clone()))) {
+                Ok(_) => {
+                    return true;
+                }
+                Err(_) => {
+                    tracing::warn!("Could not send tip-successor block from sync loop to main loop; main loop appears busy ...");
+                    tokio::time::sleep(Duration::from_millis(10 * i)).await;
+                }
+            }
+        }
+
+        false
+    }
+
     /// The tip-successors subtask.
     ///
     /// If we are sitting on blocks that immediately succeed the tip with no
     /// gaps, then send them all over to the main loop for processing. Do that
     /// until there are no more such blocks left.
+    ///
+    /// This task must be asynchronous because it can take a while and we do not
+    /// want it to halt iteration of the event loop.
     async fn process_successors_of_tip(
         current_tip_height: BlockHeight,
         download_state: RapidBlockDownload,
         channel_to_main: Sender<SyncToMain>,
-    ) -> Result<SyncLoopReturnCode, SyncLoopError> {
+        return_channel: Sender<SuccessorsToSync>,
+    ) {
         let mut tip_height = current_tip_height;
         while download_state.have_received(tip_height.next()) {
             // get successor block
-            let successor = download_state
-                .get_received_block(tip_height.next())
-                .await.map_err(|e| {
-                    tracing::error!("Could not get block from temp directory even though the block was received: {e}. Terminating sync mode.");
-                    SyncLoopError::RapidBlockDownloadError(e)
-                })?;
+            let Ok(successor) = download_state.get_received_block(tip_height.next()).await else {
+                tracing::error!("Could not get block from temp directory even though the block was received. Terminating sync mode.");
+                let _ = return_channel
+                    .send(SuccessorsToSync::RapidBlockDownloadError)
+                    .await;
+                return;
+            };
 
             // send to main
-            // important payload, so report on delays
-            let mut counter = 0;
-            let max = 100;
-            for _ in 0..max {
-                match channel_to_main
-                    .try_send(SyncToMain::TipSuccessor(Box::new(successor.clone())))
-                {
-                    Ok(_) => break,
-                    Err(_) => {
-                        tracing::warn!("Could not send tip-successor block from sync loop to main loop; main loop appears busy ...");
-                        counter += 1;
-                        tokio::time::sleep(Duration::from_millis(counter)).await;
-                    }
-                }
-            }
-            if counter == max {
-                tracing::error!("Failed to send tip-successor block from sync loop to main loop. Aborting sync mode.");
-                return Err(SyncLoopError::SendError(
-                    tokio::sync::mpsc::error::SendError(SyncToMain::TipSuccessor(Box::new(
-                        successor,
-                    ))),
-                ));
+            if !Self::ensure_send_tip_successor(&channel_to_main, successor).await {
+                tracing::error!("Failed to send tip-successor block from sync loop to main loop. Aborting sync loop.");
+                let _ = return_channel.send(SuccessorsToSync::SendError).await;
+                return;
             }
 
             // delete the block after the main loop successfully received it
@@ -418,16 +542,25 @@ impl SyncLoop {
 
         // We processed everything we can. Are we finished?
         if download_state.is_complete() {
-            Ok(SyncLoopReturnCode::Finished)
+            let _ = return_channel
+                .send(SuccessorsToSync::Finished {
+                    block_height: tip_height,
+                })
+                .await;
         } else {
-            Ok(SyncLoopReturnCode::Continue { tip_height })
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let _ = return_channel
+                .send(SuccessorsToSync::Continue {
+                    block_height: tip_height,
+                })
+                .await;
         }
     }
 }
 
 #[derive(Debug, Clone)]
 enum SyncLoopReturnCode {
-    Finished,
+    Finished { tip_height: BlockHeight },
     Continue { tip_height: BlockHeight },
 }
 
@@ -560,23 +693,33 @@ mod tests {
             loop {
                 tokio::select! {
                     Some(message) = self.sync_to_main_receiver.recv() => {
-                        tracing::debug!("mock main loop: got message from sync loop!");
                         match message {
-                            SyncToMain::Finished => {
-                                if self.current_tip_height == self.sync_target_height {
+                            SyncToMain::Finished(target) => {
+                                tracing::info!("sync loop is finished");
+                                if self.current_tip_height == target {
                                     self.finished = true;
+
+                                    // There may be a race condition whereby new
+                                    // "blocks" are "disseminated" while the
+                                    // sync loop is finishing up. Ignore these.
+                                    self.sync_target_height = target;
                                 }
                                 else {
-                                    tracing::warn!("Got Finished message from sync loop but we are not finished yet.");
+                                    tracing::warn!("Got Finished({}) message from sync loop but we are not finished yet ({}).", target, self.current_tip_height);
                                 }
                                 break;
                             }
                             SyncToMain::TipSuccessor(block) => {
+                                tracing::debug!("mock main loop: processing block {}", block.header().height);
                                 if block.header().height == self.current_tip_height.next() {
                                     self.current_tip_height = block.header().height;
                                     if let Some(tip_tracker) = &self.tip_tracker {
                                         *tip_tracker.lock().await = block.header().height;
+                                        tracing::info!("mock main loop: updated tip to new block ({})", block.header().height);
                                     }
+                                }
+                                else {
+                                    panic!("tip-success is not actual successor");
                                 }
                             }
                             SyncToMain::RequestBlocks(block_requests) => {
@@ -585,7 +728,6 @@ mod tests {
                                     if let Some(peer) = self.peers.get_mut(&block_request.peer_handle.clone()) {
                                         if let Some(block) = peer.request(block_request.height).await {
                                             tracing::debug!("got block from peer; relaying to sync loop");
-                                            tracing::debug!("note: channel capacity is at {}/{}", self.main_to_sync_sender.capacity(), self.main_to_sync_sender.max_capacity());
                                             if let Err(e) = self
                                                 .main_to_sync_sender
                                                 .try_send(MainToSync::ReceiveBlock {
@@ -594,9 +736,22 @@ mod tests {
                                                 })
                                             {
                                                 tracing::warn!("error relaying block to sync loop: {e}");
+                                                tracing::debug!("note: channel capacity is at {}/{}", self.main_to_sync_sender.capacity(), self.main_to_sync_sender.max_capacity());
                                             }
                                             tracing::debug!("done relaying");
                                         } else {
+                                            if let MockPeer::Syncing(syncing_peer) = peer {
+                                                if rng().random_bool(0.5_f64) {
+                                                    if let Err(e) = self
+                                                        .main_to_sync_sender
+                                                        .try_send(MainToSync::SyncCoverage {
+                                                            peer_handle: block_request.peer_handle,
+                                                            coverage: syncing_peer.coverage()
+                                                        }) {
+                                                        tracing::warn!("error relaying coverage to sync loop: {e}");
+                                                    }
+                                                }
+                                            }
                                             tracing::debug!("no response from peer");
                                         }
                                     } else {
@@ -610,7 +765,6 @@ mod tests {
                                 break;
                             }
                         }
-                        tracing::debug!("done processing message from sync loop");
                     }
 
                     Some(message) = self.peer_control_receiver.recv() => {
@@ -627,13 +781,18 @@ mod tests {
                     }
 
                     Some(message) = self.blockchain_tip_control_receiver.recv() => {
+                        tracing::debug!("got new block! while there is {} messages in the peer control channel", self.peer_control_receiver.len());
                         match message {
                             BlockchainTipControl::NewBlock(block) => {
                                 tracing::info!("new block was mined; expanding sync target accordingly ******");
                                 self.sync_target_height = self.sync_target_height.next();
-                                self.main_to_sync_sender.send(MainToSync::ExtendChain(block)).await.unwrap();
+                                if let Err(e) = self.main_to_sync_sender.send(MainToSync::ExtendChain(Box::new(block))).await {
+                                    tracing::error!("failed to send new block to sync loop: {e}");
+                                    return;
+                                }
                             }
                         }
+                        tracing::debug!("done relaying new block.");
                     }
                 }
             }
@@ -644,6 +803,7 @@ mod tests {
     enum MockPeer {
         Good(GoodPeer),
         Flaky(FlakyPeer),
+        Syncing(SyncingPeer),
     }
 
     impl MockPeer {
@@ -651,6 +811,7 @@ mod tests {
             match self {
                 MockPeer::Good(good_peer) => good_peer.request(block_height).await,
                 MockPeer::Flaky(flaky_peer) => flaky_peer.request(block_height).await,
+                MockPeer::Syncing(syncing_peer) => syncing_peer.request(block_height).await,
             }
         }
 
@@ -658,6 +819,7 @@ mod tests {
             match self {
                 MockPeer::Good(good_peer) => good_peer.handle(),
                 MockPeer::Flaky(flaky_peer) => flaky_peer.handle(),
+                MockPeer::Syncing(syncing_peer) => syncing_peer.handle(),
             }
         }
     }
@@ -708,6 +870,52 @@ mod tests {
 
         fn handle(&self) -> PeerHandle {
             self.peer_handle
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct SyncingPeer {
+        peer_handle: PeerHandle,
+        coverage: BitMask,
+    }
+
+    impl SyncingPeer {
+        fn new(coverage: BitMask) -> Self {
+            Self {
+                peer_handle: random_peer_handle(),
+                coverage,
+            }
+        }
+        async fn request(&mut self, block_height: BlockHeight) -> Option<Block> {
+            // with certain probability, this peer has received a new block
+            if rng().random_bool(0.2_f64) && !self.coverage.is_complete() {
+                let height = self.coverage.sample(false, rng().random());
+                self.coverage.set(height);
+            }
+
+            // simulate flakiness
+            if rng().random_bool(0.5_f64) {
+                return None;
+            }
+
+            // if the block is not present then we certainly cannot provide it
+            if !self.coverage.contains(block_height.value()) {
+                return None;
+            }
+
+            // sample and return block
+            let mut block = rng().random::<Block>();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            block.set_header_height(block_height);
+            Some(block)
+        }
+
+        fn handle(&self) -> PeerHandle {
+            self.peer_handle
+        }
+
+        fn coverage(&self) -> BitMask {
+            self.coverage.clone()
         }
     }
 
@@ -976,9 +1184,10 @@ mod tests {
         let _sync_loop_handle = sync_loop.start();
         let moved_peer_control_sender = main_loop.peer_control_sender();
         let peer_set_changer_handle = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1)).await;
             for _ in 0..100 {
-                tokio::time::sleep(Duration::from_millis(500)).await;
                 change_peer_set(&mut peer_set, moved_peer_control_sender.clone(), &mut rng).await;
+                tokio::time::sleep(Duration::from_millis(500)).await;
             }
         });
         main_loop.run().await;
@@ -999,12 +1208,17 @@ mod tests {
             tip_control_sender: Sender<BlockchainTipControl>,
             rng: &mut StdRng,
         ) {
-            let mut block = rng.random::<Block>();
+            let mut moved_rng = rng.clone();
+            let mut block = tokio::task::spawn_blocking(move || moved_rng.random::<Block>())
+                .await
+                .unwrap();
             let mut target_height_lock = target_height.lock_owned().await;
             let old_height: BlockHeight = *target_height_lock;
             let new_height = old_height.next();
-            block.set_header_height(new_height);
             *target_height_lock = new_height;
+            drop(target_height_lock);
+            tokio::task::yield_now().await;
+            block.set_header_height(new_height);
             tip_control_sender
                 .send(BlockchainTipControl::NewBlock(block))
                 .await
@@ -1014,9 +1228,9 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(rng().next_u64());
         tracing::info!("starting test ...");
 
-        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32() >> 20));
         let original_sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
+            BlockHeight::from(current_tip_height.value() + rng.random_range(0..100));
         let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
             SyncLoop::new(current_tip_height, original_sync_target_height, false)
                 .await
@@ -1039,14 +1253,15 @@ mod tests {
         let updated_sync_target_height = Arc::new(Mutex::new(original_sync_target_height));
         let moved_updated_sync_target_height = updated_sync_target_height.clone();
         let new_blocks_handle = tokio::spawn(async move {
-            for _ in 0..100 {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            loop {
                 disseminate_new_block(
                     moved_updated_sync_target_height.clone(),
                     blockchain_tip_control_sender.clone(),
                     &mut rng,
                 )
                 .await;
+                tokio::time::sleep(Duration::from_millis(250)).await;
             }
         });
 
@@ -1069,5 +1284,181 @@ mod tests {
 
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn can_sync_from_syncing_peers() {}
+    async fn can_sync_from_syncing_peers() {
+        let mut rng = rng();
+        tracing::info!("starting test ...");
+
+        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32() >> 12));
+        let sync_target_height =
+            BlockHeight::from(current_tip_height.value() + rng.random_range(0..100));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
+            SyncLoop::new(current_tip_height, sync_target_height, false)
+                .await
+                .unwrap();
+        let mut main_loop = MockMainLoop::new(
+            main_to_sync_sender,
+            sync_to_main_receiver,
+            current_tip_height,
+            sync_target_height,
+        );
+
+        let mut cumulative_coverage = BitMask::new(sync_target_height.next().value());
+        for _ in 0..5 {
+            let peer_coverage = tokio::task::spawn_blocking(move || {
+                BitMask::random(
+                    current_tip_height.value(),
+                    sync_target_height.next().value(),
+                )
+            })
+            .await
+            .unwrap();
+            cumulative_coverage = cumulative_coverage | peer_coverage.clone();
+            main_loop
+                .connect(MockPeer::Syncing(SyncingPeer::new(peer_coverage)))
+                .await;
+        }
+        main_loop
+            .connect(MockPeer::Syncing(SyncingPeer::new(!cumulative_coverage)))
+            .await;
+
+        let _sync_loop_handle = sync_loop.start();
+        main_loop.run().await;
+        assert!(
+            main_loop.sync_is_finished(),
+            "current tip height {} versus sync target height {}",
+            main_loop.current_tip_height,
+            main_loop.sync_target_height
+        );
+    }
+
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_sync_with_moving_target_from_dynamic_set_of_flaky_syncing_peers() {
+        async fn change_peer_set(
+            target_height: Arc<Mutex<BlockHeight>>,
+            peer_set: &mut Vec<PeerHandle>,
+            peer_control_sender: Sender<PeerControl>,
+            rng: &mut StdRng,
+        ) {
+            if (peer_set.is_empty() || rng.random_bool(0.5_f64)) && peer_set.len() < 5 {
+                let height = *target_height.try_lock().unwrap();
+                let bit_mask =
+                    tokio::task::spawn_blocking(move || BitMask::random(0, height.value()))
+                        .await
+                        .unwrap();
+                let new_peer = SyncingPeer::new(bit_mask);
+                let handle = new_peer.handle();
+                peer_set.push(handle);
+                peer_control_sender
+                    .send(PeerControl::AddPeer(MockPeer::Syncing(new_peer)))
+                    .await
+                    .unwrap();
+            } else {
+                let index = rng.random_range(0..peer_set.len());
+                let handle = peer_set.swap_remove(index);
+                peer_control_sender
+                    .send(PeerControl::RemovePeer(handle))
+                    .await
+                    .unwrap();
+            }
+        }
+
+        async fn disseminate_new_block(
+            target_height: Arc<Mutex<BlockHeight>>,
+            tip_control_sender: Sender<BlockchainTipControl>,
+            rng: &mut StdRng,
+        ) {
+            let mut moved_rng = rng.clone();
+            let mut block = tokio::task::spawn_blocking(move || moved_rng.random::<Block>())
+                .await
+                .unwrap();
+            let mut target_height_lock = target_height.try_lock().unwrap();
+            let old_height: BlockHeight = *target_height_lock;
+            let new_height = old_height.next();
+            block.set_header_height(new_height);
+            *target_height_lock = new_height;
+            drop(target_height_lock);
+            tokio::task::yield_now().await;
+            tip_control_sender
+                .send(BlockchainTipControl::NewBlock(block))
+                .await
+                .unwrap();
+        }
+
+        let mut rng = StdRng::seed_from_u64(rng().next_u64());
+        tracing::info!("starting test ...");
+
+        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32() >> 20));
+        let original_sync_target_height = BlockHeight::from(current_tip_height.value() + 100);
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
+            SyncLoop::new(current_tip_height, original_sync_target_height, false)
+                .await
+                .unwrap();
+        let mut main_loop = MockMainLoop::new(
+            main_to_sync_sender,
+            sync_to_main_receiver,
+            current_tip_height,
+            original_sync_target_height,
+        );
+
+        let mut peer_set = vec![];
+        for _ in 0..1 {
+            let peer = FlakyPeer::new();
+            peer_set.push(peer.handle());
+            main_loop.connect(MockPeer::Flaky(peer)).await;
+        }
+
+        let _sync_loop_handle = sync_loop.start();
+
+        let moved_peer_control_sender = main_loop.peer_control_sender();
+        let updated_sync_target_height = Arc::new(Mutex::new(original_sync_target_height));
+        let moved_updated_sync_target_height = updated_sync_target_height.clone();
+        let mut moved_rng = StdRng::seed_from_u64(rng.next_u64());
+        let peer_set_changer_handle = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            loop {
+                change_peer_set(
+                    moved_updated_sync_target_height.clone(),
+                    &mut peer_set,
+                    moved_peer_control_sender.clone(),
+                    &mut moved_rng,
+                )
+                .await;
+                tokio::time::sleep(Duration::from_millis(15)).await;
+            }
+        });
+
+        let moved_updated_sync_target_height_ = updated_sync_target_height.clone();
+        let blockchain_tip_control_sender = main_loop.blockchain_tip_control_sender();
+        let mut moved_rng_ = StdRng::seed_from_u64(rng.next_u64());
+        let new_blocks_handle = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            loop {
+                disseminate_new_block(
+                    moved_updated_sync_target_height_.clone(),
+                    blockchain_tip_control_sender.clone(),
+                    &mut moved_rng_,
+                )
+                .await;
+                tokio::time::sleep(Duration::from_millis(29)).await;
+            }
+        });
+
+        main_loop.run().await;
+
+        peer_set_changer_handle.abort();
+        new_blocks_handle.abort();
+
+        assert!(
+            main_loop.sync_is_finished(),
+            "current tip height {} versus sync target height {}",
+            main_loop.current_tip_height,
+            main_loop.sync_target_height
+        );
+
+        assert_ne!(
+            original_sync_target_height,
+            *updated_sync_target_height.lock().await
+        );
+    }
 }
