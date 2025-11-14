@@ -124,7 +124,6 @@ impl SyncLoop {
                 Some(successor_task_result) = successors_receiver.recv() => {
                     match successor_task_result {
                         SuccessorsToSync::Finished{ block_height: tip_height } => {
-                            tracing::debug!("successors subtask finished ({}), and it looks like we're done ...", tip_height);
                             self.tip_height = tip_height;
 
                             // The successors subtask claims it is finished, but
@@ -137,15 +136,10 @@ impl SyncLoop {
                             if self.main_channel_receiver.is_empty() && self.download_state.is_complete() && self.download_state.target() == tip_height {
                                 finished_processing = true;
                                 break;
-                            } else if !self.main_channel_receiver.is_empty() {
-                                tracing::debug!("aha, not done: we have {} messages from main loop to process", self.main_channel_receiver.len());
-                            } else if self.download_state.target() != tip_height  {
-                                tracing::debug!("aha, not done: we behind target.");
                             }
                         }
                         SuccessorsToSync::Continue{ block_height: tip_height } => {
                             self.tip_height = tip_height;
-                            tracing::debug!("successors subtask finished ({}), but not done yet ...", tip_height);
                         }
                         SuccessorsToSync::RapidBlockDownloadError => {
                             tracing::error!("Rapid block download error while sending tip-successors to main loop. Terminating sync loop.");
@@ -168,7 +162,6 @@ impl SyncLoop {
 
                 // event: message from sync loop
                 Some(message_from_main) = self.main_channel_receiver.recv() => {
-                    tracing::debug!("sync loop: read one message from main");
                     match message_from_main {
                         MainToSync::AddPeer(peer_handle) => {
                             tracing::debug!("sync loop got new peer");
@@ -186,7 +179,7 @@ impl SyncLoop {
                             last_peer_disconnect_time = Some(SystemTime::now());
                         }
                         MainToSync::ReceiveBlock { peer_handle, block } => {
-                            tracing::info!("receiving block {} ...", block.header().height);
+                            tracing::info!("Sync loop: receiving block {} ...", block.header().height);
                             // Store block and update download state.
                             if let Err(e) = self.download_state.receive_block(&block).await
                             {
@@ -220,10 +213,10 @@ impl SyncLoop {
                             }
                         }
                         MainToSync::ExtendChain(block) => {
-                            tracing::debug!("sync loop: extending chain to new target height {}", block.header().height);
+                            tracing::debug!("Sync loop: extending chain to new target height {}", block.header().height);
                             if let Err(e) = self.download_state.extend_chain(&block).await {
                                 tracing::error!(
-                                    "Could not extend chain of download state with new block og height {} and digest {:x}; got error: {e}",
+                                    "Sync loop: could not extend chain of download state with new block of height {} and digest {:x}; got error: {e}",
                                     block.header().height, block.hash()
                                 );
                                 continue;
@@ -237,7 +230,6 @@ impl SyncLoop {
                             // without going through the tip-successors subtask.
                             // Save valuable setup-time.
                             if self.tip_height.next() == block.header().height {
-                                tracing::debug!("by-passing tip-successors subtask; processing tip-successor {} directly ...", block.header().height);
                                 self.tip_height = block.header().height;
                                 if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block).await {
                                     tracing::error!("Could not send tip-successor to main loop. Terminating sync loop.");
@@ -269,14 +261,6 @@ impl SyncLoop {
 
                 // event: timer ticks
                 _ = ticker.tick() => {
-
-                    let proportion = self.download_state.coverage().proportion();
-                    tracing::debug!("tick! syncing is {} done", proportion);
-
-                    if proportion == 1.0 && !finished_downloading {
-                        tracing::debug!("sync loop inconsistent state: all blocks were downloaded but we are not finished yet.");
-                        break;
-                    }
 
                     // If we are finished and there are no messages waiting to
                     // be read, then we can exit.
@@ -318,7 +302,6 @@ impl SyncLoop {
                     }
 
                     if !finished_downloading {
-                        tracing::debug!("not finished downloading yet ...");
 
                         // Check all peers for timeouts.
                         let mut timeouts = vec![];
@@ -334,7 +317,7 @@ impl SyncLoop {
                         // If timeout, add those peers to queue of block requests.
                         pending_block_requests.sort();
                         for peer in timeouts {
-                            tracing::warn!("{peer} peer timed out; sending new random block request.");
+                            tracing::warn!("Sync loop: peer {peer} timed out; sending new random block request.");
                             if !pending_block_requests.contains(&peer) {
                                 pending_block_requests.push(peer);
                             }
@@ -378,7 +361,7 @@ impl SyncLoop {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         if !send_success {
-            tracing::error!("Failed to send message from sync loop to main loop that job is done.");
+            tracing::error!("Sync loop: failed to send message to main loop that job is done.");
         }
 
         // Clean up the temp directory.
@@ -397,7 +380,7 @@ impl SyncLoop {
                 // Peer disconnected in between being added to the queue and
                 // this function being executed. No cause for concern. And also:
                 // nothing we can do.
-                tracing::warn!("Cannot use peer {peer_handle} for syncing; ignoring.");
+                tracing::warn!("Sync loop: cannot use peer {peer_handle} for syncing; ignoring.");
                 continue;
             };
 
@@ -434,7 +417,7 @@ impl SyncLoop {
             return;
         }
 
-        tracing::debug!("sampling missing block heights ...");
+        tracing::debug!("Sync loop: sampling missing block heights ...");
         let moved_peers = self.peers.clone();
         let own_coverage = self.download_state.coverage();
         let moved_peer_handles = peer_handles.to_vec();
@@ -447,7 +430,7 @@ impl SyncLoop {
             return;
         };
         tracing::info!(
-            "requesting blocks [{}] from peers",
+            "Sync loop: requesting blocks [{}] from peers",
             block_requests.iter().map(|br| br.height.value()).join(", ")
         );
 
@@ -458,15 +441,12 @@ impl SyncLoop {
             .main_channel_sender
             .try_send(SyncToMain::RequestBlocks(block_requests))
         {
-            tracing::warn!("Could not send message from sync loop to main loop; error: {e}");
+            tracing::warn!("Sync loop: could not send message to main loop; error: {e}");
             tracing::warn!("Relying on timeout mechanism to retry in a short while.");
         }
 
-        tracing::info!("sent blocks request");
-
         // Record timestamp of last request.
         let now = SystemTime::now();
-        tracing::info!("modifying last request time to now");
         for peer_handle in peer_handles {
             self.peers
                 .entry(*peer_handle)
@@ -490,7 +470,10 @@ impl SyncLoop {
                     return true;
                 }
                 Err(_) => {
-                    tracing::warn!("Could not send tip-successor block from sync loop to main loop; main loop appears busy ...");
+                    tracing::warn!(
+                        "Sync loop: could not send tip-successor block to main \
+                        loop; main loop appears busy ..."
+                    );
                     tokio::time::sleep(Duration::from_millis(10 * i)).await;
                 }
             }
@@ -517,7 +500,10 @@ impl SyncLoop {
         while download_state.have_received(tip_height.next()) {
             // get successor block
             let Ok(successor) = download_state.get_received_block(tip_height.next()).await else {
-                tracing::error!("Could not get block from temp directory even though the block was received. Terminating sync mode.");
+                tracing::error!(
+                    "Sync loop: could not get block from temp directory even \
+                    though the block was received. Terminating sync mode."
+                );
                 let _ = return_channel
                     .send(SuccessorsToSync::RapidBlockDownloadError)
                     .await;
@@ -526,14 +512,20 @@ impl SyncLoop {
 
             // send to main
             if !Self::ensure_send_tip_successor(&channel_to_main, successor).await {
-                tracing::error!("Failed to send tip-successor block from sync loop to main loop. Aborting sync loop.");
+                tracing::error!(
+                    "Sync loop: failed to send tip-successor block to main \
+                    loop. Aborting sync loop."
+                );
                 let _ = return_channel.send(SuccessorsToSync::SendError).await;
                 return;
             }
 
             // delete the block after the main loop successfully received it
             if let Err(e) = download_state.delete_block(tip_height.next()).await {
-                tracing::warn!("Could not delete block from temp directory even though the block was received: {e}. Not critical.");
+                tracing::warn!(
+                    "Sync loop: could not delete block from temp directory \
+                    even though the block was received: {e}. Not critical."
+                );
             }
 
             // update tip height
