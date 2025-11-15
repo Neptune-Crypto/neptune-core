@@ -6,7 +6,7 @@ use rand::RngCore;
 use tokio::fs;
 
 use crate::api::export::BlockHeight;
-use crate::application::loops::sync_loop::bit_mask::BitMask;
+use crate::application::loops::sync_loop::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
 /// The state of a rapid block download process.
@@ -18,7 +18,7 @@ use crate::protocol::consensus::block::Block;
 #[derive(Debug, Clone)]
 pub(crate) struct RapidBlockDownload {
     temp_directory: PathBuf,
-    coverage: BitMask,
+    coverage: SynchronizationBitMask,
     index_to_filename: HashMap<u64, PathBuf>,
 
     target_height: BlockHeight,
@@ -53,7 +53,7 @@ impl RapidBlockDownload {
         };
 
         let mut index_to_filename = HashMap::new();
-        let mut coverage = BitMask::new(target_height.next().value());
+        let mut coverage = SynchronizationBitMask::new(target_height.next().value());
         coverage.set_range(0, highest_block_already_processed.value());
 
         // Read and process all the files in the temp directory.
@@ -289,10 +289,10 @@ impl RapidBlockDownload {
         Ok(block)
     }
 
-    /// Get the [`BitMask`] corresponding to covered blocks (blocks we have,
-    /// whether cached or in the database). The complement of this bit mask
-    /// indicates which blocks we do not yet have.
-    pub(crate) fn coverage(&self) -> BitMask {
+    /// Get the [`SynchronizationBitMask`] corresponding to covered blocks
+    /// (blocks we have, whether cached or in the database). The complement of
+    /// this bit mask indicates which blocks we do not yet have.
+    pub(crate) fn coverage(&self) -> SynchronizationBitMask {
         self.coverage.clone()
     }
 
