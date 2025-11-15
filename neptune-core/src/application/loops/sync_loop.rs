@@ -13,18 +13,18 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 use crate::api::export::BlockHeight;
-use crate::application::loops::sync_loop::bit_mask::BitMask;
 use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::MainToSync;
 use crate::application::loops::sync_loop::channel::SuccessorsToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownload;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownloadError;
+use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
-pub(crate) mod bit_mask;
 pub(crate) mod channel;
 pub(crate) mod rapid_block_download;
+pub(crate) mod synchronization_bit_mask;
 
 /// After this long without any response from anyone, the sync loop will
 /// terminate.
@@ -47,7 +47,7 @@ pub(crate) struct PeerSyncState {
     last_request: Option<SystemTime>,
 
     /// None if peer is synced. Some(bitmask) if peer is syncing.
-    coverage: Option<BitMask>,
+    coverage: Option<SynchronizationBitMask>,
 }
 
 /// Holds state for the synchronization event loop.
@@ -371,7 +371,7 @@ impl SyncLoop {
     /// Sample one appropriate missing block height for each peer.
     fn sample_heights(
         peers: HashMap<PeerHandle, PeerSyncState>,
-        own_coverage: BitMask,
+        own_coverage: SynchronizationBitMask,
         peer_handles: Vec<PeerHandle>,
     ) -> Vec<BlockRequest> {
         let mut block_requests = vec![];
@@ -868,11 +868,11 @@ mod tests {
     #[derive(Debug, Clone)]
     struct SyncingPeer {
         peer_handle: PeerHandle,
-        coverage: BitMask,
+        coverage: SynchronizationBitMask,
     }
 
     impl SyncingPeer {
-        fn new(coverage: BitMask) -> Self {
+        fn new(coverage: SynchronizationBitMask) -> Self {
             Self {
                 peer_handle: random_peer_handle(),
                 coverage,
@@ -906,7 +906,7 @@ mod tests {
             self.peer_handle
         }
 
-        fn coverage(&self) -> BitMask {
+        fn coverage(&self) -> SynchronizationBitMask {
             self.coverage.clone()
         }
     }
@@ -1294,10 +1294,11 @@ mod tests {
             sync_target_height,
         );
 
-        let mut cumulative_coverage = BitMask::new(sync_target_height.next().value());
+        let mut cumulative_coverage =
+            SynchronizationBitMask::new(sync_target_height.next().value());
         for _ in 0..5 {
             let peer_coverage = tokio::task::spawn_blocking(move || {
-                BitMask::random(
+                SynchronizationBitMask::random(
                     current_tip_height.value(),
                     sync_target_height.next().value(),
                 )
@@ -1334,10 +1335,11 @@ mod tests {
         ) {
             if (peer_set.is_empty() || rng.random_bool(0.5_f64)) && peer_set.len() < 5 {
                 let height = *target_height.try_lock().unwrap();
-                let bit_mask =
-                    tokio::task::spawn_blocking(move || BitMask::random(0, height.value()))
-                        .await
-                        .unwrap();
+                let bit_mask = tokio::task::spawn_blocking(move || {
+                    SynchronizationBitMask::random(0, height.value())
+                })
+                .await
+                .unwrap();
                 let new_peer = SyncingPeer::new(bit_mask);
                 let handle = new_peer.handle();
                 peer_set.push(handle);
