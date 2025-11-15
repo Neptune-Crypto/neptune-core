@@ -95,6 +95,9 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Archival)]
     FindUtxoOrigin,
+
+    #[namespace(Namespace::Wallet)]
+    RestoreMembershipProof,
 }
 
 #[cfg(test)]

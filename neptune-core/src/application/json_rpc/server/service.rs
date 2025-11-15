@@ -1,9 +1,11 @@
 use async_trait::async_trait;
+use tracing::debug;
 
-use crate::application::json_rpc::core::api::rpc::RpcApi;
-use crate::application::json_rpc::core::api::rpc::RpcResult;
+use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
+use crate::application::json_rpc::core::model::wallet::mutator_set::MsMembershipProof;
+use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
 use crate::application::json_rpc::server::rpc::RpcServer;
 
 #[async_trait]
@@ -334,6 +336,47 @@ impl RpcApi for RpcServer {
         Ok(FindUtxoOriginResponse {
             block: block.map(|block| block.hash()),
         })
+    }
+
+    async fn restore_membership_proof_call(
+        &self,
+        request: RestoreMembershipProofRequest,
+    ) -> RpcResult<RestoreMembershipProofResponse> {
+        if request.absolute_index_sets.len() > 256 {
+            return Err(RpcError::RestoreMembershipProof(
+                RestoreMembershipProofError::ExceedsAllowed,
+            ));
+        }
+
+        let state = self.state.lock_guard().await;
+        let ams = state.chain.archival_state().archival_mutator_set.ams();
+
+        let mut membership_proofs: Vec<MsMembershipProof> =
+            Vec::with_capacity(request.absolute_index_sets.len());
+        for (index, set) in request.absolute_index_sets.into_iter().enumerate() {
+            match ams.restore_membership_proof_privacy_preserving(set).await {
+                Ok(msmp) => membership_proofs.push(msmp.into()),
+                Err(err) => {
+                    debug!("Failed to restore MSMP for {index}: {err}");
+                    return Err(RpcError::RestoreMembershipProof(
+                        RestoreMembershipProofError::Failed(index),
+                    ));
+                }
+            }
+        }
+
+        let current_tip = state.chain.light_state();
+        let tip_mutator_set = current_tip
+            .mutator_set_accumulator_after()
+            .expect("Tip must have valid MSA after");
+        let snapshot = RpcMsMembershipSnapshot {
+            synced_height: current_tip.header().height.into(),
+            synced_hash: current_tip.hash(),
+            membership_proofs,
+            synced_mutator_set: (&tip_mutator_set).into(),
+        };
+
+        Ok(RestoreMembershipProofResponse { snapshot })
     }
 }
 

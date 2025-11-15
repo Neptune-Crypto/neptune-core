@@ -5,15 +5,28 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
+use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
 
+#[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
+pub enum RestoreMembershipProofError {
+    #[error("Failed for index {0}")]
+    Failed(usize),
+
+    #[error("Exceeds the allowed limit")]
+    ExceedsAllowed,
+}
+
 #[derive(Debug, Clone, Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RpcError {
     #[error("JSON-RPC server error: {0}")]
     Server(JsonError),
+
+    #[error("Failed to restore membership proof: {0}")]
+    RestoreMembershipProof(RestoreMembershipProofError),
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -212,4 +225,18 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: FindUtxoOriginRequest,
     ) -> RpcResult<FindUtxoOriginResponse>;
+
+    async fn restore_membership_proof(
+        &self,
+        absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+    ) -> RpcResult<RestoreMembershipProofResponse> {
+        self.restore_membership_proof_call(RestoreMembershipProofRequest {
+            absolute_index_sets,
+        })
+        .await
+    }
+    async fn restore_membership_proof_call(
+        &self,
+        request: RestoreMembershipProofRequest,
+    ) -> RpcResult<RestoreMembershipProofResponse>;
 }

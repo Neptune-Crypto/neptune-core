@@ -37,7 +37,7 @@ pub struct IndexedAoclAuthPath {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MsMembershipProofPrivacyPreserving {
     pub(crate) aocl_auth_paths: Vec<IndexedAoclAuthPath>,
-    target_chunks: ChunkDictionary,
+    pub target_chunks: ChunkDictionary,
 }
 
 impl MsMembershipProofPrivacyPreserving {
@@ -371,7 +371,7 @@ where
                 leaf_index,
                 auth_path,
             };
-            aocl_auth_paths.push(auth_path);
+            aocl_auth_paths.push(auth_path); // TODO: After tarpc gets deprecated, use indexed-kind like on json-rpc.
         }
 
         let mut target_chunks = vec![];

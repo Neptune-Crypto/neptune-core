@@ -10,6 +10,7 @@ use crate::application::json_rpc::core::model::block::header::*;
 use crate::application::json_rpc::core::model::block::transaction_kernel::*;
 use crate::application::json_rpc::core::model::block::*;
 use crate::application::json_rpc::core::model::common::*;
+use crate::application::json_rpc::core::model::wallet::mutator_set::*;
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -256,4 +257,16 @@ pub struct FindUtxoOriginRequest {
 #[serde(rename_all = "camelCase")]
 pub struct FindUtxoOriginResponse {
     pub block: Option<Digest>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreMembershipProofRequest {
+    pub absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreMembershipProofResponse {
+    pub snapshot: RpcMsMembershipSnapshot,
 }
