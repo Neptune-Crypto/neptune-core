@@ -14,7 +14,6 @@ use axum_extra::response::ErasedJson;
 use block_selector::BlockSelectorExtended;
 use bytes::Buf;
 use get_size2::GetSize;
-use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -722,7 +721,9 @@ mod block_selector {
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 Ok(match s.parse::<u64>() {
                     Ok(h) => Self::Height(h.into()),
-                    Err(_) => Self::Digest(Digest::try_from_hex(s)?),
+                    Err(_) => Self::Digest(Digest::try_from_hex(s).map_err(|e| {
+                        BlockSelectorParseError::InvalidSelector(e.to_string())
+                    })?),
                 })
             }
         }
