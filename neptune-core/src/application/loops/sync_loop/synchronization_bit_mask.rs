@@ -6,17 +6,23 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 
-/// A `BitMask` is a representation of a set of indexed elements. It captures
-/// the state of a system where all elements up to a certain bound can be
-/// enumerated in principle, but some elements are present, and some are not.
+/// A [`SynchronizationBitMask`] is a representation of the synchronization
+/// state of a set of indexed elements (such as blocks). It captures the state
+/// of a system where all elements up to a certain bound can be enumerated in
+/// principle, but some elements are present, and some are not.
+///
+/// [`SynchronizationBitMask`]s can be used to as a database to concisely
+/// represent which blocks have been downloaded already and which have not, or
+/// as a reconciliation primitive for syncing peers to rapidly determine which
+/// blocks they can serve that their counterparts are missing.
 #[derive(Debug, Clone)]
-pub(crate) struct BitMask {
+pub(crate) struct SynchronizationBitMask {
     // exclusive
     upper_bound: u64,
     limbs: Vec<u32>,
 }
 
-impl PartialEq for BitMask {
+impl PartialEq for SynchronizationBitMask {
     fn eq(&self, other: &Self) -> bool {
         if self.upper_bound != other.upper_bound {
             return false;
@@ -40,10 +46,10 @@ impl PartialEq for BitMask {
         (self.limbs[last] ^ other.limbs[last]) & mask == 0
     }
 }
-impl Eq for BitMask {}
+impl Eq for SynchronizationBitMask {}
 
-impl Not for BitMask {
-    type Output = BitMask;
+impl Not for SynchronizationBitMask {
+    type Output = SynchronizationBitMask;
 
     fn not(self) -> Self::Output {
         let mut limbs = self.limbs.iter().map(|limb| !*limb).collect_vec();
@@ -55,15 +61,15 @@ impl Not for BitMask {
                 }
             }
         }
-        BitMask {
+        SynchronizationBitMask {
             upper_bound: self.upper_bound,
             limbs,
         }
     }
 }
 
-impl BitOr for BitMask {
-    type Output = BitMask;
+impl BitOr for SynchronizationBitMask {
+    type Output = SynchronizationBitMask;
 
     fn bitor(self, rhs: Self) -> Self::Output {
         let upper_bound = u64::max(self.upper_bound, rhs.upper_bound);
@@ -77,11 +83,11 @@ impl BitOr for BitMask {
                 itertools::EitherOrBoth::Right(right) => right,
             })
             .collect_vec();
-        BitMask { upper_bound, limbs }
+        SynchronizationBitMask { upper_bound, limbs }
     }
 }
 
-impl BitMask {
+impl SynchronizationBitMask {
     fn num_limbs(max_bit_index: u64) -> usize {
         (if (max_bit_index + 1).is_multiple_of(32) {
             (max_bit_index + 1) / 32
@@ -329,11 +335,11 @@ pub mod test {
     use std::hint::black_box;
     use test_strategy::proptest;
 
-    impl BitMask {
+    impl SynchronizationBitMask {
         pub(crate) fn random(lower_bound: u64, upper_bound: u64) -> Self {
             assert!(upper_bound >= lower_bound);
 
-            let mut bit_mask = BitMask::new(upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
 
             bit_mask.set_range(0, lower_bound);
 
@@ -366,7 +372,7 @@ pub mod test {
         #[strategy(0u64..(1<<8))] length: u64,
     ) {
         let upper_bound = lower_bound + length;
-        let bit_mask = BitMask::random(lower_bound, upper_bound);
+        let bit_mask = SynchronizationBitMask::random(lower_bound, upper_bound);
         black_box(bit_mask);
     }
 
@@ -376,7 +382,7 @@ pub mod test {
         #[strategy(vec(0u64..#upper_bound, u64::min(#upper_bound, 1000) as usize))]
         set_indices: Vec<u64>,
     ) {
-        let mut bit_mask = BitMask::new(upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
         for index in &set_indices {
             bit_mask.set(*index);
         }
@@ -391,7 +397,7 @@ pub mod test {
         #[strategy(2..(1_u64<<15))] upper_bound: u64,
         #[strategy(vec(0u64..#upper_bound,(#upper_bound-2) as usize))] bit_indices: Vec<u64>,
     ) {
-        let mut bit_mask = BitMask::new(upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
         prop_assert!(!bit_mask.is_complete());
 
         for index in bit_indices {
@@ -409,7 +415,7 @@ pub mod test {
         #[strategy(0..(#upper_bound-1))] range_start: u64,
         #[strategy(#range_start..#upper_bound)] range_stop: u64,
     ) {
-        let mut bit_mask = BitMask::new(upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
         bit_mask.set_range(range_start, range_stop);
 
         for index in 0u64..upper_bound {
@@ -427,7 +433,7 @@ pub mod test {
             (5598, 11, 3263),
             (19666, 9718, 9718),
         ] {
-            let mut bit_mask = BitMask::new(upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
             bit_mask.set_range(range_start, range_stop);
 
             for index in 0u64..upper_bound {
@@ -446,7 +452,7 @@ pub mod test {
         #[strategy(0u64..u64::MAX)] seed: u64,
         target: bool,
     ) {
-        let mut bit_mask = BitMask::new(upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
         if target {
             bit_mask.set_range(0, upper_bound - 1);
             for index in &set_indices {
@@ -471,7 +477,7 @@ pub mod test {
                 .map(|_| rng.random_range(0u64..upper_bound))
                 .collect_vec();
 
-            let mut bit_mask = BitMask::new(upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
             if target {
                 bit_mask.set_range(0, upper_bound - 1);
                 for index in &set_indices {
@@ -495,7 +501,7 @@ pub mod test {
         #[strategy(0u64..u64::MAX)] seed: u64,
         target: bool,
     ) {
-        let mut bit_mask = BitMask::new(upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
 
         if target {
             for index in &set_indices {
@@ -525,7 +531,7 @@ pub mod test {
                 .map(|_| rng.random_range(0..upper_bound))
                 .collect_vec();
 
-            let mut bit_mask = BitMask::new(upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
 
             if target {
                 for index in &set_indices {
@@ -559,7 +565,7 @@ pub mod test {
                 false,
             ),
         ] {
-            let mut bit_mask = BitMask::new(upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
 
             if target {
                 for index in &set_indices {
@@ -586,7 +592,7 @@ pub mod test {
         #[strategy(vec(0u64..#small_upper_bound, u64::min(#small_upper_bound, 1000) as usize))]
         set_indices: Vec<u64>,
     ) {
-        let mut bit_mask = BitMask::new(small_upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(small_upper_bound);
         for index in &set_indices {
             bit_mask.set(*index);
         }
@@ -605,7 +611,7 @@ pub mod test {
             let set_indices = (0..1000)
                 .map(|_| rng.random_range(0..small_upper_bound))
                 .collect_vec();
-            let mut bit_mask = BitMask::new(small_upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(small_upper_bound);
             for index in &set_indices {
                 bit_mask.set(*index);
             }
@@ -624,7 +630,7 @@ pub mod test {
         #[strategy(vec(0u64..#large_upper_bound, u64::min(#large_upper_bound, 1000) as usize))]
         set_indices: Vec<u64>,
     ) {
-        let mut bit_mask = BitMask::new(large_upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(large_upper_bound);
         for index in &set_indices {
             bit_mask.set(*index);
         }
@@ -646,7 +652,7 @@ pub mod test {
                 .map(|_| rng.random_range(0..large_upper_bound))
                 .collect_vec();
 
-            let mut bit_mask = BitMask::new(large_upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(large_upper_bound);
             for index in &set_indices {
                 bit_mask.set(*index);
             }
@@ -665,7 +671,7 @@ pub mod test {
 
     #[test]
     fn can_sample_index_for_zero() {
-        let mut bit_mask = BitMask::new(200);
+        let mut bit_mask = SynchronizationBitMask::new(200);
         bit_mask.set_range(0, 100);
         for i in [122, 117, 136, 116, 105, 187, 111, 143, 108, 111] {
             bit_mask.set(i);

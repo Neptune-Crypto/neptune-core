@@ -1,5 +1,5 @@
 use crate::api::export::BlockHeight;
-use crate::application::loops::sync_loop::bit_mask::BitMask;
+use crate::application::loops::sync_loop::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
 use super::PeerHandle;
@@ -31,7 +31,7 @@ pub(crate) enum MainToSync {
     ExtendChain(Box<Block>),
     SyncCoverage {
         peer_handle: PeerHandle,
-        coverage: BitMask,
+        coverage: SynchronizationBitMask,
     },
 }
 
