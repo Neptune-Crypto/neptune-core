@@ -4,9 +4,9 @@ use tracing::debug;
 use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
-use crate::application::json_rpc::core::model::wallet::mutator_set::MsMembershipProof;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
 use crate::application::json_rpc::server::rpc::RpcServer;
+use crate::protocol::consensus::block::block_selector::BlockSelector;
 
 #[async_trait]
 impl RpcApi for RpcServer {
@@ -338,11 +338,46 @@ impl RpcApi for RpcServer {
         })
     }
 
+    async fn get_blocks_call(&self, request: GetBlocksRequest) -> RpcResult<GetBlocksResponse> {
+        // Reverse get_blocks is not supported yet.
+        // Might be reconsidered after "succinctness" as it might give it a purpose.
+        if request.to_height < request.from_height {
+            return Ok(GetBlocksResponse { blocks: Vec::new() });
+        }
+
+        let max_blocks = if self.unrestricted { usize::MAX } else { 100 };
+
+        let state = self.state.lock_guard().await;
+        let mut blocks = Vec::new();
+        let mut height = request.from_height;
+
+        while height <= request.to_height && blocks.len() < max_blocks {
+            let block_selector = BlockSelector::Height(height);
+            let Some(digest) = block_selector.as_digest(&state).await else {
+                break;
+            };
+            let Some(block) = state
+                .chain
+                .archival_state()
+                .get_block(digest)
+                .await
+                .unwrap()
+            else {
+                break;
+            };
+
+            blocks.push((&block).into());
+            height = height.next();
+        }
+
+        Ok(GetBlocksResponse { blocks })
+    }
+
     async fn restore_membership_proof_call(
         &self,
         request: RestoreMembershipProofRequest,
     ) -> RpcResult<RestoreMembershipProofResponse> {
-        if request.absolute_index_sets.len() > 256 {
+        if request.absolute_index_sets.len() > 256 && !self.unrestricted {
             return Err(RpcError::RestoreMembershipProof(
                 RestoreMembershipProofError::ExceedsAllowed,
             ));
@@ -351,8 +386,7 @@ impl RpcApi for RpcServer {
         let state = self.state.lock_guard().await;
         let ams = state.chain.archival_state().archival_mutator_set.ams();
 
-        let mut membership_proofs: Vec<MsMembershipProof> =
-            Vec::with_capacity(request.absolute_index_sets.len());
+        let mut membership_proofs = Vec::with_capacity(request.absolute_index_sets.len());
         for (index, set) in request.absolute_index_sets.into_iter().enumerate() {
             match ams.restore_membership_proof_privacy_preserving(set).await {
                 Ok(msmp) => membership_proofs.push(msmp.into()),

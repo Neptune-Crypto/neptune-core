@@ -57,12 +57,11 @@ impl JsonError {
     }
 }
 
-#[allow(unreachable_patterns)] // Currently there is only one variant in enum.
 impl From<RpcError> for JsonError {
     fn from(err: RpcError) -> Self {
         match err {
             RpcError::Server(error) => error,
-            _ => JsonError::Custom {
+            err => JsonError::Custom {
                 code: -32000,
                 message: "RPC error".to_string(),
                 data: Some(serde_json::to_value(err).unwrap()),

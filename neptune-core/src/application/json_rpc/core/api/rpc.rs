@@ -5,6 +5,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
+use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
@@ -225,6 +226,19 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: FindUtxoOriginRequest,
     ) -> RpcResult<FindUtxoOriginResponse>;
+
+    async fn get_blocks(
+        &self,
+        from_height: RpcBlockHeight,
+        to_height: RpcBlockHeight,
+    ) -> RpcResult<GetBlocksResponse> {
+        self.get_blocks_call(GetBlocksRequest {
+            from_height,
+            to_height,
+        })
+        .await
+    }
+    async fn get_blocks_call(&self, request: GetBlocksRequest) -> RpcResult<GetBlocksResponse>;
 
     async fn restore_membership_proof(
         &self,
