@@ -53,8 +53,10 @@ impl RapidBlockDownload {
         };
 
         let mut index_to_filename = HashMap::new();
-        let mut coverage = SynchronizationBitMask::new(target_height.next().value());
-        coverage.set_range(0, highest_block_already_processed.value());
+        let mut coverage = SynchronizationBitMask::new(
+            highest_block_already_processed.value() + 1,
+            target_height.next().value(),
+        );
 
         // Read and process all the files in the temp directory.
         // There is only something to iterate over if we are resuming from an
@@ -268,7 +270,7 @@ impl RapidBlockDownload {
         if self.coverage().is_complete() {
             None
         } else {
-            Some(self.coverage().sample(false, seed).into())
+            Some(self.coverage().sample(seed).into())
         }
     }
 
@@ -383,11 +385,8 @@ mod tests {
         for _ in 0..100 {
             let seed = rng.next_u64();
             let mut inner_rng = StdRng::seed_from_u64(seed);
-            let jndex = BlockHeight::from(
-                rapid_block_download
-                    .coverage()
-                    .sample(false, inner_rng.random()),
-            );
+            let jndex =
+                BlockHeight::from(rapid_block_download.coverage().sample(inner_rng.random()));
             assert!(!rapid_block_download.coverage().contains(jndex.value()));
             assert_eq!(
                 rapid_block_download
@@ -492,7 +491,7 @@ mod tests {
         assert!(
             rapid_block_download_b.is_complete(),
             "missing blocks: {}",
-            rapid_block_download_b.coverage.sample(false, rng.random())
+            rapid_block_download_b.coverage.sample(rng.random())
         );
 
         // clean up
