@@ -15,17 +15,42 @@ use rand::SeedableRng;
 /// represent which blocks have been downloaded already and which have not, or
 /// as a reconciliation primitive for syncing peers to rapidly determine which
 /// blocks they can serve that their counterparts are missing.
+//
+// # Implementation Details
+//
+// Up to and including index `lower_bound`, all bits are implicitly set to 1.
+// At and beyond index `upper_bound`, all bits are implicitly set to 0. Between
+// the lower and upper bound, the bits can be 0 or 1, and so these bits are
+// represented explicitly through a vector of u32s called `limbs`. The index
+// boundary separating one limb from the next is independent of `lower_bound`
+// and of `upper_bound`, but the values of these bounds can affect which slice
+// of limbs is stored.
+//
+// Not every bit mask has a unique representation. Two SynchronizationBitMasks
+// can be equivalent as bit masks but have a different upper bound.
+//
+// However, with respect to the lower bound, this value is guaranteed to be set
+// to the highest possible value. So in particular, the bit at index
+// `lower_bound` must always be 0. Whenever this bit is set to 1, the
+// `lower_bound` increases.
 #[derive(Debug, Clone)]
 pub(crate) struct SynchronizationBitMask {
+    // inclusive
+    pub(crate) lower_bound: u64,
+
     // exclusive
-    upper_bound: u64,
+    pub(crate) upper_bound: u64,
+
     limbs: Vec<u32>,
 }
 
 impl PartialEq for SynchronizationBitMask {
     fn eq(&self, other: &Self) -> bool {
-        if self.upper_bound != other.upper_bound {
+        if self.lower_bound != other.lower_bound || self.upper_bound != other.upper_bound {
             return false;
+        }
+        if self.lower_bound == self.upper_bound {
+            return true;
         }
         if self.upper_bound.is_multiple_of(32) {
             return self.limbs == other.limbs;
@@ -41,9 +66,10 @@ impl PartialEq for SynchronizationBitMask {
         {
             return false;
         }
+        let offset = (self.lower_bound / 32) as usize;
         let shamt = self.upper_bound % 32;
         let mask = (1u32 << shamt) - 1;
-        (self.limbs[last] ^ other.limbs[last]) & mask == 0
+        (self.limbs[last - offset] ^ other.limbs[last - offset]) & mask == 0
     }
 }
 impl Eq for SynchronizationBitMask {}
@@ -51,6 +77,8 @@ impl Eq for SynchronizationBitMask {}
 impl Not for SynchronizationBitMask {
     type Output = SynchronizationBitMask;
 
+    /// Inverts only the middle portion of the bit mask, not the all-ones at the
+    /// start nor the infinite-zeros at the end.
     fn not(self) -> Self::Output {
         let mut limbs = self.limbs.iter().map(|limb| !*limb).collect_vec();
         if let Some(limb) = limbs.last_mut() {
@@ -63,8 +91,10 @@ impl Not for SynchronizationBitMask {
         }
         SynchronizationBitMask {
             upper_bound: self.upper_bound,
+            lower_bound: self.lower_bound,
             limbs,
         }
+        .canonize()
     }
 }
 
@@ -73,40 +103,131 @@ impl BitOr for SynchronizationBitMask {
 
     fn bitor(self, rhs: Self) -> Self::Output {
         let upper_bound = u64::max(self.upper_bound, rhs.upper_bound);
-        let limbs = self
-            .limbs
-            .into_iter()
-            .zip_longest(rhs.limbs.into_iter())
-            .map(|x| match x {
-                itertools::EitherOrBoth::Both(left, right) => left | right,
-                itertools::EitherOrBoth::Left(left) => left,
-                itertools::EitherOrBoth::Right(right) => right,
+        if upper_bound == 0 {
+            return Self {
+                lower_bound: 0,
+                upper_bound,
+                limbs: vec![],
+            };
+        }
+
+        let lower_bound = u64::max(self.lower_bound, rhs.lower_bound);
+        if lower_bound == upper_bound {
+            return Self {
+                lower_bound,
+                upper_bound,
+                limbs: vec![],
+            };
+        }
+
+        let limbs = ((lower_bound / 32)..=((upper_bound.saturating_sub(1)) / 32))
+            .map(|i| {
+                let index = i.try_into().expect(
+                    "SynchronizationBitMasks cannot handle more limbs than fit in a usize.",
+                );
+                self.limb(index) | rhs.limb(index)
             })
             .collect_vec();
-        SynchronizationBitMask { upper_bound, limbs }
+        Self::Output {
+            lower_bound,
+            upper_bound,
+            limbs,
+        }
+        .canonize()
     }
 }
 
 impl SynchronizationBitMask {
-    fn num_limbs(max_bit_index: u64) -> usize {
-        (if (max_bit_index + 1).is_multiple_of(32) {
-            (max_bit_index + 1) / 32
-        } else {
-            (max_bit_index / 32) + 1
-        }) as usize
+    /// Take a [`SynchronizationBitMask`] not in canonical representation and
+    /// put it into canonical representation. Canonical representation means
+    /// the `lower_bound` field points to the first zero.
+    fn canonize(mut self) -> SynchronizationBitMask {
+        // TODO: very slow. improve perf!
+        while self.contains(self.lower_bound) {
+            self.lower_bound += 1;
+            if self.lower_bound.is_multiple_of(32) {
+                self.limbs.remove(0);
+            }
+        }
+
+        if self.lower_bound == self.upper_bound {
+            self.limbs = vec![];
+        }
+
+        self
     }
 
-    /// Create a new [`BitMask`] object.
+    /// Get the ith limb of the entire bit mask.
+    fn limb(&self, index: usize) -> u32 {
+        let offset = (self.lower_bound / 32)
+            .try_into()
+            .expect("SynchronizationBitMasks cannot handle more limbs than fit in a usize.");
+        if index < offset {
+            return u32::MAX;
+        }
+
+        let onset = (self.upper_bound.saturating_sub(1) / 32)
+            .try_into()
+            .expect("SynchronizationBitMasks cannot handle more limbs than fit in a usize.");
+        if index <= onset && !self.limbs.is_empty() {
+            return self.limbs[index - offset];
+        }
+
+        0
+    }
+
+    /// Create a new [`SynchronizationBitMask`] object.
     ///
-    /// All bits are initialized to zero. The argument, `upper_bound` is
+    /// All bits are initialized to zero. The second argument, `upper_bound` is
     /// exclusive, meaning that the max index is `upper_bound` - 1.
     ///
     /// # Panics
-    ///  - If `upper_bound` == 0
-    pub(crate) fn new(upper_bound: u64) -> Self {
-        let num_limbs = Self::num_limbs(upper_bound - 1);
-        let limbs = vec![0_u32; num_limbs];
-        Self { upper_bound, limbs }
+    ///
+    ///  - If `upper_bound` <= `lower_bound`.
+    ///  - If the would-be number of limbs is greater than usize::MAX.
+    pub(crate) fn new(lower_bound: u64, upper_bound: u64) -> Self {
+        assert!(upper_bound > lower_bound);
+        let offset = lower_bound / 32;
+        let onset = upper_bound.saturating_sub(1) / 32;
+        let num_limbs = if lower_bound == upper_bound {
+            0
+        } else {
+            1_usize + usize::try_from(onset - offset).unwrap()
+        };
+
+        let mut limbs = vec![0_u32; num_limbs];
+
+        // set the limb bits below the lower bound
+        if let Some(first) = limbs.first_mut() {
+            for i in 0..(lower_bound % 32) {
+                *first |= 1 << i;
+            }
+        }
+
+        Self {
+            lower_bound,
+            upper_bound,
+            limbs,
+        }
+    }
+
+    /// Compute a bitmask whose zeros indicate items that the other does have
+    /// and we don't.
+    pub(crate) fn reconcile(&self, other: &Self) -> Self {
+        let offset = self.lower_bound / 32;
+        let onset = self.upper_bound.saturating_sub(1) / 32;
+
+        let limbs = (offset..=onset)
+            .map(|i| usize::try_from(i).expect("Limb indices fit in usizes."))
+            .map(|i| self.limb(i) | !other.limb(i))
+            .collect_vec();
+
+        Self {
+            lower_bound: self.lower_bound,
+            upper_bound: self.upper_bound,
+            limbs,
+        }
+        .canonize()
     }
 
     /// Increase the upper bound.
@@ -118,10 +239,19 @@ impl SynchronizationBitMask {
     ///  - If the new upper bound is less than the old.
     pub(crate) fn expand(self, new_upper_bound: u64) -> Self {
         assert!(new_upper_bound >= self.upper_bound);
-        let new_num_limbs = Self::num_limbs(new_upper_bound - 1);
-        let extra_limbs = usize::try_from(new_num_limbs).unwrap() - self.limbs.len();
+
+        let offset = self.lower_bound / 32;
+        let onset = new_upper_bound.saturating_sub(1) / 32;
+        let num_limbs = if self.lower_bound == new_upper_bound {
+            0
+        } else {
+            1_usize + usize::try_from(onset - offset).unwrap()
+        };
+
+        let extra_limbs = num_limbs.saturating_sub(self.limbs.len());
         let new_limbs = [self.limbs, vec![0u32; extra_limbs]].concat();
         Self {
+            lower_bound: self.lower_bound,
             upper_bound: new_upper_bound,
             limbs: new_limbs,
         }
@@ -134,60 +264,96 @@ impl SynchronizationBitMask {
     ///  - If the new upper bound is greater than the old.
     pub(crate) fn shrink(mut self, new_upper_bound: u64) -> Self {
         assert!(new_upper_bound <= self.upper_bound);
-        let new_num_limbs = Self::num_limbs(new_upper_bound - 1);
-        while self.limbs.len() > new_num_limbs {
+
+        let new_lower_bound = u64::min(self.lower_bound, new_upper_bound);
+
+        let offset = new_lower_bound / 32;
+        let onset = new_upper_bound.saturating_sub(1) / 32;
+        let num_limbs = if new_lower_bound == new_upper_bound {
+            0
+        } else {
+            1_usize + usize::try_from(onset - offset).unwrap()
+        };
+
+        while self.limbs.len() > num_limbs {
             self.limbs.pop();
         }
-        for index in new_upper_bound..(32 * (new_num_limbs as u64)) {
-            self.unset(index);
+        if let Some(last) = self.limbs.last_mut() {
+            if !new_upper_bound.is_multiple_of(32) {
+                let shamt = 32 - (new_upper_bound % 32);
+                *last &= u32::MAX >> shamt;
+            }
         }
+
         self.upper_bound = new_upper_bound;
+        self.lower_bound = new_lower_bound;
         self
     }
 
     /// Determine whether the ith bit is set.
+    ///
+    /// # Panics
+    ///  - If the limb index corresponding to the given bit index is smaller
+    ///    than usize::MAX.
     pub(crate) fn contains(&self, index: u64) -> bool {
-        let limb_index = usize::try_from(index / 32).unwrap();
-        if limb_index >= self.limbs.len() {
+        if index < self.lower_bound {
+            return true;
+        } else if index >= self.upper_bound {
             return false;
         }
 
+        let limb_index = usize::try_from(index / 32).unwrap();
+        let offset = usize::try_from(self.lower_bound / 32).unwrap();
+
         let shift_amount = index % 32;
         let mask = 1_u32 << shift_amount;
-        self.limbs[limb_index] & mask != 0
+        self.limbs[limb_index - offset] & mask != 0
     }
 
     /// Set the ith bit.
     ///
     /// Ensure it is set to one.
-    pub(crate) fn set(&mut self, index: u64) {
-        let limb_index = usize::try_from(index / 32).unwrap();
-        let shift_amount = index % 32;
-        let mask = 1_u32 << shift_amount;
-        self.limbs[limb_index] |= mask;
-    }
-
-    /// Unset the ith bit.
     ///
-    /// Ensure it is set to zero.
-    pub(crate) fn unset(&mut self, index: u64) {
+    /// # Panics
+    ///
+    ///  - If the given index is greater than or equal to the upper bound.
+    pub(crate) fn set(&mut self, index: u64) {
+        assert!(index < self.upper_bound);
+        if self.lower_bound == self.upper_bound {
+            return;
+        }
+
         let limb_index = usize::try_from(index / 32).unwrap();
+        let offset = usize::try_from(self.lower_bound / 32).unwrap();
+        if limb_index < offset {
+            return;
+        }
+
         let shift_amount = index % 32;
         let mask = 1_u32 << shift_amount;
-        let mask = u32::MAX ^ mask;
-        self.limbs[limb_index] &= mask;
+        self.limbs[limb_index - offset] |= mask;
+
+        *self = self.clone().canonize();
     }
 
     /// Set bits min through max (ends inclusive).
+    ///
+    /// # Panics
+    ///
+    ///  - If either of the given indices is greater than the upper bound.
+    ///  - If max < min.
     pub(crate) fn set_range(&mut self, min: u64, max: u64) {
+        assert!(max < self.upper_bound);
+        assert!(min < self.upper_bound);
         assert!(max >= min);
         let first_full_limb = min.div_ceil(32);
         let first_index_in_full_limb = min.div_ceil(32) * 32;
         let successor_of_last_full_limb = max / 32;
         let first_index_after_last_full_limb = successor_of_last_full_limb * 32;
+        let offset = usize::try_from(self.lower_bound / 32).unwrap();
 
         for limb_i in first_full_limb..successor_of_last_full_limb {
-            self.limbs[limb_i as usize] = u32::MAX;
+            self.limbs[limb_i as usize - offset] = u32::MAX;
         }
         for index in min..u64::min(max, first_index_in_full_limb) {
             self.set(index);
@@ -197,84 +363,52 @@ impl SynchronizationBitMask {
         }
     }
 
-    /// Return the vector of indices of set bits.
+    /// Return the vector of indices of set bits in between lower bound and
+    /// upper bound.
     pub(crate) fn to_vec(&self) -> Vec<u64> {
-        let mut offset = 0;
-        let mut elements = vec![];
-        for limb in &self.limbs {
-            if *limb == 0 {
-                offset += 32;
-                continue;
-            }
-
-            for i in 0u64..32 {
-                let mask = 1u32 << i;
-                if limb & mask != 0 {
-                    elements.push(offset + i);
-                }
-            }
-
-            offset += 32;
-        }
-
-        elements
-            .into_iter()
-            .filter(|e| *e < self.upper_bound)
+        (self.lower_bound..self.upper_bound)
+            .filter(|i| self.contains(*i))
             .collect_vec()
     }
 
-    /// Return the vector of indices of unset bits
+    /// Return the vector of indices of unset bits in between lower bound and
+    /// upper bound.
     pub(crate) fn to_vec_complement(&self) -> Vec<u64> {
-        let mut offset = 0;
-        let mut elements = vec![];
-        for limb in &self.limbs {
-            if *limb == u32::MAX {
-                offset += 32;
-                continue;
-            }
-
-            for i in 0_u64..32 {
-                let mask = 1u32 << i;
-                if limb & mask == 0 {
-                    elements.push(offset + i);
-                }
-            }
-
-            offset += 32;
-        }
-
-        elements
-            .into_iter()
-            .filter(|e| *e < self.upper_bound)
+        (self.lower_bound..self.upper_bound)
+            .filter(|i| !self.contains(*i))
             .collect_vec()
     }
 
-    /// Sample an element from the set.
+    /// Sample an index between lower and upper bounds whose corresponding bit
+    /// is zero.
     ///
-    /// In other words, sample an index into the bit array whose indicated
-    /// element matches with value.
-    pub(crate) fn sample(&self, value: bool, seed: [u8; 32]) -> u64 {
-        let [single_element] = self.sample_many(value, seed);
+    /// # Panics
+    ///
+    ///  - If lower bound >= upper bound.
+    pub(crate) fn sample(&self, seed: [u8; 32]) -> u64 {
+        let [single_element] = self.sample_many(seed);
         single_element
     }
 
-    /// Sample elements from the set.
+    /// Sample an index between lower and upper bounds with the given value. Do
+    /// this many times.
     ///
-    /// In other words, sample an index into the bit array whose indicated
-    /// element matches with value. Do this many times.
-    pub(crate) fn sample_many<const N: usize>(&self, target: bool, seed: [u8; 32]) -> [u64; N] {
+    /// # Panics
+    ///
+    ///  - If lower bound >= upper bound.
+    pub(crate) fn sample_many<const N: usize>(&self, seed: [u8; 32]) -> [u64; N] {
+        assert_ne!(self.lower_bound, self.upper_bound);
         let mut rng = StdRng::from_seed(seed);
         let mut elements = vec![];
         let mut num_misses = 0;
         while elements.len() != N {
-            let index = rng.random_range(0u64..self.upper_bound);
-            if self.contains(index) == target {
+            let index = rng.random_range(self.lower_bound..self.upper_bound);
+            if !self.contains(index) {
                 elements.push(index);
             } else {
                 num_misses += 1;
                 if num_misses > 10 * (1 + elements.len()) {
-                    let remainder =
-                        self.sample_many_densified(target, N - elements.len(), rng.random());
+                    let remainder = self.sample_many_densified(N - elements.len(), rng.random());
                     return [elements, remainder].concat().try_into().unwrap();
                 }
             }
@@ -283,13 +417,9 @@ impl SynchronizationBitMask {
         elements.try_into().unwrap()
     }
 
-    fn sample_many_densified(&self, target: bool, len: usize, seed: [u8; 32]) -> Vec<u64> {
+    fn sample_many_densified(&self, len: usize, seed: [u8; 32]) -> Vec<u64> {
         let mut rng = StdRng::from_seed(seed);
-        let list = if target {
-            self.to_vec()
-        } else {
-            self.to_vec_complement()
-        };
+        let list = self.to_vec_complement();
         let mut elements = vec![];
         while elements.len() != len {
             elements.push(list[rng.random_range(0..list.len())]);
@@ -297,29 +427,20 @@ impl SynchronizationBitMask {
         elements
     }
 
-    /// Determine whether all bits are set.
+    /// Determine whether all bits up to the upper bound are set.
     pub(crate) fn is_complete(&self) -> bool {
-        if self.upper_bound == 0 {
-            return true;
-        }
-        for limb in self.limbs.iter().take(self.limbs.len() - 1) {
-            if *limb != u32::MAX {
-                return false;
-            }
-        }
-        for i in 0..=((self.upper_bound - 1) % 32) {
-            if (1 << i) & *self.limbs.last().unwrap() == 0 {
-                return false;
-            }
-        }
-        true
+        // Canonicity requires that the lower bound be set as high as possible,
+        // i.e. it is the index of the first zero. If the bit mask is complete,
+        // then the first zero is exactly the point where the infinte string of
+        // zeros starts.
+        self.lower_bound == self.upper_bound
     }
 
     /// Calculate the proportion of ones to zeros, of bits from zero to the
     /// upper bound (exclusive).
     pub(crate) fn proportion(&self) -> f64 {
         let num_ones = self.limbs.iter().map(|l| l.count_ones()).sum::<u32>();
-        f64::from(num_ones) / (self.upper_bound as f64)
+        ((self.lower_bound + u64::from(num_ones)) as f64) / (self.upper_bound as f64)
     }
 }
 
@@ -328,8 +449,10 @@ pub mod test {
     use super::*;
 
     use proptest::collection::vec;
+    use proptest::prelude::Just;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
     use rand::rng;
     use rand::RngCore;
     use std::hint::black_box;
@@ -339,30 +462,36 @@ pub mod test {
         pub(crate) fn random(lower_bound: u64, upper_bound: u64) -> Self {
             assert!(upper_bound >= lower_bound);
 
-            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
+            if lower_bound == upper_bound {
+                return SynchronizationBitMask {
+                    lower_bound,
+                    upper_bound,
+                    limbs: vec![],
+                };
+            }
 
-            bit_mask.set_range(0, lower_bound);
-
+            let offset = lower_bound / 32;
+            let onset = (upper_bound.saturating_sub(1)) / 32;
+            let num_limbs = onset - offset + 1;
             let mut rng = rng();
-            let first_full_limb = lower_bound.div_ceil(32);
-            let first_index_in_full_limb = lower_bound.div_ceil(32) * 32;
-            let successor_of_last_full_limb = (upper_bound - 1) / 32;
-            let first_index_after_last_full_limb = successor_of_last_full_limb * 32;
+            let mut limbs = (0..num_limbs).map(|_| rng.next_u32()).collect_vec();
+            if let Some(first) = limbs.first_mut() {
+                if !lower_bound.is_multiple_of(32) {
+                    *first |= (1 << (lower_bound % 32)) - 1;
+                }
+            }
+            if let Some(last) = limbs.last_mut() {
+                if !upper_bound.is_multiple_of(32) {
+                    *last &= u32::MAX >> (32 - (upper_bound % 32));
+                }
+            }
 
-            for limb_i in first_full_limb..successor_of_last_full_limb {
-                bit_mask.limbs[limb_i as usize] = rng.next_u32();
+            SynchronizationBitMask {
+                lower_bound,
+                upper_bound,
+                limbs,
             }
-            for index in lower_bound..u64::min(upper_bound, first_index_in_full_limb) {
-                if rng.random_bool(0.5_f64) {
-                    bit_mask.set(index);
-                }
-            }
-            for index in u64::max(lower_bound, first_index_after_last_full_limb)..upper_bound {
-                if rng.random_bool(0.5_f64) {
-                    bit_mask.set(index);
-                }
-            }
-            bit_mask
+            .canonize()
         }
     }
 
@@ -377,27 +506,104 @@ pub mod test {
     }
 
     #[proptest]
-    fn set_indices_are_set_and_unset_remain_unset(
-        #[strategy(1..(1_u64<<15))] upper_bound: u64,
-        #[strategy(vec(0u64..#upper_bound, u64::min(#upper_bound, 1000) as usize))]
-        set_indices: Vec<u64>,
+    fn random_bitmask_is_canonical_prop(
+        #[strategy(0_u64..(1<<15))] lower_bound: u64,
+        #[strategy(0u64..(1<<8))] length: u64,
     ) {
-        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
-        for index in &set_indices {
-            bit_mask.set(*index);
-        }
+        let upper_bound = lower_bound + length;
+        let bit_mask = SynchronizationBitMask::random(lower_bound, upper_bound);
+        prop_assert!(!bit_mask.contains(bit_mask.lower_bound));
+        prop_assert!(bit_mask.lower_bound < bit_mask.upper_bound || bit_mask.limbs.is_empty());
+    }
 
-        for index in 0u64..upper_bound {
-            prop_assert_eq!(set_indices.contains(&index), bit_mask.contains(index))
+    #[test]
+    fn random_bitmask_is_canonical_unit() {
+        let lower_bound = 5984;
+        let length = 1;
+        let upper_bound = lower_bound + length;
+        let bit_mask = SynchronizationBitMask::random(lower_bound, upper_bound);
+        assert!(!bit_mask.contains(bit_mask.lower_bound));
+        assert!(bit_mask.lower_bound < bit_mask.upper_bound || bit_mask.limbs.is_empty());
+    }
+
+    #[proptest]
+    fn setting_single_index_works(
+        #[strategy(0_u64..(1<<15))] lower_bound: u64,
+        #[strategy(1u64..(1<<12))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
+        #[strategy(#lower_bound..#upper_bound)] index: u64,
+    ) {
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+        prop_assert!(!bit_mask.contains(index));
+        bit_mask.set(index);
+        prop_assert!(bit_mask.contains(index));
+    }
+
+    #[test]
+    fn set_single_index_unit() {
+        for (lower_bound, upper_bound, index) in [(17088, 17320, 17116), (31, 39, 31)] {
+            let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+            assert!(!bit_mask.contains(index));
+            bit_mask.set(index);
+            assert!(bit_mask.contains(index));
+        }
+    }
+
+    #[test]
+    fn set_explicit_range_unit() {
+        for (lower_bound, upper_bound, indices) in
+            [(17088, 17320, 17088..=17116), (31, 39, 31..=31)]
+        {
+            let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+            for index in indices {
+                assert!(!bit_mask.contains(index));
+                bit_mask.set(index);
+                assert!(bit_mask.contains(index));
+            }
         }
     }
 
     #[proptest]
-    fn bit_mask_is_complete_iff_all_its_are_set(
-        #[strategy(2..(1_u64<<15))] upper_bound: u64,
-        #[strategy(vec(0u64..#upper_bound,(#upper_bound-2) as usize))] bit_indices: Vec<u64>,
+    fn set_indices_are_set_and_unset_remain_unset_prop(
+        #[strategy(0_u64..(1<<6))] lower_bound: u64,
+        #[strategy(1u64..(1<<5))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
+        #[strategy(vec(#lower_bound..#upper_bound, u64::min(#_length, 1000) as usize))]
+        set_indices: Vec<u64>,
     ) {
-        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+        for index in &set_indices {
+            bit_mask.set(*index);
+        }
+
+        for index in lower_bound..upper_bound {
+            prop_assert_eq!(set_indices.contains(&index), bit_mask.contains(index))
+        }
+    }
+
+    #[test]
+    fn set_indices_are_set_and_unset_remain_unset_unit() {
+        let lower_bound = 31;
+        let upper_bound = 39;
+        let set_indices = [31];
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+        for index in &set_indices {
+            bit_mask.set(*index);
+        }
+
+        for index in lower_bound..upper_bound {
+            assert_eq!(set_indices.contains(&index), bit_mask.contains(index))
+        }
+    }
+
+    #[proptest]
+    fn bit_mask_is_complete_iff_all_bits_are_set(
+        #[strategy(0_u64..(1<<7))] lower_bound: u64,
+        #[strategy(3u64..(1<<5))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
+        #[strategy(vec(#lower_bound..#upper_bound,(#_length-2) as usize))] bit_indices: Vec<u64>,
+    ) {
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
         prop_assert!(!bit_mask.is_complete());
 
         for index in bit_indices {
@@ -405,20 +611,22 @@ pub mod test {
         }
         prop_assert!(!bit_mask.is_complete());
 
-        bit_mask.set_range(0, upper_bound - 1);
+        bit_mask.set_range(lower_bound, upper_bound - 1);
         prop_assert!(bit_mask.is_complete());
     }
 
     #[proptest]
     fn set_range_sets_range(
-        #[strategy(2..(1_u64<<15))] upper_bound: u64,
-        #[strategy(0..(#upper_bound-1))] range_start: u64,
+        #[strategy(0_u64..(1<<15))] lower_bound: u64,
+        #[strategy(2u64..(1<<12))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
+        #[strategy(#lower_bound..(#upper_bound-1))] range_start: u64,
         #[strategy(#range_start..#upper_bound)] range_stop: u64,
     ) {
-        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
         bit_mask.set_range(range_start, range_stop);
 
-        for index in 0u64..upper_bound {
+        for index in lower_bound..upper_bound {
             prop_assert_eq!(
                 (range_start..=range_stop).contains(&index),
                 bit_mask.contains(index)
@@ -433,7 +641,7 @@ pub mod test {
             (5598, 11, 3263),
             (19666, 9718, 9718),
         ] {
-            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(0, upper_bound);
             bit_mask.set_range(range_start, range_stop);
 
             for index in 0u64..upper_bound {
@@ -446,153 +654,164 @@ pub mod test {
     }
 
     #[proptest]
-    fn sample_dense_samples_target(
-        #[strategy(100..(1_u64<<15))] upper_bound: u64,
-        #[strategy(vec(0u64..#upper_bound, 10))] set_indices: Vec<u64>,
-        #[strategy(0u64..u64::MAX)] seed: u64,
-        target: bool,
+    fn can_sample_missing_from_incomplete_bitmask(
+        #[strategy(0_u64..(1<<50))] lower_bound: u64,
+        #[strategy(1u64..(1<<12))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
     ) {
-        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
-        if target {
-            bit_mask.set_range(0, upper_bound - 1);
-            for index in &set_indices {
-                bit_mask.unset(*index);
-            }
-        } else {
-            for index in &set_indices {
-                bit_mask.set(*index);
-            }
+        let bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+
+        let _ = bit_mask.sample(rng().random()); // no crash
+    }
+
+    #[proptest]
+    fn not_of_bitmask_is_canonical(
+        #[strategy(1usize..(1<<12))] _length: usize,
+        #[strategy((#_length as u64)..(1u64<<50))] upper_bound: u64,
+        #[strategy(Just(#upper_bound-(#_length as u64)))] lower_bound: u64,
+        #[strategy(vec(#lower_bound..#upper_bound, usize::min(#_length-1, 1000)))] set_indices: Vec<
+            u64,
+        >,
+    ) {
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+        for index in set_indices {
+            bit_mask.set(index);
+        }
+
+        let not = !bit_mask;
+
+        prop_assert!(!not.contains(not.lower_bound));
+    }
+
+    #[test]
+    fn can_sample_missing_simple_unit() {
+        let upper_bound = 171510685654;
+        let lower_bound = 171510685625;
+        let bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+        let mut rng = rng();
+
+        for _ in 0..1000 {
+            let _ = bit_mask.sample(rng.random()); // no crash
+        }
+    }
+
+    #[proptest]
+    fn sample_dense_samples_missing_prop(
+        #[strategy(0_u64..(1<<15))] lower_bound: u64,
+        #[strategy(2u64..(1<<12))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
+        #[strategy(vec(#lower_bound..#upper_bound, u64::min(#_length-1, 1000) as usize))]
+        set_indices: Vec<u64>,
+        #[strategy(0u64..u64::MAX)] seed: u64,
+    ) {
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+
+        for index in &set_indices {
+            bit_mask.set(*index);
         }
 
         let mut rng = StdRng::seed_from_u64(seed);
-        let index = bit_mask.sample(target, rng.random());
-        prop_assert_eq!(target, bit_mask.contains(index));
+        let index = bit_mask.sample(rng.random());
+        prop_assert!(!bit_mask.contains(index));
     }
 
     #[test]
     fn sample_dense_samples_target_unit() {
-        for (upper_bound, seed, target) in [(100_u64, 0_u64, false), (100, 203, true)] {
+        for (upper_bound, seed) in [(100_u64, 0_u64)] {
             let mut rng = StdRng::seed_from_u64(seed);
             let set_indices = (0..10)
                 .map(|_| rng.random_range(0u64..upper_bound))
                 .collect_vec();
 
-            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
-            if target {
-                bit_mask.set_range(0, upper_bound - 1);
-                for index in &set_indices {
-                    bit_mask.unset(*index);
-                }
-            } else {
-                for index in &set_indices {
-                    bit_mask.set(*index);
-                }
+            let mut bit_mask = SynchronizationBitMask::new(0, upper_bound);
+
+            for index in &set_indices {
+                bit_mask.set(*index);
             }
 
-            let index = bit_mask.sample(target, rng.random());
-            assert_eq!(target, bit_mask.contains(index));
+            let index = bit_mask.sample(rng.random());
+            assert!(!bit_mask.contains(index));
         }
     }
 
     #[proptest]
-    fn sample_sparse_samples_target(
-        #[strategy(100..(1_u64<<15))] upper_bound: u64,
-        #[strategy(vec(0u64..#upper_bound, 10))] set_indices: Vec<u64>,
+    fn sample_sparse_samples_missing_index_prop(
+        #[strategy(0_u64..(1<<15))] lower_bound: u64,
+        #[strategy(2u64..(1<<12))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
+        #[strategy(vec(#lower_bound..#upper_bound, u64::min(#_length-1, 1000) as usize))]
+        set_indices: Vec<u64>,
         #[strategy(0u64..u64::MAX)] seed: u64,
-        target: bool,
     ) {
-        let mut bit_mask = SynchronizationBitMask::new(upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
 
-        if target {
-            for index in &set_indices {
-                bit_mask.set(*index);
+        for index in lower_bound..upper_bound {
+            if set_indices.contains(&index) {
+                continue;
             }
-        } else {
-            bit_mask.set_range(0, upper_bound - 1);
-            for index in &set_indices {
-                bit_mask.unset(*index);
-            }
+            bit_mask.set(index);
         }
 
         let mut rng = StdRng::seed_from_u64(seed);
-        let index = bit_mask.sample(target, rng.random());
-        prop_assert_eq!(target, bit_mask.contains(index));
+        let index = bit_mask.sample(rng.random());
+        prop_assert!(!bit_mask.contains(index));
     }
 
     #[test]
-    fn sample_sparse_samples_target_unit() {
-        for (upper_bound, seed, target) in [
-            (100_u64, 0_u64, false),
-            (100, 1, true),
-            (145, 5528042011211264207, true),
-        ] {
+    fn sample_sparse_samples_missing_index_unit() {
+        for (upper_bound, seed) in [(100_u64, 0_u64)] {
             let mut rng = StdRng::seed_from_u64(seed);
             let set_indices = (0..10)
                 .map(|_| rng.random_range(0..upper_bound))
                 .collect_vec();
 
-            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(0, upper_bound);
 
-            if target {
-                for index in &set_indices {
-                    bit_mask.set(*index);
+            for index in 0..upper_bound {
+                if set_indices.contains(&index) {
+                    continue;
                 }
-            } else {
-                bit_mask.set_range(0, upper_bound - 1);
-                for index in &set_indices {
-                    bit_mask.unset(*index);
-                }
+                bit_mask.set(index);
             }
 
-            let index = bit_mask.sample(target, rng.random());
-            assert_eq!(target, bit_mask.contains(index));
+            let index = bit_mask.sample(rng.random());
+            assert!(!bit_mask.contains(index));
         }
     }
 
     #[test]
     fn sample_sparse_samples_target_unit_proptest_regression() {
-        for (upper_bound, set_indices, seed, target) in [
-            (
-                145_u64,
-                vec![64, 64, 64, 0, 68, 64, 64, 3, 64, 64],
-                5528042011211264207_u64,
-                true,
-            ),
-            (
-                105,
-                vec![6, 9, 96, 16, 18, 12, 23, 49, 100, 12],
-                9495413841520055326,
-                false,
-            ),
-        ] {
-            let mut bit_mask = SynchronizationBitMask::new(upper_bound);
+        for (upper_bound, set_indices, seed) in [(
+            105,
+            vec![6, 9, 96, 16, 18, 12, 23, 49, 100, 12],
+            9495413841520055326,
+        )] {
+            let mut bit_mask = SynchronizationBitMask::new(0, upper_bound);
 
-            if target {
-                for index in &set_indices {
-                    bit_mask.set(*index);
+            for index in 0..upper_bound {
+                if set_indices.contains(&index) {
+                    continue;
                 }
-            } else {
-                bit_mask.set_range(0, upper_bound - 1);
-                for index in &set_indices {
-                    bit_mask.unset(*index);
-                }
+                bit_mask.set(index);
             }
 
             let mut rng = StdRng::seed_from_u64(seed);
             let sampling_seed = rng.random();
-            let index = bit_mask.sample(target, sampling_seed);
-            assert_eq!(target, bit_mask.contains(index));
+            let index = bit_mask.sample(sampling_seed);
+            assert!(!bit_mask.contains(index));
         }
     }
 
     #[proptest]
-    fn expand_then_shrink_is_identity(
-        #[strategy(2..(1_u64<<15))] large_upper_bound: u64,
-        #[strategy(1..#large_upper_bound)] small_upper_bound: u64,
-        #[strategy(vec(0u64..#small_upper_bound, u64::min(#small_upper_bound, 1000) as usize))]
+    fn expand_then_shrink_is_identity_prop(
+        #[strategy(0_u64..(1<<16))] lower_bound: u64,
+        #[strategy(3u64..(1<<13))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] large_upper_bound: u64,
+        #[strategy((#lower_bound+2)..#large_upper_bound)] small_upper_bound: u64,
+        #[strategy(vec(#lower_bound..#small_upper_bound, u64::min(#_length, 1000) as usize))]
         set_indices: Vec<u64>,
     ) {
-        let mut bit_mask = SynchronizationBitMask::new(small_upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, small_upper_bound);
         for index in &set_indices {
             bit_mask.set(*index);
         }
@@ -605,13 +824,14 @@ pub mod test {
 
     #[test]
     fn expand_then_shrink_is_identity_unit() {
-        for (large_upper_bound, small_upper_bound, seed) in [(2_u64, 1_u64, 0_u64), (200, 100, 483)]
+        for (large_upper_bound, small_upper_bound, seed) in
+            [(2_u64, 1_u64, 0_u64), (200, 100, 483), (50, 45, 44)]
         {
             let mut rng = StdRng::seed_from_u64(seed);
             let set_indices = (0..1000)
                 .map(|_| rng.random_range(0..small_upper_bound))
                 .collect_vec();
-            let mut bit_mask = SynchronizationBitMask::new(small_upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(0, small_upper_bound);
             for index in &set_indices {
                 bit_mask.set(*index);
             }
@@ -624,13 +844,32 @@ pub mod test {
     }
 
     #[proptest]
-    fn shrink_then_expand_resets_dropped_bits(
+    fn shrink_then_expand_resets_dropped_bits_prop(
         #[strategy(2..(1_u64<<15))] large_upper_bound: u64,
         #[strategy(1..#large_upper_bound)] small_upper_bound: u64,
         #[strategy(vec(0u64..#large_upper_bound, u64::min(#large_upper_bound, 1000) as usize))]
         set_indices: Vec<u64>,
     ) {
-        let mut bit_mask = SynchronizationBitMask::new(large_upper_bound);
+        let mut bit_mask = SynchronizationBitMask::new(0, large_upper_bound);
+        for index in &set_indices {
+            bit_mask.set(*index);
+        }
+
+        let mut new_bit_mask = bit_mask.clone();
+        new_bit_mask = new_bit_mask.shrink(small_upper_bound);
+        new_bit_mask = new_bit_mask.expand(large_upper_bound);
+        for index in small_upper_bound..large_upper_bound {
+            prop_assert!(!new_bit_mask.contains(index));
+        }
+    }
+
+    #[proptest]
+    fn shrink_then_expand_resets_dropped_bits_unit_1() {
+        let large_upper_bound = 2;
+        let small_upper_bound = 1;
+        let set_indices = [0, 1];
+
+        let mut bit_mask = SynchronizationBitMask::new(0, large_upper_bound);
         for index in &set_indices {
             bit_mask.set(*index);
         }
@@ -644,15 +883,15 @@ pub mod test {
     }
 
     #[test]
-    fn shrink_then_expand_resets_dropped_bits_unit() {
-        for (large_upper_bound, small_upper_bound, seed) in [(2_u64, 1_u64, 0_u64), (200, 100, 300)]
+    fn shrink_then_expand_resets_dropped_bits_unit_2() {
+        for (large_upper_bound, small_upper_bound, seed) in [(2_u64, 1_u64, 2_u64), (200, 100, 300)]
         {
             let mut rng = StdRng::seed_from_u64(seed);
             let set_indices = (0..u64::min(large_upper_bound, 1000))
                 .map(|_| rng.random_range(0..large_upper_bound))
                 .collect_vec();
 
-            let mut bit_mask = SynchronizationBitMask::new(large_upper_bound);
+            let mut bit_mask = SynchronizationBitMask::new(0, large_upper_bound);
             for index in &set_indices {
                 bit_mask.set(*index);
             }
@@ -671,7 +910,7 @@ pub mod test {
 
     #[test]
     fn can_sample_index_for_zero() {
-        let mut bit_mask = SynchronizationBitMask::new(200);
+        let mut bit_mask = SynchronizationBitMask::new(0, 200);
         bit_mask.set_range(0, 100);
         for i in [122, 117, 136, 116, 105, 187, 111, 143, 108, 111] {
             bit_mask.set(i);
@@ -680,8 +919,107 @@ pub mod test {
         let seed = 4552531317295863509_u64;
         let mut rng = StdRng::seed_from_u64(seed);
 
-        let index = bit_mask.sample(false, rng.random());
+        let index = bit_mask.sample(rng.random());
 
         assert!(!bit_mask.contains(index));
+    }
+
+    #[proptest]
+    fn reconcile_prop(
+        #[strategy(0usize..5)] num_limbs: usize,
+        #[strategy((#num_limbs as u64*32)..(1<<50))] upper_bound: u64,
+        #[strategy(vec(arb::<u32>(), #num_limbs+1))] own_limbs: Vec<u32>,
+        #[strategy(vec(arb::<u32>(), #num_limbs+1))] peer_limbs: Vec<u32>,
+    ) {
+        let lower_bound = upper_bound - (num_limbs as u64) * 32;
+        let own_coverage = SynchronizationBitMask {
+            lower_bound,
+            upper_bound,
+            limbs: own_limbs,
+        }
+        .canonize();
+        let peer_coverage = SynchronizationBitMask {
+            lower_bound,
+            upper_bound,
+            limbs: peer_limbs,
+        }
+        .canonize();
+
+        let reconciliation = own_coverage.reconcile(&peer_coverage);
+
+        print!("        own:  ");
+        for i in lower_bound..upper_bound {
+            print!("{}", u8::from(own_coverage.contains(i)));
+        }
+        println!();
+
+        print!("       peer:  ");
+        for i in lower_bound..upper_bound {
+            print!("{}", u8::from(peer_coverage.contains(i)));
+        }
+        println!();
+
+        print!("own | !peer:  ");
+        for i in lower_bound..upper_bound {
+            print!("{}", u8::from(reconciliation.contains(i)));
+        }
+        println!("\n");
+
+        for index in lower_bound..upper_bound {
+            if !own_coverage.contains(index) && peer_coverage.contains(index) {
+                prop_assert!(!reconciliation.contains(index));
+            } else {
+                prop_assert!(reconciliation.contains(index));
+            }
+        }
+    }
+
+    #[test]
+    fn reconcile_unit() {
+        let num_limbs = 4;
+        let upper_bound = 128;
+        let own_limbs = [0, 0, 0, 2548952530].to_vec();
+        let peer_limbs = [2561858424, 3351979687, 741446663, 3660427733].to_vec();
+        let lower_bound = upper_bound - (num_limbs as u64) * 32;
+        let own_coverage = SynchronizationBitMask {
+            lower_bound,
+            upper_bound,
+            limbs: own_limbs,
+        }
+        .canonize();
+        let peer_coverage = SynchronizationBitMask {
+            lower_bound,
+            upper_bound,
+            limbs: peer_limbs,
+        }
+        .canonize();
+
+        let reconciliation = own_coverage.reconcile(&peer_coverage);
+
+        print!("        own:  ");
+        for i in lower_bound..upper_bound {
+            print!("{}", u8::from(own_coverage.contains(i)));
+        }
+        println!();
+
+        print!("       peer:  ");
+        for i in lower_bound..upper_bound {
+            print!("{}", u8::from(peer_coverage.contains(i)));
+        }
+        println!();
+
+        print!("own | !peer:  ");
+        for i in lower_bound..upper_bound {
+            print!("{}", u8::from(reconciliation.contains(i)));
+        }
+        println!("\n");
+
+        for index in lower_bound..upper_bound {
+            if !own_coverage.contains(index) && peer_coverage.contains(index) {
+                assert!(!reconciliation.contains(index));
+            } else {
+                assert!(reconciliation.contains(index));
+            }
+        }
     }
 }

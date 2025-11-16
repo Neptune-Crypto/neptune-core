@@ -164,7 +164,6 @@ impl SyncLoop {
                 Some(message_from_main) = self.main_channel_receiver.recv() => {
                     match message_from_main {
                         MainToSync::AddPeer(peer_handle) => {
-                            tracing::debug!("sync loop got new peer");
                             self.peers.insert(peer_handle, PeerSyncState::default());
 
                             // Add new block request to queue, if we are still
@@ -174,7 +173,6 @@ impl SyncLoop {
                             }
                         }
                         MainToSync::RemovePeer(peer_handle) => {
-                            tracing::debug!("sync loop dropped peer");
                             self.peers.remove(&peer_handle);
                             last_peer_disconnect_time = Some(SystemTime::now());
                         }
@@ -386,15 +384,17 @@ impl SyncLoop {
 
             // Otherwise, compute the distribution of blocks to sample from.
             let mut distribution = own_coverage.clone();
-            if let Some(coverage) = peer.coverage.clone() {
-                distribution = distribution | !coverage;
+            if let Some(peer_coverage) = &peer.coverage {
+                distribution = distribution.reconcile(peer_coverage);
             }
 
             // Sample and collect block request, if possible.
             if distribution.is_complete() {
+                tracing::debug!("Peer has no blocks we want.");
                 continue;
             }
-            let height = distribution.sample(false, rng().random());
+            let height = distribution.sample(rng().random());
+
             block_requests.push(BlockRequest {
                 peer_handle,
                 height: BlockHeight::from(height),
@@ -429,6 +429,12 @@ impl SyncLoop {
             tracing::error!("Could not sample block heights due tokio/concurrency error.");
             return;
         };
+
+        if block_requests.is_empty() {
+            tracing::warn!("Sync loop: no viable blocks to request from peers.");
+            return;
+        }
+
         tracing::info!(
             "Sync loop: requesting blocks [{}] from peers",
             block_requests.iter().map(|br| br.height.value()).join(", ")
@@ -881,7 +887,7 @@ mod tests {
         async fn request(&mut self, block_height: BlockHeight) -> Option<Block> {
             // with certain probability, this peer has received a new block
             if rng().random_bool(0.2_f64) && !self.coverage.is_complete() {
-                let height = self.coverage.sample(false, rng().random());
+                let height = self.coverage.sample(rng().random());
                 self.coverage.set(height);
             }
 
@@ -1282,7 +1288,7 @@ mod tests {
 
         let current_tip_height = BlockHeight::from(u64::from(rng.next_u32() >> 12));
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..100));
+            BlockHeight::from(current_tip_height.value() + rng.random_range(20..100));
         let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
             SyncLoop::new(current_tip_height, sync_target_height, false)
                 .await
@@ -1294,8 +1300,10 @@ mod tests {
             sync_target_height,
         );
 
-        let mut cumulative_coverage =
-            SynchronizationBitMask::new(sync_target_height.next().value());
+        let mut cumulative_coverage = SynchronizationBitMask::new(
+            current_tip_height.value() + 1,
+            sync_target_height.next().value(),
+        );
         for _ in 0..5 {
             let peer_coverage = tokio::task::spawn_blocking(move || {
                 SynchronizationBitMask::random(
