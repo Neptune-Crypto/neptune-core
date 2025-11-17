@@ -7,3 +7,4 @@ pub mod peers_screen;
 pub mod receive_screen;
 pub mod screen;
 pub mod send_screen;
+pub mod scrollable_table;

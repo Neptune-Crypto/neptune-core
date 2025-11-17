@@ -9,7 +9,7 @@ mod receive_screen;
 mod screen;
 mod send_screen;
 mod utxos_screen;
-
+mod scrollable_table;
 #[cfg(feature = "mock")]
 mod mock_rpc_client;
 
