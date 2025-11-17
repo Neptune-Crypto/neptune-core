@@ -45,9 +45,6 @@ type BalanceUpdateArc = Arc<std::sync::Mutex<Vec<BalanceUpdate>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
 
-
-
-
 #[derive(Debug, Clone)]
 pub struct HistoryScreen {
     active: bool,
@@ -135,11 +132,7 @@ impl HistoryScreen {
                     return None;
                 }
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        _ => {
-                            escalate_event = Some(event);
-                        }
-                    }
+                    escalate_event = Some(event);
                 }
             }
         }
@@ -334,6 +327,6 @@ impl Widget for HistoryScreen {
             table_canvas.width,
             widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,
         );
-        StatefulWidget::render(table, table_canvas, buf,  self.scrollable_table.state_mut());
+        StatefulWidget::render(table, table_canvas, buf, self.scrollable_table.state_mut());
     }
 }

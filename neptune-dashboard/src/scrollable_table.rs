@@ -1,7 +1,7 @@
-use std::sync::{Arc, Mutex};
-use ratatui::widgets::TableState;
-use crossterm::event::{Event, KeyCode, KeyEventKind};
 use crate::dashboard_app::DashboardEvent;
+use crossterm::event::{Event, KeyCode, KeyEventKind};
+use ratatui::widgets::TableState;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct ScrollableTable<T> {
@@ -26,10 +26,7 @@ impl<T> ScrollableTable<T> {
     }
 
     fn num_items(&self) -> usize {
-        self.data
-            .lock()
-            .map(|data| data.len())
-            .unwrap_or(0)
+        self.data.lock().map(|data| data.len()).unwrap_or(0)
     }
 
     fn terminal_height() -> u16 {

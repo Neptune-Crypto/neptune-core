@@ -123,11 +123,7 @@ impl AddressScreen {
                         return None;
                     }
 
-                    match key.code {
-                        _ => {
-                            escalate_event = Some(event);
-                        }
-                    }
+                    escalate_event = Some(event);
                 }
             }
         }

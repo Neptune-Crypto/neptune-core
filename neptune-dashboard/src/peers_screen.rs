@@ -207,7 +207,6 @@ impl PeersScreen {
 
         if self.in_focus {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
-
                 if key.kind == KeyEventKind::Press {
                     if self.scrollable_table.handle_navigation(&event) {
                         return None;
@@ -545,5 +544,3 @@ impl Widget for PeersScreen {
         StatefulWidget::render(table, table_rect, buf, self.scrollable_table.state_mut());
     }
 }
-
-
