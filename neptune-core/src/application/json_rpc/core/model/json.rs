@@ -59,13 +59,14 @@ impl JsonError {
 
 impl From<RpcError> for JsonError {
     fn from(err: RpcError) -> Self {
-        match err {
-            RpcError::Server(error) => error,
-            err => JsonError::Custom {
+        if let RpcError::Server(error) = err {
+            error
+        } else {
+            JsonError::Custom {
                 code: -32000,
                 message: "RPC error".to_string(),
                 data: Some(serde_json::to_value(err).unwrap()),
-            },
+            }
         }
     }
 }

@@ -385,8 +385,8 @@ impl RpcApi for RpcServer {
 
         let state = self.state.lock_guard().await;
         let ams = state.chain.archival_state().archival_mutator_set.ams();
-
         let mut membership_proofs = Vec::with_capacity(request.absolute_index_sets.len());
+
         for (index, set) in request.absolute_index_sets.into_iter().enumerate() {
             match ams.restore_membership_proof_privacy_preserving(set).await {
                 Ok(msmp) => membership_proofs.push(msmp.into()),
