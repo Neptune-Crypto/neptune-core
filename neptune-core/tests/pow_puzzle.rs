@@ -3,7 +3,7 @@ mod common;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-
+use std::time::Instant;
 use common::genesis_node::GenesisNode;
 use common::logging;
 use neptune_cash::api::export::Network;
@@ -55,8 +55,8 @@ pub async fn can_find_valid_pow_solution() {
     let mut alice = GenesisNode::start_node(
         GenesisNode::default_args_with_network_and_devnet_wallet(network).await,
     )
-    .await
-    .unwrap();
+        .await
+        .unwrap();
     let timestamp = Timestamp(BFieldElement::new(1861920000000u64));
     alice
         .gsl

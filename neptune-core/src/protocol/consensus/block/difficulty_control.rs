@@ -509,6 +509,7 @@ mod tests {
 
     use super::*;
     use crate::protocol::consensus::block::Network;
+    use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
 
     impl Difficulty {
         pub(crate) fn from_biguint(bi: BigUint) -> Self {
@@ -599,6 +600,24 @@ mod tests {
         log_hash_rate: f64,
         proving_time: f64,
         num_iterations: usize,
+    }
+
+    #[test]
+    fn block_interval_reduced_to_5mins_after_60_blocks() {
+        let network = Network::Main;
+        let mut old_interval = network.target_block_interval(BlockHeight::from(2)).to_millis(); //
+        assert_eq!(old_interval, 588000);
+        let zero_timestamp = Timestamp::zero();
+        let mut old_difficulty: Difficulty = Difficulty::from_u64(65187421179626); // difficulty at block 14204 from mainnet
+        let target_block_interval = network.target_block_interval(BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET);
+
+        for _ in 0..60 {
+            let new_difficulty = difficulty_control(Timestamp::seconds(old_interval), zero_timestamp, old_difficulty, target_block_interval, BlockHeight::from(2));
+            dbg!(BigUint::from(new_difficulty).to_f64().unwrap() / BigUint::from(old_difficulty).to_f64().unwrap());
+            old_interval = ((old_interval as u128) * BigUint::from(new_difficulty).to_u128().unwrap() / BigUint::from(old_difficulty).to_u128().unwrap()) as u64;
+            old_difficulty = new_difficulty;
+        }
+        dbg!(old_interval);
     }
 
     #[test]

@@ -72,9 +72,9 @@ impl Network {
     ///
     /// The difficulty is reset to genesis difficulty on testnet network(s) any
     /// time the duration between a block and the previous block is >= twice the
-    /// target interval ie 19.6 minutes.
+    /// target interval ie 10 minutes from beta fork and 19.6 minutes before beta fork.
     ///
-    /// - testnet, testnet-mock: Some(19.6 minutes)
+    /// - testnet, testnet-mock: Some(10 minutes) or Some(19.6 minutes)
     /// - mainnet, others: None
     pub fn difficulty_reset_interval(&self, block_height: BlockHeight) -> Option<Timestamp> {
         match *self {

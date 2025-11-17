@@ -78,7 +78,8 @@ impl BlockHeight {
             ConsensusRuleSet::HardforkBeta => {
                 let hard_fork_block = match network {
                     Network::Testnet(_) => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
-                    _ => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
+                    Network::Main => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
+                    _ => BlockHeight::from(1)
                 }
                 .value()
                     - 1;
