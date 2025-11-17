@@ -3,15 +3,15 @@ mod dashboard_app;
 mod dashboard_rpc_client;
 mod history_screen;
 mod mempool_screen;
+#[cfg(feature = "mock")]
+mod mock_rpc_client;
 mod overview_screen;
 mod peers_screen;
 mod receive_screen;
 mod screen;
+mod scrollable_table;
 mod send_screen;
 mod utxos_screen;
-
-#[cfg(feature = "mock")]
-mod mock_rpc_client;
 
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;

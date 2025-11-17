@@ -4,8 +4,11 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use crate::dashboard_app::DashboardEvent;
+use crate::dashboard_rpc_client::DashboardRpcClient;
+use crate::screen::Screen;
+use crate::scrollable_table::ScrollableTable;
 use crossterm::event::Event;
-use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::application::rpc::auth;
@@ -21,65 +24,12 @@ use ratatui::widgets::Cell;
 use ratatui::widgets::Row;
 use ratatui::widgets::StatefulWidget;
 use ratatui::widgets::Table;
-use ratatui::widgets::TableState;
 use ratatui::widgets::Widget;
 use tarpc::context;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use unicode_width::UnicodeWidthStr;
-
-use crate::dashboard_app::DashboardEvent;
-use crate::dashboard_rpc_client::DashboardRpcClient;
-use crate::screen::Screen;
-
-#[derive(Debug, Clone)]
-pub struct ScrollableTable {
-    data: Arc<Mutex<Vec<UiUtxo>>>,
-    state: TableState,
-}
-
-impl ScrollableTable {
-    // # of rows in table header (1 text row, 2 border rows).
-    // this is used to avoid selecting the header rows.
-    // kind of a hack, but appears to be necessary for now.
-    // ratatui seems to be redesigning scrollable widgets at present.
-    const TABLE_HEADER_ROWS: usize = 3;
-
-    // Select the next item. This will not be reflected until the widget is drawn
-    // with `Frame::render_stateful_widget`.
-    pub fn next(&mut self) {
-        let offset = Self::TABLE_HEADER_ROWS;
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i >= self.data.lock().unwrap().len() + offset - 1 {
-                    i // end on last entry.  (no wrap to start)
-                } else {
-                    i + 1
-                }
-            }
-            None => offset,
-        };
-        self.state.select(Some(i));
-    }
-
-    // Select the previous item. This will not be reflected until the widget is drawn
-    // with `Frame::render_stateful_widget`.
-    pub fn previous(&mut self) {
-        let offset = Self::TABLE_HEADER_ROWS;
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i == offset {
-                    i // stay at first entry.  (no wrap to end.)
-                } else {
-                    i - 1
-                }
-            }
-            None => offset,
-        };
-        self.state.select(Some(i));
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct UtxosScreen {
@@ -92,7 +42,7 @@ pub struct UtxosScreen {
     token: auth::Token,
     poll_task: Option<Arc<Mutex<JoinHandle<()>>>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
-    scrollable_table: ScrollableTable,
+    scrollable_table: ScrollableTable<UiUtxo>,
 }
 
 impl UtxosScreen {
@@ -108,10 +58,7 @@ impl UtxosScreen {
             token,
             poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
-            scrollable_table: ScrollableTable {
-                data: data.clone(),
-                state: TableState::default(),
-            },
+            scrollable_table: ScrollableTable::new(data),
         }
     }
 
@@ -169,14 +116,11 @@ impl UtxosScreen {
         if self.in_focus {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Down => self.scrollable_table.next(),
-                        KeyCode::Up => self.scrollable_table.previous(),
-                        // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
-                        _ => {
-                            escalate_event = Some(event);
-                        }
+                    if self.scrollable_table.handle_navigation(&event) {
+                        return None;
                     }
+
+                    escalate_event = Some(event);
                 }
             }
         }
@@ -372,6 +316,6 @@ impl Widget for UtxosScreen {
             table_canvas.width,
             widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,
         );
-        StatefulWidget::render(table, table_canvas, buf, &mut self.scrollable_table.state);
+        StatefulWidget::render(table, table_canvas, buf, self.scrollable_table.state_mut());
     }
 }

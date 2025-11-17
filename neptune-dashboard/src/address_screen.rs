@@ -5,7 +5,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use crossterm::event::Event;
-use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::api::export::KeyType;
@@ -23,7 +22,6 @@ use ratatui::widgets::Cell;
 use ratatui::widgets::Row;
 use ratatui::widgets::StatefulWidget;
 use ratatui::widgets::Table;
-use ratatui::widgets::TableState;
 use ratatui::widgets::Widget;
 use tarpc::context;
 use tokio::select;
@@ -34,75 +32,12 @@ use unicode_width::UnicodeWidthStr;
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
 use crate::dashboard_rpc_client::DashboardRpcClient;
+use crate::scrollable_table::ScrollableTable;
 
 type AddressUpdate = SpendingKey;
 type AddressUpdateArc = Arc<std::sync::Mutex<Vec<AddressUpdate>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
-
-// Define some events to display.
-// note: based on ratatui scrollable table example at:
-//   https://github.com/ratatui-org/ratatui/blob/main/examples/table.rs
-#[derive(Debug, Clone)]
-struct Events {
-    // `items` is the state managed by the application.
-    items: AddressUpdateArc,
-    // `state` is the state that can be modified by the UI. It stores the index of the selected
-    // item as well as the offset computed during the previous draw call (used to implement
-    // natural scrolling).
-    state: TableState,
-}
-
-impl From<AddressUpdateArc> for Events {
-    fn from(items: AddressUpdateArc) -> Self {
-        Events {
-            items,
-            state: Default::default(),
-        }
-    }
-}
-
-impl Events {
-    // # of rows in table header (1 text row, 2 border rows).
-    // this is used to avoid selecting the header rows.
-    // kind of a hack, but appears to be necessary for now.
-    // ratatui seems to be redesigning scrollable widgets at present.
-    const TABLE_HEADER_ROWS: usize = 3;
-
-    // Select the next item. This will not be reflected until the widget is drawn
-    // with `Frame::render_stateful_widget`.
-    pub fn next(&mut self) {
-        let offset = Self::TABLE_HEADER_ROWS;
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i >= self.items.lock().unwrap().len() + offset - 1 {
-                    i // end on last entry.  (no wrap to start)
-                } else {
-                    i + 1
-                }
-            }
-            None => offset,
-        };
-        self.state.select(Some(i));
-    }
-
-    // Select the previous item. This will not be reflected until the widget is drawn
-    // with `Frame::render_stateful_widget`.
-    pub fn previous(&mut self) {
-        let offset = Self::TABLE_HEADER_ROWS;
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i == offset {
-                    i // stay at first entry.  (no wrap to end.)
-                } else {
-                    i - 1
-                }
-            }
-            None => offset,
-        };
-        self.state.select(Some(i));
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct AddressScreen {
@@ -114,7 +49,7 @@ pub struct AddressScreen {
     server: Arc<DashboardRpcClient>,
     poll_task: Option<JoinHandleArc>,
     escalatable_event: DashboardEventArc,
-    events: Events,
+    scrollable_table: ScrollableTable<AddressUpdate>,
     network: Network,
     token: auth::Token,
 }
@@ -131,7 +66,7 @@ impl AddressScreen {
             server: rpc_server,
             poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
-            events: data.into(),
+            scrollable_table: ScrollableTable::new(data),
             network,
             token,
         }
@@ -184,14 +119,11 @@ impl AddressScreen {
         if self.in_focus {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Down => self.events.next(),
-                        KeyCode::Up => self.events.previous(),
-                        // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
-                        _ => {
-                            escalate_event = Some(event);
-                        }
+                    if self.scrollable_table.handle_navigation(&event) {
+                        return None;
                     }
+
+                    escalate_event = Some(event);
                 }
             }
         }
@@ -384,6 +316,6 @@ impl Widget for AddressScreen {
             table_canvas.width,
             widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,
         );
-        StatefulWidget::render(table, table_canvas, buf, &mut self.events.state);
+        StatefulWidget::render(table, table_canvas, buf, self.scrollable_table.state_mut());
     }
 }
