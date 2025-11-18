@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ops::BitOr;
 use std::ops::Not;
 
@@ -41,7 +42,7 @@ pub(crate) struct SynchronizationBitMask {
     // exclusive
     pub(crate) upper_bound: u64,
 
-    limbs: Vec<u32>,
+    limbs: VecDeque<u32>,
 }
 
 impl PartialEq for SynchronizationBitMask {
@@ -80,8 +81,12 @@ impl Not for SynchronizationBitMask {
     /// Inverts only the middle portion of the bit mask, not the all-ones at the
     /// start nor the infinite-zeros at the end.
     fn not(self) -> Self::Output {
-        let mut limbs = self.limbs.iter().map(|limb| !*limb).collect_vec();
-        if let Some(limb) = limbs.last_mut() {
+        let mut limbs = self
+            .limbs
+            .iter()
+            .map(|limb| !*limb)
+            .collect::<VecDeque<u32>>();
+        if let Some(limb) = limbs.back_mut() {
             let bound = self.upper_bound % 32;
             if bound != 0 {
                 for i in bound..32 {
@@ -107,7 +112,7 @@ impl BitOr for SynchronizationBitMask {
             return Self {
                 lower_bound: 0,
                 upper_bound,
-                limbs: vec![],
+                limbs: VecDeque::new(),
             };
         }
 
@@ -116,7 +121,7 @@ impl BitOr for SynchronizationBitMask {
             return Self {
                 lower_bound,
                 upper_bound,
-                limbs: vec![],
+                limbs: VecDeque::new(),
             };
         }
 
@@ -127,7 +132,7 @@ impl BitOr for SynchronizationBitMask {
                 );
                 self.limb(index) | rhs.limb(index)
             })
-            .collect_vec();
+            .collect::<VecDeque<u32>>();
         Self::Output {
             lower_bound,
             upper_bound,
@@ -146,12 +151,12 @@ impl SynchronizationBitMask {
         while self.contains(self.lower_bound) {
             self.lower_bound += 1;
             if self.lower_bound.is_multiple_of(32) {
-                self.limbs.remove(0);
+                self.limbs.pop_front();
             }
         }
 
         if self.lower_bound == self.upper_bound {
-            self.limbs = vec![];
+            self.limbs = VecDeque::new();
         }
 
         self
@@ -195,10 +200,10 @@ impl SynchronizationBitMask {
             1_usize + usize::try_from(onset - offset).unwrap()
         };
 
-        let mut limbs = vec![0_u32; num_limbs];
+        let mut limbs = VecDeque::from(vec![0_u32; num_limbs]);
 
         // set the limb bits below the lower bound
-        if let Some(first) = limbs.first_mut() {
+        if let Some(first) = limbs.front_mut() {
             for i in 0..(lower_bound % 32) {
                 *first |= 1 << i;
             }
@@ -220,7 +225,7 @@ impl SynchronizationBitMask {
         let limbs = (offset..=onset)
             .map(|i| usize::try_from(i).expect("Limb indices fit in usizes."))
             .map(|i| self.limb(i) | !other.limb(i))
-            .collect_vec();
+            .collect::<VecDeque<u32>>();
 
         Self {
             lower_bound: self.lower_bound,
@@ -249,7 +254,11 @@ impl SynchronizationBitMask {
         };
 
         let extra_limbs = num_limbs.saturating_sub(self.limbs.len());
-        let new_limbs = [self.limbs, vec![0u32; extra_limbs]].concat();
+        let new_limbs = self
+            .limbs
+            .into_iter()
+            .chain(std::iter::repeat_n(0u32, extra_limbs))
+            .collect::<VecDeque<u32>>();
         Self {
             lower_bound: self.lower_bound,
             upper_bound: new_upper_bound,
@@ -276,9 +285,9 @@ impl SynchronizationBitMask {
         };
 
         while self.limbs.len() > num_limbs {
-            self.limbs.pop();
+            self.limbs.pop_back();
         }
-        if let Some(last) = self.limbs.last_mut() {
+        if let Some(last) = self.limbs.back_mut() {
             if !new_upper_bound.is_multiple_of(32) {
                 let shamt = 32 - (new_upper_bound % 32);
                 *last &= u32::MAX >> shamt;
@@ -466,7 +475,7 @@ pub mod test {
                 return SynchronizationBitMask {
                     lower_bound,
                     upper_bound,
-                    limbs: vec![],
+                    limbs: VecDeque::new(),
                 };
             }
 
@@ -474,13 +483,15 @@ pub mod test {
             let onset = (upper_bound.saturating_sub(1)) / 32;
             let num_limbs = onset - offset + 1;
             let mut rng = rng();
-            let mut limbs = (0..num_limbs).map(|_| rng.next_u32()).collect_vec();
-            if let Some(first) = limbs.first_mut() {
+            let mut limbs = (0..num_limbs)
+                .map(|_| rng.next_u32())
+                .collect::<VecDeque<u32>>();
+            if let Some(first) = limbs.front_mut() {
                 if !lower_bound.is_multiple_of(32) {
                     *first |= (1 << (lower_bound % 32)) - 1;
                 }
             }
-            if let Some(last) = limbs.last_mut() {
+            if let Some(last) = limbs.back_mut() {
                 if !upper_bound.is_multiple_of(32) {
                     *last &= u32::MAX >> (32 - (upper_bound % 32));
                 }
@@ -935,13 +946,13 @@ pub mod test {
         let own_coverage = SynchronizationBitMask {
             lower_bound,
             upper_bound,
-            limbs: own_limbs,
+            limbs: VecDeque::from(own_limbs),
         }
         .canonize();
         let peer_coverage = SynchronizationBitMask {
             lower_bound,
             upper_bound,
-            limbs: peer_limbs,
+            limbs: VecDeque::from(peer_limbs),
         }
         .canonize();
 
@@ -984,13 +995,13 @@ pub mod test {
         let own_coverage = SynchronizationBitMask {
             lower_bound,
             upper_bound,
-            limbs: own_limbs,
+            limbs: VecDeque::from(own_limbs),
         }
         .canonize();
         let peer_coverage = SynchronizationBitMask {
             lower_bound,
             upper_bound,
-            limbs: peer_limbs,
+            limbs: VecDeque::from(peer_limbs),
         }
         .canonize();
 
