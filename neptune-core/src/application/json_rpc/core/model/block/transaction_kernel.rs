@@ -3,13 +3,17 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
 use crate::api::export::AdditionRecord;
+use crate::api::export::Announcement;
 use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use crate::util_types::mutator_set::removal_record::chunk::Chunk;
 use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -32,6 +36,26 @@ impl From<ChunkDictionary> for RpcChunkDictionary {
     }
 }
 
+impl From<RpcChunkDictionary> for ChunkDictionary {
+    fn from(value: RpcChunkDictionary) -> Self {
+        let dictionary = value
+            .0
+            .into_iter()
+            .map(|(index, (authentication_path, relative_indices))| {
+                (
+                    index,
+                    (
+                        MmrMembershipProof::new(authentication_path),
+                        Chunk { relative_indices },
+                    ),
+                )
+            })
+            .collect();
+
+        Self { dictionary }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcRemovalRecord {
@@ -41,6 +65,15 @@ pub struct RpcRemovalRecord {
 
 impl From<RemovalRecord> for RpcRemovalRecord {
     fn from(record: RemovalRecord) -> Self {
+        Self {
+            absolute_indices: record.absolute_indices,
+            target_chunks: record.target_chunks.into(),
+        }
+    }
+}
+
+impl From<RpcRemovalRecord> for RemovalRecord {
+    fn from(record: RpcRemovalRecord) -> Self {
         Self {
             absolute_indices: record.absolute_indices,
             target_chunks: record.target_chunks.into(),
@@ -103,6 +136,33 @@ impl From<&TransactionKernel> for RpcTransactionKernel {
                 .collect(),
             fee: kernel.fee.into(),
             coinbase: kernel.coinbase.map(|c| c.into()),
+            timestamp: kernel.timestamp,
+            mutator_set_hash: kernel.mutator_set_hash,
+            merge_bit: kernel.merge_bit,
+        }
+    }
+}
+
+impl From<RpcTransactionKernel> for TransactionKernel {
+    fn from(kernel: RpcTransactionKernel) -> Self {
+        TransactionKernelProxy::from(kernel).into_kernel()
+    }
+}
+
+impl From<RpcTransactionKernel> for TransactionKernelProxy {
+    fn from(kernel: RpcTransactionKernel) -> Self {
+        Self {
+            inputs: kernel.inputs.into_iter().map(Into::into).collect(),
+            outputs: kernel.outputs.into_iter().map(Into::into).collect(),
+            announcements: kernel
+                .announcements
+                .into_iter()
+                .map(|msg| Announcement {
+                    message: msg.into(),
+                })
+                .collect(),
+            fee: kernel.fee.into(),
+            coinbase: kernel.coinbase.map(Into::into),
             timestamp: kernel.timestamp,
             mutator_set_hash: kernel.mutator_set_hash,
             merge_bit: kernel.merge_bit,

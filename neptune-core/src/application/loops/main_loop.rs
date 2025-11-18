@@ -2066,6 +2066,30 @@ impl MainLoopHandler {
                 // shut down
                 Ok(true)
             }
+            RPCServerToMain::SubmitTx(transaction) => {
+                // Technically RPC is not supposed/capable to handle ProofWitness but just in case
+                // Until a decision is made. (As this might get used by api too.)
+                let notification: Option<TransactionNotification> =
+                    transaction.as_ref().try_into().ok();
+
+                {
+                    let mut state = self.global_state_lock.lock_guard_mut().await;
+
+                    state
+                        .mempool_insert(*transaction, UpgradePriority::Critical)
+                        .await;
+                }
+
+                // If transaction can be sent thru P2P, submit instantly.
+                // This might be mempools responsibility but for now...
+                // We know upgraded transactions gets announced but not sure about new entries, might get moved into mempool too.
+                if let Some(notification) = notification {
+                    let pmsg = MainToPeerTask::TransactionNotification(notification);
+                    self.main_to_peer_broadcast(pmsg);
+                }
+
+                Ok(false)
+            }
         }
     }
 

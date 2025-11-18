@@ -12,6 +12,7 @@ use crate::application::json_rpc::core::model::block::*;
 use crate::application::json_rpc::core::model::common::*;
 use crate::application::json_rpc::core::model::wallet::block::*;
 use crate::application::json_rpc::core::model::wallet::mutator_set::*;
+use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -283,4 +284,16 @@ pub struct RestoreMembershipProofRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RestoreMembershipProofResponse {
     pub snapshot: RpcMsMembershipSnapshot,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitTransactionRequest {
+    pub transaction: RpcTransaction,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitTransactionResponse {
+    pub success: bool,
 }

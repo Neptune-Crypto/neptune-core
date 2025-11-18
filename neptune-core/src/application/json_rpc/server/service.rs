@@ -1,12 +1,16 @@
 use async_trait::async_trait;
 use tracing::debug;
 
+use crate::api::export::Timestamp;
+use crate::api::export::Transaction;
 use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
 use crate::application::json_rpc::server::rpc::RpcServer;
+use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
+use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 
 #[async_trait]
 impl RpcApi for RpcServer {
@@ -412,6 +416,63 @@ impl RpcApi for RpcServer {
 
         Ok(RestoreMembershipProofResponse { snapshot })
     }
+
+    async fn submit_transaction_call(
+        &self,
+        request: SubmitTransactionRequest,
+    ) -> RpcResult<SubmitTransactionResponse> {
+        let transaction: Transaction = request.transaction.into();
+        let network = self.state.cli().network;
+        let consensus_rule_set = self.state.lock_guard().await.consensus_rule_set();
+
+        if !transaction.is_valid(network, consensus_rule_set).await {
+            return Err(RpcError::SubmitTransaction(
+                SubmitTransactionError::InvalidTransaction,
+            ));
+        }
+
+        if transaction.kernel.coinbase.is_some() {
+            return Err(RpcError::SubmitTransaction(
+                SubmitTransactionError::CoinbaseTransaction,
+            ));
+        }
+
+        if transaction.kernel.fee.is_negative() {
+            return Err(RpcError::SubmitTransaction(
+                SubmitTransactionError::FeeNegative,
+            ));
+        }
+
+        let timestamp = transaction.kernel.timestamp;
+        let now = Timestamp::now();
+        if timestamp >= now + FUTUREDATING_LIMIT {
+            return Err(RpcError::SubmitTransaction(
+                SubmitTransactionError::FutureDated,
+            ));
+        }
+
+        let msa = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .expect("Tip block must have mutator set");
+
+        if !transaction.is_confirmable_relative_to(&msa) {
+            return Err(RpcError::SubmitTransaction(
+                SubmitTransactionError::NotConfirmable,
+            ));
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::SubmitTx(Box::new(transaction)))
+            .await;
+
+        Ok(SubmitTransactionResponse { success: true })
+    }
 }
 
 #[cfg(test)]
@@ -547,7 +608,7 @@ pub mod tests {
                 .header
                 .expect("header should exist");
             assert_eq!(kernel.header, header);
-            assert_eq!(header.height, height.into());
+            assert_eq!(header.height, height);
 
             let body = rpc_server
                 .get_block_body(selector)

@@ -11,6 +11,7 @@ use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdd
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
+use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RestoreMembershipProofError {
@@ -21,6 +22,24 @@ pub enum RestoreMembershipProofError {
     ExceedsAllowed,
 }
 
+#[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
+pub enum SubmitTransactionError {
+    #[error("Invalid transaction")]
+    InvalidTransaction,
+
+    #[error("Coinbase transactions are not allowed")]
+    CoinbaseTransaction,
+
+    #[error("Transaction fee is negative")]
+    FeeNegative,
+
+    #[error("Transaction is future-dated")]
+    FutureDated,
+
+    #[error("Transaction not confirmable relative to the mutator set")]
+    NotConfirmable,
+}
+
 #[derive(Debug, Clone, Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RpcError {
     #[error("JSON-RPC server error: {0}")]
@@ -28,6 +47,9 @@ pub enum RpcError {
 
     #[error("Failed to restore membership proof: {0}")]
     RestoreMembershipProof(RestoreMembershipProofError),
+
+    #[error("Failed to submit transaction: {0}")]
+    SubmitTransaction(SubmitTransactionError),
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -253,4 +275,16 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: RestoreMembershipProofRequest,
     ) -> RpcResult<RestoreMembershipProofResponse>;
+
+    async fn submit_transaction(
+        &self,
+        transaction: RpcTransaction,
+    ) -> RpcResult<SubmitTransactionResponse> {
+        self.submit_transaction_call(SubmitTransactionRequest { transaction })
+            .await
+    }
+    async fn submit_transaction_call(
+        &self,
+        request: SubmitTransactionRequest,
+    ) -> RpcResult<SubmitTransactionResponse>;
 }

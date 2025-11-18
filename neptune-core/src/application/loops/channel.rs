@@ -236,6 +236,9 @@ pub enum RPCServerToMain {
     PauseMiner,
     RestartMiner,
     SetTipToStoredBlock(Digest),
+
+    // Used by JSON-RPC
+    SubmitTx(Box<Transaction>),
 }
 
 pub trait Cancelable: Send + Sync {

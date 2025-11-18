@@ -101,6 +101,9 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Wallet)]
     RestoreMembershipProof,
+
+    #[namespace(Namespace::Wallet)]
+    SubmitTransaction,
 }
 
 #[cfg(test)]
