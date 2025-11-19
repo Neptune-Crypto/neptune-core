@@ -111,7 +111,7 @@ pub struct TipAnnouncementsRequest {}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TipAnnouncementsResponse {
-    pub announcements: Vec<RpcBFieldElements>,
+    pub announcements: Vec<RpcAnnouncement>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
@@ -219,7 +219,7 @@ pub struct GetBlockAnnouncementsRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetBlockAnnouncementsResponse {
-    pub announcements: Option<Vec<RpcBFieldElements>>,
+    pub announcements: Option<Vec<RpcAnnouncement>>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]

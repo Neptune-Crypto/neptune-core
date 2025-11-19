@@ -4,21 +4,38 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
 use crate::application::json_rpc::core::model::block::body::RpcMutatorSetAccumulator;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcChunkDictionary;
 use crate::util_types::mutator_set::archival_mutator_set::IndexedAoclAuthPath;
 use crate::util_types::mutator_set::archival_mutator_set::MsMembershipProofPrivacyPreserving;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct RpcIndexedAoclAuthPaths(pub BTreeMap<u64, Vec<Digest>>);
+pub struct RpcMmrMembershipProof(Vec<Digest>);
+
+impl From<MmrMembershipProof> for RpcMmrMembershipProof {
+    fn from(value: MmrMembershipProof) -> Self {
+        Self(value.authentication_path)
+    }
+}
+
+impl From<RpcMmrMembershipProof> for MmrMembershipProof {
+    fn from(value: RpcMmrMembershipProof) -> Self {
+        MmrMembershipProof::new(value.0)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct RpcIndexedAoclAuthPaths(pub BTreeMap<u64, RpcMmrMembershipProof>);
 
 impl From<Vec<IndexedAoclAuthPath>> for RpcIndexedAoclAuthPaths {
     fn from(value: Vec<IndexedAoclAuthPath>) -> Self {
-        RpcIndexedAoclAuthPaths(
+        Self(
             value
                 .into_iter()
-                .map(|indexed| (indexed.leaf_index, indexed.auth_path.authentication_path)) // TODO: RpcMmrMembershipProof
+                .map(|indexed| (indexed.leaf_index, indexed.auth_path.into()))
                 .collect(),
         )
     }
@@ -26,14 +43,36 @@ impl From<Vec<IndexedAoclAuthPath>> for RpcIndexedAoclAuthPaths {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MsMembershipProof {
+pub struct RpcMsMembershipProofPrivacyPreserving {
     pub aocl_auth_paths: RpcIndexedAoclAuthPaths,
     pub target_chunks: RpcChunkDictionary,
 }
 
-impl From<MsMembershipProofPrivacyPreserving> for MsMembershipProof {
+impl RpcMsMembershipProofPrivacyPreserving {
+    /// Build the required membership proof by supplying the correct AOCL leaf
+    /// index to extract the right MMR authentication path and the missing
+    /// cryptographic data.
+    pub fn extract_ms_membership_proof(
+        self,
+        aocl_leaf_index: u64,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
+    ) -> Option<MsMembershipProof> {
+        let aocl_mmr = self.aocl_auth_paths.0.get(&aocl_leaf_index).cloned()?;
+
+        Some(MsMembershipProof {
+            sender_randomness,
+            receiver_preimage,
+            auth_path_aocl: aocl_mmr.into(),
+            aocl_leaf_index,
+            target_chunks: self.target_chunks.into(),
+        })
+    }
+}
+
+impl From<MsMembershipProofPrivacyPreserving> for RpcMsMembershipProofPrivacyPreserving {
     fn from(value: MsMembershipProofPrivacyPreserving) -> Self {
-        MsMembershipProof {
+        Self {
             aocl_auth_paths: value.aocl_auth_paths.into(),
             target_chunks: value.target_chunks.into(),
         }
@@ -46,5 +85,5 @@ pub struct RpcMsMembershipSnapshot {
     pub synced_height: BFieldElement,
     pub synced_hash: Digest,
     pub synced_mutator_set: RpcMutatorSetAccumulator,
-    pub membership_proofs: Vec<MsMembershipProof>,
+    pub membership_proofs: Vec<RpcMsMembershipProofPrivacyPreserving>,
 }

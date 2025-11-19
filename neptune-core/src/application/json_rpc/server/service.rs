@@ -105,7 +105,7 @@ impl RpcApi for RpcServer {
                 .transaction_kernel()
                 .announcements
                 .iter()
-                .map(|a| a.message.clone().into())
+                .map(|a| a.clone().into())
                 .collect(),
         })
     }
@@ -284,7 +284,7 @@ impl RpcApi for RpcServer {
                         .transaction_kernel()
                         .announcements
                         .iter()
-                        .map(|a| a.message.clone().into())
+                        .map(|a| a.clone().into())
                         .collect::<Vec<_>>()
                 }),
             None => None,
@@ -459,19 +459,20 @@ impl RpcApi for RpcServer {
             .light_state()
             .mutator_set_accumulator_after()
             .expect("Tip block must have mutator set");
-
         if !transaction.is_confirmable_relative_to(&msa) {
             return Err(RpcError::SubmitTransaction(
                 SubmitTransactionError::NotConfirmable,
             ));
         }
 
-        let _ = self
+        let response = self
             .to_main_tx
             .send(RPCServerToMain::SubmitTx(Box::new(transaction)))
             .await;
 
-        Ok(SubmitTransactionResponse { success: true })
+        Ok(SubmitTransactionResponse {
+            success: response.is_ok(),
+        })
     }
 }
 
@@ -482,15 +483,24 @@ pub mod tests {
 
     use macro_rules_attr::apply;
     use tasm_lib::prelude::Digest;
+    use tasm_lib::prelude::Tip5;
 
+    use crate::api::export::Announcement;
+    use crate::api::export::KeyType;
+    use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::Network;
+    use crate::api::export::OutputFormat;
+    use crate::api::export::Timestamp;
+    use crate::api::export::TxProvingCapability;
     use crate::application::config::cli_args;
     use crate::application::json_rpc::core::api::rpc::RpcApi;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::protocol::consensus::block::block_height::BlockHeight;
+    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
+    use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -753,5 +763,112 @@ pub mod tests {
                 "origin block mismatch for utxo {utxo_index}"
             );
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn off_node_wallets_behave_correctly() {
+        let mut rpc_server = test_rpc_server().await;
+
+        // Prepare a transaction to our wallet coming from devnet wallet.
+        let wallet = WalletEntropy::devnet_wallet();
+        let mut devnet_node =
+            mock_genesis_global_state(0, wallet, rpc_server.state.cli().clone()).await;
+
+        let rpc_address = rpc_server
+            .state
+            .api()
+            .wallet()
+            .next_receiving_address(KeyType::Generation)
+            .await
+            .unwrap();
+        let mock_amount = NativeCurrencyAmount::coins_from_str("1").unwrap();
+        let artifacts = devnet_node
+            .api_mut()
+            .tx_sender_mut()
+            .send(
+                vec![OutputFormat::AddressAndAmount(rpc_address, mock_amount)],
+                Default::default(),
+                mock_amount,
+                Timestamp::now(),
+            )
+            .await
+            .unwrap();
+
+        // Pass transaction into rpc_server network.
+        let devnet_mempool = &devnet_node.lock_guard().await.mempool;
+        let transaction = devnet_mempool.get(artifacts.transaction().txid()).unwrap();
+        let tip =
+            invalid_block_with_transaction(&Block::genesis(Network::Main), transaction.clone());
+        rpc_server.state.set_new_tip(tip.clone()).await.unwrap();
+
+        // Fetch genesis and tip and ensure announcement (on tip) matches after de/serialization.
+        let blocks = rpc_server
+            .get_blocks(BlockHeight::genesis(), BlockHeight::genesis().next())
+            .await
+            .unwrap()
+            .blocks;
+        assert_eq!(blocks.len(), 2);
+
+        let announcement: Announcement = blocks[1].kernel.body.transaction_kernel.announcements[0]
+            .clone()
+            .into();
+        let expected_announcement = artifacts.details().announcements()[0].clone();
+        assert_eq!(announcement, expected_announcement);
+
+        // Try restoring MSMP thru RPC and ensure it matches the one maintained by our wallet.
+        let msa = rpc_server
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .unwrap();
+        let wallet_status = rpc_server
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_wallet_status(tip.hash(), &msa)
+            .await;
+
+        let (utxo, msmp) = &wallet_status.synced_unspent[0];
+        let item = Tip5::hash(&utxo.utxo);
+
+        let msmp_snapshot = rpc_server
+            .restore_membership_proof(vec![msmp.compute_indices(item)])
+            .await
+            .expect("restore to succeed")
+            .snapshot;
+        let extracted_msmp = msmp_snapshot.membership_proofs[0]
+            .clone()
+            .extract_ms_membership_proof(
+                utxo.aocl_leaf_index,
+                msmp.sender_randomness,
+                msmp.receiver_preimage,
+            )
+            .unwrap();
+        assert_eq!(msmp, &extracted_msmp);
+
+        // Try submitting a valid transaction (ProofCollection) by RPC.
+        let tx_creation_config = TxCreationConfig::default()
+            .with_prover_capability(TxProvingCapability::ProofCollection);
+        let test_artifacts = rpc_server
+            .state
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
+                Default::default(),
+                mock_amount,
+                Timestamp::now(),
+                tx_creation_config,
+                ConsensusRuleSet::infer_from(Network::Main, tip.header().height),
+            )
+            .await
+            .unwrap();
+        let rpc_transaction = test_artifacts.transaction().clone().into();
+        let submit_tx_response = rpc_server.submit_transaction(rpc_transaction).await;
+
+        assert!(submit_tx_response.is_ok());
     }
 }

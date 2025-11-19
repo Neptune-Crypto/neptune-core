@@ -3,13 +3,13 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
-use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
 use crate::api::export::AdditionRecord;
 use crate::api::export::Announcement;
 use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
+use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMmrMembershipProof;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -20,7 +20,7 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 pub type RpcAbsoluteIndexSet = AbsoluteIndexSet;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct RpcChunkDictionary(pub BTreeMap<u64, (Vec<Digest>, Vec<u32>)>);
+pub struct RpcChunkDictionary(pub BTreeMap<u64, (RpcMmrMembershipProof, Vec<u32>)>);
 
 impl From<ChunkDictionary> for RpcChunkDictionary {
     fn from(value: ChunkDictionary) -> Self {
@@ -28,9 +28,7 @@ impl From<ChunkDictionary> for RpcChunkDictionary {
             value
                 .dictionary
                 .into_iter()
-                .map(|(index, (proof, chunk))| {
-                    (index, (proof.authentication_path, chunk.relative_indices))
-                })
+                .map(|(index, (proof, chunk))| (index, (proof.into(), chunk.relative_indices)))
                 .collect(),
         )
     }
@@ -44,10 +42,7 @@ impl From<RpcChunkDictionary> for ChunkDictionary {
             .map(|(index, (authentication_path, relative_indices))| {
                 (
                     index,
-                    (
-                        MmrMembershipProof::new(authentication_path),
-                        Chunk { relative_indices },
-                    ),
+                    (authentication_path.into(), Chunk { relative_indices }),
                 )
             })
             .collect();
@@ -98,12 +93,29 @@ impl From<RpcAdditionRecord> for AdditionRecord {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RpcAnnouncement(RpcBFieldElements);
+
+impl From<Announcement> for RpcAnnouncement {
+    fn from(announcement: Announcement) -> Self {
+        Self(announcement.message.into())
+    }
+}
+
+impl From<RpcAnnouncement> for Announcement {
+    fn from(announcement: RpcAnnouncement) -> Self {
+        Announcement {
+            message: announcement.0.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcTransactionKernel {
     pub inputs: Vec<RpcRemovalRecord>,
     pub outputs: Vec<RpcAdditionRecord>,
-    pub announcements: Vec<RpcBFieldElements>,
+    pub announcements: Vec<RpcAnnouncement>,
     pub fee: RpcNativeCurrencyAmount,
     pub coinbase: Option<RpcNativeCurrencyAmount>,
     pub timestamp: Timestamp,
@@ -131,8 +143,9 @@ impl From<&TransactionKernel> for RpcTransactionKernel {
             outputs: kernel.outputs.iter().copied().map(Into::into).collect(),
             announcements: kernel
                 .announcements
-                .iter()
-                .map(|a| a.message.clone().into())
+                .clone()
+                .into_iter()
+                .map(Into::into)
                 .collect(),
             fee: kernel.fee.into(),
             coinbase: kernel.coinbase.map(|c| c.into()),
@@ -154,13 +167,7 @@ impl From<RpcTransactionKernel> for TransactionKernelProxy {
         Self {
             inputs: kernel.inputs.into_iter().map(Into::into).collect(),
             outputs: kernel.outputs.into_iter().map(Into::into).collect(),
-            announcements: kernel
-                .announcements
-                .into_iter()
-                .map(|msg| Announcement {
-                    message: msg.into(),
-                })
-                .collect(),
+            announcements: kernel.announcements.into_iter().map(Into::into).collect(),
             fee: kernel.fee.into(),
             coinbase: kernel.coinbase.map(Into::into),
             timestamp: kernel.timestamp,
