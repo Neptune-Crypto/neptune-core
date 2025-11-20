@@ -369,7 +369,7 @@ mod tests {
         let high = 200;
         tip.set_header_height(high.into());
         let mut rapid_block_download =
-            RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
+            RapidBlockDownload::new((low - 1).into(), BlockHeight::from(high), false)
                 .await
                 .unwrap();
 
@@ -380,7 +380,11 @@ mod tests {
             received_heights.push(height);
             let mut block = rng.random::<Block>();
             block.set_header_height(BlockHeight::from(height));
-            let _ = rapid_block_download.receive_block(&block).await;
+            if let Err(e) = rapid_block_download.receive_block(&block).await {
+                panic!("Could not receive block {height}: {e}");
+            } else {
+                println!("received block {height} in good order.");
+            }
         }
 
         // get ith
@@ -388,7 +392,10 @@ mod tests {
             let index = BlockHeight::from(
                 received_heights[rng.random_range(0usize..received_heights.len())],
             );
-            assert!(rapid_block_download.get_received_block(index).await.is_ok());
+            match rapid_block_download.get_received_block(index).await {
+                Ok(_) => (),
+                Err(e) => panic!("Could not get block {index}! {e}"),
+            }
         }
 
         // fail to get jth
