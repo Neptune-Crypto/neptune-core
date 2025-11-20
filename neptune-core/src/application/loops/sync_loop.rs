@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -9,6 +10,7 @@ use rand::Rng;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
@@ -19,11 +21,13 @@ use crate::application::loops::sync_loop::channel::SuccessorsToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownload;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownloadError;
+use crate::application::loops::sync_loop::status::Status;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
 pub(crate) mod channel;
 pub(crate) mod rapid_block_download;
+pub mod status;
 pub(crate) mod synchronization_bit_mask;
 
 /// After this long without any response from anyone, the sync loop will
@@ -55,7 +59,7 @@ pub(crate) struct PeerSyncState {
 pub(crate) struct SyncLoop {
     tip_height: BlockHeight,
     download_state: RapidBlockDownload,
-    peers: HashMap<PeerHandle, PeerSyncState>,
+    peers: Arc<Mutex<HashMap<PeerHandle, PeerSyncState>>>,
     main_channel_sender: Sender<SyncToMain>,
     main_channel_receiver: Receiver<MainToSync>,
 }
@@ -77,7 +81,7 @@ impl SyncLoop {
             Self {
                 tip_height,
                 download_state,
-                peers: HashMap::new(),
+                peers: Arc::new(Mutex::new(HashMap::new())),
                 main_channel_sender: sync_to_main_sender,
                 main_channel_receiver: main_to_sync_receiver,
             },
@@ -164,7 +168,7 @@ impl SyncLoop {
                 Some(message_from_main) = self.main_channel_receiver.recv() => {
                     match message_from_main {
                         MainToSync::AddPeer(peer_handle) => {
-                            self.peers.insert(peer_handle, PeerSyncState::default());
+                            self.peers.lock().await.insert(peer_handle, PeerSyncState::default());
 
                             // Add new block request to queue, if we are still
                             // downloading.
@@ -173,11 +177,16 @@ impl SyncLoop {
                             }
                         }
                         MainToSync::RemovePeer(peer_handle) => {
-                            self.peers.remove(&peer_handle);
+                            self.peers.lock().await.remove(&peer_handle);
                             last_peer_disconnect_time = Some(SystemTime::now());
                         }
                         MainToSync::ReceiveBlock { peer_handle, block } => {
-                            tracing::info!("Sync loop: receiving block {} ...", block.header().height);
+                            tracing::info!(
+                                "Sync loop: receiving block {} out of [{}:{}) ...",
+                                block.header().height,
+                                self.download_state.coverage().lower_bound,
+                                self.download_state.coverage().upper_bound,
+                            );
                             // Store block and update download state.
                             if let Err(e) = self.download_state.receive_block(&block).await
                             {
@@ -187,7 +196,7 @@ impl SyncLoop {
                                 );
                                 continue;
                             }
-                            self.peers.entry(peer_handle).and_modify(|e|{e.num_blocks_contributed += 1;});
+                            self.peers.lock().await.entry(peer_handle).and_modify(|e|{e.num_blocks_contributed += 1;});
                             most_recent_receipt = Some(SystemTime::now());
 
                             // Update tip to available successors.
@@ -242,17 +251,42 @@ impl SyncLoop {
                         }
                         MainToSync::SyncCoverage{peer_handle, coverage } => {
                             // Record peer's status.
-                            let Some(peer) = self.peers.get_mut(&peer_handle) else {
-                                tracing::error!("Inconsistent peer dictionary in sync loop: peer {peer_handle} not present.");
-                                continue;
-                            };
-                            peer.coverage = Some(coverage);
+
+                            {
+                                let mut peers_lock_mut = self.peers.lock().await;
+                                let Some(peer) = peers_lock_mut.get_mut(&peer_handle) else {
+                                    tracing::error!("Inconsistent peer dictionary in sync loop: peer {peer_handle} not present.");
+                                    continue;
+                                };
+                                peer.coverage = Some(coverage);
+                            }
 
                             // If there are still blocks outstanding, add a
                             // block request to the queue.
                             if !self.download_state.is_complete() {
                                 pending_block_requests.push(peer_handle);
                             }
+                        }
+                        MainToSync::Status => {
+                            let distance = self.download_state.target().next().value() - self.download_state.original_tip_height().value();
+                            let num_blocks_processed = self.tip_height.value() - self.download_state.original_tip_height().value();
+
+                            // Calculating the proportion of blocks covered is
+                            // fast but not fast enough. So clone all the
+                            // necessary information and hand control off to
+                            // a new task that handles the computation and the
+                            // return message. This way, control returns to the
+                            // loop.
+                            let moved_coverage = self.download_state.coverage();
+                            let moved_main_channel_sender = self.main_channel_sender.clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                    let num_blocks_downloaded_but_not_processed = moved_coverage.pop_count();
+                                    let total_num_blocks_downloaded = num_blocks_processed + num_blocks_downloaded_but_not_processed;
+                                    let status = Status::new(distance).with_num_blocks_downloaded(total_num_blocks_downloaded);
+                                    if let Err(e) = moved_main_channel_sender.blocking_send(SyncToMain::Status(status)) {
+                                        tracing::warn!("Sync loop: failed to send Status({}) message to main loop: {e}.", status)
+                                    }
+                                }).await;
                         }
                     }
                 }
@@ -278,7 +312,8 @@ impl SyncLoop {
                     // If we have not been connected to peers long enough,
                     // terminate.
                     let now = SystemTime::now();
-                    if self.peers.is_empty() && last_peer_disconnect_time.and_then(|t| now.duration_since(t).ok()).is_some_and(|d| d > Duration::from_secs(10)) {
+                    let connected_to_peers = !self.peers.lock().await.is_empty();
+                    if !connected_to_peers && last_peer_disconnect_time.and_then(|t| now.duration_since(t).ok()).is_some_and(|d| d > Duration::from_secs(10)) {
                         tracing::warn!("Sync loop not connected to peers for too long; terminating.");
                         break;
                     }
@@ -303,12 +338,13 @@ impl SyncLoop {
 
                         // Check all peers for timeouts.
                         let mut timeouts = vec![];
-                        for (peer_handle, peer_state) in &self.peers {
+                        let peers_clone = self.peers.lock().await.clone();
+                        for (peer_handle, peer_state) in peers_clone {
                             if peer_state
                             .last_request
                             .and_then(|timestamp| now.duration_since(timestamp).ok())
                             .is_none_or(|duration| duration > PEER_RESPONSE_TIMEOUT) {
-                                timeouts.push(*peer_handle);
+                                timeouts.push(peer_handle);
                             }
                         }
 
@@ -321,8 +357,18 @@ impl SyncLoop {
                             }
                         }
 
-                        // Flush queue of pending block requests.
-                        self.request_random_blocks(&pending_block_requests).await;
+                        // Flush queue of pending block requests. But do this in
+                        // another task so control passes back to the loop.
+                        let moved_pending_block_requests = pending_block_requests.clone();
+                        let moved_coverage = self.download_state.coverage();
+                        let moved_peers = self.peers.clone();
+                        let moved_channel_to_main = self.main_channel_sender.clone();
+                        if let Err(e) = tokio::task::spawn( async move {
+                            Self::request_random_blocks(moved_coverage, moved_peers, moved_channel_to_main, moved_pending_block_requests).await;
+                        }).await {
+                            tracing::error!("Failed to request random blocks from peers: {e}.");
+                        }
+
                         pending_block_requests = vec![];
                     }
 
@@ -404,13 +450,18 @@ impl SyncLoop {
     }
 
     /// Request random (but missing) blocks from the given peer.
-    async fn request_random_blocks(&mut self, peer_handles: &[PeerHandle]) {
+    async fn request_random_blocks(
+        coverage: SynchronizationBitMask,
+        peers: Arc<Mutex<HashMap<PeerHandle, PeerSyncState>>>,
+        channel_to_sender: Sender<SyncToMain>,
+        peer_handles: Vec<PeerHandle>,
+    ) {
         if peer_handles.is_empty() {
             return;
         }
 
         // If we are finished already, abort.
-        if self.download_state.is_complete() {
+        if coverage.is_complete() {
             tracing::error!(
                 "Cannot request random block from peer because all blocks are in already."
             );
@@ -418,11 +469,10 @@ impl SyncLoop {
         }
 
         tracing::debug!("Sync loop: sampling missing block heights ...");
-        let moved_peers = self.peers.clone();
-        let own_coverage = self.download_state.coverage();
+        let moved_peers = peers.lock().await.clone();
         let moved_peer_handles = peer_handles.to_vec();
         let Ok(block_requests) = tokio::task::spawn_blocking(move || {
-            Self::sample_heights(moved_peers, own_coverage, moved_peer_handles)
+            Self::sample_heights(moved_peers, coverage, moved_peer_handles)
         })
         .await
         else {
@@ -443,19 +493,17 @@ impl SyncLoop {
         // Send a request to the peer for that block.
         // Use `try_send` here so that if the capacity is full, the message is
         // dropped and we can continue operations within this thread.
-        if let Err(e) = self
-            .main_channel_sender
-            .try_send(SyncToMain::RequestBlocks(block_requests))
-        {
+        if let Err(e) = channel_to_sender.try_send(SyncToMain::RequestBlocks(block_requests)) {
             tracing::warn!("Sync loop: could not send message to main loop; error: {e}");
             tracing::warn!("Relying on timeout mechanism to retry in a short while.");
         }
 
         // Record timestamp of last request.
         let now = SystemTime::now();
+        let mut peers_lock_mut = peers.lock().await;
         for peer_handle in peer_handles {
-            self.peers
-                .entry(*peer_handle)
+            peers_lock_mut
+                .entry(peer_handle)
                 .and_modify(|e| e.last_request = Some(now));
         }
     }
@@ -688,6 +736,9 @@ mod tests {
         }
 
         async fn run(&mut self) {
+            // Create an interval timer, triggering a tick event regularly.
+            let mut ticker = interval(Duration::from_millis(100));
+
             loop {
                 tokio::select! {
                     Some(message) = self.sync_to_main_receiver.recv() => {
@@ -758,6 +809,9 @@ mod tests {
                                     tokio::task::yield_now().await;
                                 }
                             }
+                            SyncToMain::Status(status) => {
+                                tracing::info!("Syncing is {status} complete.");
+                            }
                             SyncToMain::Error => {
                                 tracing::error!("Error code from sync loop.");
                                 break;
@@ -791,6 +845,12 @@ mod tests {
                             }
                         }
                         tracing::debug!("done relaying new block.");
+                    }
+
+                    _ = ticker.tick() => {
+                        if let Err(e) = self.main_to_sync_sender.try_send(MainToSync::Status) {
+                            tracing::error!("\n\n\nCould not send Status message to sync loop: {e}.");
+                        }
                     }
                 }
             }

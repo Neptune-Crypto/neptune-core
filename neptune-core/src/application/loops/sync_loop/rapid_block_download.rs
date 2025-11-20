@@ -6,6 +6,7 @@ use rand::RngCore;
 use tokio::fs;
 
 use crate::api::export::BlockHeight;
+use crate::application::loops::sync_loop::status::Status;
 use crate::application::loops::sync_loop::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
@@ -22,6 +23,7 @@ pub(crate) struct RapidBlockDownload {
     index_to_filename: HashMap<u64, PathBuf>,
 
     target_height: BlockHeight,
+    original_tip_height: BlockHeight,
 }
 
 impl RapidBlockDownload {
@@ -33,6 +35,11 @@ impl RapidBlockDownload {
     /// The target block height we are syncing to.
     pub(crate) fn target(&self) -> BlockHeight {
         self.target_height
+    }
+
+    // The local (unsynced) tip height when sync started.
+    pub(crate) fn original_tip_height(&self) -> BlockHeight {
+        self.original_tip_height
     }
 
     /// Set up a [`RapidBlockDownload`] state.
@@ -92,6 +99,7 @@ impl RapidBlockDownload {
             coverage,
             index_to_filename,
             target_height,
+            original_tip_height: highest_block_already_processed,
         })
     }
 
@@ -222,18 +230,20 @@ impl RapidBlockDownload {
         self.temp_directory.join(block.hash().to_hex())
     }
 
-    /// Store the block in the temp directory and mark it as received.
+    /// Store the block in the temp directory and mark it as received, if it
+    /// wasn't received already.
     pub(crate) async fn receive_block(
         &mut self,
         block: &Block,
     ) -> Result<(), RapidBlockDownloadError> {
-        let file_name = self.file_name(block);
-        self.store_block(block, &file_name).await?;
+        if !self.coverage.contains(block.header().height.value()) {
+            let file_name = self.file_name(block);
+            self.store_block(block, &file_name).await?;
 
-        self.index_to_filename
-            .insert(block.header().height.value(), file_name);
-
-        self.coverage.set(block.header().height.value());
+            self.index_to_filename
+                .insert(block.header().height.value(), file_name);
+            self.coverage.set(block.header().height.value());
+        }
 
         Ok(())
     }

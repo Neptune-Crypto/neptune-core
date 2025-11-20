@@ -327,6 +327,10 @@ impl SynchronizationBitMask {
     ///
     ///  - If the given index is greater than or equal to the upper bound.
     pub(crate) fn set(&mut self, index: u64) {
+        if index < self.lower_bound {
+            return;
+        }
+
         assert!(index < self.upper_bound);
         if self.lower_bound == self.upper_bound {
             return;
@@ -445,11 +449,30 @@ impl SynchronizationBitMask {
         self.lower_bound == self.upper_bound
     }
 
-    /// Calculate the proportion of ones to zeros, of bits from zero to the
-    /// upper bound (exclusive).
-    pub(crate) fn proportion(&self) -> f64 {
-        let num_ones = self.limbs.iter().map(|l| l.count_ones()).sum::<u32>();
-        ((self.lower_bound + u64::from(num_ones)) as f64) / (self.upper_bound as f64)
+    /// Count the number of ones between the lower and upper bounds.
+    pub(crate) fn pop_count(&self) -> u64 {
+        let mut pop_count = 0u64;
+        for (i, limb) in self.limbs.iter().copied().enumerate() {
+            if limb == 0 {
+                continue;
+            }
+
+            if i == 0 && !self.lower_bound.is_multiple_of(32) {
+                let mask = (1 << (self.lower_bound % 32)) - 1;
+                pop_count += u64::from((limb & (!mask)).count_ones());
+            } else if i == self.limbs.len() - 1 && !self.upper_bound.is_multiple_of(32) {
+                let mask = (1 << (self.upper_bound % 32)) - 1;
+                pop_count += u64::from((limb & mask).count_ones());
+            } else {
+                pop_count += u64::from(limb.count_ones());
+            }
+        }
+        pop_count
+    }
+
+    /// The difference between upper and lower bounds.
+    pub(crate) fn distance(&self) -> u64 {
+        self.upper_bound - self.lower_bound
     }
 }
 
@@ -1032,5 +1055,51 @@ pub mod test {
                 assert!(reconciliation.contains(index));
             }
         }
+    }
+
+    #[proptest]
+    fn popcount_agrees_with_manual_count_prop(
+        #[strategy(0_u64..(1<<16))] lower_bound: u64,
+        #[strategy(3u64..(1<<13))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
+        #[strategy(vec(#lower_bound..#upper_bound, u64::min(#_length, 10) as usize))]
+        set_indices: Vec<u64>,
+    ) {
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+        for index in &set_indices {
+            bit_mask.set(*index);
+        }
+
+        let manual_count = (bit_mask.lower_bound..bit_mask.upper_bound)
+            .map(|i| if bit_mask.contains(i) { 1 } else { 0 })
+            .sum::<u64>();
+        prop_assert_eq!(bit_mask.pop_count(), manual_count);
+    }
+
+    #[test]
+    fn popcount_agrees_with_manual_count_unit() {
+        let lower_bound = 30233;
+        let length = 1287;
+        let upper_bound = lower_bound + length;
+        let set_indices = [
+            30233, 30233, 30233, 31488, 30233, 30233, 30233, 30233, 30233, 30233,
+        ]
+        .to_vec();
+
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+        assert!(bit_mask.limbs.len() > 1);
+        for index in &set_indices {
+            bit_mask.set(*index);
+        }
+
+        let mut manual_count = 0;
+        for index in bit_mask.lower_bound..bit_mask.upper_bound {
+            if bit_mask.contains(index) {
+                println!("found set bit at index {index}");
+                manual_count += 1;
+            }
+        }
+
+        assert_eq!(bit_mask.pop_count(), manual_count);
     }
 }
