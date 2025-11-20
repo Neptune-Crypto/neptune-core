@@ -79,7 +79,7 @@ impl BlockHeight {
                 let hard_fork_block = match network {
                     Network::Testnet(_) => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
                     Network::Main => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
-                    _ => BlockHeight::from(1)
+                    _ => BlockHeight::from(1),
                 }
                 .value()
                     - 1;
@@ -225,9 +225,8 @@ mod tests {
         let network = Network::Main;
 
         let check = |block_per_generation: u64, block_height: BlockHeight| {
-            let calculated_halving_time = network
-                .target_block_interval(block_height)
-                * (block_per_generation as usize);
+            let calculated_halving_time =
+                network.target_block_interval(block_height) * (block_per_generation as usize);
             let calculated_halving_time = calculated_halving_time.to_millis();
             let three_years = Timestamp::years(3);
             let three_years = three_years.to_millis();
@@ -238,9 +237,15 @@ mod tests {
             three years = {three_years}ms\n calculated_halving_time = {calculated_halving_time}ms"
             );
         };
-        
-        check(BLOCKS_PER_GENERATION_BEFORE_BETA, BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET);
-        check(BLOCKS_PER_GENERATION_FROM_BETA, BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET);
+
+        check(
+            BLOCKS_PER_GENERATION_BEFORE_BETA,
+            BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET,
+        );
+        check(
+            BLOCKS_PER_GENERATION_FROM_BETA,
+            BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
+        );
     }
 
     #[test]

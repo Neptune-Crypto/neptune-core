@@ -1,14 +1,14 @@
 use std::fmt;
 use std::str::FromStr;
 
-use get_size2::GetSize;
-use serde::Deserialize;
-use serde::Serialize;
-use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use crate::api::export::BlockHeight;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use get_size2::GetSize;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 #[derive(
     Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, strum::EnumIs, GetSize,
@@ -123,18 +123,14 @@ impl Network {
     pub fn target_block_interval(&self, block_height: BlockHeight) -> Timestamp {
         let consensus_rule_set = ConsensusRuleSet::infer_from(*self, block_height);
         match consensus_rule_set {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
-                match *self {
-                    Self::RegTest => Timestamp::millis(100),
-                    Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(588000),
-                }
-            }
-            ConsensusRuleSet::HardforkBeta => {
-                match *self {
-                    Self::RegTest => Timestamp::millis(100),
-                    Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(900000),
-                }
-            }
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => match *self {
+                Self::RegTest => Timestamp::millis(100),
+                Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(588000),
+            },
+            ConsensusRuleSet::HardforkBeta => match *self {
+                Self::RegTest => Timestamp::millis(100),
+                Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(900000),
+            },
         }
     }
 

@@ -5,29 +5,6 @@ use std::fmt::Debug;
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::bail;
-use anyhow::Result;
-use itertools::Itertools;
-use num_traits::CheckedAdd;
-use num_traits::CheckedSub;
-use num_traits::Zero;
-use serde_derive::Deserialize;
-use serde_derive::Serialize;
-use tasm_lib::triton_vm::prelude::BFieldElement;
-use tasm_lib::triton_vm::prelude::Tip5;
-use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::prelude::Mmr;
-use tasm_lib::twenty_first::tip5::digest::Digest;
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::AsyncWriteExt;
-use tokio::io::BufReader;
-use tokio::io::BufWriter;
-use tracing::debug;
-use tracing::info;
-use tracing::trace;
-use tracing::warn;
-use crate::api::export::Network;
 use super::address::generation_address;
 use super::address::symmetric_key;
 use super::address::KeyType;
@@ -44,6 +21,7 @@ use super::wallet_entropy::WalletEntropy;
 use super::wallet_file::WalletFileContext;
 use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
+use crate::api::export::Network;
 use crate::application::config::cli_args::Args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
@@ -75,6 +53,28 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use anyhow::bail;
+use anyhow::Result;
+use itertools::Itertools;
+use num_traits::CheckedAdd;
+use num_traits::CheckedSub;
+use num_traits::Zero;
+use serde_derive::Deserialize;
+use serde_derive::Serialize;
+use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::triton_vm::prelude::Tip5;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::tip5::digest::Digest;
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::io::BufReader;
+use tokio::io::BufWriter;
+use tracing::debug;
+use tracing::info;
+use tracing::trace;
+use tracing::warn;
 
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
@@ -430,7 +430,7 @@ impl WalletState {
                     &MutatorSetAccumulator::default(),
                     genesis,
                     maintain_mps,
-                    configuration.network()
+                    configuration.network(),
                 )
                 .await?;
 
@@ -1236,7 +1236,11 @@ impl WalletState {
     ///
     /// Only announced UTXOs actually present in the transaction are returned
     /// here, it's not sufficient that they are announced.
-    async fn recover_by_scanning(&mut self, new_block: &Block, network: Network) -> Vec<IncomingUtxo> {
+    async fn recover_by_scanning(
+        &mut self,
+        new_block: &Block,
+        network: Network,
+    ) -> Vec<IncomingUtxo> {
         let Some(scan_mode_configuration) = &self.configuration.scan_mode else {
             return Vec::new();
         };
@@ -1705,7 +1709,7 @@ impl WalletState {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
         maintain_membership_proofs_in_wallet: bool,
-        network: Network
+        network: Network,
     ) -> Result<Vec<IncomingUtxoRecoveryData>> {
         /// Get potential duplicates, to avoid registering same UTXO twice.
         ///
@@ -2842,7 +2846,7 @@ pub(crate) mod tests {
                 &genesis_block.mutator_set_accumulator_after().unwrap(),
                 &block1,
                 true,
-                network
+                network,
             )
             .await
             .unwrap();
@@ -2866,7 +2870,7 @@ pub(crate) mod tests {
                     &genesis_block.mutator_set_accumulator_after().unwrap(),
                     &block1,
                     wallet_maintains_mp,
-                    network
+                    network,
                 )
                 .await
                 .unwrap();
@@ -2947,7 +2951,7 @@ pub(crate) mod tests {
                     &latest_block.mutator_set_accumulator_after().unwrap(),
                     &new_block,
                     maintain_mps,
-                    network
+                    network,
                 )
                 .await
                 .unwrap();
@@ -4465,7 +4469,7 @@ pub(crate) mod tests {
                         &genesis_block.mutator_set_accumulator_after().unwrap(),
                         &block_1,
                         maintain_mps,
-                        network
+                        network,
                     )
                     .await
                     .unwrap();
@@ -4783,7 +4787,7 @@ pub(crate) mod tests {
                     &previous_block.mutator_set_accumulator_after().unwrap(),
                     &new_block,
                     maintain_mps,
-                    network
+                    network,
                 )
                 .await
                 .unwrap();
@@ -4923,7 +4927,7 @@ pub(crate) mod tests {
                     &genesis_block.mutator_set_accumulator_after().unwrap(),
                     &new_block,
                     maintain_mps,
-                    network
+                    network,
                 )
                 .await
                 .unwrap();

@@ -217,7 +217,10 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
     // Build coinbase UTXO and associated data
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
-        None => previous_block.kernel.header.timestamp + network.target_block_interval(previous_block.header().height), // todo hduoc: check
+        None => {
+            previous_block.kernel.header.timestamp
+                + network.target_block_interval(previous_block.header().height)
+        } // todo hduoc: check
     };
 
     let coinbase_distribution = CoinbaseDistribution::solo(composer_key.to_address().into());
@@ -484,7 +487,10 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), tx, network);
 
     let body = primitive_witness.body().to_owned();
-    let header = primitive_witness.header(timestamp, network.target_block_interval(predecessor.header().height));
+    let header = primitive_witness.header(
+        timestamp,
+        network.target_block_interval(predecessor.header().height),
+    );
     let (appendix, proof) = {
         let block_proof_witness = BlockProofWitness::produce(primitive_witness);
         let appendix = block_proof_witness.appendix();

@@ -152,7 +152,10 @@ pub async fn next_block_incoming_utxos(
     let tx: BlockTransaction = tx.try_into().unwrap();
     let block_primitive_witness = BlockPrimitiveWitness::new(parent.to_owned(), tx, network);
     let body = block_primitive_witness.body().to_owned();
-    let header = block_primitive_witness.header(timestamp, network.target_block_interval(parent.header().height)); // todo hduoc: check
+    let header = block_primitive_witness.header(
+        timestamp,
+        network.target_block_interval(parent.header().height),
+    ); // todo hduoc: check
     let (appendix, proof) = {
         let block_proof_witness = BlockProofWitness::produce(block_primitive_witness);
         let appendix = block_proof_witness.appendix();

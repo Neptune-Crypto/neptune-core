@@ -36,14 +36,16 @@ pub enum ConsensusRuleSet {
     #[default]
     Reboot,
     HardforkAlpha,
-    HardforkBeta
+    HardforkBeta,
 }
 
 impl ConsensusRuleSet {
     /// Maximum block size in number of BFieldElements
     pub(crate) const fn max_block_size(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::HardforkBeta => {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::HardforkBeta => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -83,23 +85,23 @@ impl ConsensusRuleSet {
 
     pub(crate) fn max_num_inputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::HardforkBeta => {
-                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
-            }
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::HardforkBeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_outputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::HardforkBeta => {
-                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
-            }
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::HardforkBeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_announcements(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::HardforkBeta => {
-                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
-            }
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::HardforkBeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 }

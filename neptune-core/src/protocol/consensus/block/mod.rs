@@ -99,8 +99,10 @@ pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS: usize = 1 << 14;
 /// is time locked for this period.
 pub(crate) const MINING_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
 
-pub(crate) const INITIAL_BLOCK_SUBSIDY_BEFORE_BETA: NativeCurrencyAmount = NativeCurrencyAmount::coins(128);
-pub(crate) const INITIAL_BLOCK_SUBSIDY_FROM_BETA: NativeCurrencyAmount = NativeCurrencyAmount::coins(8);
+pub(crate) const INITIAL_BLOCK_SUBSIDY_BEFORE_BETA: NativeCurrencyAmount =
+    NativeCurrencyAmount::coins(128);
+pub(crate) const INITIAL_BLOCK_SUBSIDY_FROM_BETA: NativeCurrencyAmount =
+    NativeCurrencyAmount::coins(8);
 
 /// Blocks with timestamps too far into the future are invalid. Reject blocks
 /// whose timestamp exceeds now with this value or more.
@@ -273,7 +275,7 @@ impl Block {
                 transaction.proof.clone().into_single_proof(),
                 network
             )
-                .await,
+            .await,
             "Transaction proof must be valid to generate a block"
         );
 
@@ -289,7 +291,7 @@ impl Block {
             triton_vm_job_queue,
             proof_job_options,
         )
-            .await
+        .await
     }
 
     /// Compose a block.
@@ -309,7 +311,7 @@ impl Block {
             triton_vm_job_queue,
             proof_job_options,
         )
-            .await
+        .await
     }
 
     /// Returns the block Digest
@@ -398,8 +400,10 @@ impl Block {
     pub fn block_subsidy(block_height: BlockHeight, network: Network) -> NativeCurrencyAmount {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         let mut reward = match consensus_rule_set {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => INITIAL_BLOCK_SUBSIDY_BEFORE_BETA,
-            ConsensusRuleSet::HardforkBeta => INITIAL_BLOCK_SUBSIDY_FROM_BETA
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                INITIAL_BLOCK_SUBSIDY_BEFORE_BETA
+            }
+            ConsensusRuleSet::HardforkBeta => INITIAL_BLOCK_SUBSIDY_FROM_BETA,
         };
         let generation = block_height.get_generation(network);
 
@@ -469,7 +473,7 @@ impl Block {
             mutator_set_hash: MutatorSetAccumulator::default().hash(),
             merge_bit: false,
         }
-            .into_kernel();
+        .into_kernel();
 
         let body: BlockBody = BlockBody::new(
             genesis_txk,
@@ -667,7 +671,7 @@ impl Block {
             Self::original_premine_distribution(),
             Self::utxo_redemption_fund_and_claims(),
         ]
-            .concat()
+        .concat()
     }
 
     pub fn premine_utxos() -> Vec<Utxo> {
@@ -1098,7 +1102,10 @@ impl Block {
     ///
     /// May not be used in any consensus-related setting, as precision is lost
     /// because of the use of floats.
-    pub(crate) fn relative_guesser_reward(&self, network: Network) -> Result<f64, BlockValidationError> {
+    pub(crate) fn relative_guesser_reward(
+        &self,
+        network: Network,
+    ) -> Result<f64, BlockValidationError> {
         let guesser_reward = self.body().total_guesser_reward()?;
         let block_subsidy = Self::block_subsidy(self.header().height, network);
 
@@ -1244,8 +1251,8 @@ pub(crate) mod tests {
                 vm_job_queue(),
                 TritonVmProofJobOptions::default(),
             )
-                .await
-                .unwrap();
+            .await
+            .unwrap();
 
             (fake_genesis, fake_child)
         }
@@ -1351,7 +1358,10 @@ pub(crate) mod tests {
     #[test]
     fn halving_happens_when_expected() {
         let network = Network::Main;
-        assert_eq!(INITIAL_BLOCK_SUBSIDY_BEFORE_BETA, Block::block_subsidy(bfe!(2).into(), network));
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY_BEFORE_BETA,
+            Block::block_subsidy(bfe!(2).into(), network)
+        );
         assert_eq!(
             INITIAL_BLOCK_SUBSIDY_FROM_BETA,
             Block::block_subsidy(bfe!(96_688).into(), network)
@@ -1628,7 +1638,7 @@ pub(crate) mod tests {
                 sender_randomness_vec.pop().unwrap(),
                 network,
             )
-                .await;
+            .await;
             if i != 54 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());
@@ -1718,7 +1728,7 @@ pub(crate) mod tests {
                     ..Default::default()
                 },
             )
-                .await;
+            .await;
 
             let job_options = TritonVmProofJobOptions::default();
             let (transaction, _) = create_block_transaction_from(
@@ -1728,8 +1738,8 @@ pub(crate) mod tests {
                 job_options.clone(),
                 TxMergeOrigin::ExplicitList(vec![]),
             )
-                .await
-                .unwrap();
+            .await
+            .unwrap();
             let block1_proposal = Block::compose(
                 &genesis,
                 transaction,
@@ -1737,8 +1747,8 @@ pub(crate) mod tests {
                 vm_job_queue(),
                 job_options,
             )
-                .await
-                .unwrap();
+            .await
+            .unwrap();
             (genesis, plus_one_hour, network, block1_proposal)
         }
 
@@ -1813,7 +1823,7 @@ pub(crate) mod tests {
                 rng.random(),
                 network,
             )
-                .await;
+            .await;
 
             let alice_wallet = WalletEntropy::devnet_wallet();
             let mut alice = mock_genesis_global_state(
@@ -1825,7 +1835,7 @@ pub(crate) mod tests {
                     ..Default::default()
                 },
             )
-                .await;
+            .await;
             alice.set_new_tip(block1.clone()).await.unwrap();
             let alice_key = alice
                 .lock_guard()
@@ -1846,8 +1856,8 @@ pub(crate) mod tests {
                 plus_eight_months,
                 TritonVmProofJobOptions::default_with_network(network),
             )
-                .await
-                .unwrap();
+            .await
+            .unwrap();
             let block_height = block1.header().height;
             let consensus_rule_set_1 = ConsensusRuleSet::infer_from(network, block_height);
             let fee = NativeCurrencyAmount::coins(1);
@@ -1859,7 +1869,7 @@ pub(crate) mod tests {
                     alice_wallet.clone(),
                     cli_args::Args::default_with_network(network),
                 )
-                    .await;
+                .await;
                 alice.set_new_tip(block1.clone()).await.unwrap();
                 let outputs = vec![output_to_self.clone(); i];
                 let config2 = TxCreationConfig::default()
@@ -1886,8 +1896,8 @@ pub(crate) mod tests {
                     TritonVmProofJobOptions::default_with_network(network),
                     consensus_rule_set_1,
                 )
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
                 let block2_without_valid_pow = Block::compose(
                     &block1,
                     block2_tx,
@@ -1895,8 +1905,8 @@ pub(crate) mod tests {
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(network),
                 )
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
 
                 assert!(
                     block2_without_valid_pow
@@ -1915,8 +1925,8 @@ pub(crate) mod tests {
                     plus_nine_months,
                     TritonVmProofJobOptions::default_with_network(network),
                 )
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
 
                 let block_height2 = block2_without_valid_pow.header().height;
                 let consensus_rule_set_2 = ConsensusRuleSet::infer_from(network, block_height2);
@@ -1944,8 +1954,8 @@ pub(crate) mod tests {
                     TritonVmProofJobOptions::default_with_network(network),
                     consensus_rule_set_2,
                 )
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
                 assert!(
                     !block3_tx.kernel.inputs.len().is_zero(),
                     "block transaction 3 must have inputs"
@@ -1957,8 +1967,8 @@ pub(crate) mod tests {
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(network),
                 )
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
 
                 assert!(
                     block3_without_valid_pow
@@ -2140,7 +2150,7 @@ pub(crate) mod tests {
                 (0.4, guesser_address.into()),
                 network,
             )
-                .await;
+            .await;
             let ars = block1.guesser_fee_addition_records().unwrap();
             let ars_from_wallet = block1
                 .kernel
@@ -2153,7 +2163,7 @@ pub(crate) mod tests {
                         sender_randomness: block1.hash(),
                         receiver_digest: guesser_address.receiver_postimage(),
                     }
-                        .addition_record()
+                    .addition_record()
                 })
                 .collect_vec();
             assert_eq!(ars, ars_from_wallet);
@@ -2220,7 +2230,7 @@ pub(crate) mod tests {
                 alice_wallet,
                 cli_args::Args::default_with_network(network),
             )
-                .await;
+            .await;
 
             let output = TxOutput::offchain_native_currency(
                 NativeCurrencyAmount::coins(4),
@@ -2329,7 +2339,7 @@ pub(crate) mod tests {
             devnet_wallet,
             cli_args::Args::default_with_network(network),
         )
-            .await;
+        .await;
 
         let job_queue = TritonVmJobQueue::get_instance();
 
@@ -2355,8 +2365,8 @@ pub(crate) mod tests {
                 launch_date,
                 TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
             )
-                .await
-                .unwrap();
+            .await
+            .unwrap();
             let mut transaction = BlockOrRegularTransaction::from(transaction);
 
             let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
@@ -2384,7 +2394,7 @@ pub(crate) mod tests {
                     receiving_address,
                     true,
                 )]
-                    .into();
+                .into();
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key.into())
                     .with_prover_capability(TxProvingCapability::SingleProof)
@@ -2412,9 +2422,9 @@ pub(crate) mod tests {
                     TritonVmProofJobOptions::default_with_network(network),
                     consensus_rule_set,
                 )
-                    .await
-                    .unwrap()
-                    .into();
+                .await
+                .unwrap()
+                .into();
 
                 alice
                     .lock_guard_mut()
@@ -2433,8 +2443,8 @@ pub(crate) mod tests {
                 job_queue.clone(),
                 TritonVmProofJobOptions::default(),
             )
-                .await
-                .unwrap();
+            .await
+            .unwrap();
 
             let block_is_valid = block.validate(blocks.last().unwrap(), now, network).await;
             println!("block is valid? {:?}", block_is_valid.map(|_| "yes"));

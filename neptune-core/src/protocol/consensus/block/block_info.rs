@@ -1,6 +1,13 @@
 //! BlockInfo is a concise summary of a block intended for human
 //! consumption/reporting in block explorers, cli, dashboard, etc.
 
+use super::difficulty_control::Difficulty;
+use super::difficulty_control::ProofOfWork;
+use crate::api::export::Network;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use itertools::Itertools;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
@@ -8,13 +15,6 @@ use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
-use crate::api::export::Network;
-use super::difficulty_control::Difficulty;
-use super::difficulty_control::ProofOfWork;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 /// Provides summary information about a Block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

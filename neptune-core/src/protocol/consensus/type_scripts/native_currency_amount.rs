@@ -1028,9 +1028,15 @@ pub(crate) mod tests {
         assert_eq!(2, (one_coin + one_nau).ceil_num_whole_coins());
         assert_eq!(
             128,
-            (INITIAL_BLOCK_SUBSIDY_BEFORE_BETA.checked_sub(&one_nau).unwrap()).ceil_num_whole_coins()
+            (INITIAL_BLOCK_SUBSIDY_BEFORE_BETA
+                .checked_sub(&one_nau)
+                .unwrap())
+            .ceil_num_whole_coins()
         );
-        assert_eq!(128, INITIAL_BLOCK_SUBSIDY_BEFORE_BETA.ceil_num_whole_coins());
+        assert_eq!(
+            128,
+            INITIAL_BLOCK_SUBSIDY_BEFORE_BETA.ceil_num_whole_coins()
+        );
         assert_eq!(
             129,
             (INITIAL_BLOCK_SUBSIDY_BEFORE_BETA + one_nau).ceil_num_whole_coins()

@@ -1876,7 +1876,7 @@ impl GlobalState {
                 &parent_ms_accumulator.unwrap_or_default(),
                 &new_tip,
                 maintain_mps_in_wallet,
-                self.cli.network
+                self.cli.network,
             )
             .await?;
 

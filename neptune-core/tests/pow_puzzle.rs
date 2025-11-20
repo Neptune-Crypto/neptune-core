@@ -1,8 +1,5 @@
 mod common;
 
-use std::fs::File;
-use std::io::Write;
-use std::path::PathBuf;
 use common::genesis_node::GenesisNode;
 use common::logging;
 use neptune_cash::api::export::Network;
@@ -10,6 +7,9 @@ use neptune_cash::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuz
 use neptune_cash::protocol::consensus::block::block_header::BlockPow;
 use neptune_cash::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::common::fetch_files::test_helper_data_dir;
@@ -54,8 +54,8 @@ pub async fn can_find_valid_pow_solution() {
     let mut alice = GenesisNode::start_node(
         GenesisNode::default_args_with_network_and_devnet_wallet(network).await,
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
     let timestamp = Timestamp(BFieldElement::new(1861920000000u64));
     alice
         .gsl
