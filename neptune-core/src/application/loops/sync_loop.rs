@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 use crate::api::export::BlockHeight;
+use crate::application::loops::main_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::MainToSync;
 use crate::application::loops::sync_loop::channel::SuccessorsToSync;
@@ -57,33 +58,37 @@ pub(crate) struct PeerSyncState {
 /// Holds state for the synchronization event loop.
 #[derive(Debug)]
 pub(crate) struct SyncLoop {
-    tip_height: BlockHeight,
+    tip: Block,
     download_state: RapidBlockDownload,
     peers: Arc<Mutex<HashMap<PeerHandle, PeerSyncState>>>,
     main_channel_sender: Sender<SyncToMain>,
     main_channel_receiver: Receiver<MainToSync>,
+
+    block_validator: BlockValidator,
 }
 
 impl SyncLoop {
     pub(crate) async fn new(
-        tip_height: BlockHeight,
+        tip: Block,
         target_height: BlockHeight,
         resume_if_possible: bool,
+        block_validator: BlockValidator,
     ) -> Result<(Self, Sender<MainToSync>, Receiver<SyncToMain>), RapidBlockDownloadError> {
         const CHANNEL_CAPACITY: usize = 10;
         let download_state =
-            RapidBlockDownload::new(tip_height, target_height, resume_if_possible).await?;
+            RapidBlockDownload::new(tip.header().height, target_height, resume_if_possible).await?;
         let (main_to_sync_sender, main_to_sync_receiver) =
             mpsc::channel::<MainToSync>(CHANNEL_CAPACITY);
         let (sync_to_main_sender, sync_to_main_receiver) =
             mpsc::channel::<SyncToMain>(CHANNEL_CAPACITY);
         Ok((
             Self {
-                tip_height,
+                tip,
                 download_state,
                 peers: Arc::new(Mutex::new(HashMap::new())),
                 main_channel_sender: sync_to_main_sender,
                 main_channel_receiver: main_to_sync_receiver,
+                block_validator,
             },
             main_to_sync_sender,
             sync_to_main_receiver,
@@ -127,8 +132,8 @@ impl SyncLoop {
                 // event: successors subtask finished
                 Some(successor_task_result) = successors_receiver.recv() => {
                     match successor_task_result {
-                        SuccessorsToSync::Finished{ block_height: tip_height } => {
-                            self.tip_height = tip_height;
+                        SuccessorsToSync::Finished{ new_tip: new_tip } => {
+                            self.tip = new_tip;
 
                             // The successors subtask claims it is finished, but
                             // it can only support this claim with an outdated
@@ -137,13 +142,13 @@ impl SyncLoop {
                             // still in the channel but not read yet. So double-
                             // check the download state and channel, and start a
                             // new run of the subtask if necessary.
-                            if self.main_channel_receiver.is_empty() && self.download_state.is_complete() && self.download_state.target() == tip_height {
+                            if self.main_channel_receiver.is_empty() && self.download_state.is_complete() && self.download_state.target() == self.tip.header().height {
                                 finished_processing = true;
                                 break;
                             }
                         }
-                        SuccessorsToSync::Continue{ block_height: tip_height } => {
-                            self.tip_height = tip_height;
+                        SuccessorsToSync::Continue{ new_tip } => {
+                            self.tip = new_tip;
                         }
                         SuccessorsToSync::RapidBlockDownloadError => {
                             tracing::error!("Rapid block download error while sending tip-successors to main loop. Terminating sync loop.");
@@ -153,14 +158,17 @@ impl SyncLoop {
                             tracing::error!("Could not send tip-successor block to main loop. Terminating sync loop.");
                             break;
                         }
+                        SuccessorsToSync::BlockValidationError => {
+                            tracing::error!("Block validation error occurred during syncing. Possible cause: a reorg happened while syncing. Terminating sync loop.");
+                        }
                     }
 
-                    let moved_tip_height = self.tip_height;
+                    let moved_tip = self.tip.clone();
                     let moved_download_state = self.download_state.clone();
                     let moved_main_channel_sender = self.main_channel_sender.clone();
                     let moved_return_sender = successors_sender.clone();
                     maybe_successors_subtask = Some(tokio::spawn(async move {
-                        Self::process_successors_of_tip(moved_tip_height, moved_download_state, moved_main_channel_sender, moved_return_sender).await
+                        Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_sender, self.block_validator).await
                     }));
                 }
 
@@ -201,12 +209,12 @@ impl SyncLoop {
 
                             // Update tip to available successors.
                             if maybe_successors_subtask.is_none() {
-                                let moved_tip_height = self.tip_height;
+                                let moved_tip = self.tip.clone();
                                 let moved_download_state = self.download_state.clone();
                                 let moved_main_channel_sender = self.main_channel_sender.clone();
                                 let moved_return_channel_sender = successors_sender.clone();
                                 maybe_successors_subtask = Some(tokio::spawn(async move {
-                                    Self::process_successors_of_tip(moved_tip_height, moved_download_state, moved_main_channel_sender, moved_return_channel_sender).await
+                                    Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_channel_sender, self.block_validator).await
                                 }));
                             }
 
@@ -236,12 +244,13 @@ impl SyncLoop {
                             // we already synchronized to), process it directly,
                             // without going through the tip-successors subtask.
                             // Save valuable setup-time.
-                            if self.tip_height.next() == block.header().height {
-                                self.tip_height = block.header().height;
-                                if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block).await {
+                            if self.tip.header().height.next() == block.header().height {
+                                if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block.to_owned()).await {
                                     tracing::error!("Could not send tip-successor to main loop. Terminating sync loop.");
                                     break;
                                 }
+
+                                self.tip = *block;
 
                                 if self.main_channel_receiver.is_empty() {
                                     finished_processing = true;
@@ -269,7 +278,7 @@ impl SyncLoop {
                         }
                         MainToSync::Status => {
                             let distance = self.download_state.target().next().value() - self.download_state.original_tip_height().value();
-                            let num_blocks_processed = self.tip_height.value() - self.download_state.original_tip_height().value();
+                            let num_blocks_processed = self.tip.header().height.value() - self.download_state.original_tip_height().value();
 
                             // Calculating the proportion of blocks covered is
                             // fast but not fast enough. So clone all the
@@ -545,15 +554,19 @@ impl SyncLoop {
     /// This task must be asynchronous because it can take a while and we do not
     /// want it to halt iteration of the event loop.
     async fn process_successors_of_tip(
-        current_tip_height: BlockHeight,
+        current_tip: Block,
         download_state: RapidBlockDownload,
         channel_to_main: Sender<SyncToMain>,
         return_channel: Sender<SuccessorsToSync>,
+        block_validator: BlockValidator,
     ) {
-        let mut tip_height = current_tip_height;
-        while download_state.have_received(tip_height.next()) {
+        let mut tip = current_tip;
+        while download_state.have_received(tip.header().height.next()) {
             // get successor block
-            let Ok(successor) = download_state.get_received_block(tip_height.next()).await else {
+            let Ok(successor) = download_state
+                .get_received_block(tip.header().height.next())
+                .await
+            else {
                 tracing::error!(
                     "Sync loop: could not get block from temp directory even \
                     though the block was received. Terminating sync mode."
@@ -564,8 +577,16 @@ impl SyncLoop {
                 return;
             };
 
+            // validate
+            if !block_validator.verify(&successor, &tip).await {
+                let _ = return_channel
+                    .send(SuccessorsToSync::BlockValidationError)
+                    .await;
+                return;
+            }
+
             // send to main
-            if !Self::ensure_send_tip_successor(&channel_to_main, successor).await {
+            if !Self::ensure_send_tip_successor(&channel_to_main, successor.clone()).await {
                 tracing::error!(
                     "Sync loop: failed to send tip-successor block to main \
                     loop. Aborting sync loop."
@@ -575,30 +596,29 @@ impl SyncLoop {
             }
 
             // delete the block after the main loop successfully received it
-            if let Err(e) = download_state.delete_block(tip_height.next()).await {
+            if let Err(e) = download_state
+                .delete_block(tip.header().height.next())
+                .await
+            {
                 tracing::warn!(
                     "Sync loop: could not delete block from temp directory \
                     even though the block was received: {e}. Not critical."
                 );
             }
 
-            // update tip height
-            tip_height = tip_height.next();
+            // update tip
+            tip = successor;
         }
 
         // We processed everything we can. Are we finished?
         if download_state.is_complete() {
             let _ = return_channel
-                .send(SuccessorsToSync::Finished {
-                    block_height: tip_height,
-                })
+                .send(SuccessorsToSync::Finished { new_tip: tip })
                 .await;
         } else {
             tokio::time::sleep(Duration::from_millis(10)).await;
             let _ = return_channel
-                .send(SuccessorsToSync::Continue {
-                    block_height: tip_height,
-                })
+                .send(SuccessorsToSync::Continue { new_tip: tip })
                 .await;
         }
     }
@@ -989,17 +1009,21 @@ mod tests {
     async fn can_sync_from_one_good_peer() {
         let mut rng = rng();
         tracing::info!("starting test ...");
-        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let current_tip = rng.random::<Block>();
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height, false)
-                .await
-                .unwrap();
+            BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
+            current_tip.clone(),
+            sync_target_height,
+            false,
+            BlockValidator::Test,
+        )
+        .await
+        .unwrap();
         let mut main_loop = MockMainLoop::new(
             main_to_sync_sender,
             sync_to_main_receiver,
-            current_tip_height,
+            current_tip.header().height,
             sync_target_height,
         );
 
@@ -1019,17 +1043,21 @@ mod tests {
     async fn can_sync_from_many_good_peers() {
         let mut rng = rng();
         tracing::info!("starting test ...");
-        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let current_tip = rng.random::<Block>();
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height, false)
-                .await
-                .unwrap();
+            BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
+            current_tip.clone(),
+            sync_target_height,
+            false,
+            BlockValidator::Test,
+        )
+        .await
+        .unwrap();
         let mut main_loop = MockMainLoop::new(
             main_to_sync_sender,
             sync_to_main_receiver,
-            current_tip_height,
+            current_tip.header().height,
             sync_target_height,
         );
 
@@ -1053,17 +1081,22 @@ mod tests {
     async fn can_sync_from_one_flaky_peer() {
         let mut rng = rng();
         tracing::info!("starting test ...");
-        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let current_tip = rng.random::<Block>();
+
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height, false)
-                .await
-                .unwrap();
+            BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
+            current_tip.clone(),
+            sync_target_height,
+            false,
+            BlockValidator::Test,
+        )
+        .await
+        .unwrap();
         let mut main_loop = MockMainLoop::new(
             main_to_sync_sender,
             sync_to_main_receiver,
-            current_tip_height,
+            current_tip.header().height,
             sync_target_height,
         );
 
@@ -1084,17 +1117,21 @@ mod tests {
         let mut rng = rng();
         tracing::info!("starting test ...");
 
-        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let current_tip = rng.random::<Block>();
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..100));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height, false)
-                .await
-                .unwrap();
+            BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..100));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
+            current_tip.clone(),
+            sync_target_height,
+            false,
+            BlockValidator::Test,
+        )
+        .await
+        .unwrap();
         let mut main_loop = MockMainLoop::new(
             main_to_sync_sender,
             sync_to_main_receiver,
-            current_tip_height,
+            current_tip.header().height,
             sync_target_height,
         );
 
@@ -1120,24 +1157,28 @@ mod tests {
         let mut rng = rng();
         tracing::info!("starting test ...");
 
-        let mut current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let current_tip = rng.random::<Block>();
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..200));
+            BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
 
         // set up first attempt
-        let (sync_loop_a, main_to_sync_sender_a, sync_to_main_receiver_a) =
-            SyncLoop::new(current_tip_height, sync_target_height, false)
-                .await
-                .unwrap();
+        let (sync_loop_a, main_to_sync_sender_a, sync_to_main_receiver_a) = SyncLoop::new(
+            current_tip.clone(),
+            sync_target_height,
+            false,
+            BlockValidator::Test,
+        )
+        .await
+        .unwrap();
         let mut main_loop = MockMainLoop::new(
             main_to_sync_sender_a,
             sync_to_main_receiver_a,
-            current_tip_height,
+            current_tip.header().height,
             sync_target_height,
         );
 
         // keep track of tip height
-        let tip_tracker = Arc::new(Mutex::new(current_tip_height));
+        let tip_tracker = Arc::new(Mutex::new(current_tip.header().height));
         main_loop.set_tip_tracker(tip_tracker.clone());
 
         // run
@@ -1156,9 +1197,9 @@ mod tests {
         // start second attempt
         // Reuse tip height from previous attempt, with one block margin due to
         // race conditions.
-        current_tip_height = *tip_tracker.lock().await;
+        let current_tip_height = *tip_tracker.lock().await;
         let (sync_loop_b, main_to_sync_sender_b, sync_to_main_receiver_b) =
-            SyncLoop::new(current_tip_height, sync_target_height, true)
+            SyncLoop::new(current_tip, sync_target_height, true, BlockValidator::Test)
                 .await
                 .unwrap();
         let mut main_loop_b = MockMainLoop::new(
@@ -1218,17 +1259,21 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(rng().next_u64());
         tracing::info!("starting test ...");
 
-        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32()));
+        let current_tip = rng.random::<Block>();
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..100));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height, false)
-                .await
-                .unwrap();
+            BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..100));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
+            current_tip.clone(),
+            sync_target_height,
+            false,
+            BlockValidator::Test,
+        )
+        .await
+        .unwrap();
         let mut main_loop = MockMainLoop::new(
             main_to_sync_sender,
             sync_to_main_receiver,
-            current_tip_height,
+            current_tip.header().height,
             sync_target_height,
         );
 
@@ -1286,17 +1331,21 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(rng().next_u64());
         tracing::info!("starting test ...");
 
-        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32() >> 20));
+        let current_tip = rng.random::<Block>();
         let original_sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(0..100));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, original_sync_target_height, false)
-                .await
-                .unwrap();
+            BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..100));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
+            current_tip.clone(),
+            original_sync_target_height,
+            false,
+            BlockValidator::Test,
+        )
+        .await
+        .unwrap();
         let mut main_loop = MockMainLoop::new(
             main_to_sync_sender,
             sync_to_main_receiver,
-            current_tip_height,
+            current_tip.header().height,
             original_sync_target_height,
         );
 
@@ -1346,30 +1395,32 @@ mod tests {
         let mut rng = rng();
         tracing::info!("starting test ...");
 
-        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32() >> 12));
+        let current_tip = rng.random::<Block>();
         let sync_target_height =
-            BlockHeight::from(current_tip_height.value() + rng.random_range(20..100));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, sync_target_height, false)
-                .await
-                .unwrap();
+            BlockHeight::from(current_tip.header().height.value() + rng.random_range(20..100));
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
+            current_tip.clone(),
+            sync_target_height,
+            false,
+            BlockValidator::Test,
+        )
+        .await
+        .unwrap();
         let mut main_loop = MockMainLoop::new(
             main_to_sync_sender,
             sync_to_main_receiver,
-            current_tip_height,
+            current_tip.header().height,
             sync_target_height,
         );
 
         let mut cumulative_coverage = SynchronizationBitMask::new(
-            current_tip_height.value() + 1,
+            current_tip.header().height.value() + 1,
             sync_target_height.next().value(),
         );
         for _ in 0..5 {
+            let mut current_height = current_tip.header().height.value();
             let peer_coverage = tokio::task::spawn_blocking(move || {
-                SynchronizationBitMask::random(
-                    current_tip_height.value(),
-                    sync_target_height.next().value(),
-                )
+                SynchronizationBitMask::random(current_height, sync_target_height.next().value())
             })
             .await
             .unwrap();
@@ -1404,7 +1455,10 @@ mod tests {
             if (peer_set.is_empty() || rng.random_bool(0.5_f64)) && peer_set.len() < 5 {
                 let height = *target_height.try_lock().unwrap();
                 let bit_mask = tokio::task::spawn_blocking(move || {
-                    SynchronizationBitMask::random(0, height.value())
+                    SynchronizationBitMask::random(
+                        height.value().saturating_sub(2000),
+                        height.value(),
+                    )
                 })
                 .await
                 .unwrap();
@@ -1450,16 +1504,22 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(rng().next_u64());
         tracing::info!("starting test ...");
 
-        let current_tip_height = BlockHeight::from(u64::from(rng.next_u32() >> 20));
-        let original_sync_target_height = BlockHeight::from(current_tip_height.value() + 100);
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) =
-            SyncLoop::new(current_tip_height, original_sync_target_height, false)
-                .await
-                .unwrap();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(u64::from(rng.next_u32() >> 20)));
+        let original_sync_target_height =
+            BlockHeight::from(current_tip.header().height.value() + 100);
+        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
+            current_tip.clone(),
+            original_sync_target_height,
+            false,
+            BlockValidator::Test,
+        )
+        .await
+        .unwrap();
         let mut main_loop = MockMainLoop::new(
             main_to_sync_sender,
             sync_to_main_receiver,
-            current_tip_height,
+            current_tip.header().height,
             original_sync_target_height,
         );
 
