@@ -768,6 +768,7 @@ pub mod tests {
     #[apply(shared_tokio_runtime)]
     async fn off_node_wallets_behave_correctly() {
         let mut rpc_server = test_rpc_server().await;
+        let network = rpc_server.state.cli().network;
 
         // Prepare a transaction to our wallet coming from devnet wallet.
         let mut devnet_node = mock_genesis_global_state(
@@ -785,22 +786,22 @@ pub mod tests {
             .await
             .unwrap();
         let mock_amount = NativeCurrencyAmount::coins_from_str("1").unwrap();
-        let artifacts = devnet_node
+        let devnet_artifacts = devnet_node
             .api_mut()
             .tx_sender_mut()
             .send(
                 vec![OutputFormat::AddressAndAmount(rpc_address, mock_amount)],
                 Default::default(),
                 mock_amount,
-                Timestamp::now(),
+                network.launch_date() + Timestamp::months(3),
             )
             .await
             .unwrap();
 
         // Pass transaction into rpc_server network.
         let block_1 = invalid_block_with_transaction(
-            &Block::genesis(Network::Main),
-            artifacts.transaction().clone(),
+            &Block::genesis(network),
+            devnet_artifacts.transaction().clone(),
         );
         rpc_server.state.set_new_tip(block_1.clone()).await.unwrap();
 
@@ -815,7 +816,7 @@ pub mod tests {
         let announcement: Announcement = blocks[1].kernel.body.transaction_kernel.announcements[0]
             .clone()
             .into();
-        let expected_announcement = artifacts.details().announcements()[0].clone();
+        let expected_announcement = devnet_artifacts.details().announcements()[0].clone();
         assert_eq!(announcement, expected_announcement);
 
         // Try restoring MSMP thru RPC and ensure it matches the one maintained by our wallet.
@@ -856,22 +857,25 @@ pub mod tests {
         // Try submitting a valid transaction (ProofCollection) by RPC.
         let tx_creation_config = TxCreationConfig::default()
             .with_prover_capability(TxProvingCapability::ProofCollection);
-        let test_artifacts = rpc_server
+        let artifacts = rpc_server
             .state
             .api()
             .tx_initiator_internal()
             .create_transaction(
                 Default::default(),
                 mock_amount,
-                Timestamp::now(),
+                network.launch_date() + Timestamp::months(3) + Timestamp::minutes(3),
                 tx_creation_config,
-                ConsensusRuleSet::infer_from(Network::Main, block_1.header().height),
+                ConsensusRuleSet::infer_from(network, block_1.header().height),
             )
             .await
             .unwrap();
-        let rpc_transaction = test_artifacts.transaction().clone().into();
-        let submit_tx_response = rpc_server.submit_transaction(rpc_transaction).await;
+        let rpc_transaction = artifacts.transaction().clone().into();
+        let submit_tx_response = rpc_server
+            .submit_transaction(rpc_transaction)
+            .await
+            .expect("submission to succeed");
 
-        assert!(submit_tx_response.is_ok());
+        assert!(submit_tx_response.success);
     }
 }
