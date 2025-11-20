@@ -770,9 +770,12 @@ pub mod tests {
         let mut rpc_server = test_rpc_server().await;
 
         // Prepare a transaction to our wallet coming from devnet wallet.
-        let wallet = WalletEntropy::devnet_wallet();
-        let mut devnet_node =
-            mock_genesis_global_state(0, wallet, rpc_server.state.cli().clone()).await;
+        let mut devnet_node = mock_genesis_global_state(
+            0,
+            WalletEntropy::devnet_wallet(),
+            rpc_server.state.cli().clone(),
+        )
+        .await;
 
         let rpc_address = rpc_server
             .state
@@ -795,11 +798,11 @@ pub mod tests {
             .unwrap();
 
         // Pass transaction into rpc_server network.
-        let devnet_mempool = &devnet_node.lock_guard().await.mempool;
-        let transaction = devnet_mempool.get(artifacts.transaction().txid()).unwrap();
-        let tip =
-            invalid_block_with_transaction(&Block::genesis(Network::Main), transaction.clone());
-        rpc_server.state.set_new_tip(tip.clone()).await.unwrap();
+        let block_1 = invalid_block_with_transaction(
+            &Block::genesis(Network::Main),
+            artifacts.transaction().clone(),
+        );
+        rpc_server.state.set_new_tip(block_1.clone()).await.unwrap();
 
         // Fetch genesis and tip and ensure announcement (on tip) matches after de/serialization.
         let blocks = rpc_server
@@ -829,7 +832,7 @@ pub mod tests {
             .lock_guard()
             .await
             .wallet_state
-            .get_wallet_status(tip.hash(), &msa)
+            .get_wallet_status(block_1.hash(), &msa)
             .await;
 
         let (utxo, msmp) = &wallet_status.synced_unspent[0];
@@ -862,7 +865,7 @@ pub mod tests {
                 mock_amount,
                 Timestamp::now(),
                 tx_creation_config,
-                ConsensusRuleSet::infer_from(Network::Main, tip.header().height),
+                ConsensusRuleSet::infer_from(Network::Main, block_1.header().height),
             )
             .await
             .unwrap();

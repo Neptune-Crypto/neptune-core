@@ -49,9 +49,8 @@ pub struct RpcMsMembershipProofPrivacyPreserving {
 }
 
 impl RpcMsMembershipProofPrivacyPreserving {
-    /// Build the required membership proof by supplying the correct AOCL leaf
-    /// index to extract the right MMR authentication path and the missing
-    /// cryptographic data.
+    /// Extracts the correct mutator‑set membership proof from the privacy‑preserving
+    /// recovery data by selecting the appropriate AOCL MMR authentication path.
     pub fn extract_ms_membership_proof(
         self,
         aocl_leaf_index: u64,
