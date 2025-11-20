@@ -4,6 +4,10 @@ use std::fmt::Display;
 use std::ops::Add;
 use std::ops::Sub;
 
+use crate::api::export::Network;
+use crate::protocol::consensus::consensus_rule_set::{
+    ConsensusRuleSet, BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET, BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
+};
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
@@ -43,7 +47,11 @@ pub struct BlockHeight(BFieldElement);
 
 // Assuming a block time of 588 seconds, and a halving every three years,
 // the number of blocks per halving cycle is 160815.
-pub const BLOCKS_PER_GENERATION: u64 = 160815;
+pub const BLOCKS_PER_GENERATION_BEFORE_BETA: u64 = 160815;
+
+// Assuming a block time of 900 seconds, and a halving every three years,
+// the number of blocks per halving cycle is 105066.
+pub const BLOCKS_PER_GENERATION_FROM_BETA: u64 = 105066;
 pub const NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT: u64 = 21310;
 
 impl BlockHeight {
@@ -57,11 +65,33 @@ impl BlockHeight {
         self.0.value()
     }
 
-    pub fn get_generation(&self) -> u64 {
-        self.0
-            .value()
-            .saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT)
-            / BLOCKS_PER_GENERATION
+    pub fn get_generation(&self, network: Network) -> u64 {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, *self);
+
+        match consensus_rule_set {
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                self.0
+                    .value()
+                    .saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT)
+                    / BLOCKS_PER_GENERATION_BEFORE_BETA
+            }
+            ConsensusRuleSet::HardforkBeta => {
+                let hard_fork_block = match network {
+                    Network::Testnet(_) => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
+                    Network::Main => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
+                    _ => BlockHeight::from(1),
+                }
+                .value()
+                    - 1;
+                let before_beta_gen =
+                    (hard_fork_block.saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT) as f64)
+                        / (BLOCKS_PER_GENERATION_BEFORE_BETA as f64);
+                let from_beta_gen = (self.0.value().saturating_sub(hard_fork_block) as f64)
+                    / (BLOCKS_PER_GENERATION_FROM_BETA as f64);
+
+                (before_beta_gen + from_beta_gen) as u64
+            }
+        }
     }
 
     pub fn next(&self) -> Self {
@@ -127,7 +157,7 @@ impl From<BlockHeight> for u64 {
 
 impl Ord for BlockHeight {
     fn cmp(&self, other: &Self) -> Ordering {
-        (self.0.value()).cmp(&(other.0.value()))
+        self.0.value().cmp(&(other.0.value()))
     }
 }
 
@@ -148,7 +178,7 @@ impl Sub for BlockHeight {
 }
 
 impl PartialOrd for BlockHeight {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -178,6 +208,7 @@ mod tests {
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::Network;
     use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
+    use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
@@ -192,29 +223,42 @@ mod tests {
     #[test]
     fn block_interval_times_generation_count_is_three_years() {
         let network = Network::Main;
-        let calculated_halving_time =
-            network.target_block_interval() * (BLOCKS_PER_GENERATION as usize);
-        let calculated_halving_time = calculated_halving_time.to_millis();
-        let three_years = Timestamp::years(3);
-        let three_years = three_years.to_millis();
-        assert!(
-            (calculated_halving_time as f64) * 1.01 > three_years as f64
-                && (calculated_halving_time as f64) * 0.99 < three_years as f64,
-            "target halving time must be within 1 % of 3 years. Got:\n\
+
+        let check = |block_per_generation: u64, block_height: BlockHeight| {
+            let calculated_halving_time =
+                network.target_block_interval(block_height) * (block_per_generation as usize);
+            let calculated_halving_time = calculated_halving_time.to_millis();
+            let three_years = Timestamp::years(3);
+            let three_years = three_years.to_millis();
+            assert!(
+                (calculated_halving_time as f64) * 1.01 > three_years as f64
+                    && (calculated_halving_time as f64) * 0.99 < three_years as f64,
+                "target halving time must be within 1 % of 3 years. Got:\n\
             three years = {three_years}ms\n calculated_halving_time = {calculated_halving_time}ms"
+            );
+        };
+
+        check(
+            BLOCKS_PER_GENERATION_BEFORE_BETA,
+            BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET,
+        );
+        check(
+            BLOCKS_PER_GENERATION_FROM_BETA,
+            BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
         );
     }
 
     #[test]
     fn asymptotic_limit_is_42_million() {
-        let generation_0_subsidy = Block::block_subsidy(BlockHeight::genesis().next());
+        let generation_0_subsidy =
+            Block::block_subsidy(BlockHeight::genesis().next(), Network::Main);
 
         // Genesis block does not contain block subsidy so it must be subtracted
         // from total number.
         let total_skipped_subsidies_generation_0 = generation_0_subsidy
             .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
         let mineable_amount = generation_0_subsidy
-            .scalar_mul(BLOCKS_PER_GENERATION as u32)
+            .scalar_mul(BLOCKS_PER_GENERATION_BEFORE_BETA as u32)
             .scalar_mul(2)
             .checked_sub(&generation_0_subsidy)
             .unwrap()

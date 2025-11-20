@@ -281,7 +281,7 @@ mod tests {
             b_new.header().timestamp,
             b_prev.header().timestamp,
             b_prev.header().difficulty,
-            network.target_block_interval(),
+            network.target_block_interval(b_new.header().height),
             b_prev.header().height,
         );
         prop_assert_eq!(
@@ -424,7 +424,7 @@ mod tests {
         let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
 
         let too_big_coinbase =
-            NativeCurrencyAmount::one_nau() + Block::block_subsidy(b_new.header().height);
+            NativeCurrencyAmount::one_nau() + Block::block_subsidy(b_new.header().height, network);
         let mut tx_kernel_big_coinbase =
             TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
         tx_kernel_big_coinbase.coinbase = Some(too_big_coinbase);

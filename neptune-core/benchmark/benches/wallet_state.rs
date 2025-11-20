@@ -167,6 +167,7 @@ mod maintain_membership_proofs {
                             &block1.mutator_set_accumulator_after().unwrap(),
                             &block2,
                             maintain_msmps_from_block_data,
+                            network,
                         )
                         .await
                         .unwrap();

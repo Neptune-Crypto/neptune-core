@@ -2249,7 +2249,7 @@ pub(super) mod tests {
                 .available_confirmed(in_seven_months)
         );
 
-        let block_subsidy = Block::block_subsidy(block_1.header().height);
+        let block_subsidy = Block::block_subsidy(block_1.header().height, network);
         let mut liquid_reward = block_subsidy;
         liquid_reward.div_two();
         assert_eq!(
