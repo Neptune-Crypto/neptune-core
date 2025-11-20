@@ -1,3 +1,4 @@
+pub(crate) mod block_validator;
 pub mod proof_upgrader;
 pub(crate) mod upgrade_incentive;
 

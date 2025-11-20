@@ -39,8 +39,9 @@ pub(crate) enum MainToSync {
 }
 
 pub(crate) enum SuccessorsToSync {
-    Finished { block_height: BlockHeight },
-    Continue { block_height: BlockHeight },
+    Finished { new_tip: Block },
+    Continue { new_tip: Block },
     RapidBlockDownloadError,
     SendError,
+    BlockValidationError,
 }
