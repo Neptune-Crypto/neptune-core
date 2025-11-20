@@ -1,4 +1,5 @@
 use crate::api::export::BlockHeight;
+use crate::application::loops::sync_loop::status::Status;
 use crate::application::loops::sync_loop::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
@@ -16,6 +17,7 @@ pub(crate) enum SyncToMain {
     Finished(BlockHeight),
     TipSuccessor(Box<Block>),
     RequestBlocks(Vec<BlockRequest>),
+    Status(Status),
     Error,
 }
 
@@ -33,6 +35,7 @@ pub(crate) enum MainToSync {
         peer_handle: PeerHandle,
         coverage: SynchronizationBitMask,
     },
+    Status,
 }
 
 pub(crate) enum SuccessorsToSync {
