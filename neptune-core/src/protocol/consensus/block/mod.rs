@@ -99,7 +99,8 @@ pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS: usize = 1 << 14;
 /// is time locked for this period.
 pub(crate) const MINING_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
 
-pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(128);
+pub(crate) const INITIAL_BLOCK_SUBSIDY_BEFORE_BETA: NativeCurrencyAmount = NativeCurrencyAmount::coins(128);
+pub(crate) const INITIAL_BLOCK_SUBSIDY_FROM_BETA: NativeCurrencyAmount = NativeCurrencyAmount::coins(8);
 
 /// Blocks with timestamps too far into the future are invalid. Reject blocks
 /// whose timestamp exceeds now with this value or more.
@@ -396,14 +397,10 @@ impl Block {
     /// a block with this height.
     pub fn block_subsidy(block_height: BlockHeight, network: Network) -> NativeCurrencyAmount {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
-        let mut reward: NativeCurrencyAmount = INITIAL_BLOCK_SUBSIDY;
-        match consensus_rule_set {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {}
-            ConsensusRuleSet::HardforkBeta => {
-                // From the beta hardfork onwards,the block time is down from 9.8 minutes to 5 minutes
-                reward.div_two();
-            }
-        }
+        let mut reward = match consensus_rule_set {
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => INITIAL_BLOCK_SUBSIDY_BEFORE_BETA,
+            ConsensusRuleSet::HardforkBeta => INITIAL_BLOCK_SUBSIDY_FROM_BETA
+        };
         let generation = block_height.get_generation(network);
 
         for _ in 0..generation {
@@ -411,8 +408,9 @@ impl Block {
 
             // Early return here is important bc of test-case generators with
             // arbitrary block heights.
-            if reward.is_zero() {
-                return NativeCurrencyAmount::zero();
+            // Tail emission
+            if reward.is_one() {
+                break;
             }
         }
 
@@ -614,7 +612,7 @@ impl Block {
     fn claims_fund() -> Vec<(ReceivingAddress, NativeCurrencyAmount)> {
         vec![
             // Allocation for claim's process
-            (ReceivingAddress::from_bech32m("nolgam1hgzpktveg37reh7wacwm38qd40huhanuujksgxh3um2vn2tak8z7jgjkv4hlvk6uunfk0pvuu836rhpjzf26pk5a65nn4xt954uu2qc9t6qjkflf752pd0pj0kek8jt88fqvmtday6vds4lpyfmfhpjmqnd0r2kpnrjlep5l2ejnj96yg4lc0658x2nep6mzmdsthfx9qqlf99wj2pg5dufzt5mwhwawv0w07r8wmv57te62mnfwh0s0vcfdlta4qsp9sxmphmuywcf5wch0f8hwtmtvfcdkc8wgcr4tezpachcg8srfhpd7t70gmuke66xw3lrxuyyzgc37h6yaa0909k6gsnvq7q0qx8tf5zvupqzvzw7uq0wa2xurw4t3g3kq80d5vkzy9magxucyh6lrzalm7gl7xmu44x02gf6utdqwf7cted5tnmmealhj3hk0x0fhggzy4knhl44z9ajsrcultdwsasd24570r2chd0k3v2jvun7t9tv7za7rgakazes2elmk3tu4acynm7s2a0mher53uyhxda69hstz2arm82fzk94l7tzy5yykmzt9ufr8e8r0jx50jcsczcwgndfr6mdrqymkwffy9tadsgcv4rpcemvflk9ru52v9sg9vapreh68w6j9l9hc52m7x3tlpsrv0hq3n7ymjvp2zqgqq5m9074ex3al8crfth090rrld3tew3ea4nmlkrkeej8xca78ty5haym6qw5ujzux53djwlg9nlfv7ms6g3990vsarj0qc625qzt95nutssrj3hfve049dpgn57snm8esd2swfr5qd2nxuzxq303q8fy5z5teqq7rps7ju003g9apa38y8gldjqcznr3ll9xl5635xzckuseje8v8z4na4xk8henklalpf33e99szjynf7qr2ke93tldr0jkaqr0mn49n7tyvj2dmqqz7gxd3pcchsu9qgqmzp39shnr5vfcwwmp2jl5m0tqlptgdsvgfngkmmad2y4un5nhzvsucgh7q97tssasj5lqc2ymy9nye0llpv2c6vdukc44z7mh5l2uhj80v6wl6w5jxqhve2qngj5k8f2xm7ljl67kqwl535tuns2k6h5rywhwzlexh68mkqwkcfupxnf2x86n0adqyssxke5zdr8e3zwqk9dutg5cddca2shzk6px4v8ece49yz5qucn9ht0txzwj6c0udtlys8szy8ufzvmpvgl4hmr9yv84pkrekq7jr8gcqsd3vrc3czkuu237uvctf8qsvzqv9t32xsqutachmsp2hmepzkrfm3mapqypvsx9u4ygs45chcywe8plt2q4uh68zwt2wd22hfrakfnnkstxquew7cvwwwk3umrm5ps47ufzceyfrnacgjhtfyag0a0h2qduj476mzrnqchzs40fd02tk2vrup38j832rp6cztsy69yx8cxz4plk43shgk2syh8jpvjvdxheaqmz3u6m04wp738zgwzn0xpndqefw3dcrxxk57hhwa3ea74s6mgrvdpwg8r09z5rjrzeslaup2r4yq760kqzt4lxjhgmk6lzexf5rq8d95pj0pyzpc0kad3uxz3uz8lqjzs6d6aykykeh927vxcj7q39p3ezz7zmekfn08g8jzpvx9em4hmhtg5nlcm6mc24amjl7acey7qxv9xc9ftrtqw8zlrr62qjpsd3lj6q6ul4hjt2k5znc09hyg062ylxjfq9nta49hywhc44ge2malzryh5vr5kz38zy0w2cac9s5k238pn3y76hfkm3ejaxr9j2rv0txyd0y7c7f764zthlmra7ggyf0rntjf4mx7gndpkzyu3xhnlrqdtzzrnxrgga2fq5793krjux357xgf0rkwr9ftx74efzpdeug49x3qnk8s7u3jy7rlttk75vh05yfmj3k949nx27xp4mgxffqvnrmvf9cutuawj9d9366fv0m87r209awlmceq5jvnm5uyekcfy95kusn5pe7lx9j8tlzxyt8dlsrzdjpm9jxuwl0yl92demrn7hyvp85x668wlxfzy6lfjvmrcyezhgytu4vms4dwmg2jnca4r45skamlkcvzc03jxews8800x0nedjdyw8gepp5lgc2tthrw946krja0x7t6mwe6f7xjpe9kcwwd27vc2gkv8ueqyyr8sv26x02xrzr4hvktrqghk3hypzrgz5d4l50scklj7r9fmps4rfrjs0ekvhfr33xcftmtlrndnpfjsxr66rdxzrwqfaf2gqt2atvrpvvtmp06ly97gvp56rjyrzfjgpgt007utxznjver0dk2quumrd8w45err03n3twlh30ly5d9efdrlkh9fuwnvldtey08rw6jfzpzelu0kvpcns055wtyc23rrzfeln97sg706x4pxyy8jkl27xj72df6ry74mfzl9cdx5dca4a4hfsceq3gndh2cnuta3s4mwlmq64eyjv00hh24gfflkp7x28wt0vqh7lw8pxzraj60fmsfmeeuf03apuawhvjpc5cchufg5e9c30yrzgwshxsxhcgq323jupfntrsw2lttsa80g0gtrtr3qfp7xl4xqwwwd4cehwz3efjy2x76jr8dz3qp84phkps7dzlg2nqexxk7ysq9fyams7p3epdrcjfyxt2cup3eptw6ml8jhwr7ppk7yl23uajjhyvhcl777nwaed6ykqqus02lhpdhx2q77vq4up90wrvrk8dtz9knj5zcwwk94q20aeawt5qgzjlzhps269lx94lvnggedvz3aqms6s46admxz0a7fy0q0jv4dnn6l5qaarftg6jf0y8encd86qnzwtj33h0eshphvrwz45f5y80zzp6mqe23dvssyhsrnm63n9ywrc7clcmsl20mnnv8tws4wj3plcmehhfntd3atqa8ad2a8d6rwzm5pn9y0v50375444vsnvps5d9355c3w093mky0umfrnxccahnnjxk0rmk5wng7z57p490kehs6509z66utalcpqj26hsxqn46v990wuhzs0vpvtxc9hwx5qxauwf9du3cdpzkrv883m6rpvag344me97lc9fnvtsn55795ws7hl7u0kjnjfczxxqczwsml4rplsvyc5wj5qxdc4ka9ed5t6z2wlluedpnmyll4y858fkfgwu2nksvxzmjzv2c35mnduka6358lyfcfc694esap240kxtts7gqcwgnpmzalugmkd6fxv9v933rkqffe670q76heqmszjuvdm4n967xvdewmk3f6j5jtj5npzj8ufs5sl8tg9zm7s44zqktekw9qxf2gkhtu5sv7hc956wq6xpgm3r258cdxpsvukv9r687afxq4yuqr9f0mjev5yrpujht5mnec9t6gn6jxajtceakv8qnnadsxp9vqvy6ddavcg5fzq0c23s5ud0", Network::Main).unwrap(), INITIAL_BLOCK_SUBSIDY.scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap())),
+            (ReceivingAddress::from_bech32m("nolgam1hgzpktveg37reh7wacwm38qd40huhanuujksgxh3um2vn2tak8z7jgjkv4hlvk6uunfk0pvuu836rhpjzf26pk5a65nn4xt954uu2qc9t6qjkflf752pd0pj0kek8jt88fqvmtday6vds4lpyfmfhpjmqnd0r2kpnrjlep5l2ejnj96yg4lc0658x2nep6mzmdsthfx9qqlf99wj2pg5dufzt5mwhwawv0w07r8wmv57te62mnfwh0s0vcfdlta4qsp9sxmphmuywcf5wch0f8hwtmtvfcdkc8wgcr4tezpachcg8srfhpd7t70gmuke66xw3lrxuyyzgc37h6yaa0909k6gsnvq7q0qx8tf5zvupqzvzw7uq0wa2xurw4t3g3kq80d5vkzy9magxucyh6lrzalm7gl7xmu44x02gf6utdqwf7cted5tnmmealhj3hk0x0fhggzy4knhl44z9ajsrcultdwsasd24570r2chd0k3v2jvun7t9tv7za7rgakazes2elmk3tu4acynm7s2a0mher53uyhxda69hstz2arm82fzk94l7tzy5yykmzt9ufr8e8r0jx50jcsczcwgndfr6mdrqymkwffy9tadsgcv4rpcemvflk9ru52v9sg9vapreh68w6j9l9hc52m7x3tlpsrv0hq3n7ymjvp2zqgqq5m9074ex3al8crfth090rrld3tew3ea4nmlkrkeej8xca78ty5haym6qw5ujzux53djwlg9nlfv7ms6g3990vsarj0qc625qzt95nutssrj3hfve049dpgn57snm8esd2swfr5qd2nxuzxq303q8fy5z5teqq7rps7ju003g9apa38y8gldjqcznr3ll9xl5635xzckuseje8v8z4na4xk8henklalpf33e99szjynf7qr2ke93tldr0jkaqr0mn49n7tyvj2dmqqz7gxd3pcchsu9qgqmzp39shnr5vfcwwmp2jl5m0tqlptgdsvgfngkmmad2y4un5nhzvsucgh7q97tssasj5lqc2ymy9nye0llpv2c6vdukc44z7mh5l2uhj80v6wl6w5jxqhve2qngj5k8f2xm7ljl67kqwl535tuns2k6h5rywhwzlexh68mkqwkcfupxnf2x86n0adqyssxke5zdr8e3zwqk9dutg5cddca2shzk6px4v8ece49yz5qucn9ht0txzwj6c0udtlys8szy8ufzvmpvgl4hmr9yv84pkrekq7jr8gcqsd3vrc3czkuu237uvctf8qsvzqv9t32xsqutachmsp2hmepzkrfm3mapqypvsx9u4ygs45chcywe8plt2q4uh68zwt2wd22hfrakfnnkstxquew7cvwwwk3umrm5ps47ufzceyfrnacgjhtfyag0a0h2qduj476mzrnqchzs40fd02tk2vrup38j832rp6cztsy69yx8cxz4plk43shgk2syh8jpvjvdxheaqmz3u6m04wp738zgwzn0xpndqefw3dcrxxk57hhwa3ea74s6mgrvdpwg8r09z5rjrzeslaup2r4yq760kqzt4lxjhgmk6lzexf5rq8d95pj0pyzpc0kad3uxz3uz8lqjzs6d6aykykeh927vxcj7q39p3ezz7zmekfn08g8jzpvx9em4hmhtg5nlcm6mc24amjl7acey7qxv9xc9ftrtqw8zlrr62qjpsd3lj6q6ul4hjt2k5znc09hyg062ylxjfq9nta49hywhc44ge2malzryh5vr5kz38zy0w2cac9s5k238pn3y76hfkm3ejaxr9j2rv0txyd0y7c7f764zthlmra7ggyf0rntjf4mx7gndpkzyu3xhnlrqdtzzrnxrgga2fq5793krjux357xgf0rkwr9ftx74efzpdeug49x3qnk8s7u3jy7rlttk75vh05yfmj3k949nx27xp4mgxffqvnrmvf9cutuawj9d9366fv0m87r209awlmceq5jvnm5uyekcfy95kusn5pe7lx9j8tlzxyt8dlsrzdjpm9jxuwl0yl92demrn7hyvp85x668wlxfzy6lfjvmrcyezhgytu4vms4dwmg2jnca4r45skamlkcvzc03jxews8800x0nedjdyw8gepp5lgc2tthrw946krja0x7t6mwe6f7xjpe9kcwwd27vc2gkv8ueqyyr8sv26x02xrzr4hvktrqghk3hypzrgz5d4l50scklj7r9fmps4rfrjs0ekvhfr33xcftmtlrndnpfjsxr66rdxzrwqfaf2gqt2atvrpvvtmp06ly97gvp56rjyrzfjgpgt007utxznjver0dk2quumrd8w45err03n3twlh30ly5d9efdrlkh9fuwnvldtey08rw6jfzpzelu0kvpcns055wtyc23rrzfeln97sg706x4pxyy8jkl27xj72df6ry74mfzl9cdx5dca4a4hfsceq3gndh2cnuta3s4mwlmq64eyjv00hh24gfflkp7x28wt0vqh7lw8pxzraj60fmsfmeeuf03apuawhvjpc5cchufg5e9c30yrzgwshxsxhcgq323jupfntrsw2lttsa80g0gtrtr3qfp7xl4xqwwwd4cehwz3efjy2x76jr8dz3qp84phkps7dzlg2nqexxk7ysq9fyams7p3epdrcjfyxt2cup3eptw6ml8jhwr7ppk7yl23uajjhyvhcl777nwaed6ykqqus02lhpdhx2q77vq4up90wrvrk8dtz9knj5zcwwk94q20aeawt5qgzjlzhps269lx94lvnggedvz3aqms6s46admxz0a7fy0q0jv4dnn6l5qaarftg6jf0y8encd86qnzwtj33h0eshphvrwz45f5y80zzp6mqe23dvssyhsrnm63n9ywrc7clcmsl20mnnv8tws4wj3plcmehhfntd3atqa8ad2a8d6rwzm5pn9y0v50375444vsnvps5d9355c3w093mky0umfrnxccahnnjxk0rmk5wng7z57p490kehs6509z66utalcpqj26hsxqn46v990wuhzs0vpvtxc9hwx5qxauwf9du3cdpzkrv883m6rpvag344me97lc9fnvtsn55795ws7hl7u0kjnjfczxxqczwsml4rplsvyc5wj5qxdc4ka9ed5t6z2wlluedpnmyll4y858fkfgwu2nksvxzmjzv2c35mnduka6358lyfcfc694esap240kxtts7gqcwgnpmzalugmkd6fxv9v933rkqffe670q76heqmszjuvdm4n967xvdewmk3f6j5jtj5npzj8ufs5sl8tg9zm7s44zqktekw9qxf2gkhtu5sv7hc956wq6xpgm3r258cdxpsvukv9r687afxq4yuqr9f0mjev5yrpujht5mnec9t6gn6jxajtceakv8qnnadsxp9vqvy6ddavcg5fzq0c23s5ud0", Network::Main).unwrap(), INITIAL_BLOCK_SUBSIDY_BEFORE_BETA.scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap())),
         ]
     }
 
@@ -1320,10 +1318,10 @@ pub(crate) mod tests {
     fn guess_nonce_happy_path() {
         let network = Network::Main;
         let genesis = Block::genesis(network);
-        let mut invalid_block = invalid_empty_block(&genesis, network);
-        let mast_auth_paths = invalid_block.pow_mast_paths();
 
         for consensus_rule_set in ConsensusRuleSet::iter() {
+            let mut invalid_block = invalid_empty_block(&genesis, network);
+            let mast_auth_paths = invalid_block.pow_mast_paths();
             let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);
             let target = Difficulty::from(2u32).target();
             let mut rng = rng();
@@ -1353,48 +1351,34 @@ pub(crate) mod tests {
     #[test]
     fn halving_happens_when_expected() {
         let network = Network::Main;
-        // 1st halving should happen at block height `BLOCKS_PER_GENERATION` =
-        // 160.815, minus `NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT` = 21310. So at
-        // block height 139505, with that block being the first to have half the
-        // block subsidy of the initial block subsidy. The first block to have a
-        // quarter of the initial block subsidy should be of height 300320 =
-        // `2 * BLOCKS_PER_GENERATION - NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT`.
-        assert_eq!(INITIAL_BLOCK_SUBSIDY, Block::block_subsidy(bfe!(2).into(), network));
+        assert_eq!(INITIAL_BLOCK_SUBSIDY_BEFORE_BETA, Block::block_subsidy(bfe!(2).into(), network));
         assert_eq!(
-            INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(100_000).into(), network)
+            INITIAL_BLOCK_SUBSIDY_FROM_BETA,
+            Block::block_subsidy(bfe!(96_688).into(), network)
         );
         assert_eq!(
-            INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(130_000).into(), network)
+            INITIAL_BLOCK_SUBSIDY_FROM_BETA,
+            Block::block_subsidy(bfe!(96_689).into(), network)
         );
         assert_eq!(
-            INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(139_503).into(), network)
+            INITIAL_BLOCK_SUBSIDY_FROM_BETA.half(),
+            Block::block_subsidy(bfe!(96_690).into(), network)
         );
         assert_eq!(
-            INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(139_504).into(), network)
+            INITIAL_BLOCK_SUBSIDY_FROM_BETA.half(),
+            Block::block_subsidy(bfe!(96_691).into(), network)
         );
         assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half(),
-            Block::block_subsidy(bfe!(139_505).into(), network)
+            INITIAL_BLOCK_SUBSIDY_FROM_BETA.half(),
+            Block::block_subsidy(bfe!(201_755).into(), network)
         );
         assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half(),
-            Block::block_subsidy(bfe!(139_506).into(), network)
+            INITIAL_BLOCK_SUBSIDY_FROM_BETA.half().half(),
+            Block::block_subsidy(bfe!(201_756).into(), network)
         );
         assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half(),
-            Block::block_subsidy(bfe!(300_319).into(), network)
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half().half(),
-            Block::block_subsidy(bfe!(300_320).into(), network)
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half().half(),
-            Block::block_subsidy(bfe!(300_321).into(), network)
+            INITIAL_BLOCK_SUBSIDY_FROM_BETA.half().half(),
+            Block::block_subsidy(bfe!(201_757).into(), network)
         );
     }
 
@@ -1688,7 +1672,7 @@ pub(crate) mod tests {
         // where 42000000 is the asymptotical limit of the token supply
         // and 0.01979733...% is the relative size of the premine
         let asymptotic_total_cap = NativeCurrencyAmount::coins(42_000_000);
-        let claims_pool = INITIAL_BLOCK_SUBSIDY
+        let claims_pool = INITIAL_BLOCK_SUBSIDY_BEFORE_BETA
             .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
         let premine_max_size = PREMINE_MAX_SIZE;
         let premine_plus_claims_pool = Block::premine_distribution()

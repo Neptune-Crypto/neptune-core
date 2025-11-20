@@ -49,9 +49,9 @@ pub struct BlockHeight(BFieldElement);
 // the number of blocks per halving cycle is 160815.
 pub const BLOCKS_PER_GENERATION_BEFORE_BETA: u64 = 160815;
 
-// Assuming a block time of 300 seconds, and a halving every three years,
-// the number of blocks per halving cycle is 315198.
-pub const BLOCKS_PER_GENERATION_FROM_BETA: u64 = 315198;
+// Assuming a block time of 900 seconds, and a halving every three years,
+// the number of blocks per halving cycle is 105066.
+pub const BLOCKS_PER_GENERATION_FROM_BETA: u64 = 105066;
 pub const NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT: u64 = 21310;
 
 impl BlockHeight {
@@ -223,18 +223,24 @@ mod tests {
     #[test]
     fn block_interval_times_generation_count_is_three_years() {
         let network = Network::Main;
-        let calculated_halving_time = network
-            .target_block_interval(BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET)
-            * (BLOCKS_PER_GENERATION_BEFORE_BETA as usize);
-        let calculated_halving_time = calculated_halving_time.to_millis();
-        let three_years = Timestamp::years(3);
-        let three_years = three_years.to_millis();
-        assert!(
-            (calculated_halving_time as f64) * 1.01 > three_years as f64
-                && (calculated_halving_time as f64) * 0.99 < three_years as f64,
-            "target halving time must be within 1 % of 3 years. Got:\n\
+
+        let check = |block_per_generation: u64, block_height: BlockHeight| {
+            let calculated_halving_time = network
+                .target_block_interval(block_height)
+                * (block_per_generation as usize);
+            let calculated_halving_time = calculated_halving_time.to_millis();
+            let three_years = Timestamp::years(3);
+            let three_years = three_years.to_millis();
+            assert!(
+                (calculated_halving_time as f64) * 1.01 > three_years as f64
+                    && (calculated_halving_time as f64) * 0.99 < three_years as f64,
+                "target halving time must be within 1 % of 3 years. Got:\n\
             three years = {three_years}ms\n calculated_halving_time = {calculated_halving_time}ms"
-        );
+            );
+        };
+        
+        check(BLOCKS_PER_GENERATION_BEFORE_BETA, BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET);
+        check(BLOCKS_PER_GENERATION_FROM_BETA, BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET);
     }
 
     #[test]

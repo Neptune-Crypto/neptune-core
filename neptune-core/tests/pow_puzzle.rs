@@ -3,7 +3,6 @@ mod common;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::Instant;
 use common::genesis_node::GenesisNode;
 use common::logging;
 use neptune_cash::api::export::Network;

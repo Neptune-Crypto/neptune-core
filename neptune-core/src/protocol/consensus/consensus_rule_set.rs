@@ -19,7 +19,7 @@ pub const BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET: BlockHeight =
 
 /// Height of 1st block that follows the beta consensus ruleset, for test net.
 pub const BLOCK_HEIGHT_HARDFORK_BETA_TESTNET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(2u64));
+    BlockHeight::new(BFieldElement::new(900u64));
 
 /// Enumerates all possible sets of consensus rules.
 ///
@@ -70,14 +70,13 @@ impl ConsensusRuleSet {
             Network::TestnetMock => ConsensusRuleSet::HardforkBeta,
             Network::RegTest => ConsensusRuleSet::HardforkBeta,
             Network::Testnet(_) => {
-                // if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET {
-                //     ConsensusRuleSet::Reboot
-                // } else if block_height < BLOCK_HEIGHT_HARDFORK_BETA_TESTNET {
-                //     ConsensusRuleSet::HardforkAlpha
-                // } else {
-                //     ConsensusRuleSet::HardforkBeta
-                // }
-                ConsensusRuleSet::HardforkBeta
+                if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET {
+                    ConsensusRuleSet::Reboot
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_BETA_TESTNET {
+                    ConsensusRuleSet::HardforkAlpha
+                } else {
+                    ConsensusRuleSet::HardforkBeta
+                }
             }
         }
     }

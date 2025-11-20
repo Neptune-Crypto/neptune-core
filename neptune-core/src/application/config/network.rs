@@ -119,7 +119,7 @@ impl Network {
     /// desired/average time between blocks.
     ///
     /// - for regtest: 100 milliseconds.
-    /// - for mainnet and others: 300000 milliseconds equals 5 minutes.
+    /// - for mainnet and others: 900000 milliseconds equals 15 minutes.
     pub fn target_block_interval(&self, block_height: BlockHeight) -> Timestamp {
         let consensus_rule_set = ConsensusRuleSet::infer_from(*self, block_height);
         match consensus_rule_set {
@@ -132,7 +132,7 @@ impl Network {
             ConsensusRuleSet::HardforkBeta => {
                 match *self {
                     Self::RegTest => Timestamp::millis(100),
-                    Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(300000),
+                    Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(900000),
                 }
             }
         }

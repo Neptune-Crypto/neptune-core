@@ -337,6 +337,10 @@ impl NativeCurrencyAmount {
     pub fn display_lossless(&self) -> String {
         self.display_n_decimals(34)
     }
+
+    pub fn is_one(&self) -> bool {
+        self.0 == 1
+    }
 }
 
 impl NativeCurrencyAmount {
@@ -616,7 +620,7 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+    use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY_BEFORE_BETA;
 
     impl NativeCurrencyAmount {
         pub(crate) fn from_raw_i128(int: i128) -> Self {
@@ -1024,12 +1028,12 @@ pub(crate) mod tests {
         assert_eq!(2, (one_coin + one_nau).ceil_num_whole_coins());
         assert_eq!(
             128,
-            (INITIAL_BLOCK_SUBSIDY.checked_sub(&one_nau).unwrap()).ceil_num_whole_coins()
+            (INITIAL_BLOCK_SUBSIDY_BEFORE_BETA.checked_sub(&one_nau).unwrap()).ceil_num_whole_coins()
         );
-        assert_eq!(128, INITIAL_BLOCK_SUBSIDY.ceil_num_whole_coins());
+        assert_eq!(128, INITIAL_BLOCK_SUBSIDY_BEFORE_BETA.ceil_num_whole_coins());
         assert_eq!(
             129,
-            (INITIAL_BLOCK_SUBSIDY + one_nau).ceil_num_whole_coins()
+            (INITIAL_BLOCK_SUBSIDY_BEFORE_BETA + one_nau).ceil_num_whole_coins()
         );
         assert_eq!(
             42_000_000,
