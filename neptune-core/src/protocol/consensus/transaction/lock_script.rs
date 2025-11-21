@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
@@ -108,18 +107,14 @@ impl<'a> Arbitrary<'a> for LockScript {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScriptAndWitness {
     pub program: Program,
-    nd_memory: Vec<(BFieldElement, BFieldElement)>,
     nd_tokens: Vec<BFieldElement>,
-    nd_digests: Vec<Digest>,
 }
 
 impl LockScriptAndWitness {
     pub fn new_with_nondeterminism(program: Program, witness: NonDeterminism) -> Self {
         Self {
             program,
-            nd_memory: witness.ram.into_iter().collect(),
             nd_tokens: witness.individual_tokens,
-            nd_digests: witness.digests,
         }
     }
 
@@ -142,25 +137,19 @@ impl LockScriptAndWitness {
     pub fn new(program: Program) -> Self {
         Self {
             program,
-            nd_memory: vec![],
             nd_tokens: vec![],
-            nd_digests: vec![],
         }
     }
 
     pub fn new_with_tokens(program: Program, tokens: Vec<BFieldElement>) -> Self {
         Self {
             program,
-            nd_memory: vec![],
             nd_tokens: tokens,
-            nd_digests: vec![],
         }
     }
 
     pub fn nondeterminism(&self) -> NonDeterminism {
         NonDeterminism::new(self.nd_tokens.clone())
-            .with_digests(self.nd_digests.clone())
-            .with_ram(self.nd_memory.iter().copied().collect::<HashMap<_, _>>())
     }
 
     /// Determine if the given UTXO can be unlocked with this
