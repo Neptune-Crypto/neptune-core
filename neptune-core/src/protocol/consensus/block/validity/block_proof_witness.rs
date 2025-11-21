@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -92,12 +93,21 @@ impl BlockProofWitness {
             }
         };
 
+        fn master_claim(block_body_mast_hash: Digest) -> Claim {
+            Claim::about_program(master).with_input(block_body_mast_hash.reversed().values())
+        }
+
+        let block_body = block_primitive_witness.body();
+        let master_claim = master_claim(block_body.mast_hash());
+        let master_proof = master.prove();
+
         // Add more claim/proof pairs here, when softforking.
-        let witness =
-            Self::new(block_primitive_witness.body().clone()).with_claim(tx_claim, tx_proof);
+        let witness = Self::new(block_body.clone())
+            .with_claim(tx_claim, tx_proof)
+            .with_claim(master_claim, master_proof);
 
         assert_eq!(
-            BlockAppendix::consensus_claims(block_primitive_witness.body(), consensus_rule_set),
+            BlockAppendix::consensus_claims(block_body, consensus_rule_set),
             witness.claims,
             "appendix witness must attest to expected claims",
         );
