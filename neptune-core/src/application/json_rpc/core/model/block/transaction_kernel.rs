@@ -158,13 +158,7 @@ impl From<&TransactionKernel> for RpcTransactionKernel {
 
 impl From<RpcTransactionKernel> for TransactionKernel {
     fn from(kernel: RpcTransactionKernel) -> Self {
-        TransactionKernelProxy::from(kernel).into_kernel()
-    }
-}
-
-impl From<RpcTransactionKernel> for TransactionKernelProxy {
-    fn from(kernel: RpcTransactionKernel) -> Self {
-        Self {
+        let kernel_proxy = TransactionKernelProxy {
             inputs: kernel.inputs.into_iter().map(Into::into).collect(),
             outputs: kernel.outputs.into_iter().map(Into::into).collect(),
             announcements: kernel.announcements.into_iter().map(Into::into).collect(),
@@ -173,6 +167,8 @@ impl From<RpcTransactionKernel> for TransactionKernelProxy {
             timestamp: kernel.timestamp,
             mutator_set_hash: kernel.mutator_set_hash,
             merge_bit: kernel.merge_bit,
-        }
+        };
+
+        kernel_proxy.into_kernel()
     }
 }

@@ -128,7 +128,9 @@ impl From<RpcTransaction> for Transaction {
 impl From<Transaction> for RpcTransaction {
     fn from(tx: Transaction) -> Self {
         RpcTransaction {
-            kernel: RpcTransactionKernel::from(&tx.kernel), // TODO: Two impls when possible, ref clones and other takes ownership...
+            // TODO: Two impls when possible, ref clones and other takes
+            // ownership...
+            kernel: RpcTransactionKernel::from(&tx.kernel),
             proof: tx.proof.into(),
         }
     }

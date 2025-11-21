@@ -511,12 +511,10 @@ pub mod tests {
     use crate::Block;
 
     pub async fn test_rpc_server() -> RpcServer {
-        let global_state_lock = mock_genesis_global_state(
-            2,
-            WalletEntropy::new_random(),
-            cli_args::Args::default_with_network(Network::Main),
-        )
-        .await;
+        let mut cli = cli_args::Args::default_with_network(Network::Main);
+        cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
+        let global_state_lock =
+            mock_genesis_global_state(2, WalletEntropy::new_random(), cli).await;
 
         RpcServer::new(global_state_lock, None)
     }
