@@ -3,6 +3,7 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
+use crate::api::export::BlockHeight;
 use crate::api::export::Timestamp;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::BlockPow;
@@ -44,11 +45,13 @@ impl From<GuesserReceiverData> for RpcGuesserReceiverData {
     }
 }
 
+pub type RpcBlockHeight = BlockHeight;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcBlockHeader {
     pub version: BFieldElement,
-    pub height: BFieldElement,
+    pub height: RpcBlockHeight,
     pub prev_block_digest: Digest,
     pub timestamp: Timestamp,
     pub pow: RpcBlockPow,
@@ -61,7 +64,7 @@ impl From<&BlockHeader> for RpcBlockHeader {
     fn from(header: &BlockHeader) -> Self {
         RpcBlockHeader {
             version: header.version,
-            height: header.height.into(),
+            height: header.height,
             prev_block_digest: header.prev_block_digest,
             timestamp: header.timestamp,
             pow: header.pow.into(),

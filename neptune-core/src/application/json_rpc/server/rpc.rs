@@ -1,22 +1,27 @@
 use std::collections::HashSet;
 
+use tokio::sync::mpsc;
 use tracing::warn;
 
 use crate::application::json_rpc::core::api::ops::Namespace;
+use crate::application::loops::channel::RPCServerToMain;
 use crate::state::GlobalStateLock;
 
 #[derive(Clone, Debug)]
 pub struct RpcServer {
     pub(crate) state: GlobalStateLock,
+    pub(crate) to_main_tx: mpsc::Sender<RPCServerToMain>,
     pub(crate) unrestricted: bool,
 }
 
 impl RpcServer {
     pub fn new(state: GlobalStateLock, unrestricted: Option<bool>) -> Self {
         let unrestricted = unrestricted.unwrap_or(state.cli().unsafe_rpc);
+        let to_main_tx = state.rpc_server_to_main_tx();
 
         Self {
             state,
+            to_main_tx,
             unrestricted,
         }
     }
