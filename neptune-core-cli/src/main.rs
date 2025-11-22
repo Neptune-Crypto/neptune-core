@@ -55,9 +55,13 @@ use crate::parser::hex_digest::HexDigest;
 
 const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Parser)]
 enum Command {
+    /// Display version information.
+    Version,
+
     /// Dump shell completions.
     Completions,
 
@@ -769,6 +773,10 @@ async fn main() -> Result<()> {
         Command::ListCoins => {
             let list = client.list_own_coins(ctx, token).await??;
             println!("{}", CoinWithPossibleTimeLock::report(&list));
+        }
+        Command::Version => {
+            // we have the version stored as a constant above.
+            println!("{VERSION}")
         }
         Command::Network => {
             // we already queries the network above.
