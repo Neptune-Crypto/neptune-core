@@ -1,0 +1,133 @@
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
+
+use crate::api::export::BlockHeight;
+use crate::application::loops::main_loop::block_validator::BlockValidator;
+use crate::application::loops::sync_loop::channel::MainToSync;
+use crate::application::loops::sync_loop::channel::SyncToMain;
+use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
+use crate::application::loops::sync_loop::PeerHandle;
+use crate::application::loops::sync_loop::SyncLoop;
+use crate::protocol::consensus::block::Block;
+
+/// Wraps a [`SyncLoop`] along with channels to an fro.
+///
+/// For use by the main loop. Defends against channel mis-use.
+#[derive(Debug)]
+pub(crate) struct SyncLoopHandle {
+    task_state: Option<SyncLoop>,
+    task_join_handle: Option<JoinHandle<()>>,
+    sender: Sender<MainToSync>,
+    receiver: Receiver<SyncToMain>,
+}
+
+impl SyncLoopHandle {
+    pub(crate) async fn new(
+        current_tip: Block,
+        target_height: BlockHeight,
+        block_validator: BlockValidator,
+    ) -> Self {
+        let (state, sender, receiver) =
+            SyncLoop::new(current_tip, target_height, false, block_validator)
+                .await
+                .unwrap();
+
+        Self {
+            task_state: Some(state),
+            task_join_handle: None,
+            sender,
+            receiver,
+        }
+    }
+
+    pub(crate) fn start(&mut self) {
+        if let Some(state) = self.task_state.take() {
+            self.task_join_handle = Some(state.start());
+        }
+    }
+
+    pub(crate) fn abort(&mut self) {
+        if let Some(join_handle) = self.task_join_handle.take() {
+            join_handle.abort();
+        }
+    }
+
+    pub(crate) fn send_block(&self, block: Box<Block>, peer: PeerHandle) {
+        if let Err(e) = self.sender.try_send(MainToSync::ReceiveBlock {
+            peer_handle: peer,
+            block,
+        }) {
+            tracing::warn!("Error relaying block to sync loop: {e}.");
+            tracing::debug!(
+                "Note: channel capacity is at {}/{}.",
+                self.sender.capacity(),
+                self.sender.max_capacity()
+            );
+        }
+    }
+
+    pub(crate) async fn send_new_target(&self, target: Box<Block>) {
+        if let Err(e) = self.sender.send(MainToSync::ExtendChain(target)).await {
+            tracing::error!("Failed to send new target block to sync loop: {e}.");
+        }
+    }
+
+    pub(crate) async fn send_add_peer(&self, peer: PeerHandle) {
+        if let Err(e) = self.sender.send(MainToSync::AddPeer(peer)).await {
+            tracing::error!(
+                "Error sending AddPeer message to sync loop: {e} -- did the sync loop terminate?"
+            );
+        }
+    }
+
+    pub(crate) async fn send_remove_peer(&self, peer: PeerHandle) {
+        if let Err(e) = self.sender.send(MainToSync::RemovePeer(peer)).await {
+            tracing::error!("Error sending RemovePeer message to sync loop: {e} -- did the sync loop terminate?");
+        }
+    }
+
+    pub(crate) fn send_sync_coverage(
+        &self,
+        peer_handle: PeerHandle,
+        coverage: SynchronizationBitMask,
+    ) {
+        if let Err(e) = self.sender.try_send(MainToSync::SyncCoverage {
+            peer_handle,
+            coverage,
+        }) {
+            tracing::warn!("Error relaying sync coverage to sync loop: {e}.");
+            tracing::debug!(
+                "Note: channel capacity is at {}/{}.",
+                self.sender.capacity(),
+                self.sender.max_capacity()
+            );
+        }
+    }
+
+    pub(crate) fn send_status_request(&self) {
+        if let Err(e) = self.sender.try_send(MainToSync::Status) {
+            tracing::warn!("Failed to send status request message to sync loop: {e}.");
+            tracing::debug!(
+                "Note: channel capacity is at {}/{}.",
+                self.sender.capacity(),
+                self.sender.max_capacity()
+            );
+        }
+    }
+
+    pub(crate) async fn recv(&mut self) -> Option<SyncToMain> {
+        self.receiver.recv().await
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    impl SyncLoopHandle {
+        pub(crate) fn take_join_handle(&mut self) -> Option<JoinHandle<()>> {
+            self.task_join_handle.take()
+        }
+    }
+}
