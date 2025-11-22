@@ -820,7 +820,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::SyncChallengeResponse(challenge_response) => {
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(45);
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(90);
 
                 log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallengeResponse");
                 info!(
