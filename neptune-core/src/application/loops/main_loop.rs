@@ -34,10 +34,7 @@ use tracing::trace;
 use tracing::warn;
 
 use crate::application::loops::channel::MainToMiner;
-use crate::application::loops::channel::MainToPeerTask;
-use crate::application::loops::channel::MainToPeerTaskBatchBlockRequest;
 use crate::application::loops::channel::MinerToMain;
-use crate::application::loops::channel::PeerTaskToMain;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::connect_to_peers::answer_peer;
 use crate::application::loops::connect_to_peers::call_peer;
@@ -45,6 +42,12 @@ use crate::application::loops::connect_to_peers::precheck_incoming_connection_is
 use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::loops::peer_loop::channel::MainToPeerTask;
+use crate::application::loops::peer_loop::channel::MainToPeerTaskBatchBlockRequest;
+use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::loops::sync_loop::channel::MainToSync;
+use crate::application::loops::sync_loop::handle::SyncLoopHandle;
+use crate::application::loops::sync_loop::SyncLoop;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
@@ -144,6 +147,11 @@ pub struct MainLoopHandler {
 
 /// The mutable part of the main loop function
 struct MutableMainLoopState {
+    /// A (handle on a) subordinate event loop responsible for rapidly
+    /// collecting blocks from peers and delivering them to the main loop in
+    /// order.
+    sync_loop: Option<SyncLoopHandle>,
+
     /// Information used to batch-download blocks.
     sync_state: SyncState,
 
@@ -169,6 +177,7 @@ impl MutableMainLoopState {
         let (_dummy_sender, dummy_receiver) =
             mpsc::channel::<Vec<MempoolUpdateJobResult>>(TX_UPDATER_CHANNEL_CAPACITY);
         Self {
+            sync_loop: None,
             sync_state: SyncState::default(),
             potential_peers: PotentialPeersState::default(),
             task_handles,
@@ -1120,6 +1129,25 @@ impl MainLoopHandler {
                 if let Some((peer_socket, _peer_info)) = longest_lived_peer {
                     let pmsg = MainToPeerTask::Disconnect(peer_socket.to_owned());
                     self.main_to_peer_broadcast(pmsg);
+                }
+            }
+            PeerTaskToMain::NewSyncTarget(new_target) => {
+                if let Some(sync_loop) = &main_loop_state.sync_loop {
+                    sync_loop
+                        .sender
+                        .send(MainToSync::ExtendChain(new_target))
+                        .await?;
+                }
+            }
+            PeerTaskToMain::NewSyncBlock(block, peer) => {
+                if let Some(sync_loop) = &main_loop_state.sync_loop {
+                    sync_loop
+                        .sender
+                        .send(MainToSync::ReceiveBlock {
+                            peer_handle: peer,
+                            block,
+                        })
+                        .await?;
                 }
             }
         }

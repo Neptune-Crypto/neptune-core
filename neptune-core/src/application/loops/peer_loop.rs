@@ -1,3 +1,5 @@
+pub(crate) mod channel;
+
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
@@ -25,11 +27,11 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-use crate::application::loops::channel::MainToPeerTask;
-use crate::application::loops::channel::PeerTaskToMain;
-use crate::application::loops::channel::PeerTaskToMainTransaction;
 use crate::application::loops::connect_to_peers::close_peer_connected_callback;
 use crate::application::loops::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
+use crate::application::loops::peer_loop::channel::MainToPeerTask;
+use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::loops::peer_loop::channel::PeerTaskToMainTransaction;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -378,10 +380,7 @@ impl PeerLoopHandler {
             .net
             .sync_anchor
             .as_ref()
-            .is_some_and(|x| {
-                x.champion
-                    .is_none_or(|(height, _)| height < last_block_height)
-            });
+            .is_some_and(|x| x.incoming_block_is_new_champion(last_block_height));
         if !is_canonical && !sync_mode_active_and_have_new_champion {
             warn!(
                 "Received {} blocks from peer but incoming blocks are less \
@@ -1017,6 +1016,57 @@ impl PeerLoopHandler {
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
                 };
+
+                // If sync mode is active, incoming blocks are destined for the
+                // sync loop.
+                let mut state_lock = self.global_state_lock.lock_guard_mut().await;
+                let tip_hash = state_lock.chain.light_state().hash();
+                if let Some(sync_anchor) = &mut state_lock.net.sync_anchor {
+                    let height = block.header().height;
+                    let digest = block.hash();
+                    let is_successor = block.header().prev_block_digest == tip_hash;
+                    let is_new_champion = sync_anchor.incoming_block_is_new_champion(height);
+
+                    if is_successor && is_new_champion {
+                        // Inform main loop about a new tip-successor.
+                        self.to_main_tx
+                            .send(PeerTaskToMain::NewSyncTarget(block))
+                            .await?;
+
+                        // Keep sync anchor up to date.
+                        sync_anchor.catch_up(height, digest);
+                    } else if is_new_champion {
+                        // The incoming block is the new champion but is not the
+                        // successor of the current tip. This happens when
+                        //  a) the peer sends new blocks out of order, or one of
+                        //     the intermediate blocks was dropped in transit;
+                        //     or
+                        //  b) the peer reorg'ed.
+                        // In either case, we can deal with the problem once
+                        // sync mode is done. So ignore for now.
+                        tracing::warn!(
+                            "Block {} / {} from peer {} is new champion but not successor to tip; ignoring.",
+                            height,
+                            digest,
+                            self.peer_address
+                        );
+                    } else if is_successor {
+                        // Cannot happen.
+                        tracing::error!(
+                            "Block {} / {} from peer {} is successor to tip but not new champion; ignoring. Cannot happen.",
+                            height,
+                            digest,
+                            self.peer_address
+                        );
+                    } else {
+                        // Inform main loop about a new middle block.
+                        self.to_main_tx
+                            .send(PeerTaskToMain::NewSyncBlock(block, self.peer_address))
+                            .await?;
+                    }
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+                drop(state_lock);
 
                 // Activate the shallow fork reconciliation mechanism if
                 // necessary, otherwise immediately proceed to processing the

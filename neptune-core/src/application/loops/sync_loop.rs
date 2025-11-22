@@ -27,6 +27,7 @@ use crate::application::loops::sync_loop::synchronization_bit_mask::Synchronizat
 use crate::protocol::consensus::block::Block;
 
 pub(crate) mod channel;
+pub(crate) mod handle;
 pub(crate) mod rapid_block_download;
 pub mod status;
 pub(crate) mod synchronization_bit_mask;
