@@ -133,7 +133,7 @@ impl SyncLoop {
                 // event: successors subtask finished
                 Some(successor_task_result) = successors_receiver.recv() => {
                     match successor_task_result {
-                        SuccessorsToSync::Finished{ new_tip: new_tip } => {
+                        SuccessorsToSync::Finished{ new_tip } => {
                             self.tip = new_tip;
 
                             // The successors subtask claims it is finished, but
@@ -647,7 +647,9 @@ mod tests {
     use rand::{rngs::StdRng, RngCore, SeedableRng};
     use tokio::sync::Mutex;
 
-    use crate::{protocol::consensus::block::Block, tests::shared_tokio_runtime};
+    use crate::application::loops::sync_loop::handle::SyncLoopHandle;
+    use crate::protocol::consensus::block::Block;
+    use crate::tests::shared_tokio_runtime;
 
     use super::*;
 
@@ -667,8 +669,7 @@ mod tests {
 
     struct MockMainLoop {
         peers: HashMap<PeerHandle, MockPeer>,
-        main_to_sync_sender: Sender<MainToSync>,
-        sync_to_main_receiver: Receiver<SyncToMain>,
+        pub(crate) sync_loop_handle: SyncLoopHandle,
         current_tip_height: BlockHeight,
         sync_target_height: BlockHeight,
         peer_control_receiver: Receiver<PeerControl>,
@@ -680,19 +681,16 @@ mod tests {
     }
 
     impl MockMainLoop {
-        fn new(
-            main_to_sync_sender: Sender<MainToSync>,
-            sync_to_main_receiver: Receiver<SyncToMain>,
-            current_tip_height: BlockHeight,
-            sync_target_height: BlockHeight,
-        ) -> Self {
+        async fn new(current_tip: Block, sync_target_height: BlockHeight) -> Self {
+            let current_tip_height = current_tip.header().height;
+            let sync_loop_handle =
+                SyncLoopHandle::new(current_tip, sync_target_height, BlockValidator::Test).await;
             let (peer_control_sender, peer_control_receiver) = mpsc::channel::<PeerControl>(10);
             let (blockchain_tip_control_sender, blockchain_tip_control_receiver) =
                 mpsc::channel::<BlockchainTipControl>(10);
             Self {
                 peers: HashMap::default(),
-                main_to_sync_sender,
-                sync_to_main_receiver,
+                sync_loop_handle,
                 current_tip_height,
                 sync_target_height,
                 finished: false,
@@ -717,43 +715,29 @@ mod tests {
         }
 
         async fn connect(&mut self, peer: MockPeer) {
-            tracing::debug!("adding peer");
-            tracing::debug!(
-                "note: channel capacity is at {}/{}",
-                self.main_to_sync_sender.capacity(),
-                self.main_to_sync_sender.max_capacity()
-            );
-
-            if let Err(e) = self
-                .main_to_sync_sender
-                .send(MainToSync::AddPeer(peer.handle()))
-                .await
-            {
-                tracing::error!("Error sending AddPeer message to sync loop: {e} -- did the sync loop terminate?");
-            }
+            self.sync_loop_handle.send_add_peer(peer.handle()).await;
             self.peers.insert(peer.handle(), peer);
         }
 
         async fn disconnect(&mut self, peer_handle: PeerHandle) {
-            tracing::debug!("removing peer");
-            tracing::debug!(
-                "note: channel capacity is at {}/{}",
-                self.main_to_sync_sender.capacity(),
-                self.main_to_sync_sender.max_capacity()
-            );
-
-            if let Err(e) = self
-                .main_to_sync_sender
-                .send(MainToSync::RemovePeer(peer_handle))
-                .await
-            {
-                tracing::error!("Error sending RemovePeer message to sync loop: {e} -- did the sync loop terminate");
-            }
+            self.sync_loop_handle.send_remove_peer(peer_handle).await;
             self.peers.remove(&peer_handle);
         }
 
         fn sync_is_finished(&self) -> bool {
             self.finished
+        }
+
+        pub(crate) fn start_sync_loop(&mut self) {
+            self.sync_loop_handle.start();
+        }
+
+        pub(crate) fn abort_sync_loop(&mut self) {
+            self.sync_loop_handle.abort();
+        }
+
+        pub(crate) fn take_sync_loop_join_handle(&mut self) -> Option<JoinHandle<()>> {
+            self.sync_loop_handle.take_join_handle()
         }
 
         async fn run(&mut self) {
@@ -762,7 +746,7 @@ mod tests {
 
             loop {
                 tokio::select! {
-                    Some(message) = self.sync_to_main_receiver.recv() => {
+                    Some(message) = self.sync_loop_handle.recv() => {
                         match message {
                             SyncToMain::Finished(target) => {
                                 tracing::info!("sync loop is finished");
@@ -798,28 +782,12 @@ mod tests {
                                     if let Some(peer) = self.peers.get_mut(&block_request.peer_handle.clone()) {
                                         if let Some(block) = peer.request(block_request.height).await {
                                             tracing::debug!("got block from peer; relaying to sync loop");
-                                            if let Err(e) = self
-                                                .main_to_sync_sender
-                                                .try_send(MainToSync::ReceiveBlock {
-                                                    peer_handle: block_request.peer_handle,
-                                                    block: Box::new(block),
-                                                })
-                                            {
-                                                tracing::warn!("error relaying block to sync loop: {e}");
-                                                tracing::debug!("note: channel capacity is at {}/{}", self.main_to_sync_sender.capacity(), self.main_to_sync_sender.max_capacity());
-                                            }
+                                            self.sync_loop_handle.send_block(Box::new(block), block_request.peer_handle);
                                             tracing::debug!("done relaying");
                                         } else {
                                             if let MockPeer::Syncing(syncing_peer) = peer {
                                                 if rng().random_bool(0.5_f64) {
-                                                    if let Err(e) = self
-                                                        .main_to_sync_sender
-                                                        .try_send(MainToSync::SyncCoverage {
-                                                            peer_handle: block_request.peer_handle,
-                                                            coverage: syncing_peer.coverage()
-                                                        }) {
-                                                        tracing::warn!("error relaying coverage to sync loop: {e}");
-                                                    }
+                                                    self.sync_loop_handle.send_sync_coverage(block_request.peer_handle, syncing_peer.coverage());
                                                 }
                                             }
                                             tracing::debug!("no response from peer");
@@ -859,19 +827,14 @@ mod tests {
                             BlockchainTipControl::NewBlock(block) => {
                                 tracing::info!("new block was mined; expanding sync target accordingly ******");
                                 self.sync_target_height = self.sync_target_height.next();
-                                if let Err(e) = self.main_to_sync_sender.send(MainToSync::ExtendChain(Box::new(block))).await {
-                                    tracing::error!("failed to send new block to sync loop: {e}");
-                                    return;
-                                }
+                                self.sync_loop_handle.send_new_target(Box::new(block)).await;
                             }
                         }
                         tracing::debug!("done relaying new block.");
                     }
 
                     _ = ticker.tick() => {
-                        if let Err(e) = self.main_to_sync_sender.try_send(MainToSync::Status) {
-                            tracing::error!("\n\n\nCould not send Status message to sync loop: {e}.");
-                        }
+                        self.sync_loop_handle.send_status_request();
                     }
                 }
             }
@@ -1013,23 +976,10 @@ mod tests {
         let current_tip = rng.random::<Block>();
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
-            current_tip.clone(),
-            sync_target_height,
-            false,
-            BlockValidator::Test,
-        )
-        .await
-        .unwrap();
-        let mut main_loop = MockMainLoop::new(
-            main_to_sync_sender,
-            sync_to_main_receiver,
-            current_tip.header().height,
-            sync_target_height,
-        );
+        let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
 
         main_loop.connect(MockPeer::Good(GoodPeer::new())).await;
-        let _sync_loop_handle = sync_loop.start();
+        main_loop.start_sync_loop();
         main_loop.run().await;
         assert!(
             main_loop.sync_is_finished(),
@@ -1047,27 +997,14 @@ mod tests {
         let current_tip = rng.random::<Block>();
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
-            current_tip.clone(),
-            sync_target_height,
-            false,
-            BlockValidator::Test,
-        )
-        .await
-        .unwrap();
-        let mut main_loop = MockMainLoop::new(
-            main_to_sync_sender,
-            sync_to_main_receiver,
-            current_tip.header().height,
-            sync_target_height,
-        );
+        let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
 
         main_loop.connect(MockPeer::Good(GoodPeer::new())).await;
         main_loop.connect(MockPeer::Good(GoodPeer::new())).await;
         main_loop.connect(MockPeer::Good(GoodPeer::new())).await;
         main_loop.connect(MockPeer::Good(GoodPeer::new())).await;
         main_loop.connect(MockPeer::Good(GoodPeer::new())).await;
-        let _sync_loop_handle = sync_loop.start();
+        main_loop.start_sync_loop();
         main_loop.run().await;
         assert!(
             main_loop.sync_is_finished(),
@@ -1086,23 +1023,10 @@ mod tests {
 
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
-            current_tip.clone(),
-            sync_target_height,
-            false,
-            BlockValidator::Test,
-        )
-        .await
-        .unwrap();
-        let mut main_loop = MockMainLoop::new(
-            main_to_sync_sender,
-            sync_to_main_receiver,
-            current_tip.header().height,
-            sync_target_height,
-        );
+        let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
 
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
-        let _sync_loop_handle = sync_loop.start();
+        main_loop.start_sync_loop();
         main_loop.run().await;
         assert!(
             main_loop.sync_is_finished(),
@@ -1121,27 +1045,16 @@ mod tests {
         let current_tip = rng.random::<Block>();
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..100));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
-            current_tip.clone(),
-            sync_target_height,
-            false,
-            BlockValidator::Test,
-        )
-        .await
-        .unwrap();
-        let mut main_loop = MockMainLoop::new(
-            main_to_sync_sender,
-            sync_to_main_receiver,
-            current_tip.header().height,
-            sync_target_height,
-        );
+        let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
 
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
-        let _sync_loop_handle = sync_loop.start();
+
+        main_loop.start_sync_loop();
+
         main_loop.run().await;
         assert!(
             main_loop.sync_is_finished(),
@@ -1159,56 +1072,35 @@ mod tests {
         tracing::info!("starting test ...");
 
         let current_tip = rng.random::<Block>();
+        let current_tip_height = current_tip.header().height;
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
 
         // set up first attempt
-        let (sync_loop_a, main_to_sync_sender_a, sync_to_main_receiver_a) = SyncLoop::new(
-            current_tip.clone(),
-            sync_target_height,
-            false,
-            BlockValidator::Test,
-        )
-        .await
-        .unwrap();
-        let mut main_loop = MockMainLoop::new(
-            main_to_sync_sender_a,
-            sync_to_main_receiver_a,
-            current_tip.header().height,
-            sync_target_height,
-        );
+        let mut main_loop = MockMainLoop::new(current_tip.clone(), sync_target_height).await;
 
         // keep track of tip height
-        let tip_tracker = Arc::new(Mutex::new(current_tip.header().height));
+        let tip_tracker = Arc::new(Mutex::new(current_tip_height));
         main_loop.set_tip_tracker(tip_tracker.clone());
 
         // run
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
-        let sync_loop_handle = sync_loop_a.start();
+        main_loop.start_sync_loop();
+        let sync_loop = main_loop.take_sync_loop_join_handle().unwrap();
         let main_loop_handle = tokio::spawn(async move {
             main_loop.run().await;
         });
 
         // after one second, interrupt
         tokio::time::sleep(Duration::from_secs(1)).await;
-        sync_loop_handle.abort();
+        sync_loop.abort();
         main_loop_handle.abort();
 
         // start second attempt
         // Reuse tip height from previous attempt, with one block margin due to
         // race conditions.
-        let current_tip_height = *tip_tracker.lock().await;
-        let (sync_loop_b, main_to_sync_sender_b, sync_to_main_receiver_b) =
-            SyncLoop::new(current_tip, sync_target_height, true, BlockValidator::Test)
-                .await
-                .unwrap();
-        let mut main_loop_b = MockMainLoop::new(
-            main_to_sync_sender_b,
-            sync_to_main_receiver_b,
-            current_tip_height,
-            sync_target_height,
-        );
+        let mut main_loop_b = MockMainLoop::new(current_tip, sync_target_height).await;
 
         assert!(
             !main_loop_b.sync_is_finished(),
@@ -1220,7 +1112,7 @@ mod tests {
         // run
         main_loop_b.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop_b.connect(MockPeer::Flaky(FlakyPeer::new())).await;
-        let _sync_loop_handle = sync_loop_b.start();
+        main_loop_b.start_sync_loop();
         main_loop_b.run().await;
 
         assert!(
@@ -1263,20 +1155,7 @@ mod tests {
         let current_tip = rng.random::<Block>();
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..100));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
-            current_tip.clone(),
-            sync_target_height,
-            false,
-            BlockValidator::Test,
-        )
-        .await
-        .unwrap();
-        let mut main_loop = MockMainLoop::new(
-            main_to_sync_sender,
-            sync_to_main_receiver,
-            current_tip.header().height,
-            sync_target_height,
-        );
+        let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
 
         let mut peer_set = vec![];
         for _ in 0..5 {
@@ -1285,7 +1164,7 @@ mod tests {
             main_loop.connect(MockPeer::Flaky(peer)).await;
         }
 
-        let _sync_loop_handle = sync_loop.start();
+        main_loop.start_sync_loop();
         let moved_peer_control_sender = main_loop.peer_control_sender();
         let peer_set_changer_handle = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(1)).await;
@@ -1335,27 +1214,14 @@ mod tests {
         let current_tip = rng.random::<Block>();
         let original_sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..100));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
-            current_tip.clone(),
-            original_sync_target_height,
-            false,
-            BlockValidator::Test,
-        )
-        .await
-        .unwrap();
-        let mut main_loop = MockMainLoop::new(
-            main_to_sync_sender,
-            sync_to_main_receiver,
-            current_tip.header().height,
-            original_sync_target_height,
-        );
+        let mut main_loop = MockMainLoop::new(current_tip, original_sync_target_height).await;
 
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
         main_loop.connect(MockPeer::Flaky(FlakyPeer::new())).await;
-        let _sync_loop_handle = sync_loop.start();
+        main_loop.start_sync_loop();
 
         let blockchain_tip_control_sender = main_loop.blockchain_tip_control_sender();
         let updated_sync_target_height = Arc::new(Mutex::new(original_sync_target_height));
@@ -1397,31 +1263,22 @@ mod tests {
         tracing::info!("starting test ...");
 
         let current_tip = rng.random::<Block>();
+        let current_tip_height = current_tip.header().height;
         let sync_target_height =
-            BlockHeight::from(current_tip.header().height.value() + rng.random_range(20..100));
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
-            current_tip.clone(),
-            sync_target_height,
-            false,
-            BlockValidator::Test,
-        )
-        .await
-        .unwrap();
-        let mut main_loop = MockMainLoop::new(
-            main_to_sync_sender,
-            sync_to_main_receiver,
-            current_tip.header().height,
-            sync_target_height,
-        );
+            BlockHeight::from(current_tip_height.value() + rng.random_range(20..100));
+        let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
 
         let mut cumulative_coverage = SynchronizationBitMask::new(
-            current_tip.header().height.value() + 1,
+            current_tip_height.value() + 1,
             sync_target_height.next().value(),
         );
         for _ in 0..5 {
-            let mut current_height = current_tip.header().height.value();
+            let moved_tip_height = current_tip_height;
             let peer_coverage = tokio::task::spawn_blocking(move || {
-                SynchronizationBitMask::random(current_height, sync_target_height.next().value())
+                SynchronizationBitMask::random(
+                    moved_tip_height.value(),
+                    sync_target_height.next().value(),
+                )
             })
             .await
             .unwrap();
@@ -1434,7 +1291,7 @@ mod tests {
             .connect(MockPeer::Syncing(SyncingPeer::new(!cumulative_coverage)))
             .await;
 
-        let _sync_loop_handle = sync_loop.start();
+        main_loop.start_sync_loop();
         main_loop.run().await;
         assert!(
             main_loop.sync_is_finished(),
@@ -1509,20 +1366,7 @@ mod tests {
         current_tip.set_header_height(BlockHeight::from(u64::from(rng.next_u32() >> 20)));
         let original_sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + 100);
-        let (sync_loop, main_to_sync_sender, sync_to_main_receiver) = SyncLoop::new(
-            current_tip.clone(),
-            original_sync_target_height,
-            false,
-            BlockValidator::Test,
-        )
-        .await
-        .unwrap();
-        let mut main_loop = MockMainLoop::new(
-            main_to_sync_sender,
-            sync_to_main_receiver,
-            current_tip.header().height,
-            original_sync_target_height,
-        );
+        let mut main_loop = MockMainLoop::new(current_tip, original_sync_target_height).await;
 
         let mut peer_set = vec![];
         for _ in 0..1 {
@@ -1531,7 +1375,7 @@ mod tests {
             main_loop.connect(MockPeer::Flaky(peer)).await;
         }
 
-        let _sync_loop_handle = sync_loop.start();
+        main_loop.start_sync_loop();
 
         let moved_peer_control_sender = main_loop.peer_control_sender();
         let updated_sync_target_height = Arc::new(Mutex::new(original_sync_target_height));

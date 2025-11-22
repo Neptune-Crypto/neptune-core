@@ -1133,21 +1133,12 @@ impl MainLoopHandler {
             }
             PeerTaskToMain::NewSyncTarget(new_target) => {
                 if let Some(sync_loop) = &main_loop_state.sync_loop {
-                    sync_loop
-                        .sender
-                        .send(MainToSync::ExtendChain(new_target))
-                        .await?;
+                    sync_loop.send_new_target(new_target).await;
                 }
             }
             PeerTaskToMain::NewSyncBlock(block, peer) => {
                 if let Some(sync_loop) = &main_loop_state.sync_loop {
-                    sync_loop
-                        .sender
-                        .send(MainToSync::ReceiveBlock {
-                            peer_handle: peer,
-                            block,
-                        })
-                        .await?;
+                    sync_loop.send_block(block, peer);
                 }
             }
         }
