@@ -53,6 +53,20 @@ impl SyncAnchor {
         }
     }
 
+    /// Determine if the incoming block is the new champion.
+    ///
+    /// This is true if the champion is not set yet, or if its height is smaller
+    /// than that of the incoming block.
+    pub(crate) fn incoming_block_is_new_champion(
+        &self,
+        incoming_block_height: BlockHeight,
+    ) -> bool {
+        self.champion
+            .is_none_or(|(block_height, _)| block_height < incoming_block_height)
+    }
+
+    /// Modify the sync anchor to point to the new incoming block, if its height
+    /// is larger.
     pub(crate) fn catch_up(&mut self, height: BlockHeight, block_hash: Digest) {
         let new_champion = Some((height, block_hash));
         let updated = SystemTime::now();
