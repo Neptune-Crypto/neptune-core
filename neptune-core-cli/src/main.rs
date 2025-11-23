@@ -53,6 +53,7 @@ use tarpc::tokio_serde::formats::Json;
 use crate::models::claim_utxo::ClaimUtxoFormat;
 use crate::models::utxo_transfer_entry::UtxoTransferEntry;
 use crate::parser::beneficiary::Beneficiary;
+use crate::parser::full_or_abbreviated_address::FullOrAbbreviatedAddress;
 use crate::parser::hex_digest::HexDigest;
 
 const SELF: &str = "self";
@@ -389,7 +390,7 @@ enum Command {
     /// if the given address does not come from the current wallet then this
     /// command will run indefinitely and the user must manually abort it.
     ///
-    /// Usage: neptune-cli index-of <full_address>
+    /// Usage: neptune-cli index-of <address>
     IndexOf {
         address: String,
 
@@ -736,21 +737,38 @@ async fn main() -> Result<()> {
         }
         Command::IndexOf { address, network } => {
             // Parse on client.
-            let receiving_address = ReceivingAddress::from_bech32m(address, *network)?;
+            let Some(full_or_abbreviated_address) =
+                FullOrAbbreviatedAddress::parse(address, *network)
+            else {
+                println!("Could not parse address.");
+                return Ok(());
+            };
 
             // Read from disk directly.
             let wallet_entropy = get_wallet_entropy(*network, args.data_dir.clone())?;
 
             // Report on key type.
-            let key_type = KeyType::from(&receiving_address);
+            let key_type = full_or_abbreviated_address.key_type();
             println!("key type: {}", key_type);
 
             // Iterate until match.
             for index in 0u64.. {
                 let nth_address = wallet_entropy.nth_receiving_address(index, key_type);
-                if receiving_address == nth_address {
-                    println!("index: {index}");
-                    break;
+                match &full_or_abbreviated_address {
+                    FullOrAbbreviatedAddress::Full(receiving_address) => {
+                        if receiving_address == &nth_address {
+                            println!("index: {index}");
+                            break;
+                        }
+                    }
+                    FullOrAbbreviatedAddress::Abbreviated(_) => {
+                        if *address == nth_address.to_bech32m_abbreviated(*network)?
+                            || *address == nth_address.to_display_bech32m_abbreviated(*network)?
+                        {
+                            println!("index: {index}");
+                            break;
+                        }
+                    }
                 }
 
                 if index.is_multiple_of(1000) && index != 0 {
