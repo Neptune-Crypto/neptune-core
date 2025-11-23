@@ -1523,7 +1523,8 @@ async fn find_index_of(
             }
             FullOrAbbreviatedAddress::Abbreviated(abb) => {
                 if abb.to_string(network) == nth_address.to_bech32m_abbreviated(network)?
-                    || abb.to_string(network) == nth_address.to_display_bech32m_abbreviated(network)?
+                    || abb.to_string(network)
+                        == nth_address.to_display_bech32m_abbreviated(network)?
                 {
                     println!("index: {index}");
                     return Ok(index);
