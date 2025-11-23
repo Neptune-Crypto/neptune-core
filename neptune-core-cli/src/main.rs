@@ -9,6 +9,7 @@ use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -38,6 +39,7 @@ use neptune_cash::state::wallet::coin_with_possible_timelock::CoinWithPossibleTi
 use neptune_cash::state::wallet::secret_key_material::SecretKeyMaterial;
 use neptune_cash::state::wallet::utxo_notification::PrivateNotificationData;
 use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
 use neptune_cash::state::wallet::wallet_file::WalletFile;
 use neptune_cash::state::wallet::wallet_file::WalletFileContext;
 use neptune_cash::state::wallet::wallet_status::WalletStatus;
@@ -136,26 +138,6 @@ enum Command {
 
     /// Get next unused generation receiving address
     NextReceivingAddress,
-
-    /// Get the nth generation receiving address.
-    ///
-    /// Ignoring the ones that have been generated in the past; re-generate them
-    /// if necessary. Do not increment any counters or modify state in any way.
-    NthReceivingAddress {
-        index: usize,
-
-        #[clap(long, default_value_t)]
-        network: Network,
-    },
-
-    /// Get a static generation receiving address, for premine recipients.
-    ///
-    /// This command is an alias for `nth-receiving-address 0`. It will be
-    /// disabled after mainnet launch.
-    PremineReceivingAddress {
-        #[clap(long, default_value_t)]
-        network: Network,
-    },
 
     /// list known coins
     ListCoins,
@@ -349,6 +331,26 @@ enum Command {
         network: Network,
     },
 
+    /// Get the nth generation receiving address.
+    ///
+    /// Ignoring the ones that have been generated in the past; re-generate them
+    /// if necessary. Do not increment any counters or modify state in any way.
+    NthReceivingAddress {
+        index: usize,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
+    /// Get a static generation receiving address, for premine recipients.
+    ///
+    /// This command is an alias for `nth-receiving-address 0`. It will be
+    /// disabled after mainnet launch.
+    PremineReceivingAddress {
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
     /// export mnemonic seed phrase
     ExportSeedPhrase {
         #[clap(long, default_value_t)]
@@ -374,6 +376,22 @@ enum Command {
     ShamirShare {
         t: usize,
         n: usize,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
+    /// Given a receiving address derived by this wallet, find the associated
+    /// derivation index.
+    ///
+    /// This command does not require a connection to neptune-core; it reads the
+    /// wallet directly. Also, this command iterates until a match is found;
+    /// if the given address does not come from the current wallet then this
+    /// command will run indefinitely and the user must manually abort it.
+    ///
+    /// Usage: neptune-cli index-of <full_address>
+    IndexOf {
+        address: String,
 
         #[clap(long, default_value_t)]
         network: Network,
@@ -526,10 +544,10 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Command::NthReceivingAddress { network, index } => {
-            return get_nth_receiving_address(*network, args.data_dir.clone(), *index);
+            return print_nth_receiving_address(*network, args.data_dir.clone(), *index);
         }
         Command::PremineReceivingAddress { network } => {
-            return get_nth_receiving_address(*network, args.data_dir.clone(), 0);
+            return print_nth_receiving_address(*network, args.data_dir.clone(), 0);
         }
         Command::ShamirCombine { t, network } => {
             let wallet_dir =
@@ -716,6 +734,34 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
+        Command::IndexOf { address, network } => {
+            // Parse on client.
+            let receiving_address = ReceivingAddress::from_bech32m(address, *network)?;
+
+            // Read from disk directly.
+            let wallet_entropy = get_wallet_entropy(*network, args.data_dir.clone())?;
+
+            // Report on key type.
+            let key_type = KeyType::from(&receiving_address);
+            println!("key type: {}", key_type);
+
+            // Iterate until match.
+            for index in 0u64.. {
+                let nth_address = wallet_entropy.nth_receiving_address(index, key_type);
+                if receiving_address == nth_address {
+                    println!("index: {index}");
+                    break;
+                }
+
+                if index.is_multiple_of(1000) && index != 0 {
+                    println!("Tried indices [0:{index}], no match yet ...");
+                }
+
+                tokio::time::sleep(Duration::from_micros(250)).await;
+            }
+
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -761,7 +807,8 @@ async fn main() -> Result<()> {
         | Command::ShamirCombine { .. }
         | Command::ShamirShare { .. }
         | Command::NthReceivingAddress { .. }
-        | Command::PremineReceivingAddress { .. } => {
+        | Command::PremineReceivingAddress { .. }
+        | Command::IndexOf { .. } => {
             unreachable!("Case should be handled earlier.")
         }
 
@@ -1353,15 +1400,9 @@ async fn get_cookie_hint(client: &RPCClient, args: &Config) -> anyhow::Result<au
     }
 }
 
-/// Get the nth receiving address directly from the wallet.
-///
-/// Read the wallet file directly; avoid going through the RPC interface of
-/// `neptune-core`.
-fn get_nth_receiving_address(
-    network: Network,
-    data_dir: Option<PathBuf>,
-    index: usize,
-) -> Result<()> {
+/// Get the [`WalletEntropy`] directly from the file system; without going
+/// through neptune-core.
+fn get_wallet_entropy(network: Network, data_dir: Option<PathBuf>) -> Result<WalletEntropy> {
     let wallet_dir = DataDirectory::get(data_dir.clone(), network)?.wallet_directory_path();
 
     // Get wallet object, create various wallet secret files
@@ -1372,19 +1413,28 @@ fn get_nth_receiving_address(
         wallet_file_name.display(),
     );
 
-    println!("{}", wallet_file_name.display());
-
     let wallet_file = match WalletFile::read_from_file(&wallet_file_name) {
         Ok(ws) => ws,
         Err(e) => {
-            eprintln!(
+            bail!(
                 "Could not open wallet file at {}. Got error: {e}",
                 wallet_file_name.to_string_lossy()
             );
-            return Ok(());
         }
     };
-    let wallet_entropy = wallet_file.entropy();
+    Ok(wallet_file.entropy())
+}
+
+/// Print the nth receiving address.
+///
+/// Read the wallet file directly; avoid going through the RPC interface of
+/// `neptune-core`.
+fn print_nth_receiving_address(
+    network: Network,
+    data_dir: Option<PathBuf>,
+    index: usize,
+) -> Result<()> {
+    let wallet_entropy = get_wallet_entropy(network, data_dir)?;
 
     let nth_spending_key = wallet_entropy.nth_generation_spending_key(index as u64);
     let nth_receiving_address = nth_spending_key.to_address();
