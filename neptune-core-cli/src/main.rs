@@ -320,7 +320,7 @@ enum Command {
     ///
     /// Usage:
     ///
-    ///  > neptune-cli rescan --block 13 --address <address>
+    /// `> neptune-cli rescan --block 13 --address nolgam1...`
     Rescan {
         /// block height
         #[arg(long, value_parser = BlockSelector::from_str)]
@@ -410,7 +410,7 @@ enum Command {
     /// if the given address does not come from the current wallet then this
     /// command will run indefinitely and the user must manually abort it.
     ///
-    /// Usage: neptune-cli index-of <address>
+    /// Usage: `neptune-cli index-of nolgam1...`
     IndexOf {
         address: String,
 
