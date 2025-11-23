@@ -311,6 +311,26 @@ enum Command {
     /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
 
+    /// Re-scan a single block for incoming UTXOs sent to a given address.
+    ///
+    /// If for whatever reason something went wrong in the course of scanning
+    /// blocks for incoming UTXOs, an inbound UTXO would be undetected by the
+    /// wallet. In that case, this command forces the wallet to look again at
+    /// the indicated block with the given address or derivation index as hint.
+    ///
+    /// Usage:
+    ///
+    ///  > neptune-cli rescan --block 13 --address <address>
+    Rescan {
+        /// block height
+        #[arg(long, value_parser = BlockSelector::from_str)]
+        block: BlockSelector,
+
+        /// address to which the UTXO was supposedly sent
+        #[clap(long)]
+        address: String,
+    },
+
     /******** RegTest Mode ********/
     /// mine a series of blocks to the node's wallet. (regtest network only)
     MineBlocksToWallet {
@@ -752,31 +772,7 @@ async fn main() -> Result<()> {
             println!("key type: {}", key_type);
 
             // Iterate until match.
-            for index in 0u64.. {
-                let nth_address = wallet_entropy.nth_receiving_address(index, key_type);
-                match &full_or_abbreviated_address {
-                    FullOrAbbreviatedAddress::Full(receiving_address) => {
-                        if receiving_address == &nth_address {
-                            println!("index: {index}");
-                            break;
-                        }
-                    }
-                    FullOrAbbreviatedAddress::Abbreviated(_) => {
-                        if *address == nth_address.to_bech32m_abbreviated(*network)?
-                            || *address == nth_address.to_display_bech32m_abbreviated(*network)?
-                        {
-                            println!("index: {index}");
-                            break;
-                        }
-                    }
-                }
-
-                if index.is_multiple_of(1000) && index != 0 {
-                    println!("Tried indices [0:{index}], no match yet ...");
-                }
-
-                tokio::time::sleep(Duration::from_micros(250)).await;
-            }
+            find_index_of(full_or_abbreviated_address, wallet_entropy, *network).await?;
 
             return Ok(());
         }
@@ -1376,6 +1372,45 @@ async fn main() -> Result<()> {
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
         }
 
+        Command::Rescan { block, address } => {
+            // Get network from server.
+            let network = client.network(ctx).await??;
+
+            // Parse on client.
+            let Some(full_or_abbreviated_address) =
+                FullOrAbbreviatedAddress::parse(&address, network)
+            else {
+                println!("Could not parse address.");
+                return Ok(());
+            };
+
+            // Read from disk directly.
+            let wallet_entropy = get_wallet_entropy(network, args.data_dir.clone())?;
+
+            // Report on key type.
+            let key_type = full_or_abbreviated_address.key_type();
+            println!("key type: {}", key_type);
+
+            // Iterate until match.
+            let derivation_index =
+                find_index_of(full_or_abbreviated_address, wallet_entropy, network).await?;
+
+            // Make RPC call.
+            match client
+                .rescan(ctx, token, block, derivation_index, key_type)
+                .await?
+            {
+                Ok(number) => {
+                    println!("Recovered {number} previously unknown UTXOs.");
+                }
+                Err(e) => {
+                    println!("Failed to scan block {block}: {e}.");
+                }
+            }
+
+            return Ok(());
+        }
+
         /******** RegTest Mode *********/
         Command::MineBlocksToWallet { num_blocks } => {
             println!("Sending command to mine block(s).");
@@ -1468,6 +1503,42 @@ fn print_nth_receiving_address(
 
     println!("{nth_address_as_string}");
     Ok(())
+}
+
+async fn find_index_of(
+    full_or_abbreviated_address: FullOrAbbreviatedAddress,
+    wallet_entropy: WalletEntropy,
+    network: Network,
+) -> Result<u64> {
+    let key_type = full_or_abbreviated_address.key_type();
+
+    for index in 0u64.. {
+        let nth_address = wallet_entropy.nth_receiving_address(index, key_type);
+        match &full_or_abbreviated_address {
+            FullOrAbbreviatedAddress::Full(receiving_address) => {
+                if receiving_address == &nth_address {
+                    println!("index: {index}");
+                    return Ok(index);
+                }
+            }
+            FullOrAbbreviatedAddress::Abbreviated(abb) => {
+                if abb.to_string(network) == nth_address.to_bech32m_abbreviated(network)?
+                    || abb.to_string(network) == nth_address.to_display_bech32m_abbreviated(network)?
+                {
+                    println!("index: {index}");
+                    return Ok(index);
+                }
+            }
+        }
+
+        if index.is_multiple_of(1000) && index != 0 {
+            println!("Tried indices [0:{index}], no match yet ...");
+        }
+
+        tokio::time::sleep(Duration::from_micros(250)).await;
+    }
+
+    bail!("unreachable");
 }
 
 // processes utxo-notifications in TxParams outputs, if any.
