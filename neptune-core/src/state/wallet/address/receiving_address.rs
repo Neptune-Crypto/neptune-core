@@ -258,10 +258,7 @@ impl ReceivingAddress {
 
     /// returns human-readable-prefix (hrp) for a given network
     pub fn get_hrp(&self, network: Network) -> String {
-        match self {
-            Self::Generation(_) => generation_address::GenerationReceivingAddress::get_hrp(network),
-            Self::Symmetric(_) => symmetric_key::SymmetricKey::get_hrp(network).to_string(),
-        }
+        KeyType::from(self).get_hrp(network)
     }
 
     /// Returns the address's lock script hash.

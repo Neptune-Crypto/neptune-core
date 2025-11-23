@@ -1,5 +1,9 @@
+use std::str::FromStr;
+
 use clap::Parser;
-use neptune_cash::api::export::Network;
+use neptune_cash::{
+    api::export::Network, protocol::consensus::block::block_selector::BlockSelector,
+};
 
 use crate::models::claim_utxo::ClaimUtxoFormat;
 
@@ -88,6 +92,26 @@ pub(crate) enum WalletCommand {
     /// regardless of UTXO index status.
     RescanGuesserRewards { first: u64, last: u64 },
 
+    /// Re-scan a single block for incoming UTXOs sent to a given address.
+    ///
+    /// If for whatever reason something went wrong in the course of scanning
+    /// blocks for incoming UTXOs, an inbound UTXO would be undetected by the
+    /// wallet. In that case, this command forces the wallet to look again at
+    /// the indicated block with the given address or derivation index as hint.
+    ///
+    /// Usage:
+    ///
+    /// `> neptune-cli rescan --block 13 --address nolgam1...`
+    Rescan {
+        /// block height
+        #[arg(long, value_parser = BlockSelector::from_str)]
+        block: BlockSelector,
+
+        /// address to which the UTXO was supposedly sent
+        #[clap(long)]
+        address: String,
+    },
+
     /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
 
@@ -128,6 +152,22 @@ pub(crate) enum WalletCommand {
     ShamirShare {
         t: usize,
         n: usize,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
+    /// Given a receiving address derived by this wallet, find the associated
+    /// derivation index.
+    ///
+    /// This command does not require a connection to neptune-core; it reads the
+    /// wallet directly. Also, this command iterates until a match is found;
+    /// if the given address does not come from the current wallet then this
+    /// command will run indefinitely and the user must manually abort it.
+    ///
+    /// Usage: `neptune-cli index-of <address>`
+    IndexOf {
+        address: String,
 
         #[clap(long, default_value_t)]
         network: Network,

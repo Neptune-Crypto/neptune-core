@@ -785,6 +785,35 @@ impl WalletState {
         )
     }
 
+    /// Scan the given block for UTXOs announced to any of the given keys.
+    ///
+    /// This function verifies that the announced UTXOs are actually present in
+    /// the transaction kernel outputs. Otherwise they are not returned.
+    fn scan_for_utxos_announced_to_given_key(
+        tx_kernel: &TransactionKernel,
+        keys: &[SpendingKey],
+    ) -> Vec<IncomingUtxo> {
+        keys.iter()
+            .flat_map(|key| {
+                key.scan_for_announced_utxos(tx_kernel)
+                    .into_iter()
+                    .filter(|iu| {
+                        let transaction_contains_addition_record =
+                            tx_kernel.outputs.contains(&iu.addition_record());
+                        if !transaction_contains_addition_record {
+                            warn!(
+                                "Transaction does not contain announced UTXO \
+                        encrypted to own receiving address."
+                            );
+                            debug!("Announced UTXO was: {:#?}", iu.utxo);
+                        }
+                        transaction_contains_addition_record
+                    })
+                    .collect_vec()
+            })
+            .collect_vec()
+    }
+
     /// Scan the given list of addition records for items that match with list
     /// of expected incoming UTXOs, and returns expected UTXOs that are present.
     ///
@@ -1585,6 +1614,18 @@ impl WalletState {
 
     /// Process all outputs in a block under the assumption that the node has
     /// access to an archival mutator set.
+    ///
+    /// "Process" means:
+    ///  - If the output was sent to us, then:
+    ///     - Modify existing `MonitoredUtxo`s, if the coincide with incoming
+    ///       UTXOs, to correctly reflect the block in which they were
+    ///       confirmed. (There may have been a reorganization.)
+    ///     - Add new `MonitoredUtxo` entries for each incoming UTXO that is not
+    ///       a duplicate.
+    ///
+    /// # Return Value
+    ///
+    ///  - A vector of `IncomingUtxoRecoveryData` for all new incoming UTXOs.
     pub(crate) async fn process_outputs_no_maintain_mps(
         &mut self,
         block: &Block,
@@ -1682,6 +1723,33 @@ impl WalletState {
                 )
                 .await;
         }
+    }
+
+    /// Given incoming UTXOs, identify potential duplicates of UTXOs that are
+    /// already monitored.
+    ///
+    /// The set of potential duplicates, UTXOs that have, potentially
+    /// already been added by this wallet. Used for a later check to avoid
+    /// adding the same UTXO twice. Since we don't know the AOCL leaf
+    /// index of the incoming transaction, these are only potential
+    /// duplicates, not certain duplicates.
+    async fn potential_duplicate_utxos(
+        monitored_utxos: &mut DbtVec<MonitoredUtxo>,
+        incoming: &HashMap<AdditionRecord, IncomingUtxo>,
+    ) -> HashMap<StrongUtxoKey, u64> {
+        let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();
+        let stream = monitored_utxos.stream().await;
+        pin_mut!(stream); // needed for iteration
+
+        while let Some((i, monitored_utxo)) = stream.next().await {
+            let addition_record = monitored_utxo.addition_record();
+            let strong_key = StrongUtxoKey::new(addition_record, monitored_utxo.aocl_leaf_index);
+            if incoming.contains_key(&addition_record) {
+                maybe_duplicates.insert(strong_key, i);
+            }
+        }
+
+        maybe_duplicates
     }
 
     /// Update wallet state with new block.
@@ -1791,6 +1859,93 @@ impl WalletState {
         }
 
         self.wallet_db.set_sync_label(block.hash()).await;
+    }
+
+    /// Rescan the given block for UTXOs announced to the given keys, identified
+    /// by (derivation-index, key-type) pairs. Appraise the wallet of all *new*
+    /// UTXOs, and return all UTXOs in the block announced to any of the given
+    /// keys.
+    pub(crate) async fn rescan(
+        &mut self,
+        block: Block,
+        key_indices: &[(u64, KeyType)],
+    ) -> Result<Vec<IncomingUtxoRecoveryData>> {
+        info!(
+            "Re-scanning block {:x} for UTXOs bound to any of {} own keys.",
+            block.hash(),
+            key_indices.len()
+        );
+
+        // Prepare to scan.
+        let keys = key_indices
+            .iter()
+            .map(|(index, key_type)| self.nth_spending_key(*key_type, *index))
+            .collect_vec();
+        let tx_kernel = block.body().transaction_kernel();
+
+        // Scan.
+        let incoming_utxos = Self::scan_for_utxos_announced_to_given_key(tx_kernel, &keys);
+
+        // Return early if no UTXOs were found.
+        if incoming_utxos.is_empty() {
+            info!("No owned UTXOs were found.");
+            return Ok(vec![]);
+        }
+
+        // Filter out invalid UTXOs and put the remaining ones into a handy
+        // format.
+        let incoming_hashmap = incoming_utxos
+            .iter()
+            .filter(|iu| iu.utxo.all_type_script_states_are_valid())
+            .map(|iu| (iu.addition_record(), iu.clone()))
+            .collect::<HashMap<_, _>>();
+
+        if incoming_hashmap.len() < incoming_utxos.len() {
+            warn!(
+                "Found {} UTXOs in block but for some, type scripts or states are invalid. After filtering for \
+                validity, {} remain.",
+                incoming_utxos.len(),
+                incoming_hashmap.len()
+            );
+        }
+
+        // Return early if no UTXOs are left.
+        if incoming_hashmap.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Modify existing `MonitoredUtxo`s or insert new entries.
+        info!(
+            "Modifying wallet database to acount for {} new incoming UTXOs.",
+            incoming_hashmap.len()
+        );
+        let aocl_num_leafs_before_this_block =
+            block.mutator_set_accumulator_after()?.aocl.num_leafs()
+                - u64::try_from(block.mutator_set_update()?.additions.len())?;
+        let recovery_list = self
+            .process_outputs_no_maintain_mps(
+                &block,
+                &incoming_hashmap,
+                aocl_num_leafs_before_this_block,
+                self.configuration.num_mps_per_utxo,
+            )
+            .await;
+
+        // Write UTXO-recovery data (incoming randomness) to disk.
+        info!(
+            "Storing recovery data for {} new incoming UTXOs to disk.",
+            recovery_list.len()
+        );
+        for item in recovery_list.clone() {
+            self.store_utxo_ms_recovery_data(item).await?;
+        }
+
+        // Do not mark `ExpectedUtxo`s that were received in this block as
+        // received. This method does not search for them; it only searches for
+        // UTXOs that come with an announcement that can be decrypted with one
+        // of the given keys.
+
+        Ok(recovery_list)
     }
 
     /// writes prepared utxo claim data to disk

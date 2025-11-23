@@ -2089,6 +2089,16 @@ pub trait RPC {
     /// canonical chain.
     async fn set_tip(token: auth::Token, indicated_tip: Digest) -> RpcResult<()>;
 
+    /// Rescan a given block for UTXOs bound to a given key. Any found UTXOs
+    /// are returned as well as passed on to the wallet and hence monitored
+    /// going forward.
+    async fn rescan(
+        token: auth::Token,
+        block: BlockSelector,
+        derivation_index: u64,
+        key_type: KeyType,
+    ) -> RpcResult<usize>;
+
     /// Gracious shutdown.
     ///
     /// ```no_run
@@ -4038,6 +4048,40 @@ impl RPC for NeptuneRPCServer {
             .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
 
         Ok(())
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn rescan(
+        mut self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        block_selector: BlockSelector,
+        derivation_index: u64,
+        key_type: KeyType,
+    ) -> RpcResult<usize> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // Get block digest.
+        let mut state = self.state.lock_guard_mut().await;
+        let Some(block_digest) = block_selector.as_digest(&state).await else {
+            tracing::error!("Can not find block digest associated with {block_selector}.");
+            return Ok(0);
+        };
+
+        // Get block.
+        let Some(block) = state.chain.archival_state().get_block(block_digest).await? else {
+            tracing::error!("Can not find block {block_digest:x} / {block_selector}.");
+            return Ok(0);
+        };
+
+        // Rescan block.
+        let new_incoming_utxos_recovery_data = state
+            .wallet_state
+            .rescan(block, &[(derivation_index, key_type)])
+            .await?;
+
+        Ok(new_incoming_utxos_recovery_data.len())
     }
 
     // documented in trait. do not add doc-comment.
