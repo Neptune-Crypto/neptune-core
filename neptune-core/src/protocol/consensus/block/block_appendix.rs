@@ -6,6 +6,7 @@ use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
@@ -26,7 +27,9 @@ pub(crate) const MAX_NUM_CLAIMS: usize = 500;
 /// The appendix is the keystone of soft-fork-friendly upgrades to the protocol.
 /// The block proof establishes that all claims in the appendix are valid.
 /// The appendix can softly be extended with new claims.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, TasmObject, GetSize, Default,
+)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub(crate) struct BlockAppendix {
     claims: Vec<Claim>,

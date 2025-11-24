@@ -37,7 +37,9 @@ use rayon::ThreadPoolBuilder;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -118,6 +120,81 @@ pub enum BlockProof {
     SingleProof(Proof),
 }
 
+impl BlockProof {
+    pub(crate) const INVALID_BLOCK_PROOF_DISCRIMINANT_ERROR: i128 = 1_000_520;
+    pub(crate) const INVALID_BLOCK_PROOF_SIZE_INDICATOR_ERROR: i128 = 1_000_521;
+}
+
+impl TasmObject for BlockProof {
+    fn label_friendly_name() -> String {
+        "BlockProof".to_owned()
+    }
+
+    fn compute_size_and_assert_valid_size_indicator(
+        _: &mut tasm_lib::prelude::Library,
+    ) -> Vec<LabelledInstruction> {
+        const SINGLE_PROOF_DISCRIMINANT: u32 = 2;
+
+        triton_asm!(
+            // _ *block_proof
+
+            addi 2
+            read_mem 3
+            pop 1
+            // _ proof_len field_size discriminant
+
+            push {SINGLE_PROOF_DISCRIMINANT}
+            eq
+            // _ proof_len field_size (discriminant == expected)
+
+            assert error_id {Self::INVALID_BLOCK_PROOF_DISCRIMINANT_ERROR}
+            // _ proof_len field_size
+
+            dup 1
+            addi 1
+            eq
+            // _ proof_len (field_size == proof_len + 1)
+
+            assert error_id {Self::INVALID_BLOCK_PROOF_SIZE_INDICATOR_ERROR}
+            // _ proof_len
+
+            addi 3
+            // _ (proof_len + 3)
+            // _ own_size
+
+            /* Ensure valid u32 */
+            dup 1
+            pop_count
+            pop 1
+            // _ own_size
+        )
+    }
+
+    fn decode_iter<Itr: Iterator<Item = BFieldElement>>(
+        iterator: &mut Itr,
+    ) -> Result<Box<Self>, Box<dyn std::error::Error + Send + Sync>> {
+        let discriminant = iterator
+            .next()
+            .ok_or(Box::new(BFieldCodecError::EmptySequence))?;
+        let field_size = iterator
+            .next()
+            .ok_or(Box::new(BFieldCodecError::SequenceTooShort))?
+            .value()
+            .try_into()
+            .map_err(|_| Box::new(BFieldCodecError::ElementOutOfRange))?;
+        let field_data = iterator.take(field_size).collect_vec();
+
+        match discriminant.value() {
+            0 => Ok(Box::new(Self::Genesis)),
+            1 => Ok(Box::new(Self::Invalid)),
+            2 => Ok(Box::new(Self::SingleProof(*BFieldCodec::decode(
+                &field_data,
+            )?))),
+            _ => Err(Box::new(BFieldCodecError::ElementOutOfRange)),
+        }
+    }
+}
+
 /// Public fields of `Block` are read-only, enforced by #[readonly::make].
 /// Modifications are possible only through `Block` methods.
 ///
@@ -171,7 +248,7 @@ pub enum BlockProof {
 //
 // A unit test-suite exists in module tests::digest_encapsulation.
 #[readonly::make]
-#[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize)]
+#[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize, TasmObject)]
 pub struct Block {
     /// Everything but the proof
     pub kernel: BlockKernel,
@@ -183,6 +260,7 @@ pub struct Block {
     #[serde(skip)]
     #[bfield_codec(ignore)]
     #[get_size(ignore)]
+    #[tasm_object(ignore)]
     digest: OnceLock<Digest>,
 }
 
@@ -1125,6 +1203,8 @@ impl Block {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use std::collections::HashMap;
+
     use macro_rules_attr::apply;
     use proptest::collection;
     use proptest::prop_compose;
@@ -1135,6 +1215,8 @@ pub(crate) mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
+    use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
     use tracing_test::traced_test;
 
@@ -2446,5 +2528,48 @@ pub(crate) mod tests {
 
             blocks.push(block);
         }
+    }
+
+    #[test]
+    fn proof_size_check_happy_path() {
+        let mut library = tasm_lib::prelude::Library::default();
+        let code = BlockProof::compute_size_and_assert_valid_size_indicator(&mut library);
+        let code = [
+            triton_asm!(
+                push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+                {&code}
+                halt
+            ),
+            library.all_imports(),
+        ]
+        .concat();
+        let code = Program::new(&code);
+        let bad_proof = Proof(bfe_array![996, 997, 999].to_vec());
+        let bad_proof = BlockProof::SingleProof(bad_proof.into());
+
+        let mut memory = HashMap::default();
+        encode_to_memory(
+            &mut memory,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            &bad_proof,
+        );
+
+        for k in memory
+            .keys()
+            .sorted_by(|x, y| Ord::cmp(&x.value(), &y.value()))
+        {
+            let v = memory[k];
+            print!("{k} => {v}");
+        }
+
+        println!();
+
+        let nondeterminism = NonDeterminism::default().with_ram(memory);
+        let res = VM::run(code, PublicInput::default(), nondeterminism);
+
+        match res {
+            Ok(_) => (),
+            Err(err) => panic!("{err}"),
+        };
     }
 }

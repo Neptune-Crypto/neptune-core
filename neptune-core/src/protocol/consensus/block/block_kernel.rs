@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
 use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
@@ -21,7 +22,7 @@ use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::util_types::mutator_set::commit;
 
 /// The kernel of a block contains all data that is not proof data
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, TasmObject)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct BlockKernel {
     pub header: BlockHeader,
