@@ -94,6 +94,7 @@ impl core::fmt::Debug for ArchivalState {
             .field("block_index_db", &self.block_index_db)
             .field("genesis_block", &self.genesis_block)
             .field("network", &self.network)
+            .field("archival_block_mmr", &self.archival_block_mmr)
             .finish()
     }
 }
