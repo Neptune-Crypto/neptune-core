@@ -6,6 +6,7 @@ use crate::api::export::BlockHeight;
 use crate::application::loops::main_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::MainToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;
+use crate::application::loops::sync_loop::status::Status;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::application::loops::sync_loop::PeerHandle;
 use crate::application::loops::sync_loop::SyncLoop;
@@ -20,6 +21,8 @@ pub(crate) struct SyncLoopHandle {
     task_join_handle: Option<JoinHandle<()>>,
     sender: Sender<MainToSync>,
     receiver: Receiver<SyncToMain>,
+    pub(crate) status: Status,
+    target_height: BlockHeight,
 }
 
 impl SyncLoopHandle {
@@ -28,6 +31,8 @@ impl SyncLoopHandle {
         target_height: BlockHeight,
         block_validator: BlockValidator,
     ) -> Self {
+        let status =
+            Status::new(target_height.value() - current_tip.header().height.next().value());
         let (state, sender, receiver) =
             SyncLoop::new(current_tip, target_height, false, block_validator)
                 .await
@@ -38,7 +43,13 @@ impl SyncLoopHandle {
             task_join_handle: None,
             sender,
             receiver,
+            status,
+            target_height,
         }
+    }
+
+    pub(crate) fn target_height(&self) -> BlockHeight {
+        self.target_height
     }
 
     pub(crate) fn start(&mut self) {
@@ -67,10 +78,12 @@ impl SyncLoopHandle {
         }
     }
 
-    pub(crate) async fn send_new_target(&self, target: Box<Block>) {
+    pub(crate) async fn send_new_target(&mut self, target: Box<Block>) {
+        let new_target_height = target.header().height;
         if let Err(e) = self.sender.send(MainToSync::ExtendChain(target)).await {
             tracing::error!("Failed to send new target block to sync loop: {e}.");
         }
+        self.target_height = new_target_height;
     }
 
     pub(crate) async fn send_add_peer(&self, peer: PeerHandle) {
@@ -118,6 +131,15 @@ impl SyncLoopHandle {
 
     pub(crate) async fn recv(&mut self) -> Option<SyncToMain> {
         self.receiver.recv().await
+    }
+
+    /// Wait on a received message, if there is a sync loop beneath this option.
+    pub(crate) async fn maybe_recv(maybe_sync_loop: &mut Option<Self>) -> Option<SyncToMain> {
+        if let Some(handle) = maybe_sync_loop {
+            handle.recv().await
+        } else {
+            None
+        }
     }
 }
 

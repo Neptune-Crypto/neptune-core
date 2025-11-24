@@ -456,6 +456,13 @@ where
             .await?;
     }
 
+    // If we are syncing, notify the peer loop that we have a new peer.
+    if state.lock_guard().await.net.sync_anchor.is_some() {
+        peer_task_to_main_tx
+            .send(PeerTaskToMain::NewPeer(peer_address))
+            .await?;
+    }
+
     let peer_distance = 1; // All incoming connections have distance 1
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
@@ -466,6 +473,7 @@ where
         peer_distance,
     );
 
+    // Run peer loop.
     peer_loop_handler
         .run_wrapper(peer, main_to_peer_task_rx)
         .await?;
@@ -622,6 +630,13 @@ where
         bail!("Attempted to connect to peer ({peer_address}) that was not allowed. This connection attempt should not have been made.");
     }
 
+    // If in sync mode, tell sync loop about new peer.
+    if state.lock_guard().await.net.sync_anchor.is_some() {
+        peer_task_to_main_tx
+            .send(PeerTaskToMain::NewPeer(peer_address))
+            .await?;
+    }
+
     // By default, start by asking the peer for its peers. In an adversarial
     // context, we want the network topology to be as robust as possible.
     // Blockchain data can be obtained from other peers, if this connection
@@ -630,7 +645,7 @@ where
 
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
-        state,
+        state.clone(),
         peer_address,
         *other_handshake,
         false,
@@ -638,6 +653,8 @@ where
     );
 
     info!("Established outgoing connection to {peer_address}");
+
+    // Run peer loop.
     peer_loop_handler
         .run_wrapper(peer, main_to_peer_task_rx)
         .await?;
@@ -681,10 +698,19 @@ pub(crate) async fn close_peer_connected_callback(
         .net
         .write_peer_standing_on_decrease(peer_address.ip(), new_standing)
         .await;
+    let sync_mode_is_active = global_state_mut.net.sync_anchor.is_some();
     drop(global_state_mut); // avoid holding across mpsc::Sender::send()
     debug!("Stored peer info standing {new_standing} for peer {peer_address}");
 
-    // This message is used to determine if we are to exit synchronization mode
+    // If in sync mode, tell sync loop about dropped peer.
+    if sync_mode_is_active {
+        to_main_tx
+            .send(PeerTaskToMain::DroppedPeer(peer_address))
+            .await
+            .expect("channel to main should exist");
+    }
+
+    // Update max block height tracker
     to_main_tx
         .send(PeerTaskToMain::RemovePeerMaxBlockHeight(peer_address))
         .await

@@ -6,7 +6,6 @@ use rand::RngCore;
 use tokio::fs;
 
 use crate::api::export::BlockHeight;
-use crate::application::loops::sync_loop::status::Status;
 use crate::application::loops::sync_loop::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
@@ -269,19 +268,6 @@ impl RapidBlockDownload {
         let block = bincode::deserialize(&data)
             .map_err(|e| RapidBlockDownloadError::Serialization(e.to_string()))?;
         Ok(block)
-    }
-
-    /// Sample a block height among blocks we still need to download.
-    ///
-    /// If we have already downloaded all the blocks we need, this function
-    /// returns `None`. Otherwise, it returns the sampled block height but
-    /// wrapped in a `Some`.
-    pub(crate) fn sample_missing_block_height(&self, seed: [u8; 32]) -> Option<BlockHeight> {
-        if self.coverage().is_complete() {
-            None
-        } else {
-            Some(self.coverage().sample(seed).into())
-        }
     }
 
     /// Read a block from the temp directory.

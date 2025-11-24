@@ -32,6 +32,8 @@ pub(crate) mod rapid_block_download;
 pub mod status;
 pub(crate) mod synchronization_bit_mask;
 
+pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 10;
+
 /// After this long without any response from anyone, the sync loop will
 /// terminate.
 const ANY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -75,13 +77,12 @@ impl SyncLoop {
         resume_if_possible: bool,
         block_validator: BlockValidator,
     ) -> Result<(Self, Sender<MainToSync>, Receiver<SyncToMain>), RapidBlockDownloadError> {
-        const CHANNEL_CAPACITY: usize = 10;
         let download_state =
             RapidBlockDownload::new(tip.header().height, target_height, resume_if_possible).await?;
         let (main_to_sync_sender, main_to_sync_receiver) =
-            mpsc::channel::<MainToSync>(CHANNEL_CAPACITY);
+            mpsc::channel::<MainToSync>(SYNC_LOOP_CHANNEL_CAPACITY);
         let (sync_to_main_sender, sync_to_main_receiver) =
-            mpsc::channel::<SyncToMain>(CHANNEL_CAPACITY);
+            mpsc::channel::<SyncToMain>(SYNC_LOOP_CHANNEL_CAPACITY);
         Ok((
             Self {
                 tip,
@@ -625,26 +626,15 @@ impl SyncLoop {
     }
 }
 
-#[derive(Debug, Clone)]
-enum SyncLoopReturnCode {
-    Finished { tip_height: BlockHeight },
-    Continue { tip_height: BlockHeight },
-}
-
-#[derive(Debug, Clone, thiserror::Error)]
-pub(crate) enum SyncLoopError {
-    #[error("RapidBlockDownloadError: {0}")]
-    RapidBlockDownloadError(RapidBlockDownloadError),
-    #[error("SendError: {0}")]
-    SendError(tokio::sync::mpsc::error::SendError<SyncToMain>),
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{net::Ipv6Addr, sync::Arc};
+    use std::net::Ipv6Addr;
+    use std::sync::Arc;
 
     use macro_rules_attr::apply;
-    use rand::{rngs::StdRng, RngCore, SeedableRng};
+    use rand::rngs::StdRng;
+    use rand::RngCore;
+    use rand::SeedableRng;
     use tokio::sync::Mutex;
 
     use crate::application::loops::sync_loop::handle::SyncLoopHandle;
@@ -730,10 +720,6 @@ mod tests {
 
         pub(crate) fn start_sync_loop(&mut self) {
             self.sync_loop_handle.start();
-        }
-
-        pub(crate) fn abort_sync_loop(&mut self) {
-            self.sync_loop_handle.abort();
         }
 
         pub(crate) fn take_sync_loop_join_handle(&mut self) -> Option<JoinHandle<()>> {

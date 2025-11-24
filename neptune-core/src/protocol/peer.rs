@@ -99,6 +99,7 @@ pub enum NegativePeerSanction {
     InvalidBlockProposal,
     NonFavorableBlockProposal,
     BlockProposalFromBlockedPeer,
+    RequestForUnknownBlock,
 
     UnwantedMessage,
 
@@ -141,6 +142,7 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::BatchBlocksInvalidStartHeight => {
                 "invalid start height of batch blocks"
             }
+            NegativePeerSanction::RequestForUnknownBlock => "request for unknown block",
             NegativePeerSanction::BatchBlocksUnknownRequest => "batch blocks unknown request",
             NegativePeerSanction::InvalidTransaction => "invalid transaction",
             NegativePeerSanction::UnconfirmableTransaction => "unconfirmable transaction",
@@ -203,14 +205,14 @@ impl Display for PositivePeerSanction {
 /// a value of this type for each connected peer.
 
 #[derive(Debug, Clone, Copy)]
-pub struct PeerSynchronizationState {
+pub struct ClaimedSynchronizationState {
     pub claimed_max_height: BlockHeight,
     pub(crate) claimed_max_pow: ProofOfWork,
     pub synchronization_start: SystemTime,
     pub last_request_received: Option<SystemTime>,
 }
 
-impl PeerSynchronizationState {
+impl ClaimedSynchronizationState {
     pub(crate) fn new(claimed_max_height: BlockHeight, claimed_max_pow: ProofOfWork) -> Self {
         Self {
             claimed_max_height,
@@ -248,6 +250,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
             NegativePeerSanction::BlockProposalNotFound => -1,
             NegativePeerSanction::InvalidBlockProposal => -10,
+            NegativePeerSanction::RequestForUnknownBlock => -5,
             NegativePeerSanction::UnwantedMessage => -1,
             NegativePeerSanction::NonFavorableBlockProposal => -1,
             NegativePeerSanction::BlockProposalFromBlockedPeer => -10,

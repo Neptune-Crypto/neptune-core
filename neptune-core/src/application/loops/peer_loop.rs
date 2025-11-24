@@ -373,18 +373,10 @@ impl PeerLoopHandler {
             .await
             .incoming_block_is_more_canonical(last_block);
         let last_block_height = last_block.header().height;
-        let sync_mode_active_and_have_new_champion = self
-            .global_state_lock
-            .lock_guard()
-            .await
-            .net
-            .sync_anchor
-            .as_ref()
-            .is_some_and(|x| x.incoming_block_is_new_champion(last_block_height));
-        if !is_canonical && !sync_mode_active_and_have_new_champion {
+        if !is_canonical {
             warn!(
                 "Received {} blocks from peer but incoming blocks are less \
-            canonical than current tip, or current sync-champion.",
+            canonical than current tip.",
                 received_blocks.len()
             );
             return Ok(None);
@@ -698,18 +690,31 @@ impl PeerLoopHandler {
             PeerMessage::BlockNotification(block_notification) => {
                 const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
 
-                let (tip_header, sync_anchor_is_set) = {
-                    let state = self.global_state_lock.lock_guard().await;
-                    (
-                        *state.chain.light_state().header(),
-                        state.net.sync_anchor.is_some(),
-                    )
-                };
+                let (tip_header, sync_anchor_height) =
+                    {
+                        let state = self.global_state_lock.lock_guard().await;
+                        (
+                            *state.chain.light_state().header(),
+                            state.net.sync_anchor.as_ref().and_then(|sync_anchor| {
+                                sync_anchor.champion.map(|(height, _)| height)
+                            }),
+                        )
+                    };
                 debug!(
                     "Got BlockNotification of height {}. Own height is {}",
                     block_notification.height, tip_header.height
                 );
 
+                // If announced block succeeds sync anchor, request it.
+                if sync_anchor_height
+                    .is_some_and(|height| height.next() == block_notification.height)
+                {
+                    peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Issue challenge if appropriate.
                 let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
                 let now = self.now();
                 let time_since_latest_successful_challenge = peer_state_info
@@ -717,13 +722,14 @@ impl PeerLoopHandler {
                     .map(|then| now - then);
                 let cooldown_expired = time_since_latest_successful_challenge
                     .is_none_or(|time_passed| time_passed > SYNC_CHALLENGE_COOLDOWN);
-                let exceeds_sync_mode_threshold = GlobalState::sync_mode_threshold_stateless(
-                    &tip_header,
-                    block_notification.height,
-                    block_notification.cumulative_proof_of_work,
-                    sync_mode_threshold,
-                );
-                if cooldown_expired && exceeds_sync_mode_threshold {
+                let claimed_height_and_pow_exceed_sync_mode_threshold =
+                    GlobalState::sync_mode_threshold_stateless(
+                        &tip_header,
+                        block_notification.height,
+                        block_notification.cumulative_proof_of_work,
+                        sync_mode_threshold,
+                    );
+                if cooldown_expired && claimed_height_and_pow_exceed_sync_mode_threshold {
                     debug!("sync mode criterion satisfied.");
 
                     if peer_state_info.sync_challenge.is_some() {
@@ -751,6 +757,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // If block is new, request it.
                 peer_state_info.highest_shared_block_height = block_notification.height;
                 let block_is_new = tip_header.cumulative_proof_of_work
                     < block_notification.cumulative_proof_of_work;
@@ -759,8 +766,8 @@ impl PeerLoopHandler {
 
                 if block_is_new
                     && peer_state_info.fork_reconciliation_blocks.is_empty()
-                    && !sync_anchor_is_set
-                    && !exceeds_sync_mode_threshold
+                    && sync_anchor_height.is_none()
+                    && !claimed_height_and_pow_exceed_sync_mode_threshold
                 {
                     debug!(
                         "sending BlockRequestByHeight to peer for block with height {}",
@@ -934,6 +941,17 @@ impl PeerLoopHandler {
 
                 match block {
                     None => {
+                        if self
+                            .global_state_lock
+                            .lock_guard()
+                            .await
+                            .net
+                            .sync_anchor
+                            .is_none()
+                        {
+                            self.punish(NegativePeerSanction::RequestForUnknownBlock)
+                                .await?;
+                        }
                         // TODO: Consider punishing here
                         warn!("Peer requested unknown block with hash {:x}", block_digest);
                         Ok(KEEP_CONNECTION_ALIVE)
@@ -1818,6 +1836,19 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            MainToPeerTask::RequestBlockByHeight {
+                peer_addr_target,
+                height,
+            } => {
+                // Only ask one of the peers about the batch of blocks
+                if peer_addr_target != self.peer_address {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                peer.send(PeerMessage::BlockRequestByHeight(height)).await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
             MainToPeerTask::PeerSynchronizationTimeout(socket_addr) => {
                 log_slow_scope!(fn_name!() + "::MainToPeerTask::PeerSynchronizationTimeout");
 
@@ -1874,6 +1905,12 @@ impl PeerLoopHandler {
                 ))
                 .await?;
                 debug!("Sent PeerMessage::BlockProposalNotification");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            MainToPeerTask::RequestBlockNotification => {
+                debug!("Sending PeerMessage::BlockNotificationRequest");
+                peer.send(PeerMessage::BlockNotificationRequest).await?;
+                debug!("Sent PeerMessage::BlockNotificationRequest");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
         }
