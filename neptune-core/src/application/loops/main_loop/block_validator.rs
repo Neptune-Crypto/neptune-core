@@ -20,10 +20,6 @@ pub(crate) enum BlockValidator {
 }
 
 impl BlockValidator {
-    pub(crate) fn production(network: Network) -> Self {
-        Self::Production { network }
-    }
-
     pub(crate) async fn verify(&self, successor: &Block, predecessor: &Block) -> bool {
         match self {
             BlockValidator::Production { network } => {

@@ -266,39 +266,6 @@ impl SynchronizationBitMask {
         }
     }
 
-    /// Decrease the upper bound.
-    ///
-    /// # Panics
-    ///
-    ///  - If the new upper bound is greater than the old.
-    pub(crate) fn shrink(mut self, new_upper_bound: u64) -> Self {
-        assert!(new_upper_bound <= self.upper_bound);
-
-        let new_lower_bound = u64::min(self.lower_bound, new_upper_bound);
-
-        let offset = new_lower_bound / 32;
-        let onset = new_upper_bound.saturating_sub(1) / 32;
-        let num_limbs = if new_lower_bound == new_upper_bound {
-            0
-        } else {
-            1_usize + usize::try_from(onset - offset).unwrap()
-        };
-
-        while self.limbs.len() > num_limbs {
-            self.limbs.pop_back();
-        }
-        if let Some(last) = self.limbs.back_mut() {
-            if !new_upper_bound.is_multiple_of(32) {
-                let shamt = 32 - (new_upper_bound % 32);
-                *last &= u32::MAX >> shamt;
-            }
-        }
-
-        self.upper_bound = new_upper_bound;
-        self.lower_bound = new_lower_bound;
-        self
-    }
-
     /// Determine whether the ith bit is set.
     ///
     /// # Panics
@@ -347,41 +314,6 @@ impl SynchronizationBitMask {
         self.limbs[limb_index - offset] |= mask;
 
         *self = self.clone().canonize();
-    }
-
-    /// Set bits min through max (ends inclusive).
-    ///
-    /// # Panics
-    ///
-    ///  - If either of the given indices is greater than the upper bound.
-    ///  - If max < min.
-    pub(crate) fn set_range(&mut self, min: u64, max: u64) {
-        assert!(max < self.upper_bound);
-        assert!(min < self.upper_bound);
-        assert!(max >= min);
-        let first_full_limb = min.div_ceil(32);
-        let first_index_in_full_limb = min.div_ceil(32) * 32;
-        let successor_of_last_full_limb = max / 32;
-        let first_index_after_last_full_limb = successor_of_last_full_limb * 32;
-        let offset = usize::try_from(self.lower_bound / 32).unwrap();
-
-        for limb_i in first_full_limb..successor_of_last_full_limb {
-            self.limbs[limb_i as usize - offset] = u32::MAX;
-        }
-        for index in min..u64::min(max, first_index_in_full_limb) {
-            self.set(index);
-        }
-        for index in u64::max(min, first_index_after_last_full_limb)..=max {
-            self.set(index);
-        }
-    }
-
-    /// Return the vector of indices of set bits in between lower bound and
-    /// upper bound.
-    pub(crate) fn to_vec(&self) -> Vec<u64> {
-        (self.lower_bound..self.upper_bound)
-            .filter(|i| self.contains(*i))
-            .collect_vec()
     }
 
     /// Return the vector of indices of unset bits in between lower bound and
@@ -469,11 +401,6 @@ impl SynchronizationBitMask {
         }
         pop_count
     }
-
-    /// The difference between upper and lower bounds.
-    pub(crate) fn distance(&self) -> u64 {
-        self.upper_bound - self.lower_bound
-    }
 }
 
 #[cfg(test)]
@@ -526,6 +453,66 @@ pub mod test {
                 limbs,
             }
             .canonize()
+        }
+
+        /// Decrease the upper bound.
+        ///
+        /// # Panics
+        ///
+        ///  - If the new upper bound is greater than the old.
+        pub(crate) fn shrink(mut self, new_upper_bound: u64) -> Self {
+            assert!(new_upper_bound <= self.upper_bound);
+
+            let new_lower_bound = u64::min(self.lower_bound, new_upper_bound);
+
+            let offset = new_lower_bound / 32;
+            let onset = new_upper_bound.saturating_sub(1) / 32;
+            let num_limbs = if new_lower_bound == new_upper_bound {
+                0
+            } else {
+                1_usize + usize::try_from(onset - offset).unwrap()
+            };
+
+            while self.limbs.len() > num_limbs {
+                self.limbs.pop_back();
+            }
+            if let Some(last) = self.limbs.back_mut() {
+                if !new_upper_bound.is_multiple_of(32) {
+                    let shamt = 32 - (new_upper_bound % 32);
+                    *last &= u32::MAX >> shamt;
+                }
+            }
+
+            self.upper_bound = new_upper_bound;
+            self.lower_bound = new_lower_bound;
+            self
+        }
+
+        /// Set bits min through max (ends inclusive).
+        ///
+        /// # Panics
+        ///
+        ///  - If either of the given indices is greater than the upper bound.
+        ///  - If max < min.
+        pub(crate) fn set_range(&mut self, min: u64, max: u64) {
+            assert!(max < self.upper_bound);
+            assert!(min < self.upper_bound);
+            assert!(max >= min);
+            let first_full_limb = min.div_ceil(32);
+            let first_index_in_full_limb = min.div_ceil(32) * 32;
+            let successor_of_last_full_limb = max / 32;
+            let first_index_after_last_full_limb = successor_of_last_full_limb * 32;
+            let offset = usize::try_from(self.lower_bound / 32).unwrap();
+
+            for limb_i in first_full_limb..successor_of_last_full_limb {
+                self.limbs[limb_i as usize - offset] = u32::MAX;
+            }
+            for index in min..u64::min(max, first_index_in_full_limb) {
+                self.set(index);
+            }
+            for index in u64::max(min, first_index_after_last_full_limb)..=max {
+                self.set(index);
+            }
         }
     }
 

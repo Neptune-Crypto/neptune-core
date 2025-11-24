@@ -31,6 +31,11 @@ pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
     BlockProposalNotification(BlockProposalNotification),
     RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
+    RequestBlockByHeight {
+        peer_addr_target: SocketAddr,
+        height: BlockHeight,
+    },
+    RequestBlockNotification,
 
     /// sanction a peer for failing to respond to sync request
     PeerSynchronizationTimeout(SocketAddr),
@@ -56,6 +61,7 @@ impl MainToPeerTask {
         match self {
             MainToPeerTask::Block(_) => "block",
             MainToPeerTask::RequestBlockBatch(_) => "req block batch",
+            MainToPeerTask::RequestBlockByHeight { .. } => "req block by height",
             MainToPeerTask::PeerSynchronizationTimeout(_) => "peer sync timeout",
             MainToPeerTask::MakePeerDiscoveryRequest => "make peer discovery req",
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => {
@@ -65,6 +71,7 @@ impl MainToPeerTask {
             MainToPeerTask::Disconnect(_) => "disconnect",
             MainToPeerTask::DisconnectAll() => "disconnect all",
             MainToPeerTask::BlockProposalNotification(_) => "block proposal notification",
+            MainToPeerTask::RequestBlockNotification => "request for block notification",
         }
         .to_string()
     }
@@ -76,12 +83,14 @@ impl MainToPeerTask {
             MainToPeerTask::Block(_) => true,
             MainToPeerTask::BlockProposalNotification(_) => true,
             MainToPeerTask::RequestBlockBatch(_) => true,
+            MainToPeerTask::RequestBlockByHeight { .. } => true,
             MainToPeerTask::PeerSynchronizationTimeout(_) => true,
             MainToPeerTask::MakePeerDiscoveryRequest => false,
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => false,
             MainToPeerTask::TransactionNotification(_) => true,
             MainToPeerTask::Disconnect(_) => false,
             MainToPeerTask::DisconnectAll() => false,
+            MainToPeerTask::RequestBlockNotification => false,
         }
     }
 }
@@ -108,6 +117,8 @@ pub(crate) enum PeerTaskToMain {
     DisconnectFromLongestLivedPeer,
     NewSyncTarget(Box<Block>),
     NewSyncBlock(Box<Block>, SocketAddr),
+    NewPeer(SocketAddr),
+    DroppedPeer(SocketAddr),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,8 +137,10 @@ impl PeerTaskToMain {
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
             PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
-            PeerTaskToMain::NewSyncTarget(block) => "new sync target",
-            PeerTaskToMain::NewSyncBlock(block, socket_addr) => "new sync block",
+            PeerTaskToMain::NewSyncTarget(_block) => "new sync target",
+            PeerTaskToMain::NewSyncBlock(_block, _socket_addr) => "new sync block",
+            PeerTaskToMain::NewPeer(_) => "new peer",
+            PeerTaskToMain::DroppedPeer(_) => "dropped peer",
         }
         .to_string()
     }
