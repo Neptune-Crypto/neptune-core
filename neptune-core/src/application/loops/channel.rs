@@ -1,11 +1,9 @@
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use futures::channel::oneshot;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::protocol::consensus::block::block_height::BlockHeight;
