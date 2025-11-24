@@ -20,6 +20,7 @@ use crate::protocol::proof_abstractions::SecretWitness;
 pub mod block_primitive_witness;
 pub mod block_program;
 pub mod block_proof_witness;
+pub mod block_validity;
 pub mod coinbase_is_valid;
 pub mod correct_control_parameter_update;
 pub mod correct_mmr_update;

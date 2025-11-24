@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use tasm_lib::io::InputSource;
 use tasm_lib::prelude::*;
 use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -14,6 +15,9 @@ use super::environment::PROGRAM_DIGEST;
 use super::environment::PUB_INPUT;
 use super::environment::PUB_OUTPUT;
 use crate::protocol::proof_abstractions::tasm::environment::ND_DIGESTS;
+
+pub(crate) type U192 = [u32; 6];
+pub(crate) type U160 = [u32; 5];
 
 /// Get the hash digest of the program that's currently running.
 pub fn own_program_digest() -> Digest {
@@ -74,6 +78,34 @@ pub fn tasmlib_io_read_stdin___u128() -> u128 {
         .try_into()
         .unwrap();
     (u128::from(e3) << 96) + (u128::from(e2) << 64) + (u128::from(e1) << 32) + u128::from(e0)
+}
+
+fn read_big_unsigned<const N: usize>(input_source: InputSource) -> [u32; N] {
+    let input_source = match input_source {
+        InputSource::StdIn => &PUB_INPUT,
+        InputSource::SecretIn => &ND_INDIVIDUAL_TOKEN,
+    };
+
+    let mut ret = [0; N];
+
+    for i in 0..N {
+        ret[N - i - 1] = input_source
+            .with(|v| v.borrow_mut().pop_front().unwrap())
+            .try_into()
+            .unwrap();
+    }
+
+    ret
+}
+
+#[expect(non_snake_case)]
+pub fn tasmlib_io_read_stdin___u160() -> U160 {
+    read_big_unsigned(InputSource::StdIn)
+}
+
+#[expect(non_snake_case)]
+pub fn tasmlib_io_read_stdin___u192() -> U192 {
+    read_big_unsigned(InputSource::StdIn)
 }
 
 #[expect(non_snake_case)]
@@ -162,6 +194,16 @@ pub fn tasmlib_io_read_secin___u64() -> u64 {
         .try_into()
         .unwrap();
     (u64::from(hi) << 32) + u64::from(lo)
+}
+
+#[expect(non_snake_case)]
+pub fn tasmlib_io_read_secin___u160() -> U160 {
+    read_big_unsigned(InputSource::SecretIn)
+}
+
+#[expect(non_snake_case)]
+pub fn tasmlib_io_read_secin___u192() -> U192 {
+    read_big_unsigned(InputSource::SecretIn)
 }
 
 #[expect(non_snake_case)]
