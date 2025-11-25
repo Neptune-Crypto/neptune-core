@@ -37,7 +37,7 @@ pub(crate) struct SyncAnchor {
     pub(crate) block_mmr: MmrAccumulator,
 
     /// Indicates the block that we have currently synced to under this anchor.
-    pub(crate) champion: Option<(BlockHeight, Digest)>,
+    pub(crate) champion: (BlockHeight, Digest),
 
     /// The last time this anchor was either created or updated.
     pub(crate) updated: SystemTime,
@@ -50,12 +50,14 @@ impl SyncAnchor {
     pub(crate) fn new(
         claimed_cumulative_pow: ProofOfWork,
         claimed_block_mmra: MmrAccumulator,
+        claimed_height: BlockHeight,
+        claimed_block_digest: Digest,
     ) -> Self {
         let status = SyncProgress::new(claimed_block_mmra.num_leafs());
         Self {
             cumulative_proof_of_work: claimed_cumulative_pow,
             block_mmr: claimed_block_mmra,
-            champion: None,
+            champion: (claimed_height, claimed_block_digest),
             updated: SystemTime::now(),
             status,
         }
@@ -69,27 +71,19 @@ impl SyncAnchor {
         &self,
         incoming_block_height: BlockHeight,
     ) -> bool {
-        self.champion
-            .is_none_or(|(block_height, _)| block_height < incoming_block_height)
+        self.champion.0 < incoming_block_height
     }
 
     /// Modify the sync anchor to point to the new incoming block, if its height
     /// is larger.
     pub(crate) fn catch_up(&mut self, height: BlockHeight, block_hash: Digest) {
-        let new_champion = Some((height, block_hash));
-        let updated = SystemTime::now();
-        match self.champion {
-            Some((current_height, _)) => {
-                if current_height < height {
-                    self.champion = new_champion;
-                    self.updated = updated;
-                }
-            }
-            None => {
-                self.champion = new_champion;
-                self.updated = updated;
-            }
-        };
+        let new_champion = (height, block_hash);
+        let now = SystemTime::now();
+
+        if self.champion.0 <= new_champion.0 {
+            self.champion = new_champion;
+            self.updated = now;
+        }
     }
 }
 

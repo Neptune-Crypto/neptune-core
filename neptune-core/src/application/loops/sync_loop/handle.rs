@@ -28,11 +28,16 @@ impl SyncLoopHandle {
         current_tip: Block,
         target_height: BlockHeight,
         block_validator: BlockValidator,
+        resume_if_possible: bool,
     ) -> Self {
-        let (state, sender, receiver) =
-            SyncLoop::new(current_tip, target_height, false, block_validator)
-                .await
-                .unwrap();
+        let (state, sender, receiver) = SyncLoop::new(
+            current_tip,
+            target_height,
+            resume_if_possible,
+            block_validator,
+        )
+        .await
+        .unwrap();
 
         Self {
             task_state: Some(state),

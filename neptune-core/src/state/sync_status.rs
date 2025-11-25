@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "mock-rpc", derive(strum::EnumCount))]
 pub enum SyncStatus {
     #[default]
