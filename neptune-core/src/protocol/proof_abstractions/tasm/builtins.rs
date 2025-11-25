@@ -59,8 +59,12 @@ pub fn tasmlib_io_read_stdin___u64() -> u64 {
     (u64::from(hi) << 32) + u64::from(lo)
 }
 
-#[expect(non_snake_case)]
-pub fn tasmlib_io_read_stdin___u128() -> u128 {
+fn read_u128(input_source: InputSource) -> u128 {
+    let input_source = match input_source {
+        InputSource::StdIn => &PUB_INPUT,
+        InputSource::SecretIn => &ND_INDIVIDUAL_TOKEN,
+    };
+
     let e3: u32 = PUB_INPUT
         .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
@@ -78,6 +82,11 @@ pub fn tasmlib_io_read_stdin___u128() -> u128 {
         .try_into()
         .unwrap();
     (u128::from(e3) << 96) + (u128::from(e2) << 64) + (u128::from(e1) << 32) + u128::from(e0)
+}
+
+#[expect(non_snake_case)]
+pub fn tasmlib_io_read_stdin___u128() -> u128 {
+    read_u128(InputSource::StdIn)
 }
 
 fn read_big_unsigned<const N: usize>(input_source: InputSource) -> [u32; N] {
@@ -194,6 +203,11 @@ pub fn tasmlib_io_read_secin___u64() -> u64 {
         .try_into()
         .unwrap();
     (u64::from(hi) << 32) + u64::from(lo)
+}
+
+#[expect(non_snake_case)]
+pub fn tasmlib_io_read_secin___u128() -> u128 {
+    read_u128(InputSource::SecretIn)
 }
 
 #[expect(non_snake_case)]

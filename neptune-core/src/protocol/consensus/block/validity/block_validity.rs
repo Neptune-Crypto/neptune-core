@@ -9,6 +9,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 
+use crate::api::export::NativeCurrencyAmount;
 use crate::protocol::consensus::block::block_body::BlockBody;
 use crate::protocol::consensus::block::block_body::BlockBodyField;
 use crate::protocol::consensus::block::block_header::BlockHeader;
@@ -17,6 +18,7 @@ use crate::protocol::consensus::block::block_kernel::BlockKernelField;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockField;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
@@ -34,6 +36,7 @@ struct BlockValidityWitnessMemory {
     parent_block_mmra: MmrAccumulator,
     current_block_mmra: MmrAccumulator,
     mmr_sucessor_proof: MmrSuccessorProof,
+    current_coinbase: Option<NativeCurrencyAmount>,
 }
 
 impl From<&BlockValidityWitness> for BlockValidityWitnessMemory {
@@ -48,6 +51,7 @@ impl From<&BlockValidityWitness> for BlockValidityWitnessMemory {
             parent_block_mmra,
             current_block_mmra,
             mmr_sucessor_proof,
+            current_coinbase: value.current_body.transaction_kernel.coinbase,
         }
     }
 }
@@ -117,6 +121,7 @@ impl SecretWitness for BlockValidityWitness {
             parent_difficulty,
             parent_cum_pow,
             parent_body_digest,
+            vec![current_body.transaction_kernel.timestamp.0],
         ]
         .concat();
 
@@ -155,6 +160,19 @@ impl SecretWitness for BlockValidityWitness {
 
         VerifyMmrSuccessor::update_nondeterminism(&mut nd, &witness_in_memory.mmr_sucessor_proof);
 
+        nd.digests
+            .extend_from_slice(&current_body.mast_path(BlockBodyField::TransactionKernel));
+        nd.digests.extend_from_slice(
+            &current_body
+                .transaction_kernel
+                .mast_path(TransactionKernelField::Timestamp),
+        );
+        nd.digests.extend_from_slice(
+            &current_body
+                .transaction_kernel
+                .mast_path(TransactionKernelField::Coinbase),
+        );
+
         nd
     }
 }
@@ -177,9 +195,11 @@ impl ConsensusProgram for BlockValidity {
 
 #[cfg(test)]
 mod tests {
+    use num_traits::Zero;
     use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::*;
+    use crate::api::export::BlockHeight;
     use crate::api::export::Network;
     use crate::api::export::Timestamp;
     use crate::protocol::consensus::block::block_body::BlockBodyField;
@@ -190,6 +210,10 @@ mod tests {
     use crate::protocol::consensus::block::difficulty_control::difficulty_control;
     use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
     use crate::protocol::consensus::block::BlockField;
+    use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
+    use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
     use crate::protocol::proof_abstractions::mast_hash::MastHash;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::builtins::decode_from_memory;
@@ -223,7 +247,7 @@ mod tests {
         fn validate_mimicker(&self) -> Result<(), BlockValidationError> {
             // Network parameters are assumed to match main net's
             let network = Network::Main;
-            let minimum_block_time = network.minimum_block_time().to_millis();
+            let minimum_block_interval = network.minimum_block_time().to_millis();
             let target_block_interval = network.target_block_interval();
 
             let current_version: BFieldElement = tasm::tasmlib_io_read_stdin___bfe();
@@ -276,7 +300,7 @@ mod tests {
             );
 
             // Use Triton VM's "split" to get a u64 representation of timestamp
-            if current_timestamp.value() < parent_timestamp.value() + minimum_block_time {
+            if current_timestamp.value() < parent_timestamp.value() + minimum_block_interval {
                 return Err(BlockValidationError::MinimumBlockTime);
             }
 
@@ -368,6 +392,57 @@ mod tests {
 
             // Extra sanity check on height/block MMR relationship.
             assert!(current_block_mmra.num_leafs() == current_height.value());
+
+            /* 2: Transaction validation */
+
+            // 2.f)
+            /* Verify block timestamp >= tx timestamp */
+            println!("Verify current_tx_kernel_digest");
+            let current_tx_kernel_digest = tasm::tasmlib_io_read_secin___digest();
+            tasm::tasmlib_hashing_merkle_verify(
+                current_body_digest,
+                BlockBodyField::TransactionKernel as u32,
+                Tip5::hash(&current_tx_kernel_digest),
+                BlockBody::MAST_HEIGHT as u32,
+            );
+
+            println!("Verify current_tx_timestamp");
+            let current_tx_timestamp = tasm::tasmlib_io_read_secin___bfe();
+            tasm::tasmlib_hashing_merkle_verify(
+                current_tx_kernel_digest,
+                TransactionKernelField::Timestamp as u32,
+                Tip5::hash(&current_tx_timestamp),
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+
+            if current_tx_timestamp.value() > current_timestamp.value() {
+                return Err(BlockValidationError::TransactionTimestamp);
+            }
+
+            let current_height: BlockHeight = current_height.into();
+            let current_generation = current_height.get_generation();
+            let block_subsidy = INITIAL_BLOCK_SUBSIDY.to_nau() >> current_generation;
+
+            println!("Verify current_coinbase");
+            let current_coinbase = memory_witness.current_coinbase;
+            tasm::tasmlib_hashing_merkle_verify(
+                current_tx_kernel_digest,
+                TransactionKernelField::Coinbase as u32,
+                Tip5::hash(&current_coinbase),
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+            let current_coinbase = current_coinbase.unwrap_or(NativeCurrencyAmount::zero());
+            if current_coinbase.is_negative() {
+                return Err(BlockValidationError::NegativeCoinbase);
+            }
+
+            if current_coinbase.to_nau() > block_subsidy {
+                return Err(BlockValidationError::CoinbaseTooBig);
+            }
+
+            // 2.j)
+            // 2.k)
+            // 2.l)
 
             Ok(())
         }
