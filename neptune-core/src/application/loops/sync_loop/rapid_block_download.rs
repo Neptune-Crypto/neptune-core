@@ -50,6 +50,7 @@ impl RapidBlockDownload {
         let temp_directory = match Self::try_resume_directory(resume_if_possible).await {
             Some(d) => d,
             None => {
+                tracing::debug!("No existing temp directory for syncing found, creating new one.");
                 let temp_directory = Self::temp_dir().join(format!("{}/", rng().next_u64()));
                 tokio::fs::create_dir_all(&temp_directory)
                     .await
