@@ -458,6 +458,9 @@ where
 
     // If we are syncing, notify the peer loop that we have a new peer.
     if state.lock_guard().await.net.sync_anchor.is_some() {
+        debug!(
+            "We are syncing, so sending information about new peer {peer_address} to sync loop."
+        );
         peer_task_to_main_tx
             .send(PeerTaskToMain::NewPeer(peer_address))
             .await?;
@@ -632,6 +635,7 @@ where
 
     // If in sync mode, tell sync loop about new peer.
     if state.lock_guard().await.net.sync_anchor.is_some() {
+        debug!("We are syncing, so tell the sync loop about the new peer.");
         peer_task_to_main_tx
             .send(PeerTaskToMain::NewPeer(peer_address))
             .await?;
@@ -709,12 +713,6 @@ pub(crate) async fn close_peer_connected_callback(
             .await
             .expect("channel to main should exist");
     }
-
-    // Update max block height tracker
-    to_main_tx
-        .send(PeerTaskToMain::RemovePeerMaxBlockHeight(peer_address))
-        .await
-        .expect("channel to main task should exist");
 }
 
 #[cfg(test)]

@@ -15,7 +15,6 @@ use itertools::Itertools;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
-use rand::seq::IndexedRandom;
 use tasm_lib::prelude::Digest;
 use tokio::net::TcpListener;
 use tokio::select;
@@ -44,7 +43,6 @@ use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProo
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
-use crate::application::loops::peer_loop::channel::MainToPeerTaskBatchBlockRequest;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::SyncToMain;
@@ -55,15 +53,12 @@ use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::transaction_notification::TransactionNotification;
-use crate::protocol::peer::ClaimedSynchronizationState;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
@@ -82,17 +77,6 @@ const MEMPOOL_PRUNE_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const MP_RESYNC_INTERVAL: Duration = Duration::from_secs(59);
 const PROOF_UPGRADE_INTERVAL: Duration = Duration::from_secs(10);
 const EXPECTED_UTXOS_PRUNE_INTERVAL: Duration = Duration::from_secs(19 * 60);
-
-const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
-
-/// Number of seconds within which an individual peer is expected to respond
-/// to a synchronization request.
-const INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT: Duration =
-    Duration::from_secs(SYNC_REQUEST_INTERVAL.as_secs() * SANCTION_PEER_TIMEOUT_FACTOR);
-
-/// Number of seconds that a synchronization may run without any progress.
-const GLOBAL_SYNCHRONIZATION_TIMEOUT: Duration =
-    Duration::from_secs(INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT.as_secs() * 4);
 
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 pub(crate) const MAX_NUM_DIGESTS_IN_BATCH_REQUEST: usize = 200;
@@ -154,9 +138,6 @@ struct MutableMainLoopState {
     /// order.
     maybe_sync_loop: Option<SyncLoopHandle>,
 
-    /// Information used to batch-download blocks.
-    sync_state: SyncState,
-
     /// Information about potential peers for new connections.
     potential_peers: PotentialPeersState,
 
@@ -180,74 +161,11 @@ impl MutableMainLoopState {
             mpsc::channel::<Vec<MempoolUpdateJobResult>>(TX_UPDATER_CHANNEL_CAPACITY);
         Self {
             maybe_sync_loop: None,
-            sync_state: SyncState::default(),
             potential_peers: PotentialPeersState::default(),
             task_handles,
             proof_upgrader_task: None,
             update_mempool_txs_handle: None,
             update_mempool_receiver: dummy_receiver,
-        }
-    }
-}
-
-/// handles batch-downloading of blocks if we are more than n blocks behind
-#[derive(Default, Debug)]
-struct SyncState {
-    peer_sync_states: HashMap<SocketAddr, ClaimedSynchronizationState>,
-    last_sync_request: Option<(SystemTime, BlockHeight, SocketAddr)>,
-}
-
-impl SyncState {
-    fn record_request(
-        &mut self,
-        requested_block_height: BlockHeight,
-        peer: SocketAddr,
-        now: SystemTime,
-    ) {
-        self.last_sync_request = Some((now, requested_block_height, peer));
-    }
-
-    /// Return a list of peers that have reported to be in possession of blocks
-    /// with a PoW above a threshold.
-    fn get_potential_peers_for_sync_request(&self, threshold_pow: ProofOfWork) -> Vec<SocketAddr> {
-        self.peer_sync_states
-            .iter()
-            .filter(|(_sa, sync_state)| sync_state.claimed_max_pow > threshold_pow)
-            .map(|(sa, _)| *sa)
-            .collect()
-    }
-
-    /// Determine if a peer should be sanctioned for failing to respond to a
-    /// synchronization request fast enough. Also determine if a new request
-    /// should be made or the previous one should be allowed to run for longer.
-    ///
-    /// Returns (peer to be sanctioned, attempt new request).
-    fn get_status_of_last_request(
-        &self,
-        current_block_height: BlockHeight,
-        now: SystemTime,
-    ) -> (Option<SocketAddr>, bool) {
-        // A peer is sanctioned if no answer has been received after N times the sync request
-        // interval.
-        match self.last_sync_request {
-            None => {
-                // No sync request has been made since startup of program
-                (None, true)
-            }
-            Some((req_time, requested_height, peer_sa)) => {
-                if requested_height < current_block_height {
-                    // The last sync request updated the state
-                    (None, true)
-                } else if req_time + INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT < now {
-                    // The last sync request was not answered, sanction peer
-                    // and make a new sync request.
-                    (Some(peer_sa), true)
-                } else {
-                    // The last sync request has not yet been answered. But it has
-                    // not timed out yet.
-                    (None, false)
-                }
-            }
         }
     }
 }
@@ -829,11 +747,15 @@ impl MainLoopHandler {
                         return Ok(());
                     }
 
+                    // Report.
                     info!(
                         "Last block from peer is new canonical tip: {:x}; height: {}",
                         last_block.hash(),
                         last_block.header().height
                     );
+
+                    // Update status.
+                    global_state_mut.net.sync_status = SyncStatus::Synced;
 
                     // Ask miner to stop work until state update is completed
                     self.main_to_miner_tx.send(MainToMiner::WaitForContinue);
@@ -895,15 +817,14 @@ impl MainLoopHandler {
                 claimed_height,
                 claimed_cumulative_pow,
                 claimed_block_mmra,
+                claimed_block_digest,
             } => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::AddPeerMaxBlockHeight");
 
-                let claimed_state =
-                    ClaimedSynchronizationState::new(claimed_height, claimed_cumulative_pow);
-                main_loop_state
-                    .sync_state
-                    .peer_sync_states
-                    .insert(peer_address, claimed_state);
+                // If we are already in sync mode, do nothing.
+                if main_loop_state.maybe_sync_loop.is_some() {
+                    return Ok(());
+                }
 
                 // Check if synchronization mode should be activated.
                 // Synchronization mode is entered if accumulated PoW exceeds
@@ -923,16 +844,22 @@ impl MainLoopHandler {
                     );
 
                     // Set sync anchor.
-                    global_state_mut.net.sync_anchor =
-                        Some(SyncAnchor::new(claimed_cumulative_pow, claimed_block_mmra));
+                    global_state_mut.net.sync_anchor = Some(SyncAnchor::new(
+                        claimed_cumulative_pow,
+                        claimed_block_mmra,
+                        claimed_height,
+                        claimed_block_digest,
+                    ));
 
                     // Create sync loop with handle.
                     let network = global_state_mut.cli().network;
                     let current_tip = global_state_mut.chain.light_state().clone();
+                    let resume_please = true;
                     let mut sync_loop = SyncLoopHandle::new(
                         current_tip,
                         claimed_height,
                         BlockValidator::Production { network },
+                        resume_please,
                     )
                     .await;
                     sync_loop.start();
@@ -956,18 +883,6 @@ impl MainLoopHandler {
                     // Pause miner.
                     self.main_to_miner_tx.send(MainToMiner::StartSyncing);
                 }
-            }
-            PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
-                log_slow_scope!(fn_name!() + "::PeerTaskToMain::RemovePeerMaxBlockHeight");
-
-                debug!(
-                    "Removing max block height from sync data structure for peer {}",
-                    socket_addr
-                );
-                main_loop_state
-                    .sync_state
-                    .peer_sync_states
-                    .remove(&socket_addr);
             }
             PeerTaskToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::PeerDiscoveryAnswer");
@@ -1337,161 +1252,6 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// Return a list of block heights for a block-batch request.
-    ///
-    /// Returns an ordered list of the heights of *most preferred block*
-    /// to build on, where current tip is always the most preferred block.
-    ///
-    /// Uses a factor to ensure that the peer will always have something to
-    /// build on top of by providing potential starting points all the way
-    /// back to genesis.
-    fn batch_request_uca_candidate_heights(own_tip_height: BlockHeight) -> Vec<BlockHeight> {
-        const FACTOR: f64 = 1.07f64;
-
-        let mut look_behind = 0;
-        let mut ret = vec![];
-
-        // A factor of 1.07 can look back ~1m blocks in 200 digests.
-        while ret.len() < MAX_NUM_DIGESTS_IN_BATCH_REQUEST - 1 {
-            let height = match own_tip_height.checked_sub(look_behind) {
-                None => break,
-                Some(height) if height.is_genesis() => break,
-                Some(height) => height,
-            };
-
-            ret.push(height);
-            look_behind = ((look_behind as f64 + 1.0) * FACTOR).floor() as u64;
-        }
-
-        ret.push(BlockHeight::genesis());
-
-        ret
-    }
-
-    /// Logic for requesting the batch-download of blocks from peers
-    ///
-    /// Locking:
-    ///   * acquires `global_state_lock` for read
-    async fn block_sync(&mut self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
-        let global_state = self.global_state_lock.lock_guard().await;
-
-        // Check if we are in sync mode
-        let Some(anchor) = &global_state.net.sync_anchor else {
-            return Ok(());
-        };
-
-        debug!("Running sync");
-
-        let (own_tip_hash, own_tip_height, own_cumulative_pow) = (
-            global_state.chain.light_state().hash(),
-            global_state.chain.light_state().kernel.header.height,
-            global_state
-                .chain
-                .light_state()
-                .kernel
-                .header
-                .cumulative_proof_of_work,
-        );
-
-        // Check if sync mode has timed out entirely, in which case it should
-        // be abandoned.
-        let anchor = anchor.to_owned();
-        if self.now().duration_since(anchor.updated)? > GLOBAL_SYNCHRONIZATION_TIMEOUT {
-            warn!("Sync mode has timed out. Abandoning sync mode.");
-
-            // Abandon attempt, and punish all peers claiming to serve these
-            // blocks.
-            drop(global_state);
-            self.global_state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .sync_anchor = None;
-
-            let peers_to_punish = main_loop_state
-                .sync_state
-                .get_potential_peers_for_sync_request(own_cumulative_pow);
-
-            for peer in peers_to_punish {
-                let pmsg = MainToPeerTask::PeerSynchronizationTimeout(peer);
-                self.main_to_peer_broadcast(pmsg);
-            }
-
-            return Ok(());
-        }
-
-        let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
-            .sync_state
-            .get_status_of_last_request(own_tip_height, self.now());
-
-        // Sanction peer if they failed to respond
-        if let Some(peer) = peer_to_sanction {
-            let pmsg = MainToPeerTask::PeerSynchronizationTimeout(peer);
-            self.main_to_peer_broadcast(pmsg);
-        }
-
-        if !try_new_request {
-            debug!("Waiting for last sync to complete.");
-            return Ok(());
-        }
-
-        // Create the next request from the reported
-        info!("Creating new sync request");
-
-        // Pick a random peer that has reported to have relevant blocks
-        let candidate_peers = main_loop_state
-            .sync_state
-            .get_potential_peers_for_sync_request(own_cumulative_pow);
-        let chosen_peer = candidate_peers.choose(&mut rand::rng());
-        assert!(
-            chosen_peer.is_some(),
-            "A synchronization candidate must be available for a request. \
-            Otherwise, the data structure is in an invalid state and syncing should not be active"
-        );
-
-        let ordered_preferred_block_digests = match anchor.champion {
-            Some((_height, digest)) => vec![digest],
-            None => {
-                // Find candidate-UCA digests based on a sparse distribution of
-                // block heights skewed towards own tip height
-                let request_heights = Self::batch_request_uca_candidate_heights(own_tip_height);
-                let mut ordered_preferred_block_digests = vec![];
-                for height in request_heights {
-                    let digest = global_state
-                        .chain
-                        .archival_state()
-                        .archival_block_mmr
-                        .ammr()
-                        .get_leaf_async(height.into())
-                        .await;
-                    ordered_preferred_block_digests.push(digest);
-                }
-                ordered_preferred_block_digests
-            }
-        };
-
-        // Send message to the relevant peer loop to request the blocks
-        let chosen_peer = chosen_peer.unwrap();
-        info!(
-            "Sending block batch request to {}\nrequesting blocks descending from {:x}\n height {}",
-            chosen_peer, own_tip_hash, own_tip_height
-        );
-        let pmsg = MainToPeerTask::RequestBlockBatch(MainToPeerTaskBatchBlockRequest {
-            peer_addr_target: *chosen_peer,
-            known_blocks: ordered_preferred_block_digests,
-            anchor_mmr: anchor.block_mmr.clone(),
-        });
-        self.main_to_peer_broadcast(pmsg);
-
-        // Record that this request was sent to the peer
-        let requested_block_height = own_tip_height.next();
-        main_loop_state
-            .sync_state
-            .record_request(requested_block_height, *chosen_peer, self.now());
-
-        Ok(())
-    }
-
     /// Scheduled task for upgrading the proofs of transactions in the mempool.
     ///
     /// Will either perform a merge of two transactions supported with single
@@ -1840,13 +1600,13 @@ impl MainLoopHandler {
                     }
                 }
 
-                // Handle synchronization (i.e. batch-downloading of blocks)
-                _ = block_sync_interval.tick() => {
-                    log_slow_scope!(fn_name!() + "::select::block_sync_interval");
+                // // Handle synchronization (i.e. batch-downloading of blocks)
+                // _ = block_sync_interval.tick() => {
+                //     log_slow_scope!(fn_name!() + "::select::block_sync_interval");
 
-                    trace!("Timer: block-synchronization job");
-                    self.block_sync(&mut main_loop_state).await?;
-                }
+                //     trace!("Timer: block-synchronization job");
+                //     self.block_sync(&mut main_loop_state).await?;
+                // }
 
                 // Clean up mempool: remove stale / too old transactions
                 _ = mempool_cleanup_interval.tick() => {
@@ -2549,145 +2309,9 @@ mod tests {
         }
     }
 
-    mod sync_mode {
-        use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-        use test_strategy::proptest;
-
-        use super::*;
-        use crate::tests::shared::globalstate::get_dummy_socket_address;
-
-        #[proptest]
-        fn batch_request_heights_prop(#[strategy(0u64..100_000_000_000)] own_height: u64) {
-            batch_request_heights_sanity(own_height);
-        }
-
-        #[test]
-        fn batch_request_heights_unit() {
-            let own_height = 1_000_000u64;
-            batch_request_heights_sanity(own_height);
-        }
-
-        fn batch_request_heights_sanity(own_height: u64) {
-            let heights = MainLoopHandler::batch_request_uca_candidate_heights(own_height.into());
-
-            let mut heights_rev = heights.clone();
-            heights_rev.reverse();
-            assert!(
-                heights_rev.is_sorted(),
-                "Heights must be sorted from high-to-low"
-            );
-
-            heights_rev.dedup();
-            assert_eq!(heights_rev.len(), heights.len(), "duplicates");
-
-            assert_eq!(heights[0], own_height.into(), "starts with own tip height");
-            assert!(
-                heights.last().unwrap().is_genesis(),
-                "ends with genesis block"
-            );
-        }
-
-        #[apply(shared_tokio_runtime)]
-        #[traced_test]
-        async fn sync_mode_abandoned_on_global_timeout() {
-            let num_outgoing_connections = 0;
-            let num_incoming_connections = 0;
-            let TestSetup {
-                mut main_loop_handler,
-                main_to_peer_rx: _main_to_peer_rx,
-                ..
-            } = setup(
-                num_outgoing_connections,
-                num_incoming_connections,
-                cli_args::Args::default(),
-            )
-            .await;
-            let mut mutable_main_loop_state = main_loop_handler.mutable();
-
-            main_loop_handler
-                .block_sync(&mut mutable_main_loop_state)
-                .await
-                .expect("Must return OK when no sync mode is set");
-
-            // Mock that we are in a valid sync state
-            let claimed_max_height = 1_000u64.into();
-            let claimed_max_pow = ProofOfWork::new([100; 6]);
-            main_loop_handler
-                .global_state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .sync_anchor = Some(SyncAnchor::new(
-                claimed_max_pow,
-                MmrAccumulator::new_from_leafs(vec![]),
-            ));
-            mutable_main_loop_state.sync_state.peer_sync_states.insert(
-                get_dummy_socket_address(0),
-                ClaimedSynchronizationState::new(claimed_max_height, claimed_max_pow),
-            );
-
-            let sync_start_time = main_loop_handler
-                .global_state_lock
-                .lock_guard()
-                .await
-                .net
-                .sync_anchor
-                .as_ref()
-                .unwrap()
-                .updated;
-            main_loop_handler
-                .block_sync(&mut mutable_main_loop_state)
-                .await
-                .expect("Must return OK when sync mode has not timed out yet");
-            assert!(
-                main_loop_handler
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .net
-                    .sync_anchor
-                    .is_some(),
-                "Sync mode must still be set before timeout has occurred"
-            );
-
-            assert_eq!(
-                sync_start_time,
-                main_loop_handler
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .net
-                    .sync_anchor
-                    .as_ref()
-                    .unwrap()
-                    .updated,
-                "timestamp may not be updated without state change"
-            );
-
-            // Mock that sync-mode has timed out
-            main_loop_handler = main_loop_handler.with_mocked_time(
-                SystemTime::now() + GLOBAL_SYNCHRONIZATION_TIMEOUT + Duration::from_secs(1),
-            );
-
-            main_loop_handler
-                .block_sync(&mut mutable_main_loop_state)
-                .await
-                .expect("Must return OK when sync mode has timed out");
-            assert!(
-                main_loop_handler
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .net
-                    .sync_anchor
-                    .is_none(),
-                "Sync mode must be unset on timeout"
-            );
-        }
-    }
-
     mod proof_upgrader {
         use super::*;
+        use crate::api::export::BlockHeight;
         use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
         use crate::protocol::consensus::transaction::Transaction;
         use crate::protocol::consensus::transaction::TransactionProof;
@@ -3303,6 +2927,8 @@ mod tests {
     }
 
     mod peer_messages {
+        use crate::api::export::BlockHeight;
+
         use super::*;
 
         #[traced_test]

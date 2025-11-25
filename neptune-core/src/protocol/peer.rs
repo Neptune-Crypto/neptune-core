@@ -569,7 +569,7 @@ impl PeerMessage {
     pub fn ignore_during_sync(&self) -> bool {
         match self {
             PeerMessage::Handshake { .. } => false,
-            PeerMessage::Block(_) => true,
+            PeerMessage::Block(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,

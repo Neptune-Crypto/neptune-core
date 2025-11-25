@@ -540,7 +540,7 @@ impl SyncLoop {
                         "Sync loop: could not send tip-successor block to main \
                         loop; main loop appears busy ..."
                     );
-                    tokio::time::sleep(Duration::from_millis(10 * i)).await;
+                    tokio::time::sleep(Duration::from_millis(50 * i)).await;
                 }
             }
         }
@@ -675,7 +675,8 @@ mod tests {
         async fn new(current_tip: Block, sync_target_height: BlockHeight) -> Self {
             let current_tip_height = current_tip.header().height;
             let sync_loop_handle =
-                SyncLoopHandle::new(current_tip, sync_target_height, BlockValidator::Test).await;
+                SyncLoopHandle::new(current_tip, sync_target_height, BlockValidator::Test, false)
+                    .await;
             let (peer_control_sender, peer_control_receiver) = mpsc::channel::<PeerControl>(10);
             let (blockchain_tip_control_sender, blockchain_tip_control_receiver) =
                 mpsc::channel::<BlockchainTipControl>(10);

@@ -111,7 +111,6 @@ use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
-use crate::state::sync_status::SyncStatus;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;

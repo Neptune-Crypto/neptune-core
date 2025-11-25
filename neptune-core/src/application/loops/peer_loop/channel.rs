@@ -106,8 +106,8 @@ pub(crate) enum PeerTaskToMain {
         /// The MMR *after* adding the tip hash, so not the one contained in the
         /// tip, but in its child.
         claimed_block_mmra: MmrAccumulator,
+        claimed_block_digest: Digest,
     },
-    RemovePeerMaxBlockHeight(SocketAddr),
 
     /// (\[(peer_listen_address)\], reported_by, distance)
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)),
@@ -132,7 +132,6 @@ impl PeerTaskToMain {
         match self {
             PeerTaskToMain::NewBlocks(_) => "new blocks",
             PeerTaskToMain::AddPeerMaxBlockHeight { .. } => "add peer max block height",
-            PeerTaskToMain::RemovePeerMaxBlockHeight(_) => "remove peer max block height",
             PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
