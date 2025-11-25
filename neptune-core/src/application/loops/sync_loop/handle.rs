@@ -6,7 +6,6 @@ use crate::api::export::BlockHeight;
 use crate::application::loops::main_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::MainToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;
-use crate::application::loops::sync_loop::status::Status;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::application::loops::sync_loop::PeerHandle;
 use crate::application::loops::sync_loop::SyncLoop;
@@ -21,7 +20,6 @@ pub(crate) struct SyncLoopHandle {
     task_join_handle: Option<JoinHandle<()>>,
     sender: Sender<MainToSync>,
     receiver: Receiver<SyncToMain>,
-    pub(crate) status: Status,
     target_height: BlockHeight,
 }
 
@@ -31,8 +29,6 @@ impl SyncLoopHandle {
         target_height: BlockHeight,
         block_validator: BlockValidator,
     ) -> Self {
-        let status =
-            Status::new(target_height.value() - current_tip.header().height.next().value());
         let (state, sender, receiver) =
             SyncLoop::new(current_tip, target_height, false, block_validator)
                 .await
@@ -43,7 +39,6 @@ impl SyncLoopHandle {
             task_join_handle: None,
             sender,
             receiver,
-            status,
             target_height,
         }
     }

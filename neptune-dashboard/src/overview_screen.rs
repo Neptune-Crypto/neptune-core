@@ -13,6 +13,7 @@ use neptune_cash::protocol::consensus::block::block_header::BlockHeader;
 use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::state::mining::mining_status::MiningStatus;
+use neptune_cash::state::sync_status::SyncStatus;
 use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
@@ -44,7 +45,7 @@ pub struct OverviewData {
     synchronization_percentage: Option<f64>,
 
     network: Network,
-    syncing: bool,
+    sync_status: SyncStatus,
     mining_status: Option<MiningStatus>,
     tip_digest: Option<Digest>,
     block_header: Option<BlockHeader>,
@@ -158,7 +159,7 @@ impl OverviewScreen {
                                 own_overview_data.peer_count=resp.peer_count;
                                 own_overview_data.max_num_peers = Some(resp.max_num_peers);
                                 own_overview_data.authenticated_peer_count=Some(0);
-                                own_overview_data.syncing=resp.syncing;
+                                own_overview_data.sync_status=resp.sync_status;
                                 own_overview_data.confirmed_available_balance = Some(resp.confirmed_available_balance);
                                 own_overview_data.confirmed_total_balance = Some(resp.confirmed_total_balance);
                                 own_overview_data.unconfirmed_available_balance = Some(resp.unconfirmed_available_balance);
@@ -344,7 +345,7 @@ impl Widget for OverviewScreen {
 
         lines.push(format!("network: {}", data.network));
 
-        lines.push(format!("synchronizing: {}", data.syncing));
+        lines.push(format!("sync status: {}", data.sync_status));
 
         lines.push(format!(
             "mining status: {}",
