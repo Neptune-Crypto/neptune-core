@@ -6,6 +6,7 @@ pub mod mempool;
 pub mod mining;
 pub mod networking_state;
 pub mod shared;
+pub mod sync_status;
 pub mod transaction;
 pub mod wallet;
 

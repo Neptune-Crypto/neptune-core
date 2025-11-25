@@ -70,6 +70,7 @@ use crate::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposal;
 use crate::state::networking_state::SyncAnchor;
+use crate::state::sync_status::SyncStatus;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
@@ -2110,6 +2111,15 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
+            RPCServerToMain::UpdateStatus => {
+                debug!("main loop is updating status indicators ...");
+                if let Some(sync_loop_handle) = &main_loop_state.maybe_sync_loop {
+                    sync_loop_handle.send_status_request();
+                    debug!("sent status request to sync loop.");
+                }
+
+                Ok(false)
+            }
         }
     }
 
@@ -2117,7 +2127,7 @@ impl MainLoopHandler {
     async fn handle_sync_loop_message(
         &mut self,
         sync_loop_message: SyncToMain,
-        mut sync_loop_handle: SyncLoopHandle,
+        sync_loop_handle: SyncLoopHandle,
     ) -> Option<SyncLoopHandle> {
         match sync_loop_message {
             SyncToMain::Finished(block_height) => {
@@ -2133,6 +2143,13 @@ impl MainLoopHandler {
                 // Pass on "finished" message to miner.
                 self.main_to_miner_tx.send(MainToMiner::StopSyncing);
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);
+
+                // Show finished where RPC server will look.
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .sync_status = SyncStatus::Synced;
 
                 // The sync loop cleaned up after itself. No need to abort tasks
                 // or delete files. Just drop the handle.
@@ -2156,6 +2173,13 @@ impl MainLoopHandler {
                 // could start a new sync loop, and that one might finish
                 // successfully.
                 self.main_to_peer_broadcast(MainToPeerTask::RequestBlockNotification);
+
+                // Show unknown current state where RPC server will look.
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .sync_status = SyncStatus::Unknown;
 
                 // If we go the error message, the sync loop halted in error but
                 // somewhat gracefully. Specifically, the sync loop would have
@@ -2201,8 +2225,13 @@ impl MainLoopHandler {
                 }
             }
             SyncToMain::Status(status) => {
-                // Store on handle.
-                sync_loop_handle.status = status;
+                info!("Sync loop progress: {status}.");
+                // Store on network state.
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .sync_status = SyncStatus::Syncing(status);
             }
         }
 

@@ -1,12 +1,15 @@
+use serde::Deserialize;
+use serde::Serialize;
 use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy)]
-pub struct Status {
+/// An object quantifying how far we are in the sync process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncProgress {
     num_blocks_downloaded: u64,
     total_span: u64,
 }
 
-impl Status {
+impl SyncProgress {
     pub(crate) fn new(span: u64) -> Self {
         Self {
             num_blocks_downloaded: 0,
@@ -39,9 +42,21 @@ impl Status {
     }
 }
 
-impl Display for Status {
+impl Display for SyncProgress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:.2}%", self.as_percentage())
+    }
+}
+
+#[cfg(feature = "mock-rpc")]
+impl rand::distr::Distribution<SyncProgress> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> SyncProgress {
+        let total_span = rng.next_u64();
+        let num_blocks_downloaded = rng.random_range(0u64..total_span);
+        SyncProgress {
+            num_blocks_downloaded,
+            total_span,
+        }
     }
 }
 
@@ -56,7 +71,7 @@ mod tests {
     #[proptest]
     fn can_display(num_blocks_downloaded: u64, total_span: u64) {
         prop_assume!(total_span >= num_blocks_downloaded);
-        let status = Status {
+        let status = SyncProgress {
             num_blocks_downloaded,
             total_span,
         };
@@ -66,13 +81,14 @@ mod tests {
     #[proptest]
     fn fraction_can_never_be_larger_than_1(num_blocks_downloaded: u64, total_span: u64) {
         prop_assume!(total_span >= num_blocks_downloaded);
-        let status = Status::new(total_span).with_num_blocks_downloaded(num_blocks_downloaded);
+        let status =
+            SyncProgress::new(total_span).with_num_blocks_downloaded(num_blocks_downloaded);
         prop_assert!(status.as_fraction() <= 1.0);
     }
 
     #[proptest]
     fn initial_fraction_is_zero(total_span: u64) {
-        let status = Status::new(total_span);
+        let status = SyncProgress::new(total_span);
         prop_assert_eq!(0.0f64, status.as_fraction());
     }
 }

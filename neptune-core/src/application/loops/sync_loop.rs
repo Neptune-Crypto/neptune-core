@@ -22,14 +22,14 @@ use crate::application::loops::sync_loop::channel::SuccessorsToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownload;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownloadError;
-use crate::application::loops::sync_loop::status::Status;
+use crate::application::loops::sync_loop::sync_progress::SyncProgress;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
 pub(crate) mod channel;
 pub(crate) mod handle;
 pub(crate) mod rapid_block_download;
-pub mod status;
+pub mod sync_progress;
 pub(crate) mod synchronization_bit_mask;
 
 pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 10;
@@ -40,7 +40,7 @@ const ANY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(15);
 /// After this long without a response from a given peer, that peer will be sent
 /// another block request.
 #[cfg(not(test))]
-const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(test)]
 const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_millis(1);
 
@@ -279,6 +279,7 @@ impl SyncLoop {
                             }
                         }
                         MainToSync::Status => {
+                            tracing::debug!("sync loop received status request, computing ...");
                             let distance = self.download_state.target().next().value() - self.download_state.original_tip_height().value();
                             let num_blocks_processed = self.tip.header().height.value() - self.download_state.original_tip_height().value();
 
@@ -293,7 +294,7 @@ impl SyncLoop {
                             let _ = tokio::task::spawn_blocking(move || {
                                     let num_blocks_downloaded_but_not_processed = moved_coverage.pop_count();
                                     let total_num_blocks_downloaded = num_blocks_processed + num_blocks_downloaded_but_not_processed;
-                                    let status = Status::new(distance).with_num_blocks_downloaded(total_num_blocks_downloaded);
+                                    let status = SyncProgress::new(distance).with_num_blocks_downloaded(total_num_blocks_downloaded);
                                     if let Err(e) = moved_main_channel_sender.blocking_send(SyncToMain::Status(status)) {
                                         tracing::warn!("Sync loop: failed to send Status({}) message to main loop: {e}.", status)
                                     }

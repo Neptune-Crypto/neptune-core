@@ -58,6 +58,7 @@ use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
+use crate::state::sync_status::SyncStatus;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::util_types::mutator_set::removal_record::RemovalRecordValidityError;
@@ -717,6 +718,16 @@ impl PeerLoopHandler {
                     debug!("sending challenge ...");
                     peer.send(PeerMessage::SyncChallenge(challenge)).await?;
 
+                    // Update the display sync state to reflect the new number.
+                    let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                    if let SyncStatus::Challenges(number) = global_state_mut.net.sync_status {
+                        global_state_mut.net.sync_status =
+                            SyncStatus::Challenges(number.saturating_add(1));
+                    } else {
+                        global_state_mut.net.sync_status = SyncStatus::Challenges(1);
+                    }
+                    drop(global_state_mut);
+
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -819,6 +830,14 @@ impl PeerLoopHandler {
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
+
+                // Decrement the display counter.
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                if let SyncStatus::Challenges(number) = global_state_mut.net.sync_status {
+                    global_state_mut.net.sync_status =
+                        SyncStatus::Challenges(number.saturating_sub(1));
+                }
+                drop(global_state_mut);
 
                 // Reset the challenge, regardless of the response's success.
                 peer_state_info.sync_challenge = None;
