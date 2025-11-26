@@ -107,6 +107,22 @@ impl Difficulty {
             carry,
         )
     }
+
+    /// Converts a BigUint into Difficulty. Returns None if it doesn’t fit.
+    pub(crate) fn from_biguint(bi: BigUint) -> Option<Self> {
+        if bi.iter_u32_digits().count() > Self::NUM_LIMBS {
+            return None;
+        }
+
+        Some(Self(
+            bi.iter_u32_digits()
+                .take(Self::NUM_LIMBS)
+                .pad_using(Self::NUM_LIMBS, |_| 0u32)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        ))
+    }
 }
 
 impl IntoIterator for Difficulty {
@@ -511,21 +527,6 @@ mod tests {
     use crate::protocol::consensus::block::Network;
 
     impl Difficulty {
-        pub(crate) fn from_biguint(bi: BigUint) -> Self {
-            assert!(
-                bi.iter_u32_digits().count() <= Self::NUM_LIMBS,
-                "BigUint too large to convert to Difficulty"
-            );
-            Self(
-                bi.iter_u32_digits()
-                    .take(Self::NUM_LIMBS)
-                    .pad_using(Self::NUM_LIMBS, |_| 0u32)
-                    .collect_vec()
-                    .try_into()
-                    .unwrap(),
-            )
-        }
-
         /// Convert a u64 into a difficulty.
         pub(crate) fn from_u64(value: u64) -> Self {
             let mut array = [0u32; Self::NUM_LIMBS];
