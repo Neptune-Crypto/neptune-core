@@ -10,6 +10,7 @@ use crate::application::json_rpc::core::model::block::header::*;
 use crate::application::json_rpc::core::model::block::transaction_kernel::*;
 use crate::application::json_rpc::core::model::block::*;
 use crate::application::json_rpc::core::model::common::*;
+use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
 use crate::application::json_rpc::core::model::wallet::block::*;
 use crate::application::json_rpc::core::model::wallet::mutator_set::*;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
@@ -295,5 +296,30 @@ pub struct SubmitTransactionRequest {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitTransactionResponse {
+    pub success: bool,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBlockTemplateRequest {
+    pub guesser_address: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBlockTemplateResponse {
+    pub template: Option<RpcBlockTemplate>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitBlockRequest {
+    pub template: RpcBlock,
+    pub pow: RpcBlockPow,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitBlockResponse {
     pub success: bool,
 }

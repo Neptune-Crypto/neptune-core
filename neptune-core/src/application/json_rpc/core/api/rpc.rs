@@ -6,8 +6,10 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
+use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
+use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
@@ -45,11 +47,16 @@ pub enum RpcError {
     #[error("JSON-RPC server error: {0}")]
     Server(JsonError),
 
+    // Call-specific errors
     #[error("Failed to restore membership proof: {0}")]
     RestoreMembershipProof(RestoreMembershipProofError),
 
     #[error("Failed to submit transaction: {0}")]
     SubmitTransaction(SubmitTransactionError),
+
+    // Common case errors
+    #[error("Invalid address provided on inputs")]
+    InvalidAddress,
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -249,6 +256,8 @@ pub trait RpcApi: Sync + Send {
         request: FindUtxoOriginRequest,
     ) -> RpcResult<FindUtxoOriginResponse>;
 
+    /* Wallet */
+
     async fn get_blocks(
         &self,
         from_height: RpcBlockHeight,
@@ -287,4 +296,31 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: SubmitTransactionRequest,
     ) -> RpcResult<SubmitTransactionResponse>;
+
+    /* Mining */
+
+    async fn get_block_template(
+        &self,
+        guesser_address: String,
+    ) -> RpcResult<GetBlockTemplateResponse> {
+        self.get_block_template_call(GetBlockTemplateRequest { guesser_address })
+            .await
+    }
+    async fn get_block_template_call(
+        &self,
+        request: GetBlockTemplateRequest,
+    ) -> RpcResult<GetBlockTemplateResponse>;
+
+    async fn submit_block(
+        &self,
+        template: RpcBlock,
+        pow: RpcBlockPow,
+    ) -> RpcResult<SubmitBlockResponse> {
+        self.submit_block_call(SubmitBlockRequest { template, pow })
+            .await
+    }
+    async fn submit_block_call(
+        &self,
+        request: SubmitBlockRequest,
+    ) -> RpcResult<SubmitBlockResponse>;
 }
