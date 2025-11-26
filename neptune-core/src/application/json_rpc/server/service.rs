@@ -1,15 +1,20 @@
 use async_trait::async_trait;
 use tracing::debug;
+use tracing::warn;
 
+use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
+use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
+use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplateMetadata;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
+use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 
 #[async_trait]
@@ -473,6 +478,71 @@ impl RpcApi for RpcServer {
         Ok(SubmitTransactionResponse {
             success: response.is_ok(),
         })
+    }
+
+    async fn get_block_template_call(
+        &self,
+        request: GetBlockTemplateRequest,
+    ) -> RpcResult<GetBlockTemplateResponse> {
+        let (maybe_proposal, tip) = {
+            let global_state = self.state.lock_guard().await;
+            let proposal = global_state.mining_state.block_proposal.map(|p| p.clone());
+            let tip = *global_state.chain.light_state().header();
+
+            (proposal, tip)
+        };
+
+        let Some(mut proposal) = maybe_proposal else {
+            return Ok(GetBlockTemplateResponse { template: None });
+        };
+
+        let address =
+            ReceivingAddress::from_bech32m(&request.guesser_address, self.state.cli().network)
+                .map_err(|_| RpcError::InvalidAddress)?;
+        proposal.set_header_guesser_address(address);
+
+        let template = RpcBlockTemplate {
+            block: RpcBlock::from(&proposal),
+            metadata: RpcBlockTemplateMetadata::new(&proposal, tip.difficulty),
+        };
+
+        Ok(GetBlockTemplateResponse {
+            template: Some(template),
+        })
+    }
+
+    async fn submit_block_call(
+        &self,
+        request: SubmitBlockRequest,
+    ) -> RpcResult<SubmitBlockResponse> {
+        let mut template: Block = request.template.into();
+
+        // Since block comes from external source, we need to check validity.
+        let tip = self.state.lock_guard().await.chain.light_state().clone();
+        if !template
+            .is_valid(&tip, Timestamp::now(), self.state.cli().network)
+            .await
+        {
+            warn!("Got claimed new block that was not valid");
+            return Ok(SubmitBlockResponse { success: false });
+        }
+
+        template.set_header_pow(request.pow.into());
+
+        if !template.has_proof_of_work(self.state.cli().network, template.header()) {
+            warn!("Got claimed PoW solution but PoW solution is not valid.");
+            return Ok(SubmitBlockResponse { success: false });
+        }
+
+        // No time to waste! Inform main_loop!
+        let solution = Box::new(template);
+        let success = self
+            .to_main_tx
+            .send(RPCServerToMain::ProofOfWorkSolution(solution))
+            .await
+            .is_ok();
+
+        Ok(SubmitBlockResponse { success })
     }
 }
 
