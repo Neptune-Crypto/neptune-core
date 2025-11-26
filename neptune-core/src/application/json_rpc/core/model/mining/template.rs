@@ -59,3 +59,46 @@ pub struct RpcBlockTemplate {
     pub block: RpcBlock,
     pub metadata: RpcBlockTemplateMetadata,
 }
+
+#[cfg(test)]
+mod tests {
+    use tasm_lib::twenty_first::bfe_array;
+
+    use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
+    use crate::protocol::consensus::block::block_header::BlockPow;
+    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::BFieldElement;
+
+    use super::*;
+
+    #[cfg(test)]
+    impl RpcBlockTemplateMetadata {
+        pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> RpcBlockPow {
+            let guesser_buffer = BlockPow::preprocess(
+                self.pow_mast_paths,
+                None,
+                consensus_rule_set,
+                self.prev_block,
+            );
+
+            let index_picker_preimage = guesser_buffer.index_picker_preimage(&self.pow_mast_paths);
+
+            let solution = (0u64..u64::MAX)
+                .map(|i| {
+                    let nonce = Digest(bfe_array![0, 0, 0, 0, i]);
+
+                    BlockPow::guess(
+                        &guesser_buffer,
+                        &self.pow_mast_paths,
+                        index_picker_preimage,
+                        nonce,
+                        self.threshold,
+                    )
+                })
+                .find_map(|x| x)
+                .expect("Should find solution within 2^{64} attempts");
+
+            solution.into()
+        }
+    }
+}
