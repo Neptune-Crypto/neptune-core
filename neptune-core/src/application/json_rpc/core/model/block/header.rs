@@ -1,5 +1,4 @@
 use num_bigint::BigUint;
-use num_traits::Zero;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -16,7 +15,7 @@ use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 use crate::protocol::consensus::block::pow::POW_MEMORY_TREE_HEIGHT;
 
-// TODO: Mirror consensus impl
+// TODO: Mirror consensus impl (RpcBlockPow = RpcPow<POW_MEMORY_TREE_HEIGHT>)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcBlockPow {
@@ -80,6 +79,18 @@ pub type RpcBlockHeight = BlockHeight;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RpcDifficulty(pub Difficulty);
 
+impl From<Difficulty> for RpcDifficulty {
+    fn from(d: Difficulty) -> Self {
+        Self(d)
+    }
+}
+
+impl From<RpcDifficulty> for Difficulty {
+    fn from(r: RpcDifficulty) -> Self {
+        r.0
+    }
+}
+
 impl Serialize for RpcDifficulty {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -100,19 +111,47 @@ impl<'de> Deserialize<'de> for RpcDifficulty {
             .ok_or_else(|| serde::de::Error::custom("invalid number"))?;
         let difficulty = Difficulty::from_biguint(big)
             .ok_or_else(|| serde::de::Error::custom("cannot convert to Difficulty"))?;
-        Ok(RpcDifficulty(difficulty))
+        Ok(Self(difficulty))
     }
 }
 
-impl From<Difficulty> for RpcDifficulty {
-    fn from(d: Difficulty) -> Self {
-        RpcDifficulty(d)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RpcProofOfWork(pub ProofOfWork);
+
+impl Serialize for RpcProofOfWork {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let big: BigUint = self.0.into();
+        serializer.serialize_str(&big.to_string())
     }
 }
 
-impl From<RpcDifficulty> for Difficulty {
-    fn from(r: RpcDifficulty) -> Self {
+impl From<ProofOfWork> for RpcProofOfWork {
+    fn from(d: ProofOfWork) -> Self {
+        Self(d)
+    }
+}
+
+impl From<RpcProofOfWork> for ProofOfWork {
+    fn from(r: RpcProofOfWork) -> Self {
         r.0
+    }
+}
+
+impl<'de> Deserialize<'de> for RpcProofOfWork {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let big = BigUint::parse_bytes(s.as_bytes(), 10)
+            .ok_or_else(|| serde::de::Error::custom("invalid number"))?;
+        let proof_of_work = big
+            .try_into()
+            .map_err(|_| serde::de::Error::custom("cannot convert to ProofOfWork"))?;
+        Ok(Self(proof_of_work))
     }
 }
 
@@ -124,7 +163,7 @@ pub struct RpcBlockHeader {
     pub prev_block_digest: Digest,
     pub timestamp: Timestamp,
     pub pow: RpcBlockPow,
-    pub cumulative_proof_of_work: String,
+    pub cumulative_proof_of_work: RpcProofOfWork,
     pub difficulty: RpcDifficulty,
     pub guesser_receiver_data: RpcGuesserReceiverData,
 }
@@ -137,7 +176,7 @@ impl From<&BlockHeader> for RpcBlockHeader {
             prev_block_digest: header.prev_block_digest,
             timestamp: header.timestamp,
             pow: header.pow.into(),
-            cumulative_proof_of_work: header.cumulative_proof_of_work.to_string(),
+            cumulative_proof_of_work: header.cumulative_proof_of_work.into(),
             difficulty: header.difficulty.into(),
             guesser_receiver_data: header.guesser_receiver_data.into(),
         }
@@ -152,7 +191,7 @@ impl From<RpcBlockHeader> for BlockHeader {
             prev_block_digest: header.prev_block_digest,
             timestamp: header.timestamp,
             pow: header.pow.into(),
-            cumulative_proof_of_work: ProofOfWork::zero(), // TODO: proper handling...
+            cumulative_proof_of_work: header.cumulative_proof_of_work.into(),
             difficulty: header.difficulty.into(),
             guesser_receiver_data: header.guesser_receiver_data.into(),
         }

@@ -302,6 +302,26 @@ impl From<ProofOfWork> for BigUint {
     }
 }
 
+impl TryFrom<BigUint> for ProofOfWork {
+    type Error = anyhow::Error;
+
+    fn try_from(big: BigUint) -> Result<Self, Self::Error> {
+        ensure!(
+            !big.iter_u32_digits().count() > Self::NUM_LIMBS,
+            "exceeds maximum ProofOfWork value"
+        );
+
+        Ok(Self(
+            big.iter_u32_digits()
+                .take(Self::NUM_LIMBS)
+                .pad_using(Self::NUM_LIMBS, |_| 0u32)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        ))
+    }
+}
+
 impl TryFrom<f64> for ProofOfWork {
     type Error = anyhow::Error;
 
