@@ -42,6 +42,15 @@ impl Display for AdditionRecord {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<AdditionRecord> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> AdditionRecord {
+        AdditionRecord {
+            canonical_commitment: rng.random(),
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use rand::random;

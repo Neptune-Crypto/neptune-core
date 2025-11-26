@@ -1,3 +1,5 @@
+pub(crate) mod channel;
+
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
@@ -24,11 +26,11 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-use crate::application::loops::channel::MainToPeerTask;
-use crate::application::loops::channel::PeerTaskToMain;
-use crate::application::loops::channel::PeerTaskToMainTransaction;
 use crate::application::loops::connect_to_peers::close_peer_connected_callback;
 use crate::application::loops::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
+use crate::application::loops::peer_loop::channel::MainToPeerTask;
+use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::loops::peer_loop::channel::PeerTaskToMainTransaction;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -56,6 +58,7 @@ use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
+use crate::state::sync_status::SyncStatus;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::util_types::mutator_set::removal_record::RemovalRecordValidityError;
@@ -351,21 +354,10 @@ impl PeerLoopHandler {
             .await
             .incoming_block_is_more_canonical(last_block);
         let last_block_height = last_block.header().height;
-        let sync_mode_active_and_have_new_champion = self
-            .global_state_lock
-            .lock_guard()
-            .await
-            .net
-            .sync_anchor
-            .as_ref()
-            .is_some_and(|x| {
-                x.champion
-                    .is_none_or(|(height, _)| height < last_block_height)
-            });
-        if !is_canonical && !sync_mode_active_and_have_new_champion {
+        if !is_canonical {
             warn!(
                 "Received {} blocks from peer but incoming blocks are less \
-            canonical than current tip, or current sync-champion.",
+            canonical than current tip.",
                 received_blocks.len()
             );
             return Ok(None);
@@ -391,7 +383,8 @@ impl PeerLoopHandler {
 
     /// Take a single block received from a peer and (attempt to) find a path
     /// between the received block and a common ancestor stored in the blocks
-    /// database.
+    /// database. Once such a path is found, the list of blocks is passed to
+    /// [`Self::handle_blocks`].
     ///
     /// This function attempts to find the parent of the received block, either
     /// by searching the database or by requesting it from a peer.
@@ -404,15 +397,26 @@ impl PeerLoopHandler {
     ///    pipeline, potentially leading to a state update; and b) the fork
     ///    reconciliation list is cleared.
     ///
-    /// Locking:
+    /// # Locking:
+    ///
     ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
     ///     `self.reward(..)`.
+    ///
+    /// # Return Value
+    ///
+    ///  - Err(_) if something unexpected went wrong.
+    ///  - Ok(None) if no state changes were applied, not counting populating
+    ///    the `fork_reconciliation_blocks`. This may be due to an error or due
+    ///    to not enough information.
+    ///  - Ok(Some(block_height)) if a path of blocks was found and found valid
+    ///    and passed on to the main loop. In this case, `block_height` is the
+    ///    highest block processed.
     async fn try_ensure_path<S>(
         &mut self,
         received_block: Box<Block>,
         peer: &mut S,
         peer_state: &mut MutablePeerState,
-    ) -> Result<()>
+    ) -> Result<Option<BlockHeight>>
     where
         S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
@@ -459,7 +463,7 @@ impl PeerLoopHandler {
             )))
             .await?;
             peer_state.fork_reconciliation_blocks = vec![];
-            return Ok(());
+            return Ok(None);
         }
 
         // otherwise, append
@@ -498,7 +502,7 @@ impl PeerLoopHandler {
             if parent_height.is_genesis() {
                 peer_state.fork_reconciliation_blocks.clear();
                 self.punish(NegativePeerSanction::DifferentGenesis).await?;
-                return Ok(());
+                return Ok(None);
             }
             debug!(
                 "Parent not known: Requesting previous block with height {} from peer",
@@ -508,7 +512,7 @@ impl PeerLoopHandler {
             peer.send(PeerMessage::BlockRequestByHash(parent_digest))
                 .await?;
 
-            return Ok(());
+            return Ok(None);
         };
 
         // We want to treat the received fork reconciliation blocks (plus the
@@ -522,21 +526,24 @@ impl PeerLoopHandler {
         let fork_reconciliation_event = !peer_state.fork_reconciliation_blocks.is_empty();
         peer_state.fork_reconciliation_blocks.clear();
 
-        if let Some(new_block_height) = self.handle_blocks(new_blocks, parent_block).await? {
-            // If `BlockNotification` was received during a block reconciliation
-            // event, then the peer might have one (or more (unlikely)) blocks
-            // that we do not have. We should thus request those blocks.
-            if fork_reconciliation_event
-                && peer_state.highest_shared_block_height > new_block_height
-            {
-                peer.send(PeerMessage::BlockRequestByHeight(
-                    peer_state.highest_shared_block_height,
-                ))
-                .await?;
-            }
+        let Some(new_block_height) = self.handle_blocks(new_blocks, parent_block).await? else {
+            // Handling blocks was unsuccessful. Function `handle_blocks` takes
+            // care of punishment. Nothing left to do here but return and keep
+            // the connection open.
+            return Ok(None);
+        };
+
+        // If `BlockNotification` was received during a block reconciliation
+        // event, then the peer might have one (or more (unlikely)) blocks that
+        // we do not have. We should thus request those blocks.
+        if fork_reconciliation_event && peer_state.highest_shared_block_height > new_block_height {
+            peer.send(PeerMessage::BlockRequestByHeight(
+                peer_state.highest_shared_block_height,
+            ))
+            .await?;
         }
 
-        Ok(())
+        Ok(Some(new_block_height))
     }
 
     /// Handle peer messages and returns Ok(true) if connection should be closed.
@@ -647,11 +654,15 @@ impl PeerLoopHandler {
             PeerMessage::BlockNotification(block_notification) => {
                 const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
 
-                let (tip_header, sync_anchor_is_set) = {
+                let (tip_header, sync_anchor_height) = {
                     let state = self.global_state_lock.lock_guard().await;
                     (
                         *state.chain.light_state().header(),
-                        state.net.sync_anchor.is_some(),
+                        state
+                            .net
+                            .sync_anchor
+                            .as_ref()
+                            .map(|sync_anchor| sync_anchor.champion.0),
                     )
                 };
                 debug!(
@@ -659,6 +670,18 @@ impl PeerLoopHandler {
                     block_notification.height, tip_header.height
                 );
 
+                // If we are syncing and:
+                if let Some(height) = sync_anchor_height {
+                    // - and announced block succeeds sync anchor, then request it;
+                    if height.next() == block_notification.height {
+                        peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
+                            .await?;
+                    }
+                    // - otherwise, ignore it.
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Issue challenge if appropriate.
                 let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
                 let now = self.now();
                 let time_since_latest_successful_challenge = peer_state_info
@@ -666,13 +689,14 @@ impl PeerLoopHandler {
                     .map(|then| now - then);
                 let cooldown_expired = time_since_latest_successful_challenge
                     .is_none_or(|time_passed| time_passed > SYNC_CHALLENGE_COOLDOWN);
-                let exceeds_sync_mode_threshold = GlobalState::sync_mode_threshold_stateless(
-                    &tip_header,
-                    block_notification.height,
-                    block_notification.cumulative_proof_of_work,
-                    sync_mode_threshold,
-                );
-                if cooldown_expired && exceeds_sync_mode_threshold {
+                let claimed_height_and_pow_exceed_sync_mode_threshold =
+                    GlobalState::sync_mode_threshold_stateless(
+                        &tip_header,
+                        block_notification.height,
+                        block_notification.cumulative_proof_of_work,
+                        sync_mode_threshold,
+                    );
+                if cooldown_expired && claimed_height_and_pow_exceed_sync_mode_threshold {
                     debug!("sync mode criterion satisfied.");
 
                     if peer_state_info.sync_challenge.is_some() {
@@ -697,9 +721,20 @@ impl PeerLoopHandler {
                     debug!("sending challenge ...");
                     peer.send(PeerMessage::SyncChallenge(challenge)).await?;
 
+                    // Update the display sync state to reflect the new number.
+                    let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                    if let SyncStatus::Challenges(number) = global_state_mut.net.sync_status {
+                        global_state_mut.net.sync_status =
+                            SyncStatus::Challenges(number.saturating_add(1));
+                    } else {
+                        global_state_mut.net.sync_status = SyncStatus::Challenges(1);
+                    }
+                    drop(global_state_mut);
+
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // If block is new, request it.
                 peer_state_info.highest_shared_block_height = block_notification.height;
                 let block_is_new = tip_header.cumulative_proof_of_work
                     < block_notification.cumulative_proof_of_work;
@@ -708,8 +743,8 @@ impl PeerLoopHandler {
 
                 if block_is_new
                     && peer_state_info.fork_reconciliation_blocks.is_empty()
-                    && !sync_anchor_is_set
-                    && !exceeds_sync_mode_threshold
+                    && sync_anchor_height.is_none()
+                    && !claimed_height_and_pow_exceed_sync_mode_threshold
                 {
                     debug!(
                         "sending BlockRequestByHeight to peer for block with height {}",
@@ -717,13 +752,16 @@ impl PeerLoopHandler {
                     );
                     peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
                         .await?;
-                } else {
-                    debug!(
-                        "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
-                        block_notification.height,
-                        block_is_new,
-                        !peer_state_info.fork_reconciliation_blocks.is_empty()
-                    );
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // If block is not new, maybe we are properly synced?
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                if tip_header.height == block_notification.height
+                    && SyncStatus::Unknown == global_state_mut.net.sync_status
+                {
+                    global_state_mut.net.sync_status = SyncStatus::Synced;
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -768,7 +806,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::SyncChallengeResponse(challenge_response) => {
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(45);
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(90);
 
                 log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallengeResponse");
                 info!(
@@ -799,6 +837,20 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
 
+                // If we are already syncing, then this message does not matter.
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                if global_state_mut.net.sync_anchor.is_some() {
+                    info!("Already entered into sync mode; ignoring sync challenge response.");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Decrement the display counter.
+                if let SyncStatus::Challenges(number) = global_state_mut.net.sync_status {
+                    global_state_mut.net.sync_status =
+                        SyncStatus::Challenges(number.saturating_sub(1));
+                }
+                drop(global_state_mut);
+
                 // Reset the challenge, regardless of the response's success.
                 peer_state_info.sync_challenge = None;
 
@@ -810,6 +862,14 @@ impl PeerLoopHandler {
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
+
+                let Ok(challenge_response_tip_hash) =
+                    Block::try_from(challenge_response.tip.clone()).map(|block| block.hash())
+                else {
+                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
 
                 // Does response verify?
                 let claimed_tip_height = challenge_response.tip.header.height;
@@ -847,7 +907,14 @@ impl PeerLoopHandler {
                 }
 
                 // Did it come in time?
-                if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
+                let time_delta = now - issued_challenge.issued_at;
+                if time_delta > SYNC_RESPONSE_TIMEOUT {
+                    warn!(
+                        "Response from {} to sync challenge came in {} ms but timeout period is {}.",
+                        self.peer_address.ip(),
+                        time_delta.to_millis(),
+                        SYNC_RESPONSE_TIMEOUT.to_millis()
+                    );
                     self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -866,6 +933,7 @@ impl PeerLoopHandler {
                         claimed_height: claimed_tip_height,
                         claimed_cumulative_pow: issued_challenge.accumulated_pow,
                         claimed_block_mmra: sync_mmra_anchor,
+                        claimed_block_digest: challenge_response_tip_hash,
                     })
                     .await?;
 
@@ -883,6 +951,17 @@ impl PeerLoopHandler {
 
                 match block {
                     None => {
+                        if self
+                            .global_state_lock
+                            .lock_guard()
+                            .await
+                            .net
+                            .sync_anchor
+                            .is_none()
+                        {
+                            self.punish(NegativePeerSanction::RequestForUnknownBlock)
+                                .await?;
+                        }
                         // TODO: Consider punishing here
                         warn!("Peer requested unknown block with hash {:x}", block_digest);
                         Ok(KEEP_CONNECTION_ALIVE)
@@ -954,7 +1033,6 @@ impl PeerLoopHandler {
                     t_block.header.height,
                     t_block.header.timestamp.standard_format()
                 );
-                let new_block_height = t_block.header.height;
 
                 let block = match Block::try_from(*t_block) {
                     Ok(block) => Box::new(block),
@@ -967,13 +1045,66 @@ impl PeerLoopHandler {
                     }
                 };
 
-                // Update the value for the highest known height that peer possesses iff
-                // we are not in a fork reconciliation state.
-                if peer_state_info.fork_reconciliation_blocks.is_empty() {
+                // If sync mode is active, incoming blocks are destined for the
+                // sync loop.
+                let mut state_lock = self.global_state_lock.lock_guard_mut().await;
+                if let Some(sync_anchor) = &mut state_lock.net.sync_anchor {
+                    let height = block.header().height;
+                    let digest = block.hash();
+                    let is_successor = block.header().prev_block_digest == sync_anchor.champion.1;
+                    let is_new_champion = sync_anchor.incoming_block_is_new_champion(height);
+
+                    if is_successor && is_new_champion {
+                        // Inform main loop about a new tip-successor.
+                        self.to_main_tx
+                            .send(PeerTaskToMain::NewSyncTarget(block))
+                            .await?;
+
+                        // Keep sync anchor up to date.
+                        sync_anchor.catch_up(height, digest);
+                    } else if is_new_champion {
+                        // The incoming block is the new champion but is not the
+                        // successor of the current tip. This happens when
+                        //  a) the peer sends new blocks out of order, or one of
+                        //     the intermediate blocks was dropped in transit;
+                        //     or
+                        //  b) the peer reorg'ed.
+                        // In either case, we can deal with the problem once
+                        // sync mode is done. So ignore for now.
+                        tracing::warn!(
+                            "Block {} / {:x} from peer {} is new champion but not successor to tip; ignoring.",
+                            height,
+                            digest,
+                            self.peer_address
+                        );
+                    } else if is_successor {
+                        // Cannot happen.
+                        tracing::error!(
+                            "Block {} / {:x} from peer {} is successor to tip but not new champion; ignoring. Cannot happen.",
+                            height,
+                            digest,
+                            self.peer_address
+                        );
+                    } else {
+                        // Inform main loop about a new middle block.
+                        self.to_main_tx
+                            .send(PeerTaskToMain::NewSyncBlock(block, self.peer_address))
+                            .await?;
+                    }
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+                drop(state_lock);
+
+                // Activate the shallow fork reconciliation mechanism if
+                // necessary, otherwise immediately proceed to processing the
+                // block.
+                if let Some(new_block_height) =
+                    self.try_ensure_path(block, peer, peer_state_info).await?
+                {
+                    // Update the tracker variable tracking the height of the
+                    // highest block shared with us so far by this peer.
                     peer_state_info.highest_shared_block_height = new_block_height;
                 }
-
-                self.try_ensure_path(block, peer, peer_state_info).await?;
 
                 // Reward happens as part of `try_ensure_path`
 
@@ -1700,6 +1831,22 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            MainToPeerTask::RequestBlockByHeight {
+                peer_addr_target,
+                height,
+            } => {
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::RequestBlockByHeight");
+                // Only ask one of the peers about the batch of blocks
+                if peer_addr_target != self.peer_address {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                peer.send(PeerMessage::BlockRequestByHeight(height)).await?;
+
+                debug!("sent block-request-by-height ({height}) to peer {peer_addr_target}");
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
             MainToPeerTask::PeerSynchronizationTimeout(socket_addr) => {
                 log_slow_scope!(fn_name!() + "::MainToPeerTask::PeerSynchronizationTimeout");
 
@@ -1756,6 +1903,12 @@ impl PeerLoopHandler {
                 ))
                 .await?;
                 debug!("Sent PeerMessage::BlockProposalNotification");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            MainToPeerTask::RequestBlockNotification => {
+                debug!("Sending PeerMessage::BlockNotificationRequest");
+                peer.send(PeerMessage::BlockNotificationRequest).await?;
+                debug!("Sent PeerMessage::BlockNotificationRequest");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
         }
@@ -2408,11 +2561,6 @@ mod tests {
                 "run_wrapper must return failure when genesis is different"
             );
 
-            match to_main_rx1.recv().await {
-                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                _ => bail!("Must receive remove of peer block max height"),
-            }
-
             // Verify that no further message was sent to main loop
             match to_main_rx1.try_recv() {
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
@@ -2612,11 +2760,6 @@ mod tests {
                     .await
                     .expect("sending (one) invalid block should not result in closed connection");
 
-                match to_main_rx1.recv().await {
-                    Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                    _ => bail!("Must receive remove of peer block max height"),
-                }
-
                 // Verify that no further message was sent to main loop
                 match to_main_rx1.try_recv() {
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
@@ -2698,10 +2841,6 @@ mod tests {
                 .run_wrapper(mock_peer_messages, from_main_rx_clone)
                 .await?;
 
-            match to_main_rx1.recv().await {
-                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                other => bail!("Must receive remove of peer block max height. Got:\n {other:?}"),
-            }
             match to_main_rx1.try_recv() {
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
                 _ => bail!("Block notification must not be sent for block with invalid PoW"),
@@ -3268,11 +3407,6 @@ mod tests {
                 _ => bail!("Did not find msg sent to main task"),
             };
 
-            match to_main_rx1.recv().await {
-                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                _ => bail!("Must receive remove of peer block max height"),
-            }
-
             if !state_lock.lock_guard().await.net.peer_map.is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
             }
@@ -3346,10 +3480,6 @@ mod tests {
                 }
                 _ => bail!("Did not find msg sent to main task 1"),
             };
-            match to_main_rx1.recv().await {
-                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                _ => bail!("Must receive remove of peer block max height"),
-            }
 
             if !state_lock.lock_guard().await.net.peer_map.is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
@@ -3415,11 +3545,6 @@ mod tests {
             peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
                 .await?;
-
-            match to_main_rx1.recv().await {
-                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                _ => bail!("Must receive remove of peer block max height"),
-            }
 
             // Verify that no block is sent to main loop.
             match to_main_rx1.try_recv() {
@@ -3506,10 +3631,6 @@ mod tests {
             assert_eq!(blocks[1].hash(), block_3.hash());
             assert_eq!(blocks[2].hash(), block_4.hash());
 
-            let Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) = to_main_rx1.recv().await else {
-                panic!("Must receive remove of peer block max height");
-            };
-
             assert!(
                 state_lock.lock_guard().await.net.peer_map.is_empty(),
                 "peer map must be empty after closing connection gracefully"
@@ -3584,10 +3705,6 @@ mod tests {
                 }
                 _ => bail!("Did not find msg sent to main task"),
             };
-            match to_main_rx1.recv().await {
-                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                _ => bail!("Must receive remove of peer block max height"),
-            }
 
             if !state_lock.lock_guard().await.net.peer_map.is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
@@ -3689,10 +3806,6 @@ mod tests {
                 }
                 _ => bail!("Did not find msg sent to main task"),
             };
-            match to_main_rx1.recv().await {
-                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                _ => bail!("Must receive remove of peer block max height"),
-            }
 
             if !state_lock.lock_guard().await.net.peer_map.is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
@@ -4386,11 +4499,6 @@ mod tests {
                 .await
                 .unwrap();
 
-            match to_main_rx.recv().await {
-                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                _ => panic!("Must receive remove of peer block max height"),
-            }
-
             assert_eq!(
                 Err(TryRecvError::Empty),
                 to_main_rx.try_recv(),
@@ -5033,6 +5141,7 @@ mod tests {
                 claimed_height: bob_tip.header().height,
                 claimed_cumulative_pow: bob_tip.header().cumulative_proof_of_work,
                 claimed_block_mmra: expected_anchor_mmra,
+                claimed_block_digest: bob_tip.hash(),
             };
             let observed_message_from_alice_peer_loop = alice_peer_to_main_rx.recv().await.unwrap();
             assert_eq!(
