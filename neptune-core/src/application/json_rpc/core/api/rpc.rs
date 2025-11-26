@@ -42,6 +42,15 @@ pub enum SubmitTransactionError {
     NotConfirmable,
 }
 
+#[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
+pub enum SubmitBlockError {
+    #[error("Invalid block")]
+    InvalidBlock,
+
+    #[error("PoW doesnt exceed the targed")]
+    InsufficientWork,
+}
+
 #[derive(Debug, Clone, Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RpcError {
     #[error("JSON-RPC server error: {0}")]
@@ -53,6 +62,9 @@ pub enum RpcError {
 
     #[error("Failed to submit transaction: {0}")]
     SubmitTransaction(SubmitTransactionError),
+
+    #[error("Failed to submit block: {0}")]
+    SubmitBlock(SubmitBlockError),
 
     // Common case errors
     #[error("Invalid address provided on inputs")]

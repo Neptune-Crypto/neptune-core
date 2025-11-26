@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use tracing::debug;
-use tracing::warn;
 
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
@@ -523,15 +522,13 @@ impl RpcApi for RpcServer {
             .is_valid(&tip, Timestamp::now(), self.state.cli().network)
             .await
         {
-            warn!("Got claimed new block that was not valid");
-            return Ok(SubmitBlockResponse { success: false });
+            return Err(RpcError::SubmitBlock(SubmitBlockError::InvalidBlock));
         }
 
         template.set_header_pow(request.pow.into());
 
         if !template.has_proof_of_work(self.state.cli().network, template.header()) {
-            warn!("Got claimed PoW solution but PoW solution is not valid.");
-            return Ok(SubmitBlockResponse { success: false });
+            return Err(RpcError::SubmitBlock(SubmitBlockError::InsufficientWork));
         }
 
         // No time to waste! Inform main_loop!
@@ -564,14 +561,18 @@ pub mod tests {
     use crate::api::export::TxProvingCapability;
     use crate::application::config::cli_args;
     use crate::application::json_rpc::core::api::rpc::RpcApi;
+    use crate::application::json_rpc::core::api::rpc::RpcError;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
+    use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
+    use crate::state::mining::block_proposal::BlockProposal;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::strategies::txkernel;
@@ -945,5 +946,65 @@ pub mod tests {
             .expect("submission to succeed");
 
         assert!(submit_tx_response.success);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn mining_scenarios_validated_properly() {
+        use crate::application::json_rpc::core::api::rpc::SubmitBlockError;
+
+        let mut rpc_server = test_rpc_server().await;
+        let network = rpc_server.state.cli().network;
+
+        let genesis = Block::genesis(network);
+        let block1 = fake_valid_deterministic_successor(&genesis, network).await;
+        rpc_server
+            .state
+            .lock_mut(|x| {
+                x.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone())
+            })
+            .await;
+        let guesser_address = rpc_server
+            .state
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await
+            .to_address();
+
+        let RpcBlockTemplate { block, metadata } = rpc_server
+            .get_block_template(guesser_address.to_bech32m(network).unwrap())
+            .await
+            .unwrap()
+            .template
+            .unwrap();
+
+        assert_eq!(
+            rpc_server
+                .submit_block(block.clone(), block.kernel.header.pow.clone())
+                .await
+                .unwrap_err(),
+            RpcError::SubmitBlock(SubmitBlockError::InsufficientWork)
+        );
+
+        let solution = metadata.solve(ConsensusRuleSet::default());
+        assert!(
+            rpc_server
+                .submit_block(block.clone(), solution.clone())
+                .await
+                .unwrap()
+                .success,
+            "Node must accept valid new tip."
+        );
+
+        let mut bad_proposal = block;
+        bad_proposal.proof = None;
+        assert_eq!(
+            rpc_server
+                .submit_block(bad_proposal.clone(), solution)
+                .await
+                .unwrap_err(),
+            RpcError::SubmitBlock(SubmitBlockError::InvalidBlock)
+        );
     }
 }
