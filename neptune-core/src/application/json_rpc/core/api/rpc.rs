@@ -47,7 +47,7 @@ pub enum SubmitBlockError {
     #[error("Invalid block")]
     InvalidBlock,
 
-    #[error("PoW doesnt exceed the targed")]
+    #[error("The block's proof-of-work does not meet the required target")]
     InsufficientWork,
 }
 
