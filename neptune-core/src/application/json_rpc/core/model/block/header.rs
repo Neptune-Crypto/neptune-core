@@ -1,6 +1,9 @@
+use num_bigint::BigUint;
 use num_traits::Zero;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
+use serde::Serializer;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
@@ -74,6 +77,45 @@ impl From<RpcGuesserReceiverData> for GuesserReceiverData {
 
 pub type RpcBlockHeight = BlockHeight;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RpcDifficulty(pub Difficulty);
+
+impl Serialize for RpcDifficulty {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let big: BigUint = self.0.into();
+        serializer.serialize_str(&big.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for RpcDifficulty {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let big = BigUint::parse_bytes(s.as_bytes(), 10)
+            .ok_or_else(|| serde::de::Error::custom("invalid number"))?;
+        let difficulty = Difficulty::from_biguint(big)
+            .ok_or_else(|| serde::de::Error::custom("cannot convert to Difficulty"))?;
+        Ok(RpcDifficulty(difficulty))
+    }
+}
+
+impl From<Difficulty> for RpcDifficulty {
+    fn from(d: Difficulty) -> Self {
+        RpcDifficulty(d)
+    }
+}
+
+impl From<RpcDifficulty> for Difficulty {
+    fn from(r: RpcDifficulty) -> Self {
+        r.0
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcBlockHeader {
@@ -83,7 +125,7 @@ pub struct RpcBlockHeader {
     pub timestamp: Timestamp,
     pub pow: RpcBlockPow,
     pub cumulative_proof_of_work: String,
-    pub difficulty: String,
+    pub difficulty: RpcDifficulty,
     pub guesser_receiver_data: RpcGuesserReceiverData,
 }
 
@@ -96,7 +138,7 @@ impl From<&BlockHeader> for RpcBlockHeader {
             timestamp: header.timestamp,
             pow: header.pow.into(),
             cumulative_proof_of_work: header.cumulative_proof_of_work.to_string(),
-            difficulty: header.difficulty.to_string(),
+            difficulty: header.difficulty.into(),
             guesser_receiver_data: header.guesser_receiver_data.into(),
         }
     }
@@ -111,7 +153,7 @@ impl From<RpcBlockHeader> for BlockHeader {
             timestamp: header.timestamp,
             pow: header.pow.into(),
             cumulative_proof_of_work: ProofOfWork::zero(), // TODO: proper handling...
-            difficulty: Difficulty::from(0_u32),
+            difficulty: header.difficulty.into(),
             guesser_receiver_data: header.guesser_receiver_data.into(),
         }
     }
