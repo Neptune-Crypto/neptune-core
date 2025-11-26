@@ -6,9 +6,12 @@
 //! see [builder](super) for examples of using the builders together.
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
+use tasm_lib::twenty_first::bfe_array;
 
 use crate::api::export::Timestamp;
 use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::address::ReceivingAddress;
@@ -16,6 +19,7 @@ use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::StateLock;
+use crate::BFieldElement;
 use crate::WalletState;
 
 // ##multicoin## :
@@ -45,6 +49,9 @@ pub enum OutputFormat {
 
     /// specify utxo, receiving address, and a utxo-notification-medium
     AddressAndUtxoAndMedium(ReceivingAddress, Utxo, UtxoNotificationMedium),
+
+    /// specify amount for irrevocable burn
+    BurnAmount(NativeCurrencyAmount),
 }
 
 impl OutputFormat {
@@ -56,19 +63,7 @@ impl OutputFormat {
             Self::AddressAndAmountAndReleaseDate(_, amt, _) => *amt,
             Self::AddressAndUtxo(_, u) => u.get_native_currency_amount(),
             Self::AddressAndUtxoAndMedium(_, u, _) => u.get_native_currency_amount(),
-        }
-    }
-
-    // ##multicoin## : maybe something like
-    // pub fn amount(&self, coint: Coin) -> CoinAmount;
-
-    pub fn address(&self) -> &ReceivingAddress {
-        match self {
-            OutputFormat::AddressAndAmount(ra, _) => ra,
-            OutputFormat::AddressAndAmountAndMedium(ra, _, _) => ra,
-            OutputFormat::AddressAndAmountAndReleaseDate(ra, _, _) => ra,
-            OutputFormat::AddressAndUtxo(ra, _) => ra,
-            OutputFormat::AddressAndUtxoAndMedium(ra, _, _) => ra,
+            Self::BurnAmount(native_currency_amount) => *native_currency_amount,
         }
     }
 }
@@ -238,13 +233,12 @@ impl TxOutputListBuilder {
 
         // Convert outputs.  [address:amount] --> TxOutputList
         let outputs = self.outputs.into_iter().map(|output_type| {
-            let sender_randomness = wallet_entropy
-                .generate_sender_randomness(block_height, output_type.address().privacy_digest());
-
             match output_type {
                 OutputFormat::AddressAndAmount(address, amt) => {
                     // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
                     // based on whether the address belongs to our wallet or not
+                    let sender_randomness = wallet_entropy
+                        .generate_sender_randomness(block_height, address.privacy_digest());
                     TxOutput::auto(
                         wallet_state,
                         address,
@@ -254,10 +248,11 @@ impl TxOutputListBuilder {
                         self.unowned_utxo_notification_medium,
                     )
                 }
-
                 OutputFormat::AddressAndAmountAndReleaseDate(address, amt, release_date) => {
                     // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
                     // based on whether the address belongs to our wallet or not
+                    let sender_randomness = wallet_entropy
+                        .generate_sender_randomness(block_height, address.privacy_digest());
                     TxOutput::auto(
                         wallet_state,
                         address,
@@ -268,17 +263,20 @@ impl TxOutputListBuilder {
                     )
                     .with_time_lock(release_date)
                 }
-
                 OutputFormat::AddressAndAmountAndMedium(address, amt, medium) => {
                     let utxo = Utxo::new_native_currency(address.lock_script_hash(), amt);
                     let owned = wallet_state.can_unlock(&utxo);
 
+                    let sender_randomness = wallet_entropy
+                        .generate_sender_randomness(block_height, address.privacy_digest());
+
                     TxOutput::native_currency(amt, sender_randomness, address, medium, owned)
                 }
-
                 OutputFormat::AddressAndUtxo(address, utxo) => {
                     // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
                     // based on whether the address belongs to our wallet or not
+                    let sender_randomness = wallet_entropy
+                        .generate_sender_randomness(block_height, address.privacy_digest());
                     TxOutput::auto_utxo(
                         wallet_state,
                         utxo,
@@ -288,9 +286,11 @@ impl TxOutputListBuilder {
                         self.unowned_utxo_notification_medium,
                     )
                 }
-
                 OutputFormat::AddressAndUtxoAndMedium(address, utxo, medium) => {
                     let owned = wallet_state.can_unlock(&utxo);
+
+                    let sender_randomness = wallet_entropy
+                        .generate_sender_randomness(block_height, address.privacy_digest());
 
                     match medium {
                         UtxoNotificationMedium::OnChain => {
@@ -300,6 +300,20 @@ impl TxOutputListBuilder {
                             TxOutput::offchain_utxo(utxo, sender_randomness, address, owned)
                         }
                     }
+                }
+                OutputFormat::BurnAmount(native_currency_amount) => {
+                    // Use two locks to guarantee these coins become
+                    // unspendable: lock script is guaranteed to fail, and
+                    // preimage of receiver digest 0 cannot be found, assuming
+                    // Tip5 hash function is not completely broken.
+                    let burn_lock_script = LockScript::burn();
+                    let burn_utxo =
+                        Utxo::new_native_currency(burn_lock_script.hash(), native_currency_amount);
+                    let sender_randomness = Digest::new(bfe_array![1, 2, 3, 4, 5]);
+                    let receiver_digest = Digest::new(bfe_array![0, 0, 0, 0, 0]);
+                    let owned = false;
+
+                    TxOutput::no_notification(burn_utxo, sender_randomness, receiver_digest, owned)
                 }
             }
         });

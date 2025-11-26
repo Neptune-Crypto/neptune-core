@@ -155,7 +155,6 @@ impl TxOutput {
     ///
     /// Warning: If care is not taken, this is an easy way to lose funds.
     /// Don't use this constructor unless you have a good reason to.
-    #[cfg(test)]
     pub(crate) fn no_notification(
         utxo: Utxo,
         sender_randomness: Digest,

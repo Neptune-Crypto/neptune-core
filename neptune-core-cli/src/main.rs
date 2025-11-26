@@ -283,6 +283,24 @@ enum Command {
         fee: NativeCurrencyAmount,
     },
 
+    /// Make coins unspendable. Equivalent to burning cash. Permanently reduces
+    /// the total money supply of the blockchain.
+    ///
+    /// This burn is transparent, meaning that an on-chain proof of burn is
+    /// associated with the transaction. No privacy.
+    BurnTransparent {
+        /// amount to burn
+        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
+        amount: NativeCurrencyAmount,
+
+        /// Fee paid to have transaction mined
+        #[clap(long, value_parser = NativeCurrencyAmount::coins_from_str)]
+        fee: NativeCurrencyAmount,
+
+        /// Value must be set to "yes_i_truly_want_to_destroy_these_coins"
+        magic_string: String,
+    },
+
     /// Upgrade the specified transaction. Transaction must be either unsynced
     /// or not have a Single Proof for this to work.
     Upgrade {
@@ -1247,6 +1265,38 @@ async fn main() -> Result<()> {
                     // no need to process UTXO notifications:
                     // all outputs (change included) generate *on-chain*
                     // notifications
+                }
+                Err(e) => eprintln!("{e}"),
+            }
+        }
+        Command::BurnTransparent {
+            amount,
+            fee,
+            magic_string,
+        } => {
+            if &magic_string != "yes_i_truly_want_to_destroy_these_coins" {
+                bail!("Not burning because correct magic string was not passed");
+            }
+
+            let burn_output = OutputFormat::BurnAmount(amount);
+            let res = client
+                .send_transparent(
+                    ctx,
+                    token,
+                    vec![burn_output],
+                    ChangePolicy::recover_to_next_unused_key(
+                        KeyType::Symmetric,
+                        UtxoNotificationMedium::OnChain,
+                    ),
+                    fee,
+                )
+                .await?;
+            match res {
+                Ok(tx_artifacts) => {
+                    println!(
+                        "Successfully created transparent burning transaction: {}",
+                        tx_artifacts.transaction().txid()
+                    );
                 }
                 Err(e) => eprintln!("{e}"),
             }
