@@ -49,10 +49,9 @@ impl RustyWalletDatabase {
         let mut tables = WalletDbTables::load_schema_in_order(&mut storage).await;
         let schema_version = tables.schema_version.get();
 
-        // if the DB is brand-new then we set the schema version.
-        // note that schema-version was not present in DB until version 1.
-
-        let is_new_db = schema_version == 0 && tables.sync_label.get() == Digest::default();
+        // if the DB is brand-new then we set the schema version to the most
+        // recent value, since there's nothing to migrate.
+        let is_new_db = tables.sync_label.get() == Digest::default();
         if is_new_db {
             tables.schema_version.set(WALLET_DB_SCHEMA_VERSION).await;
             storage.persist().await;
