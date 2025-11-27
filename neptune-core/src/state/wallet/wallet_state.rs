@@ -1713,7 +1713,7 @@ impl WalletState {
         /// index of the incoming transaction, these are only potential
         /// duplicates, not certain duplicates.
         async fn potential_duplicates(
-            monitored_utxos: &mut DbtVec<MonitoredUtxo>,
+            monitored_utxos: &DbtVec<MonitoredUtxo>,
             incoming: &HashMap<AdditionRecord, IncomingUtxo>,
         ) -> HashMap<StrongUtxoKey, u64> {
             let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();

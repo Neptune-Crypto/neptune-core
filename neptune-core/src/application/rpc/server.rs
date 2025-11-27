@@ -1920,7 +1920,8 @@ pub trait RPC {
         block_proposal: Block,
     ) -> RpcResult<bool>;
 
-    /// mark MUTXOs as abandoned
+    /// mark MUTXOs as abandoned. Does not actually delete any elements in the
+    /// list.
     ///
     /// ```no_run
     /// # use anyhow::Result;

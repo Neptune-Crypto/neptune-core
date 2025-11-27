@@ -1619,9 +1619,11 @@ impl GlobalState {
         Ok(())
     }
 
-    /// Delete from the database all monitored UTXOs from abandoned chains with a depth deeper than
-    /// `block_depth_threshold`. Use `prune_mutxos_of_unknown_depth = true` to remove MUTXOs from
-    /// abandoned chains of unknown depth.
+    /// Mark as deleted all monitored UTXOs from abandoned chains with a depth
+    /// deeper than `block_depth_threshold`. Use
+    /// `prune_mutxos_of_unknown_depth = true` to mark MUTXOs from abandoned
+    /// chains of unknown depth
+    ///
     /// Returns the number of monitored UTXOs that were marked as abandoned.
     ///
     /// Locking:

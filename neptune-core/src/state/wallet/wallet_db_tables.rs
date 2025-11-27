@@ -50,7 +50,7 @@ pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 1;
 /// Any new fields must be added at the end.
 #[derive(Debug)]
 pub(super) struct WalletDbTables {
-    // list of utxos we have already received in a block
+    // Append-only list of utxos we have already received in a block
     // table number: 0
     pub(super) monitored_utxos: DbtVec<MonitoredUtxo>,
 
