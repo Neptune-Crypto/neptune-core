@@ -4,11 +4,11 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use futures::FutureExt;
 use itertools::Itertools;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use super::super::storage_vec::Index;
 use super::traits::StorageReader;
 use super::PendingWrites;
 use super::RustyKey;
@@ -16,20 +16,16 @@ use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
 use crate::application::database::storage::storage_schema::DbtVec;
+use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::application::locks::tokio::AtomicRw;
-
-const LENGTH_KEY_PREFIX: u8 = 0;
-const KEYS_BY_INDEX_PREFIX: u8 = 1;
-const MAP_KEY_PREFIX: u8 = 2;
 
 pub(super) struct DbtMapPrivate<K, V> {
     pub(super) name: String,
     pub(super) reader: Arc<SimpleRustyReader>,
-    pub(super) current_length: Option<Index>,
-    pub(super) key_prefix: u8,
+    pub(super) prefix_map_keys: u8,
     pub(super) cache: HashMap<K, V>,
     pub(super) pending_writes: AtomicRw<PendingWrites>,
-    keys: DbtVec<K>,
+    keys_by_index: DbtVec<Option<K>>,
 }
 
 impl<K, V> Debug for DbtMapPrivate<K, V>
@@ -40,7 +36,7 @@ where
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         f.debug_struct("DbtMapPrivate")
             .field("name", &self.name)
-            .field("key_prefix", &self.key_prefix)
+            .field("key_prefix", &self.prefix_map_keys)
             .field("cache", &self.cache)
             .finish()
     }
@@ -48,50 +44,44 @@ where
 
 impl<K, V> DbtMapPrivate<K, V>
 where
-    K: Clone + Serialize + Eq + Hash,
+    K: Clone + Debug + Serialize + DeserializeOwned + Eq + Hash + Send + Sync,
     V: Clone + Serialize + DeserializeOwned,
 {
-    /// Return the RustyKey where the length of the map is stored.
-    #[inline]
-    pub(super) fn length_rusty_key(&self) -> RustyKey {
-        RustyKey(vec![self.key_prefix, LENGTH_KEY_PREFIX])
-    }
+    pub(crate) async fn new(
+        pending_writes: AtomicRw<PendingWrites>,
+        reader: Arc<SimpleRustyReader>,
+        key_prefixes: [u8; 2],
+        name: &str,
+    ) -> Self {
+        let cache = HashMap::new();
+        let [prefix_map_keys, prefix_keys_by_index] = key_prefixes;
+        let keys_name = format!("{name}_keys_by_index");
+        let keys_by_index = DbtVec::new(
+            pending_writes.clone(),
+            reader.clone(),
+            prefix_keys_by_index,
+            &keys_name,
+        )
+        .await;
 
-    /// Return the RustyKey for the value of a key into the map, where the key
-    /// is specified by index. The RustyKey where the map's key is stored.
-    #[inline]
-    pub(super) fn key_by_index_rusty_key(&self, key_index: u64) -> RustyKey {
-        let prefix = vec![self.key_prefix, KEYS_BY_INDEX_PREFIX];
-        let sub_key = key_index.to_be_bytes().to_vec();
-        RustyKey([prefix, sub_key].concat())
+        Self {
+            name: name.into(),
+            reader,
+            prefix_map_keys,
+            cache,
+            pending_writes,
+            keys_by_index,
+        }
     }
 
     /// Return the RustyKey associated with a specific key into the map. The
     /// RustyKey where the value is stored.
     #[inline]
     pub(super) fn map_key_rusty_key(&self, key: &K) -> RustyKey {
-        let prefix = vec![self.key_prefix, MAP_KEY_PREFIX];
+        let prefix = vec![self.prefix_map_keys];
         let sub_key = RustyKey::from_any(key);
 
         RustyKey([prefix, sub_key.0].concat())
-    }
-
-    pub(crate) fn new(
-        pending_writes: AtomicRw<PendingWrites>,
-        reader: Arc<SimpleRustyReader>,
-        key_prefix: u8,
-        name: &str,
-    ) -> Self {
-        let length = None;
-        let cache = HashMap::new();
-        Self {
-            name: name.into(),
-            key_prefix,
-            reader,
-            current_length: length,
-            cache,
-            pending_writes,
-        }
     }
 
     #[inline]
@@ -124,55 +114,62 @@ where
     ///
     /// If the map did have this key present, the value is updated, and the old
     /// value is returned.
-    pub fn insert(&mut self, key: K, v: V) -> bool {
-        let new = self.cache.insert(key, v);
+    pub async fn insert(&mut self, key: K, value: V) -> Option<V> {
+        let previous_val = self.get(&key).await.map(|x| x.to_owned());
+
+        // Update cache
+        self.cache.insert(key.clone(), value.clone());
+
+        // Add to write list
+        let key_as_rusty_key = self.map_key_rusty_key(&key);
+        let mut pending_writes = self.pending_writes.lock_guard_mut().await;
+        pending_writes.write_ops.push(WriteOperation::Write(
+            key_as_rusty_key,
+            RustyValue::from_any(&value),
+        ));
+
+        // Add key to key list iff key is new
+        if previous_val.is_none() {
+            self.keys_by_index.push(Some(key)).await;
+        }
+
+        previous_val
+    }
+
+    /// This will remove the entry if it exists.
+    pub async fn remove(&mut self, key: &K) -> Option<V> {
+        // let previous_val = self.get(&key).await.map(|x| x.to_owned());
+
+        // // Update cache (nop if not present)
+        // self.cache.remove(&key);
+
+        // let keys = self.keys_by_index.get_all();
 
         todo!()
-        // let new = self.keys.insert(k.clone());
-        // if new {
-        //     // key list grew by 1.  Set entire key-list
-        //     self.write_queue.push(WriteOperation::Write(
-        //         self.keylist_db_key(),
-        //         RustyValue::from_any(&self.keys),
-        //     ));
+        // self.cache.remo
+        // no-op if key not found.
+        // if !self.keys_by_index.remove(k) {
+        //     return false;
         // }
 
         // self.write_queue.push(WriteOperation::Write(
-        //     self.db_key(&k),
-        //     RustyValue::from_any(&v),
+        //     self.keylist_db_key(),
+        //     RustyValue::from_any(&self.keys_by_index),
         // ));
 
-        // let _ = self.write_cache.insert(k, v);
+        // self.write_cache.remove(k);
 
-        // new
-    }
+        // // add to write queue
+        // self.write_queue
+        //     .push(WriteOperation::Delete(self.db_key(k)));
 
-    /// This will remove the entry identified by `k` if it
-    /// exists.
-    pub fn remove(&mut self, k: &K) -> bool {
-        // no-op if key not found.
-        if !self.keys.remove(k) {
-            return false;
-        }
-
-        self.write_queue.push(WriteOperation::Write(
-            self.keylist_db_key(),
-            RustyValue::from_any(&self.keys),
-        ));
-
-        self.write_cache.remove(k);
-
-        // add to write queue
-        self.write_queue
-            .push(WriteOperation::Delete(self.db_key(k)));
-
-        true
+        // true
     }
 
     // Return the key used to store the length of the vector
     #[inline]
     pub(super) fn keylist_db_key(&self) -> RustyKey {
-        let prefix_rk: RustyKey = self.key_prefix.into();
+        let prefix_rk: RustyKey = self.prefix_map_keys.into();
         let keylist_rk = RustyKey::from(b"_kl".as_ref());
 
         // This concatenates prefix + "_kl" to form the
@@ -187,7 +184,7 @@ where
     /// Return the key of K type used to store the element at a given usize of usize type
     #[inline]
     pub(super) fn db_key(&self, k: &K) -> RustyKey {
-        let prefix_rk: RustyKey = self.key_prefix.into();
+        let prefix_rk: RustyKey = self.prefix_map_keys.into();
         let k_rk = RustyKey::from_any(&k);
 
         // This concatenates prefix + "_kl" to form the
@@ -201,27 +198,27 @@ where
     }
 
     #[inline]
-    pub(super) fn len(&self) -> usize {
-        self.keys.len()
+    pub(super) async fn len(&self) -> u64 {
+        self.keys_by_index.len().await
     }
 
     #[inline]
     pub(super) fn clear(&mut self) {
-        for k in self.keys.clone().iter() {
+        for k in self.keys_by_index.clone().iter() {
             self.remove(k);
         }
-        self.keys.clear()
+        self.keys_by_index.clear()
     }
 
     pub(super) fn iter_keys(&self) -> impl Iterator<Item = &K> {
-        self.keys.iter()
+        self.keys_by_index.iter()
     }
 
     pub(super) fn iter(&self) -> impl Iterator<Item = (&K, Cow<'_, V>)> {
-        self.keys.iter().map(|k| (k, self.get(k).unwrap()))
+        self.keys_by_index.iter().map(|k| (k, self.get(k).unwrap()))
     }
 
     pub(super) fn iter_values(&self) -> impl Iterator<Item = Cow<'_, V>> {
-        self.keys.iter().map(|k| self.get(k).unwrap())
+        self.keys_by_index.iter().map(|k| self.get(k).unwrap())
     }
 }
