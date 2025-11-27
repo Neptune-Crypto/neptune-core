@@ -19,6 +19,8 @@
 //! Important: write operations are not written until
 //! SimpleRustyStorage::persist() is called.
 
+mod dbtmap;
+mod dbtmap_private;
 mod dbtsingleton;
 mod dbtsingleton_private;
 mod dbtvec;
@@ -33,6 +35,7 @@ mod simple_rusty_reader;
 mod simple_rusty_storage;
 pub mod traits;
 
+pub use dbtmap::*;
 pub use dbtsingleton::*;
 pub use dbtvec::*;
 pub use enums::*;
