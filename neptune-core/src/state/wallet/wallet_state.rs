@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
+use std::ops::Range;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -47,6 +48,7 @@ use super::wallet_status::WalletStatusElement;
 use crate::application::config::cli_args::Args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
@@ -1627,6 +1629,7 @@ impl WalletState {
         incoming: &HashMap<AdditionRecord, IncomingUtxo>,
         mut aocl_leaf_count: u64,
         monitored_utxos: &mut DbtVec<MonitoredUtxo>,
+        aocl_to_mutxo_index: &mut DbtMap<u64, Vec<u64>>,
         potential_duplicates: &HashMap<StrongUtxoKey, u64>,
         num_mps_per_utxo: usize,
     ) -> Vec<IncomingUtxoRecoveryData> {
@@ -1660,7 +1663,14 @@ impl WalletState {
                     existing_mutxo.confirmed_in_block = mutxo.confirmed_in_block;
                     monitored_utxos.set(*mutxo_index, existing_mutxo).await;
                 } else {
+                    let mutxo_index = monitored_utxos.len().await;
                     monitored_utxos.push(mutxo).await;
+                    let mut mutxo_indices: Vec<u64> = aocl_to_mutxo_index
+                        .get(&aocl_index)
+                        .await
+                        .unwrap_or_default();
+                    mutxo_indices.push(mutxo_index);
+                    aocl_to_mutxo_index.insert(aocl_index, mutxo_indices).await;
                     let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
                         utxo,
                         sender_randomness,
@@ -1713,18 +1723,20 @@ impl WalletState {
         /// index of the incoming transaction, these are only potential
         /// duplicates, not certain duplicates.
         async fn potential_duplicates(
+            incoming_range: Range<u64>,
             monitored_utxos: &DbtVec<MonitoredUtxo>,
-            incoming: &HashMap<AdditionRecord, IncomingUtxo>,
+            aocl_to_mutxo_index: &DbtMap<u64, Vec<u64>>,
         ) -> HashMap<StrongUtxoKey, u64> {
             let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();
-            let stream = monitored_utxos.stream().await;
-            pin_mut!(stream); // needed for iteration
 
-            while let Some((i, monitored_utxo)) = stream.next().await {
-                let addition_record = monitored_utxo.addition_record();
-                let strong_key = StrongUtxoKey::new(addition_record, monitored_utxo.aocl_index());
-                if incoming.contains_key(&addition_record) {
-                    maybe_duplicates.insert(strong_key, i);
+            for aocl_leaf_index in incoming_range {
+                if let Some(mutxo_indices) = aocl_to_mutxo_index.get(&aocl_leaf_index).await {
+                    for mutxo_index in mutxo_indices {
+                        let mutxo = monitored_utxos.get(mutxo_index).await;
+                        let addition_record = mutxo.addition_record();
+                        let strong_key = StrongUtxoKey::new(addition_record, aocl_leaf_index);
+                        maybe_duplicates.insert(strong_key, mutxo_index);
+                    }
                 }
             }
 
@@ -1770,17 +1782,33 @@ impl WalletState {
             .map(|incoming_utxo| (incoming_utxo.addition_record(), incoming_utxo))
             .collect();
 
-        let monitored_utxos = self.wallet_db.monitored_utxos_mut();
-
         // return early if there are no monitored utxos and this
         // block does not affect our balance
-        if spent_inputs.is_empty() && incoming.is_empty() && monitored_utxos.is_empty().await {
+        if spent_inputs.is_empty()
+            && incoming.is_empty()
+            && self.wallet_db.monitored_utxos().is_empty().await
+        {
             self.wallet_db.set_sync_label(block.hash()).await;
             return Ok(vec![]);
         }
 
-        let potential_duplicates = potential_duplicates(monitored_utxos, &incoming).await;
+        let first_aocl_leaf_index_in_block = previous_mutator_set_accumulator.aocl.num_leafs();
+        let num_additions: u64 = additions
+            .len()
+            .try_into()
+            .expect("Cant exceed u64::MAX addition records in a block");
+        let incoming_range =
+            first_aocl_leaf_index_in_block..first_aocl_leaf_index_in_block + num_additions;
+        let potential_duplicates = potential_duplicates(
+            incoming_range,
+            self.wallet_db.monitored_utxos(),
+            &self.wallet_db.aocl_to_mutxo(),
+        )
+        .await;
         let msa_state = previous_mutator_set_accumulator.clone();
+
+        let monitored_utxos = self.wallet_db.monitored_utxos_mut();
+        let aocl_to_mutxo = self.wallet_db.aocl_to_mutxo_mut();
 
         // Mutate the monitored UTXOs to account for this block.
         let incoming_utxo_recovery_data_list = if maintain_membership_proofs_in_wallet {
@@ -1800,6 +1828,7 @@ impl WalletState {
                 &incoming,
                 msa_state.aocl.num_leafs(),
                 monitored_utxos,
+                aocl_to_mutxo,
                 &potential_duplicates,
                 self.configuration.num_mps_per_utxo,
             )

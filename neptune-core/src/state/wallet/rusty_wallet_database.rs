@@ -177,6 +177,10 @@ impl RustyWalletDatabase {
         &self.tables.aocl_to_mutxo
     }
 
+    pub fn aocl_to_mutxo_mut(&mut self) -> &mut DbtMap<u64, Vec<u64>> {
+        &mut self.tables.aocl_to_mutxo
+    }
+
     #[cfg(test)]
     pub fn storage(&self) -> &SimpleRustyStorage {
         &self.storage
