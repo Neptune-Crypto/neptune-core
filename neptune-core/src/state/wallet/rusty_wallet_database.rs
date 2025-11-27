@@ -9,6 +9,7 @@ use super::sent_transaction::SentTransaction;
 use super::wallet_db_tables::WalletDbTables;
 use super::wallet_db_tables::WALLET_DB_SCHEMA_VERSION;
 use crate::application::database::storage::storage_schema::traits::*;
+use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
@@ -171,6 +172,10 @@ impl RustyWalletDatabase {
     /// retrieve the database schema version
     pub fn schema_version(&self) -> u16 {
         self.tables.schema_version.get()
+    }
+
+    pub fn aocl_to_mutxo(&self) -> &DbtMap<u64, Vec<u64>> {
+        &self.tables.aocl_to_mutxo
     }
 
     #[cfg(test)]

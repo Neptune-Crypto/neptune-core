@@ -3,6 +3,7 @@ use twenty_first::prelude::Digest;
 use super::expected_utxo::ExpectedUtxo;
 use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
+use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtSingleton;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
@@ -20,7 +21,7 @@ use crate::prelude::twenty_first;
 ///  [migrate_db](super::migrate_db).
 ///
 /// note: the very first schema version was 0, ie u16::default()
-pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 1;
+pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 2;
 
 /// represents logical "tables" in the Wallet database as used by `DbtSchema`.
 ///
@@ -83,6 +84,12 @@ pub(super) struct WalletDbTables {
     #[allow(dead_code)]
     // table number: 7
     pub(super) schema_version: DbtSingleton<u16>,
+
+    /// table number: 8 + 9
+    /// Mapping from AOCL leaf index to index into list of `monitored_utxo` for
+    /// UTXOs managed by this wallet. Value type is list because of potential
+    /// reorganizations.
+    pub(super) aocl_to_mutxo: DbtMap<u64, Vec<u64>>,
 }
 
 impl WalletDbTables {
@@ -123,6 +130,8 @@ impl WalletDbTables {
 
         let schema_version = storage.schema.new_singleton::<u16>("schema_version").await;
 
+        let aocl_to_mutxo = storage.schema.new_map("aocl_to_mutxo").await;
+
         WalletDbTables {
             sync_label,
             monitored_utxos,
@@ -132,10 +141,30 @@ impl WalletDbTables {
             generation_key_counter,
             symmetric_key_counter,
             schema_version,
+            aocl_to_mutxo,
         }
     }
 
     pub(super) fn sent_transactions_table_count() -> u8 {
         2
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    impl WalletDbTables {
+        pub(crate) fn monitored_utxos_table_count() -> u8 {
+            0
+        }
+
+        pub(crate) fn schema_version_table_count() -> u8 {
+            7
+        }
+
+        pub(crate) fn sync_label_table_count() -> u8 {
+            3
+        }
     }
 }
