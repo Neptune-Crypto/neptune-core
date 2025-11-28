@@ -26,7 +26,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
     // reset the schema, so we start with table_count = 0.
     storage.reset_schema();
 
-    // add a DbtVec<MonitoredUtxoV0> to the schema at the correct position
+    // add a DbtVec<MonitoredUtxoV1> to the schema at the correct position
     // so the correct key-prefix is used
     storage.schema.table_count = WalletDbTables::monitored_utxos_table_count();
     let mutxos_v1 = storage
@@ -129,7 +129,7 @@ mod migration {
         use crate::state::Timestamp;
         use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
-        // this is a copy of MonitoredUtxo as it was in v0 schema.
+        // this is a copy of MonitoredUtxo as it was in v1 schema.
         #[derive(Debug, Clone, Serialize, Deserialize)]
         pub(in super::super) struct MonitoredUtxo {
             pub utxo: Utxo,
@@ -189,10 +189,13 @@ mod tests {
     ///
     /// This test uses mock types from v1 wallet to create a v2
     /// database and then migrates it.
-    // #[tracing_test::traced_test]
+    #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn migrate() -> anyhow::Result<()> {
-        fn fake_mutxo(aocl_leaf_index: u64, num_coins: u32) -> migration::schema_v1::MonitoredUtxo {
+        fn fake_v1_mutxo(
+            aocl_leaf_index: u64,
+            num_coins: u32,
+        ) -> migration::schema_v1::MonitoredUtxo {
             let utxo = Utxo::new_native_currency(
                 LockScript::anyone_can_spend().hash(),
                 NativeCurrencyAmount::coins(num_coins),
@@ -237,7 +240,11 @@ mod tests {
             // sync-label is required, else db is considered "new" on next open.
             wallet_db_v1.sync_label.set(rand::random()).await;
 
-            let mutxos = vec![fake_mutxo(14, 1), fake_mutxo(14, 2), fake_mutxo(22, 1)];
+            let mutxos = vec![
+                fake_v1_mutxo(14, 1),
+                fake_v1_mutxo(14, 2),
+                fake_v1_mutxo(22, 1),
+            ];
             for mutxo in mutxos.iter() {
                 wallet_db_v1.monitored_utxos.push(mutxo.clone()).await;
             }
