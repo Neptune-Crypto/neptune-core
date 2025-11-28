@@ -1,6 +1,5 @@
 use futures::pin_mut;
 use tracing::debug;
-use tracing::error;
 
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::storage::storage_vec::traits::*;
@@ -88,7 +87,6 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
             abandoned_at: mutxo_v1.abandoned_at,
         };
 
-        let mutxo_index = mutxos_v2.len().await;
         debug!("Inserting monitored UTXO number {list_index}");
         mutxos_v2.set(list_index, mutxo_v2).await;
 
@@ -102,7 +100,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
             .expect("Can always convert usize to u64");
         reorganized_duplicates += num_reorgs;
 
-        mutxo_indices.push(mutxo_index);
+        mutxo_indices.push(list_index);
         aocl_to_mutxo_v2
             .insert(msmp.aocl_leaf_index, mutxo_indices)
             .await;
