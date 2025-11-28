@@ -170,42 +170,50 @@ mod tests {
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 
+    impl migration::schema_v1::MonitoredUtxo {
+        pub(in super::super) fn new(utxo: Utxo, number_of_mps_per_utxo: usize) -> Self {
+            Self {
+                utxo,
+                blockhash_to_membership_proof: VecDeque::default(),
+                number_of_mps_per_utxo,
+                spent_in_block: None,
+                confirmed_in_block: None,
+                abandoned_at: None,
+            }
+        }
+    }
+
     /// tests migrating a simulated v1 wallet db to v2.
     ///
     /// This test uses mock types from v1 wallet to create a v2
     /// database and then migrates it.
-    #[tracing_test::traced_test]
+    // #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn migrate() -> anyhow::Result<()> {
-        fn fake_mutxo(aocl_leaf_index: u64, num_coins: u32) -> MonitoredUtxo {
+        fn fake_mutxo(aocl_leaf_index: u64, num_coins: u32) -> migration::schema_v1::MonitoredUtxo {
             let utxo = Utxo::new_native_currency(
                 LockScript::anyone_can_spend().hash(),
                 NativeCurrencyAmount::coins(num_coins),
             );
-            let sender_randomness = Digest::default();
-            let receiver_preimage = Digest::default();
-            let mut mutxo = MonitoredUtxo::new_from_block_hash(
-                utxo,
-                2,
-                aocl_leaf_index,
-                sender_randomness,
-                receiver_preimage,
-                (
-                    Digest::default(),
-                    Timestamp::now(),
-                    BlockHeight::genesis().next(),
-                ),
-            );
+            let mut mutxo = migration::schema_v1::MonitoredUtxo::new(utxo, 2);
+
             let msmp = MsMembershipProof {
-                sender_randomness,
-                receiver_preimage,
+                sender_randomness: Digest::default(),
+                receiver_preimage: Digest::default(),
                 auth_path_aocl: MmrMembershipProof {
                     authentication_path: vec![],
                 },
                 aocl_leaf_index,
                 target_chunks: ChunkDictionary::default(),
             };
-            mutxo.add_membership_proof_for_tip(Digest::default(), msmp);
+            mutxo
+                .blockhash_to_membership_proof
+                .push((Digest::default(), msmp));
+            mutxo.confirmed_in_block = (
+                Digest::default(),
+                Timestamp::now(),
+                BlockHeight::genesis().next,
+            );
 
             mutxo
         }
@@ -274,18 +282,17 @@ mod tests {
     // contains schema version 1 types for test(s)
     mod test_schema_v1 {
         use super::*;
-        use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 
         // represents a subset of RustyWalletDatabase as it was in v1
         pub(super) struct RustyWalletDatabase {
             pub storage: SimpleRustyStorage,
-            pub monitored_utxos: DbtVec<MonitoredUtxo>,
+            pub monitored_utxos: DbtVec<migration::schema_v1::MonitoredUtxo>,
             pub sync_label: DbtSingleton<Digest>,
             pub schema_version: DbtSingleton<u16>,
         }
         impl RustyWalletDatabase {
-            // simulates connecting to DB with v0 schema
-            // only impls requirements for SentTransactions
+            // simulates connecting to DB with v1 schema
+            // only impls requirements for MonitoredUtxo
             pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
                 let mut storage = SimpleRustyStorage::new_with_callback(
                     db,
@@ -295,7 +302,7 @@ mod tests {
                 storage.schema.table_count = WalletDbTables::monitored_utxos_table_count();
                 let monitored_utxos = storage
                     .schema
-                    .new_vec::<MonitoredUtxo>("monitored_utxos")
+                    .new_vec::<migration::schema_v1::MonitoredUtxo>("monitored_utxos")
                     .await;
                 storage.schema.table_count = WalletDbTables::sync_label_table_count();
                 let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
