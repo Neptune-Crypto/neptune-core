@@ -145,6 +145,9 @@ mod migration {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::collections::VecDeque;
+
+    use itertools::Itertools;
     use macro_rules_attr::apply;
     use tasm_lib::prelude::Digest;
     use tasm_lib::twenty_first::prelude::MmrMembershipProof;
@@ -162,7 +165,6 @@ mod tests {
     use crate::application::database::NeptuneLevelDb;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::state::wallet::migrate_db::worker;
-    use crate::state::wallet::monitored_utxo::MonitoredUtxo;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::state::BlockHeight;
     use crate::tests::shared::files::unit_test_data_directory;
@@ -208,12 +210,12 @@ mod tests {
             };
             mutxo
                 .blockhash_to_membership_proof
-                .push((Digest::default(), msmp));
-            mutxo.confirmed_in_block = (
+                .push_back((Digest::default(), msmp));
+            mutxo.confirmed_in_block = Some((
                 Digest::default(),
                 Timestamp::now(),
-                BlockHeight::genesis().next,
-            );
+                BlockHeight::genesis().next(),
+            ));
 
             mutxo
         }
@@ -270,9 +272,16 @@ mod tests {
         assert_eq!(Some(vec![2]), aocl_to_mutxo.get(&22).await);
         assert!(aocl_to_mutxo.get(&23).await.is_none());
 
+        let utxos_from_v1 = v1_mutxos.into_iter().map(|x| x.utxo).collect_vec();
+        let utxos_from_v2 = wallet_db_v2
+            .monitored_utxos()
+            .get_all()
+            .await
+            .into_iter()
+            .map(|x| x.utxo)
+            .collect_vec();
         assert_eq!(
-            v1_mutxos,
-            wallet_db_v2.monitored_utxos().get_all().await,
+            utxos_from_v1, utxos_from_v2,
             "Monitored UTXOs must be unchanged by upgrade"
         );
 
