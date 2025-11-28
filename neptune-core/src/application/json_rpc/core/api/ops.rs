@@ -104,6 +104,12 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Wallet)]
     SubmitTransaction,
+
+    #[namespace(Namespace::Mining)]
+    GetBlockTemplate,
+
+    #[namespace(Namespace::Mining)]
+    SubmitBlock,
 }
 
 #[cfg(test)]

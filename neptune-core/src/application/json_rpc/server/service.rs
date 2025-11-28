@@ -1,15 +1,19 @@
 use async_trait::async_trait;
 use tracing::debug;
 
+use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
+use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
+use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplateMetadata;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
+use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 
 #[async_trait]
@@ -474,6 +478,69 @@ impl RpcApi for RpcServer {
             success: response.is_ok(),
         })
     }
+
+    async fn get_block_template_call(
+        &self,
+        request: GetBlockTemplateRequest,
+    ) -> RpcResult<GetBlockTemplateResponse> {
+        let (maybe_proposal, tip) = {
+            let global_state = self.state.lock_guard().await;
+            let proposal = global_state.mining_state.block_proposal.map(|p| p.clone());
+            let tip = *global_state.chain.light_state().header();
+
+            (proposal, tip)
+        };
+
+        let Some(mut proposal) = maybe_proposal else {
+            return Ok(GetBlockTemplateResponse { template: None });
+        };
+
+        let address =
+            ReceivingAddress::from_bech32m(&request.guesser_address, self.state.cli().network)
+                .map_err(|_| RpcError::InvalidAddress)?;
+        proposal.set_header_guesser_address(address);
+
+        let template = RpcBlockTemplate {
+            block: RpcBlock::from(&proposal),
+            metadata: RpcBlockTemplateMetadata::new(&proposal, tip.difficulty),
+        };
+
+        Ok(GetBlockTemplateResponse {
+            template: Some(template),
+        })
+    }
+
+    async fn submit_block_call(
+        &self,
+        request: SubmitBlockRequest,
+    ) -> RpcResult<SubmitBlockResponse> {
+        let mut template: Block = request.template.into();
+
+        // Since block comes from external source, we need to check validity.
+        let tip = self.state.lock_guard().await.chain.light_state().clone();
+        if !template
+            .is_valid(&tip, Timestamp::now(), self.state.cli().network)
+            .await
+        {
+            return Err(RpcError::SubmitBlock(SubmitBlockError::InvalidBlock));
+        }
+
+        template.set_header_pow(request.pow.into());
+
+        if !template.has_proof_of_work(self.state.cli().network, template.header()) {
+            return Err(RpcError::SubmitBlock(SubmitBlockError::InsufficientWork));
+        }
+
+        // No time to waste! Inform main_loop!
+        let solution = Box::new(template);
+        let success = self
+            .to_main_tx
+            .send(RPCServerToMain::ProofOfWorkSolution(solution))
+            .await
+            .is_ok();
+
+        Ok(SubmitBlockResponse { success })
+    }
 }
 
 #[cfg(test)]
@@ -494,14 +561,18 @@ pub mod tests {
     use crate::api::export::TxProvingCapability;
     use crate::application::config::cli_args;
     use crate::application::json_rpc::core::api::rpc::RpcApi;
+    use crate::application::json_rpc::core::api::rpc::RpcError;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
+    use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
+    use crate::state::mining::block_proposal::BlockProposal;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::strategies::txkernel;
@@ -875,5 +946,65 @@ pub mod tests {
             .expect("submission to succeed");
 
         assert!(submit_tx_response.success);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn mining_scenarios_validated_properly() {
+        use crate::application::json_rpc::core::api::rpc::SubmitBlockError;
+
+        let mut rpc_server = test_rpc_server().await;
+        let network = rpc_server.state.cli().network;
+
+        let genesis = Block::genesis(network);
+        let block1 = fake_valid_deterministic_successor(&genesis, network).await;
+        rpc_server
+            .state
+            .lock_mut(|x| {
+                x.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone())
+            })
+            .await;
+        let guesser_address = rpc_server
+            .state
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await
+            .to_address();
+
+        let RpcBlockTemplate { block, metadata } = rpc_server
+            .get_block_template(guesser_address.to_bech32m(network).unwrap())
+            .await
+            .unwrap()
+            .template
+            .unwrap();
+
+        assert_eq!(
+            rpc_server
+                .submit_block(block.clone(), block.kernel.header.pow.clone())
+                .await
+                .unwrap_err(),
+            RpcError::SubmitBlock(SubmitBlockError::InsufficientWork)
+        );
+
+        let solution = metadata.solve(ConsensusRuleSet::default());
+        assert!(
+            rpc_server
+                .submit_block(block.clone(), solution.clone())
+                .await
+                .unwrap()
+                .success,
+            "Node must accept valid new tip."
+        );
+
+        let mut bad_proposal = block;
+        bad_proposal.proof = None;
+        assert_eq!(
+            rpc_server
+                .submit_block(bad_proposal.clone(), solution)
+                .await
+                .unwrap_err(),
+            RpcError::SubmitBlock(SubmitBlockError::InvalidBlock)
+        );
     }
 }

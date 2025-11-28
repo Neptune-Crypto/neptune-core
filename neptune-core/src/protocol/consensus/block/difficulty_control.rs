@@ -107,6 +107,22 @@ impl Difficulty {
             carry,
         )
     }
+
+    /// Converts a BigUint into Difficulty. Returns None if it doesn’t fit.
+    pub(crate) fn from_biguint(bi: BigUint) -> Option<Self> {
+        if bi.iter_u32_digits().count() > Self::NUM_LIMBS {
+            return None;
+        }
+
+        Some(Self(
+            bi.iter_u32_digits()
+                .take(Self::NUM_LIMBS)
+                .pad_using(Self::NUM_LIMBS, |_| 0u32)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        ))
+    }
 }
 
 impl IntoIterator for Difficulty {
@@ -283,6 +299,26 @@ impl From<ProofOfWork> for BigUint {
             bi = (bi << 32) + limb;
         }
         bi
+    }
+}
+
+impl TryFrom<BigUint> for ProofOfWork {
+    type Error = anyhow::Error;
+
+    fn try_from(big: BigUint) -> Result<Self, Self::Error> {
+        ensure!(
+            !big.iter_u32_digits().count() > Self::NUM_LIMBS,
+            "exceeds maximum ProofOfWork value"
+        );
+
+        Ok(Self(
+            big.iter_u32_digits()
+                .take(Self::NUM_LIMBS)
+                .pad_using(Self::NUM_LIMBS, |_| 0u32)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        ))
     }
 }
 
@@ -511,21 +547,6 @@ mod tests {
     use crate::protocol::consensus::block::Network;
 
     impl Difficulty {
-        pub(crate) fn from_biguint(bi: BigUint) -> Self {
-            assert!(
-                bi.iter_u32_digits().count() <= Self::NUM_LIMBS,
-                "BigUint too large to convert to Difficulty"
-            );
-            Self(
-                bi.iter_u32_digits()
-                    .take(Self::NUM_LIMBS)
-                    .pad_using(Self::NUM_LIMBS, |_| 0u32)
-                    .collect_vec()
-                    .try_into()
-                    .unwrap(),
-            )
-        }
-
         /// Convert a u64 into a difficulty.
         pub(crate) fn from_u64(value: u64) -> Self {
             let mut array = [0u32; Self::NUM_LIMBS];
