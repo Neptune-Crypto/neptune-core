@@ -276,7 +276,7 @@ impl MsMembershipProof {
         own_item: Digest,
         mutator_set: &MutatorSetAccumulator,
         addition_record: &AdditionRecord,
-    ) -> Result<bool, Box<dyn Error>> {
+    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
         assert!(self.aocl_leaf_index < mutator_set.aocl.num_leafs());
         let new_item_aocl_index = mutator_set.aocl.num_leafs();
 
