@@ -270,7 +270,9 @@ enum Command {
     ///
     /// Specifically, the transaction will include announcements that expose the
     /// raw UTXOs and all commitment randomness. This information suffices to
-    /// track amounts as well as origins and destinations.
+    /// track amounts as well as origins and destinations. Because of the added
+    /// announcements, these transactions require a higher fee than
+    /// non-transparent transactions.
     SendTransparent {
         #[clap(long, value_parser, required = false)]
         file: Option<PathBuf>,
