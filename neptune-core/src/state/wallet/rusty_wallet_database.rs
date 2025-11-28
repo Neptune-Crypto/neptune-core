@@ -14,7 +14,10 @@ use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+use crate::application::database::storage::storage_vec::traits::StorageVecBase;
+use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
+use crate::protocol::consensus::block::Block;
 
 #[derive(Debug)]
 pub struct RustyWalletDatabase {
@@ -109,6 +112,62 @@ impl RustyWalletDatabase {
     /// get mutable monitored_utxos.
     pub fn monitored_utxos_mut(&mut self) -> &mut DbtVec<MonitoredUtxo> {
         &mut self.tables.monitored_utxos
+    }
+
+    /// Mark existing monitored UTXO as received in a specified block.
+    ///
+    /// # Panics
+    ///
+    /// - If index for monitored UTXO is out of range.
+    pub(crate) async fn update_mutxo_confirmation_block(
+        &mut self,
+        mutxo_index: Index,
+        block: &Block,
+    ) {
+        let mut existing_mutxo = self.tables.monitored_utxos.get(mutxo_index).await;
+        existing_mutxo.confirmed_in_block = Some((
+            block.hash(),
+            block.kernel.header.timestamp,
+            block.kernel.header.height,
+        ));
+        self.tables
+            .monitored_utxos
+            .set(mutxo_index, existing_mutxo)
+            .await;
+    }
+
+    /// Insert a new monitored UTXO into the wallet's database and return the
+    /// index of the inserted element.
+    /// # Panics
+    ///
+    /// - If provided monitored UTXO does not have an associated membership
+    ///   proof.
+    pub(crate) async fn insert_mutxo(&mut self, monitored_utxo: MonitoredUtxo) -> Index {
+        let index_new_mutxo = self.tables.monitored_utxos.len().await;
+        let aocl_leaf_index = monitored_utxo
+            .get_latest_membership_proof_entry()
+            .expect("Must have membership proof when inserting into database")
+            .1
+            .aocl_leaf_index;
+
+        self.tables.monitored_utxos.push(monitored_utxo).await;
+
+        // In the common case (no reorgs), this is the empty vector, so it will
+        // only contain one element after insertion.
+        let mut all_mutxo_indices: Vec<u64> = self
+            .tables
+            .aocl_to_mutxo
+            .get(&aocl_leaf_index)
+            .await
+            .unwrap_or_default();
+        all_mutxo_indices.push(index_new_mutxo);
+
+        self.tables
+            .aocl_to_mutxo
+            .insert(aocl_leaf_index, all_mutxo_indices)
+            .await;
+
+        index_new_mutxo
     }
 
     /// get expected_utxos.

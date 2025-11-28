@@ -7,7 +7,10 @@ use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtSingleton;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+use crate::application::database::storage::storage_vec::traits::StorageVecBase;
+use crate::application::database::storage::storage_vec::Index;
 use crate::prelude::twenty_first;
+use crate::protocol::consensus::block::Block;
 
 /// defines the schema version of the wallet database.
 ///
@@ -147,6 +150,25 @@ impl WalletDbTables {
 
     pub(super) fn sent_transactions_table_count() -> u8 {
         2
+    }
+
+    /// Mark existing monitored UTXO as received in a specified block.
+    ///
+    /// # Panics
+    ///
+    /// - If index for monitored UTXO is out of range.
+    pub(crate) async fn update_mutxo_confirmation_block(
+        &mut self,
+        mutxo_index: Index,
+        block: &Block,
+    ) {
+        let mut existing_mutxo = self.monitored_utxos.get(mutxo_index).await;
+        existing_mutxo.confirmed_in_block = Some((
+            block.hash(),
+            block.kernel.header.timestamp,
+            block.kernel.header.height,
+        ));
+        self.monitored_utxos.set(mutxo_index, existing_mutxo).await;
     }
 }
 
