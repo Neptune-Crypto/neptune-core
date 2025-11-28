@@ -49,7 +49,7 @@ impl MsMembershipProofPrivacyPreserving {
         aocl_leaf_index: u64,
         sender_randomness: Digest,
         receiver_preimage: Digest,
-    ) -> Result<MsMembershipProof, Box<dyn Error>> {
+    ) -> Result<MsMembershipProof, Box<dyn Error + Send + Sync>> {
         let aocl_mmr = self
             .aocl_auth_paths
             .into_iter()
@@ -256,7 +256,7 @@ where
     pub async fn get_aocl_authentication_path(
         &self,
         index: u64,
-    ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof, Box<dyn Error>> {
+    ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof, Box<dyn Error + Send + Sync>> {
         if self.aocl.num_leafs().await <= index {
             return Err(Box::new(MutatorSetError::RequestedAoclAuthPathOutOfBounds(
                 (index, self.aocl.num_leafs().await),
@@ -270,7 +270,8 @@ where
     pub async fn get_chunk_and_auth_path(
         &self,
         chunk_index: u64,
-    ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof, Chunk), Box<dyn Error>> {
+    ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof, Chunk), Box<dyn Error + Send + Sync>>
+    {
         if self.swbf_inactive.num_leafs().await <= chunk_index {
             return Err(Box::new(MutatorSetError::RequestedSwbfAuthPathOutOfBounds(
                 (chunk_index, self.swbf_inactive.num_leafs().await),
@@ -301,7 +302,7 @@ where
         sender_randomness: Digest,
         receiver_preimage: Digest,
         aocl_leaf_index: u64,
-    ) -> Result<MsMembershipProof, Box<dyn Error>> {
+    ) -> Result<MsMembershipProof, Box<dyn Error + Send + Sync>> {
         if self.aocl.is_empty().await {
             return Err(Box::new(MutatorSetError::MutatorSetIsEmpty));
         }
@@ -350,7 +351,7 @@ where
     pub(crate) async fn restore_membership_proof_privacy_preserving(
         &self,
         absolute_indices: AbsoluteIndexSet,
-    ) -> Result<MsMembershipProofPrivacyPreserving, Box<dyn Error>> {
+    ) -> Result<MsMembershipProofPrivacyPreserving, Box<dyn Error + Send + Sync>> {
         let mut aocl_auth_paths = vec![];
         let num_aocl_leafs = self.aocl.num_leafs().await;
         let (aocl_index_min, aocl_index_max) = absolute_indices.aocl_range()?;
