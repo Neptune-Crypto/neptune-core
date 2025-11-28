@@ -71,7 +71,6 @@ mod tests {
 
     use super::*;
 
-    #[cfg(test)]
     impl RpcBlockTemplateMetadata {
         pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> RpcBlockPow {
             let guesser_buffer = BlockPow::preprocess(

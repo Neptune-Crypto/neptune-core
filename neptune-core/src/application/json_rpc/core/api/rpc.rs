@@ -67,7 +67,7 @@ pub enum RpcError {
     SubmitBlock(SubmitBlockError),
 
     // Common case errors
-    #[error("Invalid address provided on inputs")]
+    #[error("Invalid address provided in arguments")]
     InvalidAddress,
 }
 
