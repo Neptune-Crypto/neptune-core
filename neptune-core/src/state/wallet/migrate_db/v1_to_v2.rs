@@ -52,7 +52,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
     pin_mut!(stream); // needed for iteration
 
     let mut reorganized_duplicates: u64 = 0;
-    while let Some((_, mutxo_v1)) = stream.next().await {
+    while let Some((list_index, mutxo_v1)) = stream.next().await {
         let msmp = mutxo_v1
             .blockhash_to_membership_proof
             .iter()
@@ -61,21 +61,19 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
         let Some((_, msmp)) = msmp else {
             // Cannot happen as all monitored UTXOs always had a membership
             // proof.
-            error!(
+            panic!(
                 "Found monitored UTXO without membership proof. Skipping migration. This \
              monitored UTXO might be recovered from your incoming_randomness file."
             );
-            continue;
         };
 
         let Some(confirmed_in_block) = mutxo_v1.confirmed_in_block else {
             // Cannot happen as the `confirmed_in_block` was always populated.
-            error!(
+            panic!(
                 "Found monitored UTXO without reference to block in which it was confirmed. \
             Skipping migration of this UTXO. This monitored UTXO might be recovered from your \
             incoming_randomness file."
             );
-            continue;
         };
 
         let mutxo_v2 = MonitoredUtxo {
@@ -91,8 +89,8 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
         };
 
         let mutxo_index = mutxos_v2.len().await;
-        debug!("Inserting monitored UTXO number {mutxo_index}");
-        mutxos_v2.push(mutxo_v2).await;
+        debug!("Inserting monitored UTXO number {list_index}");
+        mutxos_v2.set(list_index, mutxo_v2).await;
 
         let mut mutxo_indices: Vec<u64> = aocl_to_mutxo_v2
             .get(&msmp.aocl_leaf_index)
