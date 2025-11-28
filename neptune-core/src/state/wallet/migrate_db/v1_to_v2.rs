@@ -87,6 +87,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
             abandoned_at: mutxo_v1.abandoned_at,
         };
 
+        // Overwrite the v1 monitored UTXO with a v2.
         debug!("Inserting monitored UTXO number {list_index}");
         mutxos_v2.set(list_index, mutxo_v2).await;
 
