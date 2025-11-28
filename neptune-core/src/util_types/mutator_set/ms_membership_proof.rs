@@ -417,7 +417,7 @@ impl MsMembershipProof {
     pub fn batch_update_from_remove(
         membership_proofs: &mut [&mut Self],
         removal_record: &RemovalRecord,
-    ) -> Result<Vec<usize>, Box<dyn Error>> {
+    ) -> Result<Vec<usize>, Box<dyn Error + Send + Sync>> {
         // Set all chunk values to the new values and calculate the mutation argument
         // for the batch updating of the MMR membership proofs.
         let mut chunk_dictionaries: Vec<&mut ChunkDictionary> = membership_proofs

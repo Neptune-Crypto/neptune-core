@@ -1439,7 +1439,7 @@ impl WalletState {
                 .collect_vec();
 
             {
-                let updated_mp_indices = MsMembershipProof::batch_update_from_addition(
+                let mut updated_mp_indices = MsMembershipProof::batch_update_from_addition(
                     &mut valid_membership_proofs_and_own_utxo_count
                         .values_mut()
                         .map(|(mp, _index, _)| mp)
@@ -1447,13 +1447,9 @@ impl WalletState {
                     &utxo_digests,
                     &msa_state,
                     addition_record,
-                );
-                match updated_mp_indices {
-                    Ok(mut indices_of_mutated_mps) => {
-                        changed_mps.append(&mut indices_of_mutated_mps)
-                    }
-                    Err(_) => bail!("Failed to update membership proofs with addition record"),
-                };
+                )
+                .expect("Failed to update membership proofs with additions");
+                changed_mps.append(&mut updated_mp_indices);
             }
 
             // Batch update removal records to keep them valid after next addition
@@ -1543,17 +1539,15 @@ impl WalletState {
         // reversed twice, so matches order in block.
         let mut removal_record_index: usize = 0;
         while let Some(removal_record) = removal_records.pop() {
-            let res = MsMembershipProof::batch_update_from_remove(
+            let mut indices_of_mutated_mps = MsMembershipProof::batch_update_from_remove(
                 &mut valid_membership_proofs_and_own_utxo_count
                     .values_mut()
                     .map(|(mp, _index, _)| mp)
                     .collect_vec(),
                 removal_record,
-            );
-            match res {
-                Ok(mut indices_of_mutated_mps) => changed_mps.append(&mut indices_of_mutated_mps),
-                Err(_) => bail!("Failed to update membership proofs with removal record"),
-            };
+            )
+            .expect("Failed to update membership proofs with removal record");
+            changed_mps.append(&mut indices_of_mutated_mps);
 
             // Batch update removal records to keep them valid after next removal
             RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record);
@@ -1814,7 +1808,9 @@ impl WalletState {
 
         // write UTXO-recovery data to disk.
         for item in incoming_utxo_recovery_data_list {
-            self.store_utxo_ms_recovery_data(item).await?;
+            self.store_utxo_ms_recovery_data(item)
+                .await
+                .expect("Failed to store mutator set recovery data to file.");
         }
 
         // Mark all expected UTXOs that were received in this block as received
