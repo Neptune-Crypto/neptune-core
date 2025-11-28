@@ -1,4 +1,5 @@
 use futures::pin_mut;
+use tracing::debug;
 use tracing::error;
 
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
@@ -33,6 +34,11 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
         .schema
         .new_vec::<migration::schema_v1::MonitoredUtxo>("mutxo_v1")
         .await;
+
+    debug!(
+        "Preparing to convert {} monitored UTXOs to v2.",
+        mutxos_v1.len().await
+    );
 
     // reset the schema again, to prepare for loading v2 schema.
     storage.reset_schema();
@@ -85,6 +91,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
         };
 
         let mutxo_index = mutxos_v2.len().await;
+        debug!("Inserting monitored UTXO number {mutxo_index}");
         mutxos_v2.push(mutxo_v2).await;
 
         let mut mutxo_indices: Vec<u64> = aocl_to_mutxo_v2
