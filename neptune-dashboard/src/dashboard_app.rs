@@ -276,7 +276,8 @@ impl DashboardApp {
         self.running
     }
 
-    pub fn enable_raw_mode() -> Result<Terminal<CrosstermBackend<Stdout>>, Box<dyn Error>> {
+    pub fn enable_raw_mode(
+    ) -> Result<Terminal<CrosstermBackend<Stdout>>, Box<dyn Error + Send + Sync>> {
         enable_raw_mode()?;
         execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
         let backend = CrosstermBackend::new(io::stdout());
@@ -286,7 +287,7 @@ impl DashboardApp {
 
     pub fn disable_raw_mode(
         mut terminal: Terminal<CrosstermBackend<Stdout>>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // restore terminal
         disable_raw_mode()?;
         execute!(
@@ -316,7 +317,7 @@ impl DashboardApp {
         network: Network,
         token: auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
-    ) -> Result<String, Box<dyn Error>> {
+    ) -> Result<String, Box<dyn Error + Send + Sync>> {
         // create app
         let mut app = DashboardApp::new(
             Arc::new(config),
@@ -432,7 +433,7 @@ impl DashboardApp {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         event: DashboardEvent,
         refresh_tx: tokio::sync::mpsc::Sender<()>,
-    ) -> Result<Option<Event>, Box<dyn Error>> {
+    ) -> Result<Option<Event>, Box<dyn Error + Send + Sync>> {
         if let DashboardEvent::RefreshScreen = event {
             terminal.draw(|f| self.render(f))?;
         } else if let DashboardEvent::Shutdown(error_message) = event {
