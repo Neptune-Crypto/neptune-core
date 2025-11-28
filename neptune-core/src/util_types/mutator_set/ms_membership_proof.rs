@@ -78,7 +78,7 @@ impl MsMembershipProof {
         own_items: &[Digest],
         mutator_set: &MutatorSetAccumulator,
         addition_record: &AdditionRecord,
-    ) -> Result<Vec<usize>, Box<dyn Error>> {
+    ) -> Result<Vec<usize>, Box<dyn Error + Send + Sync>> {
         assert!(
             membership_proofs
                 .iter()

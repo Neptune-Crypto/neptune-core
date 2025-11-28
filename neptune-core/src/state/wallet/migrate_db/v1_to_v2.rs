@@ -1,67 +1,145 @@
 use futures::pin_mut;
+use tracing::error;
 
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::storage::storage_vec::traits::*;
+use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::wallet_db_tables::WalletDbTables;
 
 /// migrates wallet db with schema-version v1 to v2
 ///
-/// The only thing that changed in v2 is that a new mapping was added, a mapping
-/// from AOCL leaf index to a list of indices into the monitored UTXOs list.
+/// Changes between v1 and v2:
+/// - Add mapping from AOCL leaf index to a list of indices into the monitored
+///   UTXOs list.
+/// - Change monitored UTXO field `confirmed_in_block` from Option<T> to T since
+///   [`MonitoredUtxo`] always represents a mined UTXO.
+/// - Add fields to monitored UTXOs:
+///   - aocl_leaf_index: u64 (was always read from MSMP previously)
+///   - sender_randomness: Digest (as above)
+///   - receiver_preimage: Digest (as above)
 ///
 /// Older databases are migrated simply by iterating over all monitored UTXOs,
-/// finding their AOCL leaf index from their respective mutator set membership
-/// proofs and then inserting the key-value pair AOCL leaf index/monitored UTXO
-/// index into the new mapping.
+/// finding their AOCL leaf index and the two required digests from their
+/// respective mutator set membership/ proofs and then inserting the key-value
+/// pair AOCL leaf index/monitored UTXO index into the new mapping.
 pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<()> {
-    // obtain stream (iterator) of all monitored UTXOs
-
-    // Reload all tables to get access to the two tables needed: monitored
-    // UTXOs and aocl_to_mutxo.
+    // reset the schema, so we start with table_count = 0.
     storage.reset_schema();
-    let mut tables = WalletDbTables::load_schema_in_order(storage).await;
 
-    let monitored_utxos = tables.monitored_utxos;
+    // add a DbtVec<MonitoredUtxoV0> to the schema at the correct position
+    // so the correct key-prefix is used
+    storage.schema.table_count = WalletDbTables::monitored_utxos_table_count();
+    let mutxos_v1 = storage
+        .schema
+        .new_vec::<migration::schema_v1::MonitoredUtxo>("mutxo_v1")
+        .await;
+
+    // reset the schema again, to prepare for loading v2 schema.
+    storage.reset_schema();
+
+    // load v2 schema tables
+    let mut tables = WalletDbTables::load_schema_in_order(storage).await;
+    let mutxos_v2 = &mut tables.monitored_utxos;
     let aocl_to_mutxo_v2 = &mut tables.aocl_to_mutxo;
 
-    let stream = monitored_utxos.stream().await;
+    let stream = mutxos_v1.stream().await;
     pin_mut!(stream); // needed for iteration
 
     let mut reorganized_duplicates: u64 = 0;
-    while let Some((mutxo_index, mutxo)) = stream.next().await {
-        let aocl_leaf_index = mutxo
-            .get_latest_membership_proof_entry()
-            .map(|msmp| msmp.1.aocl_leaf_index);
+    while let Some((_, mutxo_v1)) = stream.next().await {
+        let msmp = mutxo_v1
+            .blockhash_to_membership_proof
+            .iter()
+            .next()
+            .cloned();
+        let Some((_, msmp)) = msmp else {
+            // Cannot happen as all monitored UTXOs always had a membership
+            // proof.
+            error!(
+                "Found monitored UTXO without membership proof. Skipping migration. This \
+             monitored UTXO might be recovered from your incoming_randomness file."
+            );
+            continue;
+        };
 
-        if let Some(aocl_leaf_index) = aocl_leaf_index {
-            let mut mutxo_indices: Vec<u64> = aocl_to_mutxo_v2
-                .get(&aocl_leaf_index)
-                .await
-                .unwrap_or_default();
-            let num_reorgs: u64 = mutxo_indices
-                .len()
-                .try_into()
-                .expect("Can always convert usize to u64");
-            reorganized_duplicates += num_reorgs;
+        let Some(confirmed_in_block) = mutxo_v1.confirmed_in_block else {
+            // Cannot happen as the `confirmed_in_block` was always populated.
+            error!(
+                "Found monitored UTXO without reference to block in which it was confirmed. \
+            Skipping migration of this UTXO. This monitored UTXO might be recovered from your \
+            incoming_randomness file."
+            );
+            continue;
+        };
 
-            mutxo_indices.push(mutxo_index);
-            aocl_to_mutxo_v2
-                .insert(aocl_leaf_index, mutxo_indices)
-                .await;
-        }
+        let mutxo_v2 = MonitoredUtxo {
+            utxo: mutxo_v1.utxo,
+            aocl_leaf_index: msmp.aocl_leaf_index,
+            sender_randomness: msmp.sender_randomness,
+            receiver_preimage: msmp.receiver_preimage,
+            blockhash_to_membership_proof: mutxo_v1.blockhash_to_membership_proof,
+            number_of_mps_per_utxo: mutxo_v1.number_of_mps_per_utxo,
+            spent_in_block: mutxo_v1.spent_in_block,
+            confirmed_in_block,
+            abandoned_at: mutxo_v1.abandoned_at,
+        };
+
+        let mutxo_index = mutxos_v2.len().await;
+        mutxos_v2.push(mutxo_v2).await;
+
+        let mut mutxo_indices: Vec<u64> = aocl_to_mutxo_v2
+            .get(&msmp.aocl_leaf_index)
+            .await
+            .unwrap_or_default();
+        let num_reorgs: u64 = mutxo_indices
+            .len()
+            .try_into()
+            .expect("Can always convert usize to u64");
+        reorganized_duplicates += num_reorgs;
+
+        mutxo_indices.push(mutxo_index);
+        aocl_to_mutxo_v2
+            .insert(msmp.aocl_leaf_index, mutxo_indices)
+            .await;
     }
 
     // ensure we have the same number of entries in both tables
     assert_eq!(
-        monitored_utxos.len().await,
+        mutxos_v2.len().await,
         aocl_to_mutxo_v2.len().await + reorganized_duplicates
     );
 
-    // set schema version to v2
+    // set schema version to v2 since migration is complete
     tables.schema_version.set(2).await;
 
     // success!
     Ok(())
+}
+
+mod migration {
+    pub(super) mod schema_v1 {
+        use std::collections::VecDeque;
+
+        use serde::Deserialize;
+        use serde::Serialize;
+        use tasm_lib::prelude::Digest;
+
+        use crate::api::export::BlockHeight;
+        use crate::protocol::consensus::transaction::utxo::Utxo;
+        use crate::state::Timestamp;
+        use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+
+        // this is a copy of MonitoredUtxo as it was in v0 schema.
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub(in super::super) struct MonitoredUtxo {
+            pub utxo: Utxo,
+            pub blockhash_to_membership_proof: VecDeque<(Digest, MsMembershipProof)>,
+            pub number_of_mps_per_utxo: usize,
+            pub spent_in_block: Option<(Digest, Timestamp, BlockHeight)>,
+            pub confirmed_in_block: Option<(Digest, Timestamp, BlockHeight)>,
+            pub abandoned_at: Option<(Digest, Timestamp, BlockHeight)>,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -73,6 +151,7 @@ mod tests {
 
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
+    use crate::api::export::Timestamp;
     use crate::api::export::Utxo;
     use crate::application::config::network::Network;
     use crate::application::database::storage::storage_schema::traits::StorageWriter;
@@ -85,6 +164,7 @@ mod tests {
     use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::monitored_utxo::MonitoredUtxo;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
+    use crate::state::BlockHeight;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -102,10 +182,23 @@ mod tests {
                 LockScript::anyone_can_spend().hash(),
                 NativeCurrencyAmount::coins(num_coins),
             );
-            let mut mutxo = MonitoredUtxo::new(utxo, 2);
+            let sender_randomness = Digest::default();
+            let receiver_preimage = Digest::default();
+            let mut mutxo = MonitoredUtxo::new_from_block_hash(
+                utxo,
+                2,
+                aocl_leaf_index,
+                sender_randomness,
+                receiver_preimage,
+                (
+                    Digest::default(),
+                    Timestamp::now(),
+                    BlockHeight::genesis().next(),
+                ),
+            );
             let msmp = MsMembershipProof {
-                sender_randomness: Digest::default(),
-                receiver_preimage: Digest::default(),
+                sender_randomness,
+                receiver_preimage,
                 auth_path_aocl: MmrMembershipProof {
                     authentication_path: vec![],
                 },

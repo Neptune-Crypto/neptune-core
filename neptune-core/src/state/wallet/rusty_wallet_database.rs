@@ -8,6 +8,8 @@ use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
 use super::wallet_db_tables::WalletDbTables;
 use super::wallet_db_tables::WALLET_DB_SCHEMA_VERSION;
+use crate::api::export::BlockHeight;
+use crate::api::export::Timestamp;
 use crate::application::database::storage::storage_schema::traits::*;
 use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtVec;
@@ -18,6 +20,7 @@ use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
 use crate::protocol::consensus::block::Block;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 #[derive(Debug)]
 pub struct RustyWalletDatabase {
@@ -109,9 +112,37 @@ impl RustyWalletDatabase {
         &self.tables.monitored_utxos
     }
 
-    /// get mutable monitored_utxos.
-    pub fn monitored_utxos_mut(&mut self) -> &mut DbtVec<MonitoredUtxo> {
-        &mut self.tables.monitored_utxos
+    // /// get mutable monitored_utxos.
+    // pub fn monitored_utxos_mut(&mut self) -> &mut DbtVec<MonitoredUtxo> {
+    //     &mut self.tables.monitored_utxos
+    // }
+
+    /// Return existing monitored UTXO by list index in the list of all
+    /// monitored UTXOs.
+    ///
+    /// # Panics
+    ///
+    /// - If index for monitored UTXO is out of range.
+    pub(crate) async fn monitored_utxo_by_list_index(&self, index: Index) -> MonitoredUtxo {
+        self.tables.monitored_utxos.get(index).await
+    }
+
+    /// Mark a monitored UTXO as abandoned
+    ///
+    /// # Panics
+    ///
+    /// - If index for monitored UTXO is out of range.
+    pub(crate) async fn abandon_monitored_utxo(
+        &mut self,
+        mutxo_list_index: Index,
+        abandoned_at: (Digest, Timestamp, BlockHeight),
+    ) {
+        let mut existing_mutxo = self.tables.monitored_utxos.get(mutxo_list_index).await;
+        existing_mutxo.abandoned_at = Some(abandoned_at);
+        self.tables
+            .monitored_utxos
+            .set(mutxo_list_index, existing_mutxo)
+            .await;
     }
 
     /// Mark existing monitored UTXO as received in a specified block.
@@ -121,22 +152,55 @@ impl RustyWalletDatabase {
     /// - If index for monitored UTXO is out of range.
     pub(crate) async fn update_mutxo_confirmation_block(
         &mut self,
-        mutxo_index: Index,
+        mutxo_list_index: Index,
         block: &Block,
     ) {
-        let mut existing_mutxo = self.tables.monitored_utxos.get(mutxo_index).await;
-        existing_mutxo.confirmed_in_block = Some((
+        let mut existing_mutxo = self.tables.monitored_utxos.get(mutxo_list_index).await;
+        existing_mutxo.confirmed_in_block = (
             block.hash(),
             block.kernel.header.timestamp,
             block.kernel.header.height,
-        ));
+        );
         self.tables
             .monitored_utxos
-            .set(mutxo_index, existing_mutxo)
+            .set(mutxo_list_index, existing_mutxo)
             .await;
     }
 
-    /// Insert a new monitored UTXO into the wallet's database and return the
+    /// Mark a [`MonitoredUtxo`] as spent in a specified block.
+    ///
+    /// # Panics
+    ///
+    /// - If index for monitored UTXO is out of range.
+    pub(crate) async fn mark_mutxo_as_spent(&mut self, mutxo_list_index: Index, block: &Block) {
+        let mut spent_mutxo = self.tables.monitored_utxos.get(mutxo_list_index).await;
+        spent_mutxo.mark_as_spent(block);
+        self.tables
+            .monitored_utxos
+            .set(mutxo_list_index, spent_mutxo)
+            .await;
+    }
+
+    /// Add a new [`MsMembershipProof`] to a [`MonitoredUtxo`].
+    ///
+    /// # Panics
+    ///
+    /// - If index for monitored UTXO is out of range.
+    pub(crate) async fn add_msmp_to_monitored_utxo(
+        &mut self,
+        mutxo_list_index: Index,
+        block_hash: Digest,
+        msmp: MsMembershipProof,
+    ) {
+        let mut mutxo = self.tables.monitored_utxos.get(mutxo_list_index).await;
+        mutxo.add_membership_proof_for_tip(block_hash, msmp);
+        self.tables
+            .monitored_utxos
+            .set(mutxo_list_index, mutxo)
+            .await;
+    }
+
+    /// Insert a new [`MonitoredUtxo`] into the wallet's database and return the
     /// index of the inserted element.
     /// # Panics
     ///
@@ -271,5 +335,20 @@ pub enum WalletDbConnectError {
 impl From<anyhow::Error> for WalletDbConnectError {
     fn from(e: anyhow::Error) -> Self {
         Self::Failed(e.to_string())
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    impl RustyWalletDatabase {
+        pub(crate) async fn clear_mutxos(&mut self) {
+            self.tables.monitored_utxos.clear().await;
+        }
+
+        pub(crate) async fn clear_expected_utxos(&mut self) {
+            self.tables.expected_utxos.clear().await;
+        }
     }
 }
