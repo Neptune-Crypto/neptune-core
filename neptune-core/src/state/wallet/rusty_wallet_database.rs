@@ -208,11 +208,7 @@ impl RustyWalletDatabase {
     ///   proof.
     pub(crate) async fn insert_mutxo(&mut self, monitored_utxo: MonitoredUtxo) -> Index {
         let index_new_mutxo = self.tables.monitored_utxos.len().await;
-        let aocl_leaf_index = monitored_utxo
-            .get_latest_membership_proof_entry()
-            .expect("Must have membership proof when inserting into database")
-            .1
-            .aocl_leaf_index;
+        let aocl_leaf_index = monitored_utxo.aocl_leaf_index;
 
         self.tables.monitored_utxos.push(monitored_utxo).await;
 
