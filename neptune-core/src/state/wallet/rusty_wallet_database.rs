@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::expected_utxo::ExpectedUtxo;
@@ -21,6 +22,7 @@ use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
 use crate::protocol::consensus::block::Block;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 #[derive(Debug)]
 pub struct RustyWalletDatabase {
@@ -122,6 +124,33 @@ impl RustyWalletDatabase {
         self.tables.monitored_utxos.get(index).await
     }
 
+    /// Return the UTXO of a monitored UTXO and the monitored UTXOs list index
+    /// matching the specified absolute index set, if any.
+    ///
+    /// # Panics
+    ///
+    /// - If index for monitored UTXO is out of range, which requires the
+    ///   database to be malformed, to be missing a monitored UTXO element
+    ///   although the lookup table points to it.
+    pub(crate) async fn monitored_utxo_by_index_set(
+        &self,
+        index_set: &AbsoluteIndexSet,
+    ) -> Option<(MonitoredUtxo, Index)> {
+        let index_set_digest = Tip5::hash(index_set);
+        let list_index: Option<Index> = self.tables.index_set_to_mutxo.get(&index_set_digest).await;
+
+        match list_index {
+            Some(list_index) => {
+                let mutxo = (
+                    self.tables.monitored_utxos.get(list_index).await,
+                    list_index,
+                );
+                Some(mutxo)
+            }
+            None => None,
+        }
+    }
+
     /// Mark a monitored UTXO as abandoned
     ///
     /// # Panics
@@ -199,16 +228,24 @@ impl RustyWalletDatabase {
     /// index of the inserted element.
     ///
     /// The list of [`MonitoredUtxo`] is only allowed to grow through this
-    /// function, since this function handles the lookup table that allows for
-    /// fast lookup from an AOCL leaf index to a monitored UTXO. If the list of
-    /// [`MonitoredUtxo`] grows in other ways than through this function, these
-    /// two tables might get out of sync.
+    /// function, since this function handles the lookup tables that allows for
+    /// fast lookup from an AOCL leaf index and from an absolute index set to a
+    /// monitored UTXO. If the list of [`MonitoredUtxo`] grows in other ways
+    /// than through this function, these tables might get out of sync.
     pub(crate) async fn insert_mutxo(&mut self, monitored_utxo: MonitoredUtxo) -> Index {
         let index_new_mutxo = self.tables.monitored_utxos.len().await;
         let aocl_leaf_index = monitored_utxo.aocl_leaf_index;
 
+        // Populate lookup table for index set.
+        let index_set_digest = Tip5::hash(&monitored_utxo.absolute_indices());
+        self.tables
+            .index_set_to_mutxo
+            .insert(index_set_digest, index_new_mutxo)
+            .await;
+
         self.tables.monitored_utxos.push(monitored_utxo).await;
 
+        // Handle AOCL to mutxo lookup
         // In the common case (no reorgs), this is the empty vector, so it will
         // only contain one element after insertion.
         let mut all_mutxo_indices: Vec<u64> = self
@@ -338,6 +375,52 @@ pub(crate) mod tests {
 
         pub(crate) async fn clear_expected_utxos(&mut self) {
             self.tables.expected_utxos.clear().await;
+        }
+
+        pub(crate) async fn assert_mutxo_lookup_integrity(&self) {
+            // What has to be true for a well-formed database?
+            // Checks that the correct lookup values exist for all monitored
+            // UTXOs in the database.
+            let num_mutxos = self.tables.monitored_utxos.len().await;
+            assert_eq!(num_mutxos, self.tables.index_set_to_mutxo.len().await);
+
+            let all_aocl_keys = self.tables.aocl_to_mutxo.all_keys().await;
+            let mut num_aocl_lookup_values = 0;
+            for aocl_key in all_aocl_keys {
+                let count = self
+                    .tables
+                    .aocl_to_mutxo
+                    .get(&aocl_key)
+                    .await
+                    .unwrap()
+                    .len() as u64;
+                num_aocl_lookup_values += count;
+            }
+
+            assert_eq!(num_mutxos, num_aocl_lookup_values);
+
+            for i in 0..num_mutxos {
+                let mutxo = self.tables.monitored_utxos.get(i).await;
+                let index_set = mutxo.absolute_indices();
+                let list_index_from_index_set = self
+                    .tables
+                    .index_set_to_mutxo
+                    .get(&Tip5::hash(&index_set))
+                    .await
+                    .expect("Must have lookup entry");
+                assert_eq!(i, list_index_from_index_set);
+
+                let list_indices_from_aocl = self
+                    .tables
+                    .aocl_to_mutxo
+                    .get(&mutxo.aocl_leaf_index)
+                    .await
+                    .unwrap();
+                assert!(
+                    list_indices_from_aocl.contains(&i),
+                    "One of the AOCL leaf index lookup values must match probed monitored UTXO"
+                );
+            }
         }
     }
 }
