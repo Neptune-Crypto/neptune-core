@@ -737,28 +737,20 @@ impl WalletState {
         &self,
         transaction_kernel: &TransactionKernel,
     ) -> HashMap<AbsoluteIndexSet, (Utxo, u64)> {
-        let confirmed_absolute_index_sets: HashSet<_> = transaction_kernel
-            .inputs
-            .iter()
-            .map(|rr| rr.absolute_indices)
-            .collect();
-
-        let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut spent_own_utxos = HashMap::default();
 
-        let stream = monitored_utxos.stream().await;
-        pin_mut!(stream); // needed for iteration
-
-        while let Some((i, monitored_utxo)) = stream.next().await {
-            let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
-                Some(msmp) => msmp.1.compute_indices(Tip5::hash(&monitored_utxo.utxo)),
-                None => continue,
-            };
-
-            if confirmed_absolute_index_sets.contains(&abs_i) {
-                spent_own_utxos.insert(abs_i, (monitored_utxo.utxo, i));
+        for index_set in transaction_kernel
+            .inputs
+            .iter()
+            .map(|rr| &rr.absolute_indices)
+        {
+            if let Some((mutxo, mutxo_list_index)) =
+                self.wallet_db.monitored_utxo_by_index_set(index_set).await
+            {
+                spent_own_utxos.insert(index_set.to_owned(), (mutxo.utxo, mutxo_list_index));
             }
         }
+
         spent_own_utxos
     }
 
@@ -2100,7 +2092,6 @@ pub(crate) mod tests {
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::state::GlobalState;
     use crate::state::GlobalStateLock;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::make_mock_block;
@@ -2121,6 +2112,12 @@ pub(crate) mod tests {
             Self::try_new(configuration, wallet_entropy, &genesis_block)
                 .await
                 .unwrap()
+        }
+
+        /// Assert that monitored UTXOs are stored correctly in database, with
+        /// the correct lookup tables populated.
+        async fn assert_mutxo_lookup_integrity(&self) {
+            self.wallet_db.assert_mutxo_lookup_integrity().await;
         }
     }
 
@@ -2372,6 +2369,12 @@ pub(crate) mod tests {
             .set_new_tip(block1.clone())
             .await
             .unwrap();
+        alice
+            .lock_guard()
+            .await
+            .wallet_state
+            .assert_mutxo_lookup_integrity()
+            .await;
 
         // Bob sends two identical coins (=identical addition records) to Alice.
         let fee = NativeCurrencyAmount::coins(1);
@@ -2471,6 +2474,13 @@ pub(crate) mod tests {
                 "All four UTXOs must be registered by wallet and contribute to balance"
             );
         }
+
+        alice
+            .lock_guard()
+            .await
+            .wallet_state
+            .assert_mutxo_lookup_integrity()
+            .await;
     }
 
     #[apply(shared_tokio_runtime)]
@@ -2792,6 +2802,8 @@ pub(crate) mod tests {
             assert_eq!(block_1b.hash(), mutxo_sync_block_digest);
             assert_eq!(block_1b.hash(), mutxo.confirmed_in_block.0);
         }
+
+        bob.wallet_state.assert_mutxo_lookup_integrity().await;
     }
 
     #[apply(shared_tokio_runtime)]
@@ -2879,6 +2891,8 @@ pub(crate) mod tests {
                 assert!(wallet_state_has_all_valid_mps(&bob.wallet_state, &block1).await);
             }
         }
+
+        bob.wallet_state.assert_mutxo_lookup_integrity().await;
     }
 
     #[apply(shared_tokio_runtime)]

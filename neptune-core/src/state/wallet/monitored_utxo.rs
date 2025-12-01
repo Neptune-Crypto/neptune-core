@@ -15,6 +15,7 @@ use crate::state::archival_state::ArchivalState;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 /// A mined [`Utxo`] managed by this wallet.
 ///
@@ -144,6 +145,18 @@ impl MonitoredUtxo {
     pub(crate) fn addition_record(&self) -> AdditionRecord {
         let item = Tip5::hash(&self.utxo);
         commit(item, self.sender_randomness, self.receiver_preimage.hash())
+    }
+
+    /// Return the absolute index set associated with this mined UTXO.
+    pub(crate) fn absolute_indices(&self) -> AbsoluteIndexSet {
+        let item = Tip5::hash(&self.utxo);
+
+        AbsoluteIndexSet::compute(
+            item,
+            self.sender_randomness,
+            self.receiver_preimage,
+            self.aocl_leaf_index,
+        )
     }
 
     /// Determine whether the attached membership proof is synced to the given

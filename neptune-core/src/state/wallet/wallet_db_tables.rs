@@ -7,6 +7,7 @@ use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtSingleton;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+use crate::application::database::storage::storage_vec::Index;
 use crate::prelude::twenty_first;
 
 /// defines the schema version of the wallet database.
@@ -21,7 +22,7 @@ use crate::prelude::twenty_first;
 ///  [migrate_db](super::migrate_db).
 ///
 /// note: the very first schema version was 0, ie u16::default()
-pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 1;
+pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 2;
 
 /// represents logical "tables" in the Wallet database as used by `DbtSchema`.
 ///
@@ -55,7 +56,9 @@ pub(super) struct WalletDbTables {
     /// Append-only list of utxos we have already received in a block.
     /// Each element in this list must be accompagnied by an element in the
     /// value [`Self::aocl_to_mutxo`] such that monitored UTXOs can be looked
-    /// up quickly by AOCL leaf index.
+    /// up quickly by AOCL leaf index. And it must be accompagined by an element
+    /// in the [`Self::index_set_to_mutxo`] table for fast mapping of absolute
+    /// index set to monitored UTXO.
     pub(super) monitored_utxos: DbtVec<MonitoredUtxo>,
 
     /// list of off-chain utxos we are expecting to receive in a future block.
@@ -93,9 +96,16 @@ pub(super) struct WalletDbTables {
     /// UTXOs managed by this wallet. Value type is list because of potential
     /// reorganizations.
     ///
-    /// Each `monitored_utxo` *must* have be represented as an element in the
-    /// value of this map.
-    pub(super) aocl_to_mutxo: DbtMap<u64, Vec<u64>>,
+    /// Each `monitored_utxo` *must* be represented as an element in the value
+    /// of this map.
+    pub(super) aocl_to_mutxo: DbtMap<u64, Vec<Index>>,
+
+    /// table numbers 10 + 11
+    /// Mapping from hash(absolute_indices) to index into list of
+    /// `monitored_utxo` for UTXOs managed by this wallet.
+    ///
+    /// Each `monitored_utxo` *must* be represented as an element in this map.
+    pub(super) index_set_to_mutxo: DbtMap<Digest, Index>,
 }
 
 impl WalletDbTables {
@@ -138,6 +148,8 @@ impl WalletDbTables {
 
         let aocl_to_mutxo = storage.schema.new_map("aocl_to_mutxo").await;
 
+        let index_set_to_mutxo = storage.schema.new_map("absolute_index_set_to_mutxo").await;
+
         WalletDbTables {
             sync_label,
             monitored_utxos,
@@ -148,6 +160,7 @@ impl WalletDbTables {
             symmetric_key_counter,
             schema_version,
             aocl_to_mutxo,
+            index_set_to_mutxo,
         }
     }
 

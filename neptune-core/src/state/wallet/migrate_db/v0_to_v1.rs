@@ -153,12 +153,12 @@ mod tests {
     use crate::application::database::storage::storage_schema::RustyKey;
     use crate::application::database::storage::storage_schema::RustyValue;
     use crate::application::database::NeptuneLevelDb;
+    use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
     use crate::state::Timestamp;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
-    use crate::DataDirectory;
 
     /// tests migrating a simulated v0 wallet db to v1.
     ///
@@ -340,34 +340,6 @@ mod tests {
                     sync_label,
                 }
             }
-        }
-    }
-
-    mod worker {
-        use std::path::PathBuf;
-
-        use super::*;
-
-        pub(super) fn crate_root() -> PathBuf {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        }
-
-        // opens wallet db
-        pub(super) async fn open_db(
-            data_dir: &DataDirectory,
-        ) -> anyhow::Result<NeptuneLevelDb<RustyKey, RustyValue>> {
-            let wallet_database_path = data_dir.wallet_database_dir_path();
-            println!(
-                "path {} exists: {}",
-                wallet_database_path.display(),
-                wallet_database_path.exists()
-            );
-            DataDirectory::create_dir_if_not_exists(&wallet_database_path).await?;
-            NeptuneLevelDb::new(
-                &wallet_database_path,
-                &crate::application::database::create_db_if_missing(),
-            )
-            .await
         }
     }
 }
