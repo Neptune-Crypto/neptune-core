@@ -55,7 +55,6 @@ use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::application::database::storage::storage_vec::traits::*;
-use crate::application::database::storage::storage_vec::Index;
 use crate::application::locks::tokio as sync_tokio;
 use crate::application::locks::tokio::AtomicRwReadGuard;
 use crate::application::locks::tokio::AtomicRwWriteGuard;
@@ -92,7 +91,6 @@ use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_input::TxInput;
-use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -990,13 +988,12 @@ impl GlobalState {
 
         while let Some(mutxo) = stream.next().await {
             if max_confirmed_in_block.is_none() {
-                if let Some((.., confirmed_in_block)) = mutxo.confirmed_in_block {
-                    if mutxo
-                        .get_membership_proof_for_block(current_tip_digest)
-                        .is_some()
-                    {
-                        max_confirmed_in_block = Some(confirmed_in_block);
-                    }
+                if mutxo
+                    .get_membership_proof_for_block(current_tip_digest)
+                    .is_some()
+                {
+                    let (.., confirmed_in_block) = mutxo.confirmed_in_block;
+                    max_confirmed_in_block = Some(confirmed_in_block);
                 }
             }
 
@@ -1038,30 +1035,22 @@ impl GlobalState {
                 continue;
             };
 
-            if let Some((confirming_block, confirmation_timestamp, confirmation_height)) =
-                monitored_utxo.confirmed_in_block
-            {
-                let amount = monitored_utxo.utxo.get_native_currency_amount();
-                history.push((
-                    confirming_block,
-                    confirmation_timestamp,
-                    confirmation_height,
-                    amount,
-                ));
+            let (confirming_block, confirmation_timestamp, confirmation_height) =
+                monitored_utxo.confirmed_in_block;
+            let amount = monitored_utxo.utxo.get_native_currency_amount();
+            history.push((
+                confirming_block,
+                confirmation_timestamp,
+                confirmation_height,
+                amount,
+            ));
 
-                if let Some((spending_block, spending_timestamp, spending_height)) =
-                    monitored_utxo.spent_in_block
-                {
-                    let actually_spent =
-                        !current_msa.verify(Tip5::hash(&monitored_utxo.utxo), msmp);
-                    if actually_spent {
-                        history.push((
-                            spending_block,
-                            spending_timestamp,
-                            spending_height,
-                            -amount,
-                        ));
-                    }
+            if let Some((spending_block, spending_timestamp, spending_height)) =
+                monitored_utxo.spent_in_block
+            {
+                let actually_spent = !current_msa.verify(Tip5::hash(&monitored_utxo.utxo), msmp);
+                if actually_spent {
+                    history.push((spending_block, spending_timestamp, spending_height, -amount));
                 }
             }
         }
@@ -1148,7 +1137,7 @@ impl GlobalState {
                 .monitored_utxos()
                 .stream_values()
                 .await
-                .map(|x| ((x.aocl_index(), x.addition_record()), x))
+                .map(|x| ((x.aocl_leaf_index, x.addition_record()), x))
                 .collect()
                 .await;
             let mut seen_recovery_entries = HashSet::<Digest>::default();
@@ -1225,12 +1214,6 @@ impl GlobalState {
                 Err(err) => bail!("Could not restore MS membership proof. Got: {err}"),
             };
 
-            let mut restored_mutxo = MonitoredUtxo::new(
-                incoming_utxo.utxo,
-                self.wallet_state.configuration.num_mps_per_utxo,
-            );
-            restored_mutxo.add_membership_proof_for_tip(tip_hash, restored_msmp);
-
             // Add block info for restored MUTXO
             let confirming_block_digest = self
                 .chain
@@ -1244,16 +1227,24 @@ impl GlobalState {
                 .get_block_header(confirming_block_digest)
                 .await
                 .expect("Confirming block header must exist");
-            restored_mutxo.confirmed_in_block = Some((
-                confirming_block_digest,
-                confirming_block_header.timestamp,
-                confirming_block_header.height,
-            ));
+
+            let mut restored_mutxo = MonitoredUtxo::new_from_block_hash(
+                incoming_utxo.utxo,
+                self.wallet_state.configuration.num_mps_per_utxo,
+                incoming_utxo.aocl_index,
+                restored_msmp.sender_randomness,
+                restored_msmp.receiver_preimage,
+                (
+                    confirming_block_digest,
+                    confirming_block_header.timestamp,
+                    confirming_block_header.height,
+                ),
+            );
+            restored_mutxo.add_membership_proof_for_tip(tip_hash, restored_msmp);
 
             self.wallet_state
                 .wallet_db
-                .monitored_utxos_mut()
-                .push(restored_mutxo)
+                .insert_mutxo(restored_mutxo)
                 .await;
             restored_mutxos += 1;
         }
@@ -1277,10 +1268,7 @@ impl GlobalState {
     ///  - If the archival mutator set is not synced to the current state tip.
     ///  - If recovery data is provided but out-of-order to the monitored UTXOs
     ///    that don't have any membership proofs.
-    pub async fn restore_monitored_utxos_from_archival_mutator_set(
-        &mut self,
-        mut new_utxos: Option<Vec<IncomingUtxoRecoveryData>>,
-    ) {
+    pub async fn restore_monitored_utxos_from_archival_mutator_set(&mut self) {
         let tip_hash = self.chain.light_state().hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
@@ -1304,72 +1292,35 @@ impl GlobalState {
             asm_sync_label.to_hex()
         );
 
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos_mut();
-        let num_mutxos = monitored_utxos.len().await;
+        let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
         trace!("monitored_utxos.len() = {num_mutxos}");
         for i in 0..num_mutxos {
-            let mut monitored_utxo = monitored_utxos.get(i).await;
+            let monitored_utxo = self
+                .wallet_state
+                .wallet_db
+                .monitored_utxo_by_list_index(i)
+                .await;
 
             if monitored_utxo.is_synced_to(tip_hash) {
                 trace!("Not restoring because UTXO is marked as synced");
                 continue;
             }
 
-            // monitored UTXO does not have a valid membership proof. Fetch it
-            // from the archival mutator set.
-            let (sender_randomness, receiver_preimage, aocl_leaf_index) = match monitored_utxo
-                .get_latest_membership_proof_entry()
-            {
-                Some((_, msmp)) => (
-                    msmp.sender_randomness,
-                    msmp.receiver_preimage,
-                    msmp.aocl_leaf_index,
-                ),
-                None => {
-                    // TODO: Fix this ugly hack. We probably need AOCL leaf index on the monitored
-                    // UTXO structure to do that. And that requires a DB migration :(
-                    let Some(new_utxos) = new_utxos.as_mut() else {
-                        warn!("Monitored UTXO has no membership proof and no recovery data was provided.");
-                        continue;
-                    };
-                    let Some((index, _)) = new_utxos
-                        .iter()
-                        .find_position(|x| x.utxo == monitored_utxo.utxo)
-                    else {
-                        warn!("Monitored UTXO has no membership proof recovery data for this UTXO was not provided.");
-                        continue;
-                    };
-
-                    assert!(
-                        index.is_zero(),
-                        "Order of recovery data must match MUTXO order"
-                    );
-
-                    let recovery_data = new_utxos.remove(index);
-
-                    debug!("Setting MUTXO membership proof for the 1st time");
-                    (
-                        recovery_data.sender_randomness,
-                        recovery_data.receiver_preimage,
-                        recovery_data.aocl_index,
-                    )
-                }
-            };
-
             let ms_item = Tip5::hash(&monitored_utxo.utxo);
+            let aocl_leaf_index = monitored_utxo.aocl_leaf_index;
             let Ok(restored_msmp) = ams_ref
                 .ams()
                 .restore_membership_proof(
                     ms_item,
-                    sender_randomness,
-                    receiver_preimage,
+                    monitored_utxo.sender_randomness,
+                    monitored_utxo.receiver_preimage,
                     aocl_leaf_index,
                 )
                 .await
             else {
                 warn!(
                     "Failed to restore mutator set membership proof for UTXO \
-                with leaf index {aocl_leaf_index}."
+                with leaf index {aocl_leaf_index}.",
                 );
                 continue;
             };
@@ -1389,14 +1340,19 @@ impl GlobalState {
                 // So instead, we use the information that the UTXO was spent
                 // only for suppressing the following log message, which would
                 // be rather noisy otherwise.
-                warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", aocl_leaf_index);
+                warn!(
+                    "Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. \
+                 Maybe this UTXO is on an abandoned chain?",
+                    aocl_leaf_index
+                );
                 continue;
             }
 
-            monitored_utxo.add_membership_proof_for_tip(tip_hash, restored_msmp);
-
             // update storage.
-            monitored_utxos.set(i, monitored_utxo).await;
+            self.wallet_state
+                .wallet_db
+                .add_msmp_to_monitored_utxo(i, tip_hash, restored_msmp)
+                .await;
         }
 
         self.wallet_state.wallet_db.set_sync_label(tip_hash).await;
@@ -1427,11 +1383,13 @@ impl GlobalState {
         tip_hash: Digest,
     ) -> Result<()> {
         // loop over all monitored utxos
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos_mut();
-
-        'outer: for i in 0..monitored_utxos.len().await {
-            let i = i as Index;
-            let monitored_utxo = monitored_utxos.get(i).await;
+        let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
+        'outer: for i in 0..num_mutxos {
+            let monitored_utxo = self
+                .wallet_state
+                .wallet_db
+                .monitored_utxo_by_list_index(i)
+                .await;
 
             // Ignore those MUTXOs that were marked as abandoned
             if monitored_utxo.abandoned_at.is_some() {
@@ -1449,13 +1407,8 @@ impl GlobalState {
                 Tip5::hash(&monitored_utxo.utxo)
             );
 
-            // If the UTXO was not confirmed yet, there is no
-            // point in synchronizing its membership proof.
-            let Some((confirming_block_digest, _, confirming_block_height)) =
-                monitored_utxo.confirmed_in_block
-            else {
-                continue;
-            };
+            let (confirming_block_digest, _, confirming_block_height) =
+                monitored_utxo.confirmed_in_block;
 
             // try latest (block hash, membership proof) entry
             let (block_hash, mut membership_proof) = monitored_utxo
@@ -1606,10 +1559,10 @@ impl GlobalState {
             }
 
             // store updated membership proof
-            monitored_utxo.add_membership_proof_for_tip(tip_hash, membership_proof);
-
-            // update storage.
-            monitored_utxos.set(i, monitored_utxo).await
+            self.wallet_state
+                .wallet_db
+                .add_msmp_to_monitored_utxo(i, tip_hash, membership_proof)
+                .await;
         }
 
         // Update sync label and persist
@@ -1619,9 +1572,11 @@ impl GlobalState {
         Ok(())
     }
 
-    /// Delete from the database all monitored UTXOs from abandoned chains with a depth deeper than
-    /// `block_depth_threshold`. Use `prune_mutxos_of_unknown_depth = true` to remove MUTXOs from
-    /// abandoned chains of unknown depth.
+    /// Mark as deleted all monitored UTXOs from abandoned chains with a depth
+    /// deeper than `block_depth_threshold`. Use
+    /// `prune_mutxos_of_unknown_depth = true` to mark MUTXOs from abandoned
+    /// chains of unknown depth
+    ///
     /// Returns the number of monitored UTXOs that were marked as abandoned.
     ///
     /// Locking:
@@ -1645,10 +1600,14 @@ impl GlobalState {
             current_tip_header.timestamp,
             current_tip_header.height,
         );
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos_mut();
+        let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
         let mut removed_count = 0;
-        for i in 0..monitored_utxos.len().await {
-            let mut mutxo = monitored_utxos.get(i).await;
+        for i in 0..num_mutxos {
+            let mutxo = self
+                .wallet_state
+                .wallet_db
+                .monitored_utxo_by_list_index(i)
+                .await;
 
             // 1. Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
             //    once the spending block is buried sufficiently deep
@@ -1664,17 +1623,18 @@ impl GlobalState {
             // MUTXO is neither spent nor synced. Mark as abandoned
             // if it was confirmed in block that is now abandoned,
             // and if that block is older than threshold.
-            if let Some((_, _, block_height_confirmed)) = mutxo.confirmed_in_block {
-                let depth = current_tip_header.height - block_height_confirmed + 1;
+            let (_, _, block_height_confirmed) = mutxo.confirmed_in_block;
+            let depth = current_tip_header.height - block_height_confirmed + 1;
 
-                let abandoned = depth >= block_depth_threshold as i128
-                    && mutxo.was_abandoned(self.chain.archival_state()).await;
+            let abandoned = depth >= block_depth_threshold as i128
+                && mutxo.was_abandoned(self.chain.archival_state()).await;
 
-                if abandoned {
-                    mutxo.abandoned_at = Some(current_tip_info);
-                    monitored_utxos.set(i, mutxo).await;
-                    removed_count += 1;
-                }
+            if abandoned {
+                self.wallet_state
+                    .wallet_db
+                    .abandon_monitored_utxo(i, current_tip_info)
+                    .await;
+                removed_count += 1;
             }
         }
 
@@ -1870,8 +1830,7 @@ impl GlobalState {
                     || self.force_wallet_membership_proof_maintance
             }
         };
-        let received_utxos = self
-            .wallet_state
+        self.wallet_state
             .update_wallet_state_with_new_block(
                 &parent_ms_accumulator.unwrap_or_default(),
                 &new_tip,
@@ -1882,7 +1841,7 @@ impl GlobalState {
         // Get new membership proofs from mutator set accumulator, in case
         // wallet didn't set these from block data.
         if !maintain_mps_in_wallet {
-            self.restore_monitored_utxos_from_archival_mutator_set(Some(received_utxos))
+            self.restore_monitored_utxos_from_archival_mutator_set()
                 .await;
         }
 
@@ -1916,7 +1875,7 @@ impl GlobalState {
 
         // do we have an archival mutator set?
         if self.chain.is_archival_node() {
-            self.restore_monitored_utxos_from_archival_mutator_set(None)
+            self.restore_monitored_utxos_from_archival_mutator_set()
                 .await;
             return Ok(());
         }
@@ -3219,18 +3178,8 @@ mod tests {
             );
 
             // Clear databases, to verify recovery works.
-            state
-                .wallet_state
-                .wallet_db
-                .monitored_utxos_mut()
-                .clear()
-                .await;
-            state
-                .wallet_state
-                .wallet_db
-                .expected_utxos_mut()
-                .clear()
-                .await;
+            state.wallet_state.wallet_db.clear_mutxos().await;
+            state.wallet_state.wallet_db.clear_expected_utxos().await;
 
             let recovery_data = state
                 .wallet_state
@@ -3303,23 +3252,22 @@ mod tests {
             // Delete everything from monitored UTXO and from raw-hash keys.
             let mut global_state = global_state_lock.lock_guard_mut().await;
             {
-                let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos_mut();
                 assert_eq!(
                     5,
-                    monitored_utxos.len().await,
+                    global_state
+                        .wallet_state
+                        .wallet_db
+                        .monitored_utxos()
+                        .len()
+                        .await,
                     "MUTXO must have genesis element, composer rewards, and guesser rewards"
                 );
-                monitored_utxos.pop().await;
-                monitored_utxos.pop().await;
-                monitored_utxos.pop().await;
-                monitored_utxos.pop().await;
-                monitored_utxos.pop().await;
+                global_state.wallet_state.wallet_db.clear_mutxos().await;
 
                 global_state
                     .wallet_state
                     .wallet_db
-                    .expected_utxos_mut()
-                    .clear()
+                    .clear_expected_utxos()
                     .await;
 
                 assert!(
@@ -3358,22 +3306,22 @@ mod tests {
 
                 let mutxos = monitored_utxos.get_all().await;
                 assert_eq!(
-                    Some((
+                    (
                         genesis_block.hash(),
                         genesis_block.header().timestamp,
                         genesis_block.header().height
-                    )),
+                    ),
                     mutxos[0].confirmed_in_block,
                     "Historical information must be restored for premine UTXO"
                 );
 
                 for (i, mutxo) in mutxos.iter().enumerate().skip(1).take((1..=4).count()) {
                     assert_eq!(
-                    Some((
+                    (
                         block1.hash(),
                         block1.header().timestamp,
                         block1.header().height
-                    )),
+                    ),
                     mutxo.confirmed_in_block,
                     "Historical information must be restored for composer and guesser UTXOs, i={i}"
                 );
@@ -3470,7 +3418,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set(None)
+                            .restore_monitored_utxos_from_archival_mutator_set()
                             .await
                     }
                 };
@@ -3554,7 +3502,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set(None)
+                            .restore_monitored_utxos_from_archival_mutator_set()
                             .await
                     }
                 }
@@ -3728,7 +3676,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set(None)
+                            .restore_monitored_utxos_from_archival_mutator_set()
                             .await
                     }
                 };
@@ -3786,7 +3734,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set(None)
+                            .restore_monitored_utxos_from_archival_mutator_set()
                             .await
                     }
                 };
@@ -4558,10 +4506,6 @@ mod tests {
                 .get_all()
                 .await;
             let mut mutxos_on_tip = vec![];
-            assert!(
-                mutxos.iter().all(|x| x.confirmed_in_block.is_some()),
-                "All monitored UTXOs must be mined."
-            );
             for mutxo in mutxos {
                 if !mutxo
                     .was_abandoned(global_state.chain.archival_state())

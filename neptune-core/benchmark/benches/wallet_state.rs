@@ -161,7 +161,7 @@ mod maintain_membership_proofs {
 
             bencher.bench_local(|| {
                 rt.block_on(async {
-                    let recovery_data = global_state
+                    global_state
                         .wallet_state
                         .update_wallet_state_with_new_block(
                             &block1.mutator_set_accumulator_after().unwrap(),
@@ -172,7 +172,7 @@ mod maintain_membership_proofs {
                         .unwrap();
 
                     global_state
-                        .restore_monitored_utxos_from_archival_mutator_set(Some(recovery_data))
+                        .restore_monitored_utxos_from_archival_mutator_set()
                         .await
                 });
             });
