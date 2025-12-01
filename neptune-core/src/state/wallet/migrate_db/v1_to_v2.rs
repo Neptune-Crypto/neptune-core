@@ -349,6 +349,39 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "Test disabled on Windows due to LevelDB cross-platform issues"
+    )]
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn migrate_real_v1_db() -> anyhow::Result<()> {
+        // basics
+        let network = Network::Testnet(0);
+        let data_dir = unit_test_data_directory(network)?;
+
+        // obtain source db path and target path
+        let test_data_wallet_db_dir = worker::crate_root()
+            .join("test_data/migrations/wallet_db/v1_to_v2/wallet_db.v1-with-mutxos");
+        let wallet_database_path = data_dir.wallet_database_dir_path();
+
+        // copy DB in test_data to wallet_database_path
+        crate::copy_dir_recursive(&test_data_wallet_db_dir, &wallet_database_path)?;
+
+        // open v1 DB file
+        let db_v1 =
+            NeptuneLevelDb::new(&wallet_database_path, &leveldb::options::Options::new()).await?;
+
+        // connect to v1 Db with v2 RustyWalletDatabase.  This is where the
+        // migration occurs.
+        let wallet_db_v1 = RustyWalletDatabase::try_connect_and_migrate(db_v1).await?;
+
+        let monitored_utxos = wallet_db_v1.monitored_utxos();
+        assert_eq!(monitored_utxos.len().await, 6);
+
+        Ok(())
+    }
+
     // contains schema version 1 types for test(s)
     mod test_schema_v1 {
         use super::*;
