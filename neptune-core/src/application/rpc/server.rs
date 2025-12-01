@@ -1920,7 +1920,8 @@ pub trait RPC {
         block_proposal: Block,
     ) -> RpcResult<bool>;
 
-    /// mark MUTXOs as abandoned
+    /// mark MUTXOs as abandoned. Does not actually delete any elements in the
+    /// list.
     ///
     /// ```no_run
     /// # use anyhow::Result;
@@ -2166,12 +2167,11 @@ impl NeptuneRPCServer {
                 let mut monitored_utxo = MonitoredUtxo::new(
                     incoming_utxo.utxo.clone(),
                     self.state.cli().number_of_mps_per_utxo,
+                    msmp.aocl_leaf_index,
+                    msmp.sender_randomness,
+                    msmp.receiver_preimage,
+                    &block,
                 );
-                monitored_utxo.confirmed_in_block = Some((
-                    block.hash(),
-                    block.header().timestamp,
-                    block.header().height,
-                ));
                 monitored_utxo.add_membership_proof_for_tip(tip_digest, msmp.clone());
 
                 // Was UTXO already spent? If so, register it as such.
@@ -3641,15 +3641,10 @@ impl RPC for NeptuneRPCServer {
             .get_all()
             .await
         {
-            let received =
-                if let Some((_, timestamp, block_height)) = monitored_utxo.confirmed_in_block {
-                    UtxoStatusEvent::Confirmed {
-                        block_height,
-                        timestamp,
-                    }
-                } else {
-                    UtxoStatusEvent::Abandoned
-                };
+            let received = UtxoStatusEvent::Confirmed {
+                block_height: monitored_utxo.confirmed_in_block.2,
+                timestamp: monitored_utxo.confirmed_in_block.1,
+            };
             let spent = if let Some((_, timestamp, block_height)) = monitored_utxo.spent_in_block {
                 UtxoStatusEvent::Confirmed {
                     block_height,
@@ -3663,7 +3658,7 @@ impl RPC for NeptuneRPCServer {
                 ui_utxos.push(UiUtxo {
                     received,
                     spent,
-                    aocl_leaf_index: Some(monitored_utxo.aocl_index()),
+                    aocl_leaf_index: Some(monitored_utxo.aocl_leaf_index),
                     amount: monitored_utxo.utxo.get_native_currency_amount(),
                     release_date: monitored_utxo.utxo.release_date(),
                 });
