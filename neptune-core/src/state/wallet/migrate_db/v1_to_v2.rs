@@ -14,8 +14,8 @@ use crate::state::wallet::wallet_db_tables::WalletDbTables;
 ///   UTXOs list.
 /// - Add mapping from hash(absolute index set) to index into the list of
 ///   monitored UTXOs.
-/// - Change monitored UTXO field `confirmed_in_block` from Option<T> to T since
-///   [`MonitoredUtxo`] always represents a mined UTXO.
+/// - Change monitored UTXO field `confirmed_in_block` from `Option<T>` to `T`
+///   since [`MonitoredUtxo`] always represents a mined UTXO.
 /// - Add fields to monitored UTXOs:
 ///   - aocl_leaf_index: u64 (was always read from MSMP previously)
 ///   - sender_randomness: Digest (as above)
@@ -111,7 +111,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
             .len()
             .try_into()
             .expect("Can always convert usize to u64");
-        reorganized_duplicates += (num_reorgs != 0) as u64;
+        reorganized_duplicates += u64::from(num_reorgs != 0);
 
         if num_reorgs != 0 {
             debug!("num_reorgs: {num_reorgs}; aocl_leaf_index: {aocl_leaf_index}");
@@ -285,7 +285,7 @@ mod tests {
                 fake_v1_mutxo(22, 5),
                 fake_v1_mutxo(49, 88),
             ];
-            for mutxo in mutxos.iter() {
+            for mutxo in &mutxos {
                 wallet_db_v1.monitored_utxos.push(mutxo.clone()).await;
             }
             assert_eq!(wallet_db_v1.monitored_utxos.len().await, 7);

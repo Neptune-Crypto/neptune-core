@@ -987,14 +987,13 @@ impl GlobalState {
         pin_mut!(stream); // needed for iteration
 
         while let Some(mutxo) = stream.next().await {
-            if max_confirmed_in_block.is_none() {
-                if mutxo
+            if max_confirmed_in_block.is_none()
+                && mutxo
                     .get_membership_proof_for_block(current_tip_digest)
                     .is_some()
-                {
-                    let (.., confirmed_in_block) = mutxo.confirmed_in_block;
-                    max_confirmed_in_block = Some(confirmed_in_block);
-                }
+            {
+                let (.., confirmed_in_block) = mutxo.confirmed_in_block;
+                max_confirmed_in_block = Some(confirmed_in_block);
             }
 
             if let Some((.., spent_in_block)) = mutxo.spent_in_block {

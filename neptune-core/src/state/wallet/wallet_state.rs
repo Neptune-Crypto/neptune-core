@@ -1761,7 +1761,7 @@ impl WalletState {
         let potential_duplicates = potential_duplicates(
             incoming_range,
             self.wallet_db.monitored_utxos(),
-            &self.wallet_db.aocl_to_mutxo(),
+            self.wallet_db.aocl_to_mutxo(),
         )
         .await;
         let msa_state = previous_mutator_set_accumulator.clone();
