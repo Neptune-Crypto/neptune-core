@@ -660,9 +660,9 @@ mod tests {
         }
         assert_eq!(NUM_INSERTIONS, persisted_map.len().await);
 
-        for (key, value) in hashmap.iter() {
-            assert_eq!(*value, persisted_map.get(&key).await.unwrap());
-            assert!(persisted_map.contains_key(&key).await);
+        for (key, value) in &hashmap {
+            assert_eq!(*value, persisted_map.get(key).await.unwrap());
+            assert!(persisted_map.contains_key(key).await);
         }
         assert_eq!(NUM_INSERTIONS, persisted_map.len().await);
 
@@ -670,9 +670,9 @@ mod tests {
 
         rusty_storage.persist().await;
 
-        for (key, value) in hashmap.iter() {
-            assert_eq!(*value, persisted_map.get(&key).await.unwrap());
-            assert!(persisted_map.contains_key(&key).await);
+        for (key, value) in &hashmap {
+            assert_eq!(*value, persisted_map.get(key).await.unwrap());
+            assert!(persisted_map.contains_key(key).await);
         }
         assert_eq!(NUM_INSERTIONS, persisted_map.len().await);
         assert_eq!(inserted_keys, persisted_map.all_keys().await);
