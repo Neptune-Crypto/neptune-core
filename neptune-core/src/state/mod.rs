@@ -1292,6 +1292,11 @@ impl GlobalState {
             asm_sync_label.to_hex()
         );
 
+        let msa = self
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .expect("Stored block must have valid MSA after");
         let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
         trace!("monitored_utxos.len() = {num_mutxos}");
         for i in 0..num_mutxos {
@@ -1325,9 +1330,7 @@ impl GlobalState {
                 continue;
             };
 
-            if monitored_utxo.spent_in_block.is_none()
-                && !ams_ref.ams().verify(ms_item, &restored_msmp).await
-            {
+            if monitored_utxo.spent_in_block.is_none() && !msa.verify(ms_item, &restored_msmp) {
                 // If the UTXO was spent *and* its membership proof is invalid
                 // after attempting to resync, then that expenditure must still
                 // be canonical.
