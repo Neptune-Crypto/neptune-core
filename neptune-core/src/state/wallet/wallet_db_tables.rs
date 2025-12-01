@@ -3,6 +3,7 @@ use twenty_first::prelude::Digest;
 use super::expected_utxo::ExpectedUtxo;
 use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
+use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtSingleton;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
@@ -50,11 +51,14 @@ pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 1;
 /// Any new fields must be added at the end.
 #[derive(Debug)]
 pub(super) struct WalletDbTables {
-    // list of utxos we have already received in a block
     // table number: 0
+    /// Append-only list of utxos we have already received in a block.
+    /// Each element in this list must be accompagnied by an element in the
+    /// value [`Self::aocl_to_mutxo`] such that monitored UTXOs can be looked
+    /// up quickly by AOCL leaf index.
     pub(super) monitored_utxos: DbtVec<MonitoredUtxo>,
 
-    // list of off-chain utxos we are expecting to receive in a future block
+    /// list of off-chain utxos we are expecting to receive in a future block.
     // table number: 1
     pub(super) expected_utxos: DbtVec<ExpectedUtxo>,
 
@@ -62,7 +66,7 @@ pub(super) struct WalletDbTables {
     // table number: 2
     pub(super) sent_transactions: DbtVec<SentTransaction>,
 
-    // records which block the database is synced to
+    /// records which block the database is synced to
     // table number: 3
     pub(super) sync_label: DbtSingleton<Digest>,
 
@@ -83,6 +87,15 @@ pub(super) struct WalletDbTables {
     #[allow(dead_code)]
     // table number: 7
     pub(super) schema_version: DbtSingleton<u16>,
+
+    /// table numbers: 8 + 9
+    /// Mapping from AOCL leaf index to index into list of `monitored_utxo` for
+    /// UTXOs managed by this wallet. Value type is list because of potential
+    /// reorganizations.
+    ///
+    /// Each `monitored_utxo` *must* have be represented as an element in the
+    /// value of this map.
+    pub(super) aocl_to_mutxo: DbtMap<u64, Vec<u64>>,
 }
 
 impl WalletDbTables {
@@ -123,6 +136,8 @@ impl WalletDbTables {
 
         let schema_version = storage.schema.new_singleton::<u16>("schema_version").await;
 
+        let aocl_to_mutxo = storage.schema.new_map("aocl_to_mutxo").await;
+
         WalletDbTables {
             sync_label,
             monitored_utxos,
@@ -132,10 +147,30 @@ impl WalletDbTables {
             generation_key_counter,
             symmetric_key_counter,
             schema_version,
+            aocl_to_mutxo,
         }
     }
 
     pub(super) fn sent_transactions_table_count() -> u8 {
         2
+    }
+
+    pub(crate) fn monitored_utxos_table_count() -> u8 {
+        0
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    impl WalletDbTables {
+        pub(crate) fn schema_version_table_count() -> u8 {
+            7
+        }
+
+        pub(crate) fn sync_label_table_count() -> u8 {
+            3
+        }
     }
 }
