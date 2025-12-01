@@ -106,13 +106,18 @@ mod resync_membership_proofs {
 mod maintain_membership_proofs {
     use super::*;
 
-    /// Maintain 400 membership proofs, while receiving an additional 10 UTXOs.
-    mod maintain_400_10 {
+    /// Maintain membership proofs, while receiving additional UTXOs.
+    mod maintain_msmps {
         use super::*;
 
-        fn update_wallet_with_block2(bencher: Bencher, maintain_msmps_from_block_data: bool) {
-            const NUM_UTXOS_MAINTAINED: usize = 400;
-            const NUM_NEW_UTXOS: usize = 10;
+        fn update_wallet_with_block2<
+            const NUM_UTXOS_MAINTAINED: usize,
+            const NUM_NEW_UTXOS: usize,
+        >(
+            bencher: Bencher,
+            maintain_msmps_from_block_data: bool,
+            update_msmps: bool,
+        ) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let network = Network::Main;
             let mut global_state_lock = rt.block_on(devops_global_state_genesis(Network::Main));
@@ -171,21 +176,33 @@ mod maintain_membership_proofs {
                         .await
                         .unwrap();
 
-                    global_state
-                        .restore_monitored_utxos_from_archival_mutator_set()
-                        .await
+                    if update_msmps {
+                        global_state
+                            .restore_monitored_utxos_from_archival_mutator_set()
+                            .await
+                    }
                 });
             });
         }
 
         #[divan::bench(sample_count = 10)]
-        fn apply_block2_maintain_msmps(bencher: Bencher) {
-            update_wallet_with_block2(bencher, true);
+        fn apply_block2_maintain_msmps_400_10(bencher: Bencher) {
+            update_wallet_with_block2::<400, 10>(bencher, true, true);
         }
 
         #[divan::bench(sample_count = 10)]
-        fn apply_block2_no_maintain_msmps(bencher: Bencher) {
-            update_wallet_with_block2(bencher, false);
+        fn apply_block2_no_maintain_msmps_400_10(bencher: Bencher) {
+            update_wallet_with_block2::<400, 10>(bencher, false, true);
+        }
+
+        #[divan::bench(sample_count = 10)]
+        fn apply_block2_no_maintain_msmps_1000_10_no_msmp_update(bencher: Bencher) {
+            update_wallet_with_block2::<1000, 10>(bencher, false, false);
+        }
+
+        #[divan::bench(sample_count = 10)]
+        fn apply_block2_no_maintain_msmps_1000_10_with_msmp_update(bencher: Bencher) {
+            update_wallet_with_block2::<1000, 10>(bencher, false, true);
         }
     }
 }
