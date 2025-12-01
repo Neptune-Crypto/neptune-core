@@ -1,7 +1,8 @@
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::ChangePolicy;
