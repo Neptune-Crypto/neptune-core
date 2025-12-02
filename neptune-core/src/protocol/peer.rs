@@ -202,28 +202,6 @@ impl Display for PositivePeerSanction {
     }
 }
 
-/// Used by main task to manage synchronizations/catch-up. Main task has
-/// a value of this type for each connected peer.
-
-#[derive(Debug, Clone, Copy)]
-pub struct ClaimedSynchronizationState {
-    pub claimed_max_height: BlockHeight,
-    pub(crate) claimed_max_pow: ProofOfWork,
-    pub synchronization_start: SystemTime,
-    pub last_request_received: Option<SystemTime>,
-}
-
-impl ClaimedSynchronizationState {
-    pub(crate) fn new(claimed_max_height: BlockHeight, claimed_max_pow: ProofOfWork) -> Self {
-        Self {
-            claimed_max_height,
-            claimed_max_pow,
-            synchronization_start: SystemTime::now(),
-            last_request_received: None,
-        }
-    }
-}
-
 impl Sanction for NegativePeerSanction {
     fn severity(self) -> i32 {
         match self {
