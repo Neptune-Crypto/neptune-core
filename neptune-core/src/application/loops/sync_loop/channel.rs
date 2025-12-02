@@ -19,7 +19,15 @@ pub(crate) enum SyncToMain {
     RequestBlocks(Vec<BlockRequest>),
     Status(SyncProgress),
     Punish(Vec<PeerHandle>),
+    Coverage {
+        coverage: SynchronizationBitMask,
+        peer_handle: PeerHandle,
+    },
     Error,
+    SyncBlock {
+        block: Box<Block>,
+        peer_handle: PeerHandle,
+    },
 }
 
 /// Messages sent from the main loop to the sync loop.
@@ -37,6 +45,10 @@ pub(crate) enum MainToSync {
         coverage: SynchronizationBitMask,
     },
     Status,
+    TryFetchBlock {
+        peer_handle: PeerHandle,
+        height: BlockHeight,
+    },
 }
 
 pub(crate) enum SuccessorsToSync {

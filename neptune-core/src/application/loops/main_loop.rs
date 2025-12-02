@@ -1048,6 +1048,16 @@ impl MainLoopHandler {
                     sync_loop.send_block(block, peer);
                 }
             }
+            PeerTaskToMain::SyncCoverage(synchronization_bit_mask, socket_addr) => {
+                if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
+                    sync_loop.send_sync_coverage(socket_addr, synchronization_bit_mask);
+                }
+            }
+            PeerTaskToMain::PeerWantsSyncBlock(peer, height) => {
+                if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
+                    sync_loop.send_try_fetch_block(peer, height);
+                }
+            }
         }
 
         Ok(())
@@ -1997,6 +2007,18 @@ impl MainLoopHandler {
                 for peer in peers {
                     self.main_to_peer_broadcast(MainToPeerTask::PeerSynchronizationTimeout(peer));
                 }
+            }
+            SyncToMain::Coverage {
+                coverage,
+                peer_handle,
+            } => {
+                self.main_to_peer_broadcast(MainToPeerTask::SyncCoverage {
+                    coverage,
+                    peer_handle,
+                });
+            }
+            SyncToMain::SyncBlock { block, peer_handle } => {
+                self.main_to_peer_broadcast(MainToPeerTask::SyncBlock { block, peer_handle });
             }
         }
 

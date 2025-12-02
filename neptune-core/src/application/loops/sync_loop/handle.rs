@@ -58,18 +58,26 @@ impl SyncLoopHandle {
         }
     }
 
-    pub(crate) fn abort(&mut self) {
-        if let Some(join_handle) = self.task_join_handle.take() {
-            join_handle.abort();
-        }
-    }
-
     pub(crate) fn send_block(&self, block: Box<Block>, peer: PeerHandle) {
         if let Err(e) = self.sender.try_send(MainToSync::ReceiveBlock {
             peer_handle: peer,
             block,
         }) {
             tracing::warn!("Error relaying block to sync loop: {e}.");
+            tracing::debug!(
+                "Note: channel capacity is at {}/{}.",
+                self.sender.capacity(),
+                self.sender.max_capacity()
+            );
+        }
+    }
+
+    pub(crate) fn send_try_fetch_block(&self, peer: PeerHandle, height: BlockHeight) {
+        if let Err(e) = self.sender.try_send(MainToSync::TryFetchBlock {
+            peer_handle: peer,
+            height,
+        }) {
+            tracing::warn!("Error sending try-fetch-block message to sync loop: {e}.");
             tracing::debug!(
                 "Note: channel capacity is at {}/{}.",
                 self.sender.capacity(),
