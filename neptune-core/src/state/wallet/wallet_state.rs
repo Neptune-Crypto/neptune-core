@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
-use std::ops::Range;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -47,7 +46,6 @@ use super::wallet_status::WalletStatusElement;
 use crate::application::config::cli_args::Args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
@@ -67,9 +65,11 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::rusty_wallet_database::WalletDbConnectError;
 use crate::state::wallet::transaction_input::TxInput;
 use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -127,30 +127,6 @@ impl TryFrom<&MonitoredUtxo> for IncomingUtxoRecoveryData {
             receiver_preimage: msmp.receiver_preimage,
             aocl_index: msmp.aocl_leaf_index,
         })
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct StrongUtxoKey {
-    addition_record: AdditionRecord,
-    aocl_index: u64,
-}
-
-impl StrongUtxoKey {
-    fn new(addition_record: AdditionRecord, aocl_index: u64) -> Self {
-        Self {
-            addition_record,
-            aocl_index,
-        }
-    }
-}
-
-impl From<&UnlockedUtxo> for StrongUtxoKey {
-    fn from(unlocked_utxo: &UnlockedUtxo) -> Self {
-        Self::new(
-            unlocked_utxo.addition_record(),
-            unlocked_utxo.mutator_set_mp().aocl_leaf_index,
-        )
     }
 }
 
@@ -1324,7 +1300,6 @@ impl WalletState {
         block: &Block,
         incoming: &HashMap<AdditionRecord, IncomingUtxo>,
         spent_inputs: &HashMap<AbsoluteIndexSet, (Utxo, u64)>,
-        potential_duplicates: &HashMap<StrongUtxoKey, u64>,
         mut msa_state: MutatorSetAccumulator,
         num_mps_per_utxo: usize,
     ) -> anyhow::Result<Vec<IncomingUtxoRecoveryData>> {
@@ -1466,7 +1441,6 @@ impl WalletState {
                 let new_own_membership_proof =
                     msa_state.prove(utxo_digest, sender_randomness, receiver_preimage);
                 let aocl_index = new_own_membership_proof.aocl_leaf_index;
-                let strong_key = StrongUtxoKey::new(*addition_record, aocl_index);
 
                 // Add the new UTXO to the list of monitored UTXOs
                 let mutxo = MonitoredUtxo::new(
@@ -1478,40 +1452,47 @@ impl WalletState {
                     block,
                 );
 
+                let strong_key = mutxo.strong_utxo_key();
+
                 // Add the membership proof to the list of managed membership
                 // proofs.
-                if let Some(mutxo_index) = potential_duplicates.get(&strong_key) {
-                    // There is already a monitored UTXO with that key in the
-                    // database. If this block is confirming that UTXO, then it
-                    // must be a reorg. So overwrite the existing entry's
-                    // membership proof.
-                    debug!("Repeated monitored UTXO. Not adding new entry to monitored UTXOs");
-                    valid_membership_proofs_and_own_utxo_count.insert(
-                        strong_key,
-                        (new_own_membership_proof, *mutxo_index, utxo_digest),
-                    );
 
-                    // Update `confirmed_in_block` data to reflect this reorg.
-                    self.wallet_db
-                        .update_mutxo_confirmation_block(*mutxo_index, block)
-                        .await;
-                } else {
-                    // The monitored UTXO is new. Add it to DB.
-                    let new_mutxo_index = self.wallet_db.insert_mutxo(mutxo).await;
-                    valid_membership_proofs_and_own_utxo_count.insert(
-                        strong_key,
-                        (new_own_membership_proof, new_mutxo_index, utxo_digest),
-                    );
+                let insertion_result = self.wallet_db.insert_mutxo(mutxo).await;
 
-                    // Add the data required to restore the UTXOs membership proof from public
-                    // data to the secret's file.
-                    let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
-                        utxo,
-                        sender_randomness,
-                        receiver_preimage,
-                        aocl_index,
-                    };
-                    incoming_utxo_recovery_data_list.push(utxo_ms_recovery_data);
+                match insertion_result {
+                    MonitoredUtxoInsertResult::New(new_list_index) => {
+                        // UTXO was not seen by wallet-db before
+                        valid_membership_proofs_and_own_utxo_count.insert(
+                            strong_key,
+                            (new_own_membership_proof, new_list_index, utxo_digest),
+                        );
+                        let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
+                            utxo,
+                            sender_randomness,
+                            receiver_preimage,
+                            aocl_index,
+                        };
+                        incoming_utxo_recovery_data_list.push(utxo_ms_recovery_data);
+                    }
+                    MonitoredUtxoInsertResult::Existing(list_index_existing_mutxo) => {
+                        // UTXO (same addition record and same AOCL leaf index) was already known by
+                        // wallet-db. Either because of a reorganization, or because this block was
+                        // already processed.
+                        debug!("Repeated monitored UTXO. Not adding new entry to monitored UTXOs");
+                        valid_membership_proofs_and_own_utxo_count.insert(
+                            strong_key,
+                            (
+                                new_own_membership_proof,
+                                list_index_existing_mutxo,
+                                utxo_digest,
+                            ),
+                        );
+
+                        // Update `confirmed_in_block` data to reflect potential reorg.
+                        self.wallet_db
+                            .update_mutxo_confirmation_block(&strong_key, block)
+                            .await;
+                    }
                 }
             }
 
@@ -1594,7 +1575,6 @@ impl WalletState {
         block: &Block,
         incoming: &HashMap<AdditionRecord, IncomingUtxo>,
         mut aocl_leaf_count: u64,
-        potential_duplicates: &HashMap<StrongUtxoKey, u64>,
         num_mps_per_utxo: usize,
     ) -> Vec<IncomingUtxoRecoveryData> {
         let mut recovery_data = vec![];
@@ -1612,7 +1592,6 @@ impl WalletState {
                     ..
                 } = incoming_utxo.to_owned();
                 let aocl_index = aocl_leaf_count;
-                let strong_key = StrongUtxoKey::new(addition_record, aocl_index);
                 let mutxo = MonitoredUtxo::new(
                     utxo.clone(),
                     num_mps_per_utxo,
@@ -1621,22 +1600,29 @@ impl WalletState {
                     receiver_preimage,
                     block,
                 );
+                let strong_key = mutxo.strong_utxo_key();
 
-                if let Some(mutxo_index) = potential_duplicates.get(&strong_key) {
-                    // Update `confirmed_in_block` data to reflect potential
-                    // reorganization.
-                    self.wallet_db
-                        .update_mutxo_confirmation_block(*mutxo_index, block)
-                        .await;
-                } else {
-                    self.wallet_db.insert_mutxo(mutxo).await;
-                    let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
-                        utxo,
-                        sender_randomness,
-                        receiver_preimage,
-                        aocl_index,
-                    };
-                    recovery_data.push(utxo_ms_recovery_data);
+                let mutxo_list_index = self.wallet_db.insert_mutxo(mutxo).await;
+
+                match mutxo_list_index {
+                    MonitoredUtxoInsertResult::New(_) => {
+                        // UTXO was not seen by wallet-db before.
+                        let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
+                            utxo,
+                            sender_randomness,
+                            receiver_preimage,
+                            aocl_index,
+                        };
+                        recovery_data.push(utxo_ms_recovery_data);
+                    }
+                    MonitoredUtxoInsertResult::Existing(_) => {
+                        // This UTXO was already seen by wallet-db. This is either a reorganization,
+                        // or the reapplication of an already-processed block. Either way, update
+                        // the block hash in which the UTXO was received.
+                        self.wallet_db
+                            .update_mutxo_confirmation_block(&strong_key, block)
+                            .await;
+                    }
                 }
             }
 
@@ -1674,34 +1660,6 @@ impl WalletState {
         block: &Block,
         maintain_membership_proofs_in_wallet: bool,
     ) -> anyhow::Result<()> {
-        /// Get potential duplicates, to avoid registering same UTXO twice.
-        ///
-        /// The set of potential duplicates, UTXOs that have, potentially
-        /// already been added by this wallet. Used for a later check to avoid
-        /// adding the same UTXO twice. Since we don't know the AOCL leaf
-        /// index of the incoming transaction, these are only potential
-        /// duplicates, not certain duplicates.
-        async fn potential_duplicates(
-            incoming_range: Range<u64>,
-            monitored_utxos: &DbtVec<MonitoredUtxo>,
-            aocl_to_mutxo_index: &DbtMap<u64, Vec<u64>>,
-        ) -> HashMap<StrongUtxoKey, u64> {
-            let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();
-
-            for aocl_leaf_index in incoming_range {
-                if let Some(mutxo_indices) = aocl_to_mutxo_index.get(&aocl_leaf_index).await {
-                    for mutxo_index in mutxo_indices {
-                        let mutxo = monitored_utxos.get(mutxo_index).await;
-                        let addition_record = mutxo.addition_record();
-                        let strong_key = StrongUtxoKey::new(addition_record, aocl_leaf_index);
-                        maybe_duplicates.insert(strong_key, mutxo_index);
-                    }
-                }
-            }
-
-            maybe_duplicates
-        }
-
         let tx_kernel = &block.kernel.body.transaction_kernel;
 
         let spent_inputs = self.scan_for_spent_utxos(tx_kernel).await;
@@ -1751,19 +1709,6 @@ impl WalletState {
             return Ok(());
         }
 
-        let first_aocl_leaf_index_in_block = previous_mutator_set_accumulator.aocl.num_leafs();
-        let num_additions: u64 = additions
-            .len()
-            .try_into()
-            .expect("Cant exceed u64::MAX addition records in a block");
-        let incoming_range =
-            first_aocl_leaf_index_in_block..first_aocl_leaf_index_in_block + num_additions;
-        let potential_duplicates = potential_duplicates(
-            incoming_range,
-            self.wallet_db.monitored_utxos(),
-            self.wallet_db.aocl_to_mutxo(),
-        )
-        .await;
         let msa_state = previous_mutator_set_accumulator.clone();
 
         // Mutate the monitored UTXOs to account for this block.
@@ -1772,7 +1717,6 @@ impl WalletState {
                 block,
                 &incoming,
                 &spent_inputs,
-                &potential_duplicates,
                 msa_state,
                 self.configuration.num_mps_per_utxo,
             )
@@ -1783,7 +1727,6 @@ impl WalletState {
                     block,
                     &incoming,
                     msa_state.aocl.num_leafs(),
-                    &potential_duplicates,
                     self.configuration.num_mps_per_utxo,
                 )
                 .await;
