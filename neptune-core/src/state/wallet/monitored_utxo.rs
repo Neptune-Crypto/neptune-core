@@ -12,6 +12,7 @@ use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::archival_state::ArchivalState;
+use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -157,6 +158,10 @@ impl MonitoredUtxo {
             self.receiver_preimage,
             self.aocl_leaf_index,
         )
+    }
+
+    pub(crate) fn strong_utxo_key(&self) -> StrongUtxoKey {
+        StrongUtxoKey::new(self.addition_record(), self.aocl_leaf_index)
     }
 
     /// Determine whether the attached membership proof is synced to the given

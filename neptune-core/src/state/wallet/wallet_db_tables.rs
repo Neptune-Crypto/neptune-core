@@ -1,14 +1,53 @@
+use serde::Deserialize;
+use serde::Serialize;
 use twenty_first::prelude::Digest;
 
 use super::expected_utxo::ExpectedUtxo;
 use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
+use crate::api::export::AdditionRecord;
 use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtSingleton;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::storage::storage_vec::Index;
 use crate::prelude::twenty_first;
+use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
+
+/// An ID for UTXOs that defines uniqueness of a UTXO even in the case of
+/// reorganizations. In the case of reorganizations both the AOCL leaf index and
+/// the addition record is required to identify a UTXO across multiple forks. We
+/// do not use the block digest in which the UTXO was mined in this definition
+//  since a reorganization that repeats some UTXOs at the same location in the
+/// AOCL is not considered to introduce new UTXOs, rather the same UTXOs are
+/// present, but they were just mined in different blocks.
+///
+/// From the perspective of the mutator set, two UTXOs with the same
+/// [`StrongUtxoKey`] will always have the same lockscript and mutator set
+/// membership proofs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub(crate) struct StrongUtxoKey {
+    addition_record: AdditionRecord,
+    aocl_index: u64,
+}
+
+impl StrongUtxoKey {
+    pub(crate) fn new(addition_record: AdditionRecord, aocl_index: u64) -> Self {
+        Self {
+            addition_record,
+            aocl_index,
+        }
+    }
+}
+
+impl From<&UnlockedUtxo> for StrongUtxoKey {
+    fn from(unlocked_utxo: &UnlockedUtxo) -> Self {
+        Self::new(
+            unlocked_utxo.addition_record(),
+            unlocked_utxo.mutator_set_mp().aocl_leaf_index,
+        )
+    }
+}
 
 /// defines the schema version of the wallet database.
 ///
@@ -54,11 +93,12 @@ pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 2;
 pub(super) struct WalletDbTables {
     // table number: 0
     /// Append-only list of utxos we have already received in a block.
-    /// Each element in this list must be accompagnied by an element in the
-    /// value [`Self::aocl_to_mutxo`] such that monitored UTXOs can be looked
-    /// up quickly by AOCL leaf index. And it must be accompagined by an element
-    /// in the [`Self::index_set_to_mutxo`] table for fast mapping of absolute
-    /// index set to monitored UTXO.
+    /// Each element in this list must be accompanied by an element in the
+    /// value [`Self::strong_key_to_mutxo`] such that duplicate UTXOs are never
+    /// added and this check can be performed fast. And it must be accompanied
+    /// by an element in the [`Self::index_set_to_mutxo`] table for fast mapping
+    /// of absolute index set to monitored UTXO, such that spent UTXOs can
+    /// quickly be identified.
     pub(super) monitored_utxos: DbtVec<MonitoredUtxo>,
 
     /// list of off-chain utxos we are expecting to receive in a future block.
@@ -92,13 +132,19 @@ pub(super) struct WalletDbTables {
     pub(super) schema_version: DbtSingleton<u16>,
 
     /// table numbers: 8 + 9
-    /// Mapping from AOCL leaf index to index into list of `monitored_utxo` for
-    /// UTXOs managed by this wallet. Value type is list because of potential
-    /// reorganizations.
+    /// Mapping from [`StrongUtxoKey`] to index into list of
+    /// [`Self::monitored_utxos`]. A [`StrongUtxoKey`] uniquely identified a
+    /// UTXO, in a way that neither an [`AdditionRecord`] nor an AOCL leaf index
+    /// alone do, since two UTXOs in the mutator set can have the same addition
+    /// records and in the case of reorganizations, two different UTXOs can also
+    /// have the same AOCL leaf index.
     ///
-    /// Each `monitored_utxo` *must* be represented as an element in the value
-    /// of this map.
-    pub(super) aocl_to_mutxo: DbtMap<u64, Vec<Index>>,
+    /// This mapping ensures that the same UTXO is never counted twice by the
+    /// wallet.
+    ///
+    /// Each `monitored_utxo` *must* be represented by exactly one entry in this
+    /// map.
+    pub(super) strong_key_to_mutxo: DbtMap<StrongUtxoKey, Index>,
 
     /// table numbers 10 + 11
     /// Mapping from hash(absolute_indices) to index into list of
@@ -146,7 +192,7 @@ impl WalletDbTables {
 
         let schema_version = storage.schema.new_singleton::<u16>("schema_version").await;
 
-        let aocl_to_mutxo = storage.schema.new_map("aocl_to_mutxo").await;
+        let strong_key_to_mutxo = storage.schema.new_map("strong_key_to_mutxo").await;
 
         let index_set_to_mutxo = storage.schema.new_map("absolute_index_set_to_mutxo").await;
 
@@ -159,7 +205,7 @@ impl WalletDbTables {
             generation_key_counter,
             symmetric_key_counter,
             schema_version,
-            aocl_to_mutxo,
+            strong_key_to_mutxo,
             index_set_to_mutxo,
         }
     }
