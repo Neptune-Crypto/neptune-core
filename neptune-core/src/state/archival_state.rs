@@ -94,6 +94,7 @@ impl core::fmt::Debug for ArchivalState {
             .field("block_index_db", &self.block_index_db)
             .field("genesis_block", &self.genesis_block)
             .field("network", &self.network)
+            .field("archival_block_mmr", &self.archival_block_mmr)
             .finish()
     }
 }
@@ -700,6 +701,7 @@ impl ArchivalState {
                 return Ok(None);
             }
         };
+        let tip_height = record.block_header.height;
 
         // Is AOCL leaf index after current tip?
         if aocl_leaf_index > record.max_aocl_index() {
@@ -710,6 +712,7 @@ impl ArchivalState {
         let mut max_block_height = record.block_header.height;
 
         // Do binary search to find block
+        // invariant: min_block_height <= record.block_header.height && record.block_header.height <= max_block_height
         loop {
             if aocl_leaf_index < record.min_aocl_index {
                 // Look below current height
@@ -726,6 +729,10 @@ impl ArchivalState {
             };
 
             let new_guess_height = BlockHeight::arithmetic_mean(min_block_height, max_block_height);
+            debug!(
+                "canonical_block_digest_of_aocl_index: binary search on [{}:{}] -- new guess is {} (/{})",
+                min_block_height, max_block_height, new_guess_height, tip_height
+            );
             block_hash = self
                 .archival_block_mmr
                 .ammr()
