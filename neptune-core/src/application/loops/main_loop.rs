@@ -1994,6 +1994,11 @@ impl MainLoopHandler {
                     .net
                     .sync_status = SyncStatus::Syncing(status);
             }
+            SyncToMain::Punish(peers) => {
+                for peer in peers {
+                    self.main_to_peer_broadcast(MainToPeerTask::PeerSynchronizationTimeout(peer));
+                }
+            }
         }
 
         Some(sync_loop_handle)

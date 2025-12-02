@@ -37,12 +37,16 @@ pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 10;
 /// After this long without any response from anyone, the sync loop will
 /// terminate.
 const ANY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// After this long without a response from a given peer, that peer will be sent
 /// another block request.
 #[cfg(not(test))]
-const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+const PEER_RESPONSE_REMINDER_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(test)]
-const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_millis(1);
+const PEER_RESPONSE_REMINDER_TIMEOUT: Duration = Duration::from_millis(1);
+
+/// After this long without a response from a peer, that peer will be punished.
+const PEER_RESPONSE_PUNISHMENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Time between successive ticks of the event loop's internal clock.
 const TICK_PERIOD: Duration = Duration::from_micros(100);
@@ -52,10 +56,18 @@ type PeerHandle = SocketAddr;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PeerSyncState {
     num_blocks_contributed: usize,
-    last_request: Option<SystemTime>,
 
     /// None if peer is synced. Some(bitmask) if peer is syncing.
     coverage: Option<SynchronizationBitMask>,
+
+    /// Timestamp of the last block request sent by this sync loop to them.
+    last_request: Option<SystemTime>,
+
+    /// Timestamp of last punishment.
+    last_punishment: Option<SystemTime>,
+
+    /// Timestamp of the last message seen from them.
+    last_response: Option<SystemTime>,
 }
 
 /// Holds state for the synchronization event loop.
@@ -197,6 +209,12 @@ impl SyncLoop {
                                 self.download_state.coverage().lower_bound,
                                 self.download_state.coverage().upper_bound,
                             );
+
+                            // Track last seen state.
+                            self.peers.lock().await.entry(peer_handle).and_modify(|e| {
+                                e.last_response = Some(SystemTime::now());
+                            });
+
                             // Store block and update download state.
                             if let Err(e) = self.download_state.receive_block(&block).await
                             {
@@ -262,13 +280,14 @@ impl SyncLoop {
                         }
                         MainToSync::SyncCoverage{peer_handle, coverage } => {
                             // Record peer's status.
-
                             {
                                 let mut peers_lock_mut = self.peers.lock().await;
                                 let Some(peer) = peers_lock_mut.get_mut(&peer_handle) else {
                                     tracing::error!("Inconsistent peer dictionary in sync loop: peer {peer_handle} not present.");
                                     continue;
                                 };
+
+                                peer.last_response = Some(SystemTime::now());
                                 peer.coverage = Some(coverage);
                             }
 
@@ -349,20 +368,30 @@ impl SyncLoop {
                     if !finished_downloading {
 
                         // Check all peers for timeouts.
-                        let mut timeouts = vec![];
+                        let mut reminders = vec![];
+                        let mut punishments = vec![];
                         let peers_clone = self.peers.lock().await.clone();
                         for (peer_handle, peer_state) in peers_clone {
                             if peer_state
-                            .last_request
-                            .and_then(|timestamp| now.duration_since(timestamp).ok())
-                            .is_none_or(|duration| duration > PEER_RESPONSE_TIMEOUT) {
-                                timeouts.push(peer_handle);
+                                .last_request
+                                .and_then(|timestamp| now.duration_since(timestamp).ok())
+                                .is_none_or(|duration| duration > PEER_RESPONSE_REMINDER_TIMEOUT) {
+                                reminders.push(peer_handle);
+                            }
+
+                            if peer_state.last_response
+                                .and_then(|timestamp| now.duration_since(timestamp).ok())
+                                .is_none_or(|duration| duration > PEER_RESPONSE_PUNISHMENT_TIMEOUT)
+                                && peer_state.last_punishment.and_then(|timestamp| now.duration_since(timestamp).ok())
+                                .is_none_or(|duration| duration > PEER_RESPONSE_PUNISHMENT_TIMEOUT) {
+                                punishments.push(peer_handle);
                             }
                         }
 
-                        // If timeout, add those peers to queue of block requests.
+                        // If there are timeouts warranting reminders, add those
+                        // peers to queue of block requests.
                         pending_block_requests.sort();
-                        for peer in timeouts {
+                        for peer in reminders {
                             tracing::warn!("Sync loop: peer {peer} timed out; sending new random block request.");
                             if !pending_block_requests.contains(&peer) {
                                 pending_block_requests.push(peer);
@@ -382,6 +411,12 @@ impl SyncLoop {
                         }
 
                         pending_block_requests = vec![];
+
+                        // If there are timeouts warranting punishments, tell
+                        // the main loop to punish the perpetrators.
+                        if let Err(e) = self.main_channel_sender.try_send(SyncToMain::Punish(punishments)) {
+                            tracing::error!("Failed to send punish message to main loop: {e}.");
+                        }
                     }
 
                 }
@@ -792,6 +827,9 @@ mod tests {
                             SyncToMain::Error => {
                                 tracing::error!("Error code from sync loop.");
                                 break;
+                            }
+                            SyncToMain::Punish(peers) => {
+                                tracing::info!("Punishing {} peers for sync timeout.", peers.len());
                             }
                         }
                     }
