@@ -42,7 +42,7 @@ impl From<&ActiveWindow> for RpcActiveWindow {
 
 impl From<RpcActiveWindow> for ActiveWindow {
     fn from(window: RpcActiveWindow) -> Self {
-        ActiveWindow::from_vec_u32(&window.0) // TODO: can be optimized.
+        ActiveWindow::from_vec_u32(window.0)
     }
 }
 
