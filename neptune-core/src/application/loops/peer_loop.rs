@@ -1862,26 +1862,6 @@ impl PeerLoopHandler {
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::RequestBlockBatch(batch_block_request) => {
-                // Only ask one of the peers about the batch of blocks
-                if batch_block_request.peer_addr_target != self.peer_address {
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                let max_response_len = std::cmp::min(
-                    STANDARD_BLOCK_BATCH_SIZE,
-                    self.global_state_lock.cli().sync_mode_threshold,
-                );
-
-                peer.send(PeerMessage::BlockRequestBatch(BlockRequestBatch {
-                    known_blocks: batch_block_request.known_blocks,
-                    max_response_len,
-                    anchor: batch_block_request.anchor_mmr,
-                }))
-                .await?;
-
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
             MainToPeerTask::RequestBlockByHeight {
                 peer_addr_target,
                 height,

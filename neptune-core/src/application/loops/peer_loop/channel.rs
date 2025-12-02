@@ -11,26 +11,10 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::transaction::Transaction;
 
-#[derive(Clone, Debug)]
-pub struct MainToPeerTaskBatchBlockRequest {
-    /// The peer to whom this request should be directed.
-    pub(crate) peer_addr_target: SocketAddr,
-
-    /// Sorted list of most preferred blocks. The first digest is the block
-    /// that we would prefer to build on top off, if it belongs to the
-    /// canonical chain.
-    pub(crate) known_blocks: Vec<Digest>,
-
-    /// The block MMR accumulator relative to which incoming blocks are
-    /// authenticated.
-    pub(crate) anchor_mmr: MmrAccumulator,
-}
-
 #[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
     BlockProposalNotification(BlockProposalNotification),
-    RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
     RequestBlockByHeight {
         peer_addr_target: SocketAddr,
         height: BlockHeight,
@@ -60,7 +44,6 @@ impl MainToPeerTask {
     pub fn get_type(&self) -> String {
         match self {
             MainToPeerTask::Block(_) => "block",
-            MainToPeerTask::RequestBlockBatch(_) => "req block batch",
             MainToPeerTask::RequestBlockByHeight { .. } => "req block by height",
             MainToPeerTask::PeerSynchronizationTimeout(_) => "peer sync timeout",
             MainToPeerTask::MakePeerDiscoveryRequest => "make peer discovery req",
@@ -82,7 +65,6 @@ impl MainToPeerTask {
         match self {
             MainToPeerTask::Block(_) => true,
             MainToPeerTask::BlockProposalNotification(_) => true,
-            MainToPeerTask::RequestBlockBatch(_) => true,
             MainToPeerTask::RequestBlockByHeight { .. } => true,
             MainToPeerTask::PeerSynchronizationTimeout(_) => true,
             MainToPeerTask::MakePeerDiscoveryRequest => false,
