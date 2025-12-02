@@ -12,7 +12,6 @@ use super::wallet_db_tables::WALLET_DB_SCHEMA_VERSION;
 use crate::api::export::BlockHeight;
 use crate::api::export::Timestamp;
 use crate::application::database::storage::storage_schema::traits::*;
-use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
@@ -21,6 +20,7 @@ use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
 use crate::protocol::consensus::block::Block;
+use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
@@ -28,6 +28,19 @@ use crate::util_types::mutator_set::removal_record::absolute_index_set::Absolute
 pub struct RustyWalletDatabase {
     storage: SimpleRustyStorage,
     tables: WalletDbTables,
+}
+
+/// Communicates whether the monitored UTXO inserted was already known to the database, or whether
+/// it was new.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum MonitoredUtxoInsertResult {
+    /// Indicates that the inserted monitored UTXO was new; not previously known to the wallet
+    /// database. The returned index is the list index at which the monitored UTXO was inserted.
+    New(Index),
+
+    /// The monitored UTXO was already tracked by the wallet database. The returned index is the
+    /// list index into the list of monitored UTXOs.
+    Existing(Index),
 }
 
 impl RustyWalletDatabase {
@@ -173,13 +186,19 @@ impl RustyWalletDatabase {
     ///
     /// # Panics
     ///
-    /// - If index for monitored UTXO is out of range.
+    /// - If the [`StrongUtxoKey`] is not known by the wallet.
     pub(crate) async fn update_mutxo_confirmation_block(
         &mut self,
-        mutxo_list_index: Index,
+        strong_utxo_key: &StrongUtxoKey,
         block: &Block,
     ) {
-        let mut existing_mutxo = self.tables.monitored_utxos.get(mutxo_list_index).await;
+        let list_index = self
+            .tables
+            .strong_key_to_mutxo
+            .get(strong_utxo_key)
+            .await
+            .expect("Expected UTXO key must be present in database");
+        let mut existing_mutxo = self.tables.monitored_utxos.get(list_index).await;
         existing_mutxo.confirmed_in_block = (
             block.hash(),
             block.kernel.header.timestamp,
@@ -187,7 +206,7 @@ impl RustyWalletDatabase {
         );
         self.tables
             .monitored_utxos
-            .set(mutxo_list_index, existing_mutxo)
+            .set(list_index, existing_mutxo)
             .await;
     }
 
@@ -225,43 +244,44 @@ impl RustyWalletDatabase {
     }
 
     /// Insert a new [`MonitoredUtxo`] into the wallet's database and return the
-    /// index of the inserted element.
+    /// index of the inserted element, if this monitored UTXO is new. If the
+    /// monitored UTXO is already known to the wallet database, the index of the
+    /// duplicate (already existing entry) is returned. If the entry already
+    /// existed in the database, this call does not write to the database.
     ///
     /// The list of [`MonitoredUtxo`] is only allowed to grow through this
-    /// function, since this function handles the lookup tables that allows for
-    /// fast lookup from an AOCL leaf index and from an absolute index set to a
-    /// monitored UTXO. If the list of [`MonitoredUtxo`] grows in other ways
+    /// function, since this function handles the lookup tables and the
+    /// duplication checks. If the list of [`MonitoredUtxo`] grows in other ways
     /// than through this function, these tables might get out of sync.
-    pub(crate) async fn insert_mutxo(&mut self, monitored_utxo: MonitoredUtxo) -> Index {
-        let index_new_mutxo = self.tables.monitored_utxos.len().await;
-        let aocl_leaf_index = monitored_utxo.aocl_leaf_index;
+    pub(crate) async fn insert_mutxo(
+        &mut self,
+        monitored_utxo: MonitoredUtxo,
+    ) -> MonitoredUtxoInsertResult {
+        // Check for duplicated entries
+        let strong_key = monitored_utxo.strong_utxo_key();
+        if let Some(existing_list_index) = self.tables.strong_key_to_mutxo.get(&strong_key).await {
+            return MonitoredUtxoInsertResult::Existing(existing_list_index);
+        }
+
+        let list_index = self.tables.monitored_utxos.len().await;
+
+        // populate lookup table for addition record/AOCL leaf index pair
+        self.tables
+            .strong_key_to_mutxo
+            .insert(strong_key, list_index)
+            .await;
 
         // Populate lookup table for index set.
         let index_set_digest = Tip5::hash(&monitored_utxo.absolute_indices());
         self.tables
             .index_set_to_mutxo
-            .insert(index_set_digest, index_new_mutxo)
+            .insert(index_set_digest, list_index)
             .await;
 
+        // Add monitored UTXO to list
         self.tables.monitored_utxos.push(monitored_utxo).await;
 
-        // Handle AOCL to mutxo lookup
-        // In the common case (no reorgs), this is the empty vector, so it will
-        // only contain one element after insertion.
-        let mut all_mutxo_indices: Vec<u64> = self
-            .tables
-            .aocl_to_mutxo
-            .get(&aocl_leaf_index)
-            .await
-            .unwrap_or_default();
-        all_mutxo_indices.push(index_new_mutxo);
-
-        self.tables
-            .aocl_to_mutxo
-            .insert(aocl_leaf_index, all_mutxo_indices)
-            .await;
-
-        index_new_mutxo
+        MonitoredUtxoInsertResult::New(list_index)
     }
 
     /// get expected_utxos.
@@ -325,15 +345,6 @@ impl RustyWalletDatabase {
     pub fn schema_version(&self) -> u16 {
         self.tables.schema_version.get()
     }
-
-    pub fn aocl_to_mutxo(&self) -> &DbtMap<u64, Vec<u64>> {
-        &self.tables.aocl_to_mutxo
-    }
-
-    #[cfg(test)]
-    pub fn storage(&self) -> &SimpleRustyStorage {
-        &self.storage
-    }
 }
 
 impl StorageWriter for RustyWalletDatabase {
@@ -366,9 +377,23 @@ impl From<anyhow::Error> for WalletDbConnectError {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::collections::HashSet;
+
+    use num_traits::Zero;
+
+    use crate::application::database::storage::storage_schema::DbtMap;
+
     use super::*;
 
     impl RustyWalletDatabase {
+        pub fn storage(&self) -> &SimpleRustyStorage {
+            &self.storage
+        }
+
+        pub(crate) fn strong_keys(&self) -> &DbtMap<StrongUtxoKey, u64> {
+            &self.tables.strong_key_to_mutxo
+        }
+
         pub(crate) async fn clear_mutxos(&mut self) {
             self.tables.monitored_utxos.clear().await;
         }
@@ -384,20 +409,45 @@ pub(crate) mod tests {
             let num_mutxos = self.tables.monitored_utxos.len().await;
             assert_eq!(num_mutxos, self.tables.index_set_to_mutxo.len().await);
 
-            let all_aocl_keys = self.tables.aocl_to_mutxo.all_keys().await;
-            let mut num_aocl_lookup_values = 0;
-            for aocl_key in all_aocl_keys {
-                let count = self
+            let all_strong_keys = self.tables.strong_key_to_mutxo.all_keys().await;
+            let num_strong_keys = all_strong_keys.len();
+            let unique_strong_keys: HashSet<_> = all_strong_keys.into_iter().collect();
+            assert_eq!(
+                num_strong_keys,
+                unique_strong_keys.len(),
+                "All strong keys must be unique"
+            );
+
+            let mut reported_list_indices = HashSet::new();
+            for strong_key in &unique_strong_keys {
+                let list_index = self
                     .tables
-                    .aocl_to_mutxo
-                    .get(&aocl_key)
+                    .strong_key_to_mutxo
+                    .get(strong_key)
                     .await
-                    .unwrap()
-                    .len() as u64;
-                num_aocl_lookup_values += count;
+                    .expect("Must have reported strong key");
+                reported_list_indices.insert(list_index);
             }
 
-            assert_eq!(num_mutxos, num_aocl_lookup_values);
+            assert!(
+                reported_list_indices
+                    .iter()
+                    .copied()
+                    .min()
+                    .unwrap_or_default()
+                    .is_zero(),
+                "Min value of list indices must be zero, or list must be empty"
+            );
+            assert_eq!(
+                num_mutxos,
+                reported_list_indices
+                    .iter()
+                    .copied()
+                    .max()
+                    .map(|x| x + 1)
+                    .unwrap_or_default(),
+                "Max value of list indices must be len - 1, or list must be empty"
+            );
 
             for i in 0..num_mutxos {
                 let mutxo = self.tables.monitored_utxos.get(i).await;
@@ -407,18 +457,18 @@ pub(crate) mod tests {
                     .index_set_to_mutxo
                     .get(&Tip5::hash(&index_set))
                     .await
-                    .expect("Must have lookup entry");
+                    .expect("Must have lookup entry for index set");
                 assert_eq!(i, list_index_from_index_set);
 
-                let list_indices_from_aocl = self
+                let list_index_from_strong_key = self
                     .tables
-                    .aocl_to_mutxo
-                    .get(&mutxo.aocl_leaf_index)
+                    .strong_key_to_mutxo
+                    .get(&mutxo.strong_utxo_key())
                     .await
                     .unwrap();
-                assert!(
-                    list_indices_from_aocl.contains(&i),
-                    "One of the AOCL leaf index lookup values must match probed monitored UTXO"
+                assert_eq!(
+                    list_index_from_strong_key, i,
+                    "Strong key lookup must match probed monitored UTXO"
                 );
             }
         }
