@@ -18,6 +18,7 @@ pub(crate) enum SyncToMain {
     TipSuccessor(Box<Block>),
     RequestBlocks(Vec<BlockRequest>),
     Status(SyncProgress),
+    Punish(Vec<PeerHandle>),
     Error,
 }
 
