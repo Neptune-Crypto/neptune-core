@@ -32,7 +32,7 @@ pub struct HeightRequest {}
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeightResponse {
-    pub height: BFieldElement,
+    pub height: RpcBlockHeight,
 }
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
