@@ -319,6 +319,36 @@ impl SyncLoop {
                                     }
                                 }).await;
                         }
+                        MainToSync::TryFetchBlock{ peer_handle, height } => {
+                            tracing::debug!("sync loop received try-fetch-block message from peer {peer_handle} for block {height}");
+
+                            // Test if the requested block height lives in the
+                            // synchronization bit mask.
+                            let have_block = self.download_state.coverage().contains(height.value());
+
+                            // If it is absent, then the peer probably does not
+                            // know our current synchronization bit mask. So
+                            // send it to them.
+                            if !have_block {
+                                if let Err(e) = self.main_channel_sender.try_send(
+                                    SyncToMain::Coverage {
+                                        coverage: self.download_state.coverage(),
+                                        peer_handle
+                                    }) {
+                                    tracing::error!("Failed to send coverage to main loop: {e}.");
+                                }
+                            }
+                            else {
+                                // Go fetch the block and send it to the peer.
+                                // But do this asynchronously so we can return
+                                // control to the loop ASAP.
+                                let moved_download_state = self.download_state.clone();
+                                let moved_main_channel_sender = self.main_channel_sender.clone();
+                                let _ = tokio::task::spawn(
+                                    Self::fetch_and_send_block(moved_main_channel_sender, moved_download_state, peer_handle, height)
+                                ).await;
+                            }
+                        }
                     }
                 }
 
@@ -459,6 +489,31 @@ impl SyncLoop {
         self.download_state.clean_up().await;
     }
 
+    async fn fetch_and_send_block(
+        main_channel_sender: Sender<SyncToMain>,
+        download_state: RapidBlockDownload,
+        peer_handle: PeerHandle,
+        height: BlockHeight,
+    ) {
+        let block = match download_state.get_received_block(height).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!("Failed to read block from temp directory: {e}.");
+                return;
+            }
+        };
+
+        if let Err(e) = main_channel_sender
+            .send(SyncToMain::SyncBlock {
+                block: Box::new(block),
+                peer_handle,
+            })
+            .await
+        {
+            tracing::error!("Could not send sync block to main loop: {e}.");
+        }
+    }
+
     /// Sample one appropriate missing block height for each peer.
     fn sample_heights(
         peers: HashMap<PeerHandle, PeerSyncState>,
@@ -482,11 +537,29 @@ impl SyncLoop {
             }
 
             // Sample and collect block request, if possible.
-            if distribution.is_complete() {
-                tracing::debug!("Peer has no blocks we want.");
-                continue;
-            }
-            let height = distribution.sample(rng().random());
+            let now = SystemTime::now();
+            let distribution_is_complete = distribution.is_complete();
+            let poking_time = peer
+                .last_response
+                .and_then(|timestamp| now.duration_since(timestamp).ok())
+                .is_none_or(|silence_time| silence_time > Duration::from_secs(5));
+            let height = match (distribution_is_complete, poking_time) {
+                (false, _) => {
+                    // Peer has blocks we do not have.
+                    distribution.sample(rng().random())
+                }
+                (true, true) => {
+                    // Peer does not have blocks we do not have, but then it is
+                    // a long time since we heard from them so let us poke them
+                    // again.
+                    tracing::debug!("Peer had no blocks we want, but asking anyway.");
+                    own_coverage.sample(rng().random())
+                }
+                (true, false) => {
+                    tracing::debug!("Peer has no blocks we want.");
+                    continue;
+                }
+            };
 
             block_requests.push(BlockRequest {
                 peer_handle,
@@ -709,6 +782,11 @@ mod tests {
     impl MockMainLoop {
         async fn new(current_tip: Block, sync_target_height: BlockHeight) -> Self {
             let current_tip_height = current_tip.header().height;
+            tracing::debug!(
+                "Creating new sync loop handle with current tip height {} and sync target height {}",
+                current_tip.header().height,
+                sync_target_height
+            );
             let sync_loop_handle =
                 SyncLoopHandle::new(current_tip, sync_target_height, BlockValidator::Test, false)
                     .await;
@@ -830,6 +908,18 @@ mod tests {
                             }
                             SyncToMain::Punish(peers) => {
                                 tracing::info!("Punishing {} peers for sync timeout.", peers.len());
+                            }
+                            SyncToMain::Coverage{
+                                coverage: _,
+                                peer_handle
+                            } => {
+                                tracing::info!("Sending coverage to peer {peer_handle}");
+                            }
+                            SyncToMain::SyncBlock{
+                                block,
+                                peer_handle,
+                            } => {
+                                tracing::info!("Sending block {} over to {peer_handle}", block.header().height);
                             }
                         }
                     }

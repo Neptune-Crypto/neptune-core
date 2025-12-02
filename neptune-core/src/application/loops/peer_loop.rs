@@ -1011,54 +1011,77 @@ impl PeerLoopHandler {
                 }
             }
             PeerMessage::BlockRequestByHeight(block_height) => {
-                let block_response = {
-                    log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
 
-                    debug!("Got BlockRequestByHeight of height {}", block_height);
+                debug!("Got BlockRequestByHeight of height {}", block_height);
 
-                    let canonical_block_digest = self
+                // If a block of that height lives in archival state, send that.
+                let canonical_block_digest = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .archival_block_mmr
+                    .ammr()
+                    .try_get_leaf(block_height.into())
+                    .await;
+                if let Some(block_digest) = canonical_block_digest {
+                    let block = self
                         .global_state_lock
                         .lock_guard()
                         .await
                         .chain
                         .archival_state()
-                        .archival_block_mmr
-                        .ammr()
-                        .try_get_leaf(block_height.into())
-                        .await;
-
-                    let Some(canonical_block_digest) = canonical_block_digest else {
-                        let own_tip_height = self
-                            .global_state_lock
-                            .lock_guard()
-                            .await
-                            .chain
-                            .light_state()
-                            .header()
-                            .height;
-                        warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
-                        self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
-                            .await?;
-
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    };
-
-                    let canonical_chain_block: Block = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .archival_state()
-                        .get_block(canonical_block_digest)
+                        .get_block(block_digest)
                         .await?
-                        .unwrap();
+                        .expect("block should live in archival state because fetching the block digest from height worked");
 
-                    PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()))
-                };
+                    debug!("Sending block");
+                    let transfer_block = TransferBlock::try_from(block)
+                        .expect("block fetched from archival state should be valid");
+                    peer.send(PeerMessage::Block(Box::new(transfer_block)))
+                        .await?;
+                    debug!("Sent block");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
-                debug!("Sending block");
-                peer.send(block_response).await?;
-                debug!("Sent block");
+                // If we are not syncing, and this block height is unknown, then
+                // the peer is confused at best, malicious at worst.
+                let sync_mode_active = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .sync_anchor
+                    .is_some();
+                if !sync_mode_active {
+                    let own_tip_height = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .header()
+                        .height;
+                    warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
+                    self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
+                        .await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // If we are syncing, the requested block might be managed by
+                // the sync loop. So ask it. The various handlers downstream
+                // this message will eventually send the peer a response.
+                let _ = self
+                    .to_main_tx
+                    .send(PeerTaskToMain::PeerWantsSyncBlock(
+                        self.peer_address,
+                        block_height,
+                    ))
+                    .await;
+
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Block(t_block) => {
@@ -1812,6 +1835,34 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            PeerMessage::SyncCoverage(synchronization_bit_mask) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::SyncCoverage");
+
+                // Test if sync mode is active.
+                if self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .sync_anchor
+                    .is_some()
+                {
+                    // If so, pass bit mask on to main loop for relaying to sync
+                    // loop.
+                    self.to_main_tx
+                        .send(PeerTaskToMain::SyncCoverage(
+                            synchronization_bit_mask,
+                            self.peer_address,
+                        ))
+                        .await?;
+                } else {
+                    warn!(
+                        "Got synchronization bit mask (coverage) from peer, but not in sync mode."
+                    );
+                }
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
         }
     }
 
@@ -1940,6 +1991,24 @@ impl PeerLoopHandler {
                 debug!("Sending PeerMessage::BlockNotificationRequest");
                 peer.send(PeerMessage::BlockNotificationRequest).await?;
                 debug!("Sent PeerMessage::BlockNotificationRequest");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            MainToPeerTask::SyncCoverage {
+                coverage,
+                peer_handle,
+            } => {
+                if self.peer_address == peer_handle {
+                    peer.send(PeerMessage::SyncCoverage(coverage)).await?;
+                }
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            MainToPeerTask::SyncBlock { block, peer_handle } => {
+                if self.peer_address == peer_handle {
+                    let transfer_block = TransferBlock::try_from(*block)
+                        .expect("block fetched from sync loop should be castable into transfer block because that's where it came from");
+                    peer.send(PeerMessage::Block(Box::new(transfer_block)))
+                        .await?;
+                }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
         }

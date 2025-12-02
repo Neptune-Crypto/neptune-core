@@ -6,6 +6,8 @@ use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// A [`SynchronizationBitMask`] is a representation of the synchronization
 /// state of a set of indexed elements (such as blocks). It captures the state
@@ -34,7 +36,7 @@ use rand::SeedableRng;
 // to the highest possible value. So in particular, the bit at index
 // `lower_bound` must always be 0. Whenever this bit is set to 1, the
 // `lower_bound` increases.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SynchronizationBitMask {
     // inclusive
     pub(crate) lower_bound: u64,

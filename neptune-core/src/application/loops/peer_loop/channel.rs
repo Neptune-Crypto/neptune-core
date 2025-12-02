@@ -1,4 +1,5 @@
 use crate::application::loops::channel::BlockProposalNotification;
+use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::peer::transaction_notification::TransactionNotification;
 
@@ -38,6 +39,19 @@ pub(crate) enum MainToPeerTask {
 
     /// Disconnect from all peers
     DisconnectAll(),
+
+    /// Informs the peer which blocks we have while syncing.
+    SyncCoverage {
+        coverage: SynchronizationBitMask,
+        peer_handle: SocketAddr,
+    },
+
+    /// Sends a syncing peer a block we have downloaded already but not
+    /// processed.
+    SyncBlock {
+        block: Box<Block>,
+        peer_handle: SocketAddr,
+    },
 }
 
 impl MainToPeerTask {
@@ -55,6 +69,8 @@ impl MainToPeerTask {
             MainToPeerTask::DisconnectAll() => "disconnect all",
             MainToPeerTask::BlockProposalNotification(_) => "block proposal notification",
             MainToPeerTask::RequestBlockNotification => "request for block notification",
+            MainToPeerTask::SyncCoverage { .. } => "sync coverage",
+            MainToPeerTask::SyncBlock { .. } => "sync block",
         }
         .to_string()
     }
@@ -73,6 +89,8 @@ impl MainToPeerTask {
             MainToPeerTask::Disconnect(_) => false,
             MainToPeerTask::DisconnectAll() => false,
             MainToPeerTask::RequestBlockNotification => false,
+            MainToPeerTask::SyncCoverage { .. } => true,
+            MainToPeerTask::SyncBlock { .. } => true,
         }
     }
 }
@@ -101,6 +119,8 @@ pub(crate) enum PeerTaskToMain {
     NewSyncBlock(Box<Block>, SocketAddr),
     NewPeer(SocketAddr),
     DroppedPeer(SocketAddr),
+    SyncCoverage(SynchronizationBitMask, SocketAddr),
+    PeerWantsSyncBlock(SocketAddr, BlockHeight),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +142,8 @@ impl PeerTaskToMain {
             PeerTaskToMain::NewSyncBlock(_block, _socket_addr) => "new sync block",
             PeerTaskToMain::NewPeer(_) => "new peer",
             PeerTaskToMain::DroppedPeer(_) => "dropped peer",
+            PeerTaskToMain::SyncCoverage(_, _) => "sync coverage",
+            PeerTaskToMain::PeerWantsSyncBlock(_, _) => "peer wants sync block",
         }
         .to_string()
     }
