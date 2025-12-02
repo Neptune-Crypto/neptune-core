@@ -5,6 +5,7 @@ use tracing::debug;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::storage::storage_vec::traits::*;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::wallet_db_tables::WalletDbTables;
 
 /// migrates wallet db with schema-version v1 to v2
@@ -30,7 +31,8 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
     storage.reset_schema();
 
     // add a DbtVec<MonitoredUtxoV1> to the schema at the correct position
-    // so the correct key-prefix is used
+    // so the correct key-prefix is used. This allows for the reading of
+    // v1-monitored UTXOs.
     storage.schema.table_count = WalletDbTables::monitored_utxos_table_count();
     let mutxos_v1 = storage
         .schema
@@ -48,13 +50,12 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
     // load v2 schema tables
     let mut tables = WalletDbTables::load_schema_in_order(storage).await;
     let mutxos_v2 = &mut tables.monitored_utxos;
-    let aocl_to_mutxo = &mut tables.aocl_to_mutxo;
+    let strong_key_to_mutxo = &mut tables.strong_key_to_mutxo;
     let index_set_to_mutxo = &mut tables.index_set_to_mutxo;
 
     let stream = mutxos_v1.stream().await;
     pin_mut!(stream); // needed for iteration
 
-    let mut reorganized_duplicates: u64 = 0;
     while let Some((list_index, mutxo_v1)) = stream.next().await {
         let msmp = mutxo_v1
             .blockhash_to_membership_proof
@@ -103,39 +104,23 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
         debug!("Inserting monitored UTXO number {list_index}");
         mutxos_v2.set(list_index, mutxo_v2.clone()).await;
 
-        let mut mutxo_indices: Vec<u64> = aocl_to_mutxo
-            .get(&aocl_leaf_index)
-            .await
-            .unwrap_or_default();
-        let num_reorgs: u64 = mutxo_indices
-            .len()
-            .try_into()
-            .expect("Can always convert usize to u64");
-        reorganized_duplicates += u64::from(num_reorgs != 0);
+        // Populate lookup table for strong key
+        let strong_key = StrongUtxoKey::new(mutxo_v2.addition_record(), aocl_leaf_index);
+        let existing = strong_key_to_mutxo.insert(strong_key, list_index).await;
 
-        if num_reorgs != 0 {
-            debug!("num_reorgs: {num_reorgs}; aocl_leaf_index: {aocl_leaf_index}");
-            let item = Tip5::hash(&utxo);
-            debug!("This item: {item:x}");
-
-            for mutxo_index in &mutxo_indices {
-                let duplicate_mutxo = mutxos_v2.get(*mutxo_index).await;
-                let item_of_duplicate = Tip5::hash(&duplicate_mutxo.utxo);
-                debug!("Reorganized duplicate: {item_of_duplicate:x}");
-            }
-        }
-
-        mutxo_indices.push(list_index);
-        aocl_to_mutxo.insert(aocl_leaf_index, mutxo_indices).await;
+        // I don't think there is a way to recover from this problem in this migration logic
+        // because it requires deleting entries in the list of monitored UTXOs which means that
+        // their indices change. It's probably best to regenerate wallet database from the
+        // incoming randomnesss file.
+        assert!(existing.is_none(), "Wallet database contains duplicated entries. Try restoring wallet database from incoming_randomness file");
     }
 
     // ensure entries in tables are consistent
     let num_mutxos_v2 = mutxos_v2.len().await;
-    let num_aocl_entries = aocl_to_mutxo.len().await;
+    let num_strong_key_entries = strong_key_to_mutxo.len().await;
     assert_eq!(
-        num_mutxos_v2,
-        num_aocl_entries + reorganized_duplicates,
-        "Mismatch:\nnum_mutxos_v2: {num_mutxos_v2}\nnum_aocl_entries: {num_aocl_entries}\nreorganized_duplicates: {reorganized_duplicates}"
+        num_mutxos_v2, num_strong_key_entries,
+        "Mismatch:\nnum_mutxos_v2: {num_mutxos_v2}\nnum_aocl_entries: {num_strong_key_entries}"
     );
 
     let num_index_set_entries = index_set_to_mutxo.len().await;
@@ -204,6 +189,7 @@ mod tests {
     use crate::state::BlockHeight;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
+    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 
@@ -309,16 +295,25 @@ mod tests {
         println!("dump of v2 (upgraded) database");
         wallet_db_v2.storage().db().dump_database().await;
 
-        let aocl_to_mutxo = wallet_db_v2.aocl_to_mutxo();
-        assert_eq!(aocl_to_mutxo.len().await, 3);
+        let strong_keys = wallet_db_v2.strong_keys();
+        assert_eq!(strong_keys.len().await, 7);
         assert_eq!(wallet_db_v2.monitored_utxos().len().await, 7);
 
-        // verify that AOCL leaf index points to right entries into MUTXO list
-        assert_eq!(Some(vec![0, 1]), aocl_to_mutxo.get(&14).await);
-        assert!(aocl_to_mutxo.get(&15).await.is_none());
-        assert_eq!(Some(vec![2, 3, 4, 5]), aocl_to_mutxo.get(&22).await);
-        assert!(aocl_to_mutxo.get(&23).await.is_none());
-        assert_eq!(Some(vec![6]), aocl_to_mutxo.get(&49).await);
+        // verify that strong key lookup points to right entries into MUTXO list
+        for (i, v1_mutxo) in v1_mutxos.iter().enumerate() {
+            let (_, msmp) = v1_mutxo
+                .blockhash_to_membership_proof
+                .iter()
+                .next()
+                .unwrap();
+            let addition_record = commit(
+                Tip5::hash(&v1_mutxo.utxo),
+                msmp.sender_randomness,
+                msmp.receiver_preimage.hash(),
+            );
+            let strong_key = StrongUtxoKey::new(addition_record, msmp.aocl_leaf_index);
+            assert_eq!(i as u64, strong_keys.get(&strong_key).await.unwrap());
+        }
 
         let utxos_from_v1 = v1_mutxos.into_iter().map(|x| x.utxo).collect_vec();
         let all_v2_mutxos = wallet_db_v2.monitored_utxos().get_all().await;

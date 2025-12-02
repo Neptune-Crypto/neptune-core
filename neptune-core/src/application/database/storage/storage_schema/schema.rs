@@ -54,7 +54,7 @@ use crate::application::locks::tokio::LockCallbackFn;
 /// let tables = (
 ///     storage.schema.new_vec::<u16>("ages").await,
 ///     storage.schema.new_vec::<String>("names").await,
-///     storage.schema.new_singleton::<bool>("proceed").await
+///     storage.schema.new_singleton::<bool>("proceed").await,
 ///     storage.schema.new_map::<u64, String>("messages").await
 /// );
 ///
