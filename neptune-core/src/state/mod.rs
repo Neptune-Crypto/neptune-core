@@ -1307,7 +1307,32 @@ impl GlobalState {
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos_mut();
         let num_mutxos = monitored_utxos.len().await;
         trace!("monitored_utxos.len() = {num_mutxos}");
-        for i in 0..num_mutxos {
+
+        // Determine the range of UTXOs to process
+        // OPTIMIZATION: Only process newly added UTXOs when new_utxos is provided,
+        // avoiding O(n) iteration over all UTXOs during sync
+        let (start_index, end_index) = if let Some(ref new_utxos_list) = new_utxos {
+            // Only process newly added UTXOs (at the end of the list)
+            let new_count = new_utxos_list.len() as u64;
+
+            let start = num_mutxos.saturating_sub(new_count);
+
+            trace!(
+                "Processing {} new monitored UTXOs (indices {}-{})",
+                new_count,
+                start,
+                num_mutxos - 1
+            );
+
+            (start, num_mutxos)
+        } else {
+            // Process all UTXOs (e.g., during periodic resync)
+            trace!("Processing all {} monitored UTXOs", num_mutxos);
+
+            (0, num_mutxos)
+        };
+
+        for i in start_index..end_index {
             let mut monitored_utxo = monitored_utxos.get(i).await;
 
             if monitored_utxo.is_synced_to(tip_hash) {
@@ -1881,7 +1906,9 @@ impl GlobalState {
 
         // Get new membership proofs from mutator set accumulator, in case
         // wallet didn't set these from block data.
-        if !maintain_mps_in_wallet {
+        // OPTIMIZATION: Only restore membership proofs if we actually received UTXOs in this block.
+        // During sync, existing UTXOs don't need their proofs updated until sync completes.
+        if !maintain_mps_in_wallet && !received_utxos.is_empty() {
             self.restore_monitored_utxos_from_archival_mutator_set(Some(received_utxos))
                 .await;
         }
@@ -1918,6 +1945,22 @@ impl GlobalState {
         if self.chain.is_archival_node() {
             self.restore_monitored_utxos_from_archival_mutator_set(None)
                 .await;
+
+            // CRITICAL FIX: Clear DbtVec caches after bulk restoration
+            // Without this, the caches grow unbounded during restoration of 1000s of UTXOs
+            // causing OOM when wallet has many transactions
+
+            let ams = self
+                .chain
+                .archival_state_mut()
+                .archival_mutator_set
+                .ams_mut();
+
+            ams.aocl.delete_cache().await;
+
+            ams.swbf_inactive.delete_cache().await;
+
+            ams.chunks.delete_cache().await;
             return Ok(());
         }
 

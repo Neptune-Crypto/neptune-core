@@ -11,6 +11,7 @@ use itertools::Itertools;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use num_traits::Zero;
+use rayon::prelude::*;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -742,23 +743,40 @@ impl WalletState {
             .map(|rr| rr.absolute_indices)
             .collect();
 
+        // Early return if no inputs in block - nothing could be spent
+        if confirmed_absolute_index_sets.is_empty() {
+            return HashMap::default();
+        }
+
         let monitored_utxos = self.wallet_db.monitored_utxos();
-        let mut spent_own_utxos = HashMap::default();
 
         let stream = monitored_utxos.stream().await;
+
         pin_mut!(stream); // needed for iteration
 
+        // Collect all monitored UTXOs with valid membership proofs
+        let mut utxos_with_proofs: Vec<(u64, Utxo, MsMembershipProof)> = Vec::new();
         while let Some((i, monitored_utxo)) = stream.next().await {
-            let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
-                Some(msmp) => msmp.1.compute_indices(Tip5::hash(&monitored_utxo.utxo)),
-                None => continue,
-            };
-
-            if confirmed_absolute_index_sets.contains(&abs_i) {
-                spent_own_utxos.insert(abs_i, (monitored_utxo.utxo, i));
+            if let Some(msmp) = monitored_utxo.get_latest_membership_proof_entry() {
+                utxos_with_proofs.push((i, monitored_utxo.utxo, msmp.1));
             }
         }
-        spent_own_utxos
+
+        // Parallelize the expensive compute_indices operations
+        let spent_results: Vec<_> = utxos_with_proofs
+            .par_iter()
+            .filter_map(|(i, utxo, msmp)| {
+                let abs_i = msmp.compute_indices(Tip5::hash(utxo));
+
+                if confirmed_absolute_index_sets.contains(&abs_i) {
+                    Some((abs_i, (utxo.clone(), *i)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        spent_results.into_iter().collect()
     }
 
     /// Scan the given transaction for announced UTXOs as recognized by owned
@@ -1716,6 +1734,11 @@ impl WalletState {
             monitored_utxos: &mut DbtVec<MonitoredUtxo>,
             incoming: &HashMap<AdditionRecord, IncomingUtxo>,
         ) -> HashMap<StrongUtxoKey, u64> {
+            // Early return if no incoming UTXOs - no duplicates possible
+            if incoming.is_empty() {
+                return HashMap::default();
+            }
+
             let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();
             let stream = monitored_utxos.stream().await;
             pin_mut!(stream); // needed for iteration
