@@ -1016,6 +1016,7 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
 
             35 => NegativePeerSanction::OversizedAnnouncement,
             36 => NegativePeerSanction::OversizedBlock,
+            37 => NegativePeerSanction::RequestForUnknownBlock,
 
             _ => unreachable!(),
         }

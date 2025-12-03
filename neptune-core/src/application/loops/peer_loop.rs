@@ -442,8 +442,8 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
-        // Check block size to prevent RAM exhaustion attacks.
-        // We estimate size using bincode serialization which matches network format.
+        // Check block size to prevent RAM exhaustion attacks. Estimate size
+        // using bincode serialization which matches network format.
         let block_size = bincode::DefaultOptions::new()
             .serialized_size(received_block.as_ref())
             .unwrap_or(usize::MAX as u64) as usize;
@@ -456,7 +456,7 @@ impl PeerLoopHandler {
             );
             self.punish(NegativePeerSanction::OversizedBlock).await?;
             peer_state.fork_reconciliation_blocks.clear();
-            return Ok(());
+            return Ok(None);
         }
 
         // Does the received block match the fork reconciliation list?
