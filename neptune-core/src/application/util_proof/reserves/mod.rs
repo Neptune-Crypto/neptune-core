@@ -1,6 +1,3 @@
-/// ~~this will need a rehaul when other typescript will be in the wild \
-/// currently it uses presupposition that only Time-lock and Native currency are around~~
-///
 /// Outputting RR not only allows to check that the UTXO wasn't spent immediately after proving, but also allows to check that it isn't used in unrelated proofs (a problem which
 /// occurs on its own and basically leads to the same solution).
 ///
