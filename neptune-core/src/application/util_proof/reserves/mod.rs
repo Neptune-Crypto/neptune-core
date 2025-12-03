@@ -1,12 +1,12 @@
 /// ~~this will need a rehaul when other typescript will be in the wild \
 /// currently it uses presupposition that only Time-lock and Native currency are around~~
-/// 
+///
 /// Outputting RR not only allows to check that the UTXO wasn't spent immediately after proving, but also allows to check that it isn't used in unrelated proofs (a problem which
 /// occurs on its own and basically leads to the same solution).
-/// 
+///
 /// Proving per an UTXO makes the job easier for the prover because 1) parrallelization and 2) the smaller proofs. This increase a verifier work which shouldn't be a problem due
 /// to parallelization.
-/// 
+///
 /// # running
 /// Correct me if I'm wrong: for proving a new Neptune CLI command should be added.
 /// # checks out of Triton
@@ -14,8 +14,8 @@
 /// - each ~~salted~~ digest of RR should bump the amount only once
 /// - the RR should not be already spent
 /// - the address parts
-/// - ... 
-/// # inside of Triton 
+/// - ...
+/// # inside of Triton
 /// - ✔️ hash the UTXO to find it's in the AOCL
 /// - 🗙 check the preloaded AOCL is the same one in the membership proof (turned out this is covered by the membership proof check)
 /// - ✔️ trace `MsMembershipProof` is in `TransactionDetails::mutator_set_accumulator` (*output*!)
@@ -25,20 +25,30 @@
 /// - ✔️ *output* the amount
 /// - 🗙 check that RR isn't in the Bloom filter
 /// - 🗙 hash the RR with the Bloom filter state and *output*
-
 use tasm_lib::{
-    data_type::StructType, field as rustfield, io::{InputSource, read_input::ReadInput}, memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS, prelude::{DataType, Digest, Library, TasmObject, TasmStruct}, triton_vm::{isa::triton_asm, prelude::BFieldElement}, twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator
+    data_type::StructType,
+    field as rustfield,
+    io::{read_input::ReadInput, InputSource},
+    memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+    prelude::{DataType, Digest, Library, TasmObject, TasmStruct},
+    triton_vm::{isa::triton_asm, prelude::BFieldElement},
+    twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator,
 };
 
-use crate::{api::export::{NativeCurrencyAmount, Timestamp, Utxo}, protocol::consensus::transaction::utxo::Coin, state::wallet::unlocked_utxo::UnlockedUtxo, util_types::mutator_set::ms_membership_proof::MsMembershipProof};
+use crate::{
+    api::export::{NativeCurrencyAmount, Timestamp, Utxo},
+    protocol::consensus::transaction::utxo::Coin,
+    state::wallet::unlocked_utxo::UnlockedUtxo,
+    util_types::mutator_set::ms_membership_proof::MsMembershipProof,
+};
 
 #[derive(TasmObject, tasm_lib::triton_vm::prelude::BFieldCodec, Debug)]
 pub(crate) struct WitnessMemory {
     // from `UnlockedUtxo`
-    /* the preimage from the witness is probably unnecessary as we can just check that postimage is the same as in the public input and TODO ensure this is 
-    the same UTXO which produces the RR output */
-    
-    /// AOCL for the block (TODO hash)
+    /* the preimage from the witness is probably unnecessary as we can just check that postimage is the same as in
+    the public input and TODO ensure this is the same UTXO which produces the RR output */
+    //
+    /// AOCL for the block
     aocl: MmrAccumulator,
     ///
     membership_proof: MsMembershipProof,
@@ -48,31 +58,41 @@ pub(crate) struct WitnessMemory {
     lock_preimage: Digest,
 }
 #[derive(Debug)]
-pub struct PublicData{
-    /// `receiver_digest`; 
+pub struct PublicData {
+    /// `receiver_digest`;
     /// `release_date` ([add `MINING_REWARD_TIME_LOCK_PERIOD`](https://github.com/Neptune-Crypto/neptune-core/blob/5c1c6ef2ca1e282a05c7dc5300e742c92758fbfb/neptune-core/src/protocol/consensus/type_scripts/native_currency.rs#L365))
     input: (Digest, Timestamp),
-    /// the record to check if the reserve is still unspent; 
-    /// AOCL digest; 
-    /// `lock_postimage` of the address; 
+    /// the record to check if the reserve is still unspent;
+    /// AOCL digest;
+    /// `lock_postimage` of the address;
     /// the 'reserve'
     /// the timelocked 'reserve'
     output: (
-        crate::util_types::mutator_set::removal_record::RemovalRecord, 
-        Digest, 
-        Digest, 
+        crate::util_types::mutator_set::removal_record::RemovalRecord,
+        Digest,
+        Digest,
         NativeCurrencyAmount,
-        NativeCurrencyAmount
-    )
+        NativeCurrencyAmount,
+    ),
 }
 impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for PublicData {
-    fn library_and_code(&self) -> (Library, Vec<tasm_lib::triton_vm::prelude::LabelledInstruction>) {
+    fn library_and_code(
+        &self,
+    ) -> (
+        Library,
+        Vec<tasm_lib::triton_vm::prelude::LabelledInstruction>,
+    ) {
         let u64_stack_size: u32 = DataType::U64.stack_size().try_into().unwrap();
-        
+
         let mut library = Library::new();
-        let lib_hash_varlen = library.import(Box::new(tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen));
-        let lib_ms_commit = library.import(Box::new(tasm_lib::neptune::mutator_set::commit::Commit));
-        let lib_mmr_verify = library.import(Box::new(tasm_lib::mmr::verify_from_memory::MmrVerifyFromMemory));
+        let lib_hash_varlen = library.import(Box::new(
+            tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen,
+        ));
+        let lib_ms_commit =
+            library.import(Box::new(tasm_lib::neptune::mutator_set::commit::Commit));
+        let lib_mmr_verify = library.import(Box::new(
+            tasm_lib::mmr::verify_from_memory::MmrVerifyFromMemory,
+        ));
         let lib_compute_absolute_indices = library.import(Box::new(crate::protocol::consensus::transaction::validity::tasm::compute_absolute_indices::ComputeAbsoluteIndices));
         let lib_hash_absolute_indices = library.import(Box::new(tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize {
             size: <crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet as tasm_lib::triton_vm::prelude::BFieldCodec>::static_length().expect("absolute indices have a static size"),
@@ -83,7 +103,7 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             Box::new(crate::protocol::consensus::type_scripts::amount::add_all_amounts_and_check_time_lock::AddAllAmountsAndCheckTimeLock {
                 digest_source: crate::protocol::consensus::type_scripts::amount::total_amount_main_loop::DigestSource::
                 Hardcode(crate::protocol::consensus::type_scripts::native_currency::NativeCurrency.hash()),
-                release_date, 
+                release_date,
         }));
 
         // let aocl_datatype = DataType::StructRef(
@@ -104,7 +124,7 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
         //             ("type_script_hash".into(), DataType::Digest),
         //             ("state".into(), DataType::List(DataType::Bfe.into()))
         //         )}).into()))
-        //     ] })), 
+        //     ] })),
         //     ("membership_proof".into(), DataType::StructRef(StructType { name: "MsMembershipProof".into(), fields: vec![
         //         ("sender_randomness".into(), DataType::Digest),
         //         ("receiver_preimage".into(), DataType::Digest),
@@ -112,7 +132,7 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
         //         ("aocl_leaf_index".into(), DataType::U64),
         //         ("target_chunks".into(), DataType::StructRef(StructType {name: "ChunkDictionary".into(), fields: vec!(
         //             ("dictionary".into(), DataType::List(DataType::Tuple(vec![DataType::U64, DataType::Tuple(vec!(
-        //                 mmrmembershipproof_datatype, 
+        //                 mmrmembershipproof_datatype,
         //                 DataType::StructRef(StructType {name: "Chunk".into(), fields: vec!(
         //                     ("relative_indices".into(), DataType::U32)
         //                 )})
@@ -140,8 +160,8 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
         let audit_preloaded_data = library.import(Box::new(
             tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity::<
                 // MemoryPreload
-                crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof
-            >::default()
+                crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof,
+            >::default(),
         )); // TODO
         let payload = triton_asm! {
             push {tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
@@ -172,7 +192,7 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             // *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
         };
 
-        let main = triton_asm!{
+        let main = triton_asm! {
             /* '2.' adapted from <removal_records_integrity.rs>
             ============== */
             read_mem 1
@@ -220,12 +240,12 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             swap 3
             // *aocl *aocl_peaks [num_leafs] *auth_path [aocl_leaf_index] [canonical_commitment]
             swap 1
-            // *aocl *aocl_peaks [num_leafs] *auth_path [canonical_commitment] [aocl_leaf_index] 
+            // *aocl *aocl_peaks [num_leafs] *auth_path [canonical_commitment] [aocl_leaf_index]
             swap 2
             // *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment] *auth_path
 
             call {lib_mmr_verify}
-            assert 
+            assert
             // *aocl
 
             /* pasted '8.' from <removal_records_integrity.rs>
