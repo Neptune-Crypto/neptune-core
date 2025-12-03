@@ -1006,6 +1006,9 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
 
             33 => NegativePeerSanction::ReceivedSyncChallenge,
             34 => NegativePeerSanction::UnrelayableTransaction,
+
+            35 => NegativePeerSanction::RequestForUnknownBlock,
+
             _ => unreachable!(),
         }
     }
