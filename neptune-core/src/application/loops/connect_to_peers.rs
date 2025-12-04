@@ -197,7 +197,8 @@ async fn check_if_connection_is_allowed(
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
-    if standing.is_some_and(|s| s.is_bad()) {
+    // (But ignore bad standing if the peer is a CLI argument.)
+    if standing.is_some_and(|s| s.is_bad()) && !cli_arguments.peers.contains(peer_address) {
         let ip = peer_address.ip();
         debug!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
