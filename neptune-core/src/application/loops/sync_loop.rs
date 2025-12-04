@@ -147,6 +147,8 @@ impl SyncLoop {
                 Some(successor_task_result) = successors_receiver.recv() => {
                     match successor_task_result {
                         SuccessorsToSync::Finished{ new_tip } => {
+                            tracing::debug!("Sync loop got return value from successors task: finished! New tip height: {}", new_tip.header().height);
+
                             self.tip = new_tip;
 
                             // The successors subtask claims it is finished, but
@@ -162,6 +164,8 @@ impl SyncLoop {
                             }
                         }
                         SuccessorsToSync::Continue{ new_tip } => {
+                            tracing::debug!("Sync loop got return value from successors task: continue ... New tip height: {}", new_tip.header().height);
+
                             self.tip = new_tip;
                         }
                         SuccessorsToSync::RapidBlockDownloadError => {
@@ -190,6 +194,8 @@ impl SyncLoop {
                 Some(message_from_main) = self.main_channel_receiver.recv() => {
                     match message_from_main {
                         MainToSync::AddPeer(peer_handle) => {
+                            tracing::debug!("Sync loop got message from main: add peer");
+
                             self.peers.lock().await.insert(peer_handle, PeerSyncState::default());
 
                             // Add new block request to queue, if we are still
@@ -199,6 +205,8 @@ impl SyncLoop {
                             }
                         }
                         MainToSync::RemovePeer(peer_handle) => {
+                            tracing::debug!("Sync loop got message from main: remove peer");
+
                             self.peers.lock().await.remove(&peer_handle);
                             last_peer_disconnect_time = Some(SystemTime::now());
                         }
@@ -216,6 +224,7 @@ impl SyncLoop {
                             });
 
                             // Store block and update download state.
+                            tracing::debug!("storing block ...");
                             if let Err(e) = self.download_state.receive_block(&block).await
                             {
                                 tracing::warn!(
@@ -265,6 +274,7 @@ impl SyncLoop {
                             // without going through the tip-successors subtask.
                             // Save valuable setup-time.
                             if self.tip.header().height.next() == block.header().height {
+                                tracing::debug!("chain extension is one ahead of current tip; sending directly to main loop.");
                                 if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block.to_owned()).await {
                                     tracing::error!("Could not send tip-successor to main loop. Terminating sync loop.");
                                     break;
@@ -279,6 +289,7 @@ impl SyncLoop {
                             }
                         }
                         MainToSync::SyncCoverage{peer_handle, coverage } => {
+                            tracing::debug!("Got sync coverage message from peer via main");
                             // Record peer's status.
                             {
                                 let mut peers_lock_mut = self.peers.lock().await;
@@ -461,8 +472,9 @@ impl SyncLoop {
                         // If there are timeouts warranting punishments, tell
                         // the main loop to punish the perpetrators.
                         if !punishments.is_empty() {
+                            tracing::debug!("sync loop is punishing ...");
                             if let Err(e) = self.main_channel_sender.try_send(SyncToMain::Punish(punishments.clone())) {
-                                tracing::error!("Failed to send punish message to main loop: {e}.");
+                                tracing::warn!("Failed to send punish message to main loop: {e}.");
                             }
 
                             // If the main loop is busy and the channel full,
