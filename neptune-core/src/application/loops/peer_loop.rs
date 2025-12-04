@@ -1047,7 +1047,15 @@ impl PeerLoopHandler {
                 }
 
                 // If we are not syncing, and this block height is unknown, then
-                // the peer is confused at best, malicious at worst.
+                //  a) the peer is confused; or
+                //  b) the peer is malicious; or
+                //  c) the peer is syncing to a block height higher than our
+                //     own. In this last case, the peer will incur punishments
+                //     from us until they are synced. However, until they are
+                //     synced there is no way for us to determine whether they
+                //     are honest or malicious, so until then we treat the
+                //     costly response (requiring a disk read) as expensive (in
+                //     terms of standing).
                 let sync_mode_active = self
                     .global_state_lock
                     .lock_guard()
