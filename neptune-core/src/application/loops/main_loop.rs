@@ -1737,9 +1737,10 @@ impl MainLoopHandler {
                     let own_handshake_data: HandshakeData = state.get_own_handshakedata();
                     let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
                     let incoming_peer_task_handle = tokio::task::spawn(async move {
-                        // permit gets dropped at end of scope, to release slot.
-                        let _permit = permit;
 
+                        // Permit is passed to answer_peer and released after handshake,
+                        // not when the connection closes. This prevents semaphore
+                        // starvation attacks.
                         match answer_peer(
                             stream,
                             global_state_lock,
@@ -1747,6 +1748,7 @@ impl MainLoopHandler {
                             main_to_peer_broadcast_rx_clone,
                             peer_task_to_main_tx_clone,
                             own_handshake_data,
+                            Some(permit),
                         ).await {
                             Ok(()) => (),
                             Err(err) => debug!("Got result: {:?}", err),
@@ -3113,6 +3115,7 @@ mod tests {
                     main_to_peer_rx_mock,
                     peer_to_main_tx_clone,
                     own_handshake,
+                    None, // No semaphore permit in test
                 )
                 .await
                 {

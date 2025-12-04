@@ -17,6 +17,7 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::time::timeout;
 use tokio_serde::formats::Bincode;
 use tokio_serde::formats::SymmetricalBincode;
@@ -281,6 +282,7 @@ pub(crate) async fn answer_peer<S>(
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
+    handshake_permit: Option<OwnedSemaphorePermit>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
@@ -297,6 +299,7 @@ where
             main_to_peer_task_rx,
             peer_task_to_main_tx,
             own_handshake_data,
+            handshake_permit,
         )
         .await;
     })
@@ -330,6 +333,9 @@ where
 /// handshake was not completed. The reason for this behavior is that we want
 /// malicious connection attempts to be as resource light as possible. And
 /// allocating thousands of anyhow errors can use a lot of RAM.
+///
+/// The `handshake_permit` is dropped after handshake completes to release the
+/// semaphore slot for new incoming connection attempts.
 async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -337,6 +343,7 @@ async fn answer_peer_inner<S>(
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
+    handshake_permit: Option<OwnedSemaphorePermit>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
@@ -418,6 +425,11 @@ where
     // checked in `check_if_connection_is_allowed`. So if we get here, we are
     // good to go.
     info!("Connection accepted from {peer_address}");
+
+    // Release the handshake permit now that handshake is complete.
+    // This allows new incoming connections to start their handshake.
+    // The connection is now governed by max_num_peers, not the semaphore.
+    drop(handshake_permit);
 
     // If necessary, disconnect from another, existing peer.
     if connection_status == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
@@ -1040,6 +1052,7 @@ mod tests {
             broadcast_tx.subscribe(),
             to_main_tx.clone(),
             handshake,
+            None,
         )
         .await
         .unwrap_err();
@@ -1062,6 +1075,7 @@ mod tests {
             broadcast_tx.subscribe(),
             to_main_tx,
             handshake,
+            None,
         )
         .await?;
 
@@ -1105,6 +1119,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await?;
 
@@ -1140,6 +1155,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(answer.is_ok(), "Expect OK on bad magic value");
@@ -1173,6 +1189,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(answer.is_err(), "bad network must result in error");
@@ -1238,6 +1255,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(
@@ -1295,6 +1313,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(answer.is_err(), "max peers exceeded must result in error");
@@ -1445,6 +1464,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(
