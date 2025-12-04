@@ -444,8 +444,10 @@ impl SyncLoop {
 
                         // If there are timeouts warranting punishments, tell
                         // the main loop to punish the perpetrators.
-                        if let Err(e) = self.main_channel_sender.try_send(SyncToMain::Punish(punishments)) {
-                            tracing::error!("Failed to send punish message to main loop: {e}.");
+                        if !punishments.is_empty() {
+                            if let Err(e) = self.main_channel_sender.try_send(SyncToMain::Punish(punishments)) {
+                                tracing::error!("Failed to send punish message to main loop: {e}.");
+                            }
                         }
                     }
 
