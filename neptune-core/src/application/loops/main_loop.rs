@@ -854,7 +854,7 @@ impl MainLoopHandler {
                     // Create sync loop with handle.
                     let network = global_state_mut.cli().network;
                     let current_tip = global_state_mut.chain.light_state().clone();
-                    let resume_please = true;
+                    let resume_please = !global_state_mut.cli().no_resume_sync;
                     let mut sync_loop = SyncLoopHandle::new(
                         current_tip,
                         claimed_height,
