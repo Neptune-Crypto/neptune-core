@@ -1885,7 +1885,7 @@ impl MainLoopHandler {
             RPCServerToMain::UpdateStatus => {
                 debug!("main loop is updating status indicators ...");
                 if let Some(sync_loop_handle) = &main_loop_state.maybe_sync_loop {
-                    sync_loop_handle.send_status_request();
+                    sync_loop_handle.send_status_request().await;
                     debug!("sent status request to sync loop.");
                 }
 

@@ -310,14 +310,31 @@ impl SyncLoop {
                             // loop.
                             let moved_coverage = self.download_state.coverage();
                             let moved_main_channel_sender = self.main_channel_sender.clone();
-                            let _ = tokio::task::spawn_blocking(move || {
+                            let _jh = tokio::task::spawn(async move {
                                     let num_blocks_downloaded_but_not_processed = moved_coverage.pop_count();
                                     let total_num_blocks_downloaded = num_blocks_processed + num_blocks_downloaded_but_not_processed;
+                                    tracing::debug!(
+                                        "Assembling new SyncProgress object with total span {distance}, \
+                                        {num_blocks_downloaded_but_not_processed} blocks downloaded (but not \
+                                        processed), and {num_blocks_processed} blocks processed."
+                                    );
                                     let status = SyncProgress::new(distance).with_num_blocks_downloaded(total_num_blocks_downloaded);
-                                    if let Err(e) = moved_main_channel_sender.blocking_send(SyncToMain::Status(status)) {
-                                        tracing::warn!("Sync loop: failed to send Status({}) message to main loop: {e}.", status)
+                                    let max_num_tries = 20;
+                                    let mut counter = 1;
+                                    loop {
+                                        if let Err(e) = moved_main_channel_sender.try_send(SyncToMain::Status(status)) {
+                                            tracing::warn!("Sync loop: failed to send Status({}) message to main loop: {e}.", status);
+                                            tokio::time::sleep(Duration::from_millis(counter * 50)).await;
+                                            counter += 1;
+                                        } else {
+                                            break;
+                                        }
+
+                                        if counter == max_num_tries {
+                                            break;
+                                        }
                                     }
-                                }).await;
+                                });
                         }
                         MainToSync::TryFetchBlock{ peer_handle, height } => {
                             tracing::debug!("sync loop received try-fetch-block message from peer {peer_handle} for block {height}");
@@ -396,7 +413,6 @@ impl SyncLoop {
                     }
 
                     if !finished_downloading {
-
                         // Check all peers for timeouts.
                         let mut reminders = vec![];
                         let mut punishments = vec![];
@@ -477,15 +493,16 @@ impl SyncLoop {
 
         // Tell main loop we are done. Ensure delivery.
         let mut send_success = false;
-        let mut num_send_attempts = 1000;
+        let mut send_attempt_counter = 0;
+        let max_send_attempts = 1000;
         loop {
             let send_result = self.main_channel_sender.try_send(return_code.clone());
             if send_result.is_ok() {
                 send_success = true;
                 break;
             }
-            num_send_attempts += 1;
-            if num_send_attempts >= 1000 {
+            send_attempt_counter += 1;
+            if send_attempt_counter >= max_send_attempts {
                 break;
             }
             tracing::warn!("Sync loop: could not send return code to main loop. Is it busy?");
@@ -648,9 +665,12 @@ impl SyncLoop {
         // send to main
         // important payload, so report on delays
         let max = 100;
-        for i in 0..max {
+        for i in 1..=max {
             match channel_to_main.try_send(SyncToMain::TipSuccessor(Box::new(successor.clone()))) {
                 Ok(_) => {
+                    if i > 1 {
+                        tracing::debug!("succeeded sending tip-successorblock to main");
+                    }
                     return true;
                 }
                 Err(_) => {
@@ -960,7 +980,7 @@ mod tests {
                     }
 
                     _ = ticker.tick() => {
-                        self.sync_loop_handle.send_status_request();
+                        self.sync_loop_handle.send_status_request().await;
                     }
                 }
             }
