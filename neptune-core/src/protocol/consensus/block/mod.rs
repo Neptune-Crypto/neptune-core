@@ -92,6 +92,11 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 /// wallets to scan through all.
 pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS: usize = 1 << 14;
 
+/// Maximum size of a single announcement's message in BFieldElements.
+/// Typical encrypted UTXO notifications are ~400 BFEs. This limit provides
+/// headroom while preventing DoS via oversized announcements.
+pub(crate) const MAX_ANNOUNCEMENT_MESSAGE_SIZE: usize = 4096;
+
 /// Duration of timelock for half of all mining rewards.
 ///
 /// Half the block subsidy is liquid immediately. Half of it is locked for this

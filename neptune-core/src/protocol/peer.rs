@@ -87,6 +87,7 @@ pub enum NegativePeerSanction {
     TransactionWithNegativeFee,
     DoubleSpendingTransaction,
     CannotApplyTransactionToMutatorSet,
+    OversizedAnnouncement,
 
     InvalidBlockMmrAuthentication,
 
@@ -146,6 +147,7 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::CannotApplyTransactionToMutatorSet => {
                 "cannot apply tx to mutator set"
             }
+            NegativePeerSanction::OversizedAnnouncement => "oversized announcement",
             NegativePeerSanction::NonMinedTransactionHasCoinbase => {
                 "non-mined transaction has coinbase"
             }
@@ -237,6 +239,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::TransactionWithNegativeFee => -22,
             NegativePeerSanction::DoubleSpendingTransaction => -14,
             NegativePeerSanction::CannotApplyTransactionToMutatorSet => -3,
+            NegativePeerSanction::OversizedAnnouncement => -10,
             NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
             NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
             NegativePeerSanction::BlockProposalNotFound => -1,
