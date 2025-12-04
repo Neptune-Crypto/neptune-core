@@ -434,9 +434,9 @@ impl SyncLoop {
                         let moved_coverage = self.download_state.coverage();
                         let moved_peers = self.peers.clone();
                         let moved_channel_to_main = self.main_channel_sender.clone();
-                        if let Err(e) = tokio::task::spawn( async move {
-                            Self::request_random_blocks(moved_coverage, moved_peers, moved_channel_to_main, moved_pending_block_requests).await;
-                        }).await {
+                        if let Err(e) = tokio::task::spawn(
+                            Self::request_random_blocks(moved_coverage, moved_peers, moved_channel_to_main, moved_pending_block_requests)
+                        ).await {
                             tracing::error!("Failed to request random blocks from peers: {e}.");
                         }
 
@@ -447,11 +447,14 @@ impl SyncLoop {
                         if !punishments.is_empty() {
                             if let Err(e) = self.main_channel_sender.try_send(SyncToMain::Punish(punishments.clone())) {
                                 tracing::error!("Failed to send punish message to main loop: {e}.");
-                            } else {
-                                let mut peers_mut = self.peers.lock().await;
-                                for transgressor in punishments {
-                                    peers_mut.entry(transgressor).and_modify(|peer| {peer.last_punishment = Some(now);});
-                                }
+                            }
+
+                            // If the main loop is busy and the channel full,
+                            // don't overload it. So wait the regular timeout
+                            // period before trying again.
+                            let mut peers_mut = self.peers.lock().await;
+                            for transgressor in punishments {
+                                peers_mut.entry(transgressor).and_modify(|peer| {peer.last_punishment = Some(now);});
                             }
                         }
                     }
