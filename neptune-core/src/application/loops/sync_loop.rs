@@ -227,11 +227,6 @@ impl SyncLoop {
                                 self.download_state.coverage().upper_bound,
                             );
 
-                            // Track last seen state.
-                            self.peers.lock().await.entry(peer_handle).and_modify(|e| {
-                                e.last_response = Some(SystemTime::now());
-                            });
-
                             // Store block and update download state.
                             tracing::debug!("storing block ...");
                             if let Err(e) = self.download_state.receive_block(&block).await
@@ -480,17 +475,20 @@ impl SyncLoop {
 
                         // Flush queue of pending block requests. But do this in
                         // another task so control passes back to the loop.
-                        let moved_pending_block_requests = pending_block_requests.clone();
-                        let moved_coverage = self.download_state.coverage();
-                        let moved_peers = self.peers.clone();
-                        let moved_channel_to_main = self.main_channel_sender.clone();
-                        if let Err(e) = tokio::task::spawn(
-                            Self::request_random_blocks(moved_coverage, moved_peers, moved_channel_to_main, moved_pending_block_requests)
-                        ).await {
-                            tracing::error!("Failed to request random blocks from peers: {e}.");
-                        }
+                        if !pending_block_requests.is_empty() {
+                            tracing::debug!("sync loop is starting a new random blocks request");
+                            let moved_pending_block_requests = pending_block_requests.clone();
+                            let moved_coverage = self.download_state.coverage();
+                            let moved_peers = self.peers.clone();
+                            let moved_channel_to_main = self.main_channel_sender.clone();
+                            if let Err(e) = tokio::task::spawn(
+                                Self::request_random_blocks(moved_coverage, moved_peers, moved_channel_to_main, moved_pending_block_requests)
+                            ).await {
+                                tracing::error!("Failed to request random blocks from peers: {e}.");
+                            }
 
-                        pending_block_requests = vec![];
+                            pending_block_requests = vec![];
+                        }
 
                         // If there are timeouts warranting punishments, tell
                         // the main loop to punish the perpetrators.
