@@ -181,13 +181,22 @@ impl SyncLoop {
                         }
                     }
 
-                    let moved_tip = self.tip.clone();
-                    let moved_download_state = self.download_state.clone();
-                    let moved_main_channel_sender = self.main_channel_sender.clone();
-                    let moved_return_sender = successors_sender.clone();
-                    maybe_successors_subtask = Some(tokio::spawn(async move {
-                        Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_sender, self.block_validator).await
-                    }));
+                    // Start a new successors subtask, but only if it makes
+                    // sense. Specifically, if we have the next tip successor,
+                    // start the task. Otherwise, we wait until that block comes
+                    // in and start it there.
+                    if self.download_state.coverage().contains(self.tip.header().height.next().value()) {
+                        tracing::debug!("Starting new successors subtask task again ...");
+                        let moved_tip = self.tip.clone();
+                        let moved_download_state = self.download_state.clone();
+                        let moved_main_channel_sender = self.main_channel_sender.clone();
+                        let moved_return_sender = successors_sender.clone();
+                        maybe_successors_subtask = Some(tokio::spawn(async move {
+                            Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_sender, self.block_validator).await
+                        }));
+                    } else {
+                        maybe_successors_subtask = None;
+                    }
                 }
 
                 // event: message from sync loop
@@ -233,17 +242,31 @@ impl SyncLoop {
                                 );
                                 continue;
                             }
-                            self.peers.lock().await.entry(peer_handle).and_modify(|e|{e.num_blocks_contributed += 1;});
-                            most_recent_receipt = Some(SystemTime::now());
+
+                            // Track last seen state.
+                            tracing::debug!("tracking state ...");
+                            let now = SystemTime::now();
+                            self.peers.lock().await.entry(peer_handle).and_modify(|e|{
+                                e.last_response = Some(now);
+                                e.num_blocks_contributed += 1;
+                            });
+                            most_recent_receipt = Some(now);
 
                             // Update tip to available successors.
-                            if maybe_successors_subtask.is_none() {
+                            if maybe_successors_subtask.is_none() && block.header().height == self.tip.header().height.next() {
+                                tracing::debug!("Starting new successors subtask in response to received block ...");
                                 let moved_tip = self.tip.clone();
                                 let moved_download_state = self.download_state.clone();
                                 let moved_main_channel_sender = self.main_channel_sender.clone();
                                 let moved_return_channel_sender = successors_sender.clone();
                                 maybe_successors_subtask = Some(tokio::spawn(async move {
-                                    Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_channel_sender, self.block_validator).await
+                                    Self::process_successors_of_tip(
+                                        moved_tip,
+                                        moved_download_state,
+                                        moved_main_channel_sender,
+                                        moved_return_channel_sender,
+                                        self.block_validator
+                                    ).await
                                 }));
                             }
 
