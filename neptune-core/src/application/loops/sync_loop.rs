@@ -445,8 +445,13 @@ impl SyncLoop {
                         // If there are timeouts warranting punishments, tell
                         // the main loop to punish the perpetrators.
                         if !punishments.is_empty() {
-                            if let Err(e) = self.main_channel_sender.try_send(SyncToMain::Punish(punishments)) {
+                            if let Err(e) = self.main_channel_sender.try_send(SyncToMain::Punish(punishments.clone())) {
                                 tracing::error!("Failed to send punish message to main loop: {e}.");
+                            } else {
+                                let mut peers_mut = self.peers.lock().await;
+                                for transgressor in punishments {
+                                    peers_mut.entry(transgressor).and_modify(|peer| {peer.last_punishment = Some(now);});
+                                }
                             }
                         }
                     }
