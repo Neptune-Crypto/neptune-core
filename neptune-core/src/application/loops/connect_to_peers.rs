@@ -17,6 +17,7 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::time::timeout;
 use bincode::Options;
 use tokio_serde::formats::Bincode;
@@ -291,6 +292,10 @@ async fn check_if_connection_is_allowed(
 /// Catch and process errors (if any) gracefully.
 ///
 /// All incoming connections from peers must go through this function.
+///
+/// The `handshake_permit` is released after the handshake completes (success or
+/// failure), not when the connection closes. This prevents semaphore starvation
+/// attacks where an attacker holds connections idle to exhaust permits.
 pub(crate) async fn answer_peer<S>(
     stream: S,
     state_lock: GlobalStateLock,
@@ -298,6 +303,7 @@ pub(crate) async fn answer_peer<S>(
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
+    handshake_permit: Option<OwnedSemaphorePermit>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
@@ -314,6 +320,7 @@ where
             main_to_peer_task_rx,
             peer_task_to_main_tx,
             own_handshake_data,
+            handshake_permit,
         )
         .await;
     })
@@ -347,6 +354,9 @@ where
 /// handshake was not completed. The reason for this behavior is that we want
 /// malicious connection attempts to be as resource light as possible. And
 /// allocating thousands of anyhow errors can use a lot of RAM.
+///
+/// The `handshake_permit` is dropped after handshake completes to release the
+/// semaphore slot for new incoming connection attempts.
 async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -354,6 +364,7 @@ async fn answer_peer_inner<S>(
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
+    handshake_permit: Option<OwnedSemaphorePermit>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
@@ -431,6 +442,11 @@ where
     // checked in `check_if_connection_is_allowed`. So if we get here, we are
     // good to go.
     info!("Connection accepted from {peer_address}");
+
+    // Release the handshake permit now that handshake is complete.
+    // This allows new incoming connections to start their handshake.
+    // The connection is now governed by max_num_peers, not the semaphore.
+    drop(handshake_permit);
 
     // If necessary, disconnect from another, existing peer.
     if connection_status == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
