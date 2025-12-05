@@ -1065,7 +1065,8 @@ impl rand::distr::Distribution<PeerStanding> for rand::distr::StandardUniform {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
-    use rand::{random, rng};
+    use rand::random;
+    use rand::rng;
 
     use super::*;
     use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
