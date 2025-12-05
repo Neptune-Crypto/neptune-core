@@ -88,6 +88,8 @@ pub enum NegativePeerSanction {
     DoubleSpendingTransaction,
     CannotApplyTransactionToMutatorSet,
     OversizedAnnouncement,
+    /// Block exceeds size limit during fork reconciliation (RAM exhaustion attack)
+    OversizedBlock,
 
     InvalidBlockMmrAuthentication,
 
@@ -148,6 +150,7 @@ impl Display for NegativePeerSanction {
                 "cannot apply tx to mutator set"
             }
             NegativePeerSanction::OversizedAnnouncement => "oversized announcement",
+            NegativePeerSanction::OversizedBlock => "oversized block",
             NegativePeerSanction::NonMinedTransactionHasCoinbase => {
                 "non-mined transaction has coinbase"
             }
@@ -240,6 +243,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::DoubleSpendingTransaction => -14,
             NegativePeerSanction::CannotApplyTransactionToMutatorSet => -3,
             NegativePeerSanction::OversizedAnnouncement => -10,
+            NegativePeerSanction::OversizedBlock => -50,
             NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
             NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
             NegativePeerSanction::BlockProposalNotFound => -1,
@@ -620,6 +624,9 @@ impl PeerMessage {
 pub struct MutablePeerState {
     pub highest_shared_block_height: BlockHeight,
     pub fork_reconciliation_blocks: Vec<Block>,
+    /// Total estimated bytes of blocks in fork_reconciliation_blocks.
+    /// Used to cap memory usage during fork resolution.
+    pub(crate) fork_reconciliation_bytes: usize,
     pub(crate) sync_challenge: Option<IssuedSyncChallenge>,
 
     /// Timestamp for the last successful sync challenge response.
@@ -633,6 +640,7 @@ impl MutablePeerState {
         Self {
             highest_shared_block_height: block_height,
             fork_reconciliation_blocks: vec![],
+            fork_reconciliation_bytes: 0,
             sync_challenge: None,
             successful_sync_challenge_response_time: None,
         }
