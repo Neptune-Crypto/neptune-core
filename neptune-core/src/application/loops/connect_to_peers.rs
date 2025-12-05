@@ -18,8 +18,8 @@ use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use bincode::Options;
 use tokio_serde::formats::Bincode;
-use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::Framed;
 use tokio_util::codec::LengthDelimitedCodec;
@@ -59,6 +59,23 @@ fn get_codec_rules() -> LengthDelimitedCodec {
     let mut codec_rules = LengthDelimitedCodec::new();
     codec_rules.set_max_frame_length(MAX_PEER_FRAME_LENGTH_IN_BYTES);
     codec_rules
+}
+
+/// Returns a bincode codec with allocation limits to prevent OOM attacks.
+///
+/// This prevents "length bomb" attacks where a malicious peer sends a tiny
+/// frame claiming to contain a Vec with billions of elements. Without limits,
+/// bincode would pre-allocate memory based on the claimed length, causing OOM.
+///
+/// The limit is set to match MAX_PEER_FRAME_LENGTH_IN_BYTES (500MB).
+fn get_bincode_codec<Item, SinkItem>() -> Bincode<Item, SinkItem, impl Options + Copy>
+where
+    Item: serde::de::DeserializeOwned,
+    SinkItem: serde::Serialize,
+{
+    bincode::DefaultOptions::new()
+        .with_limit(MAX_PEER_FRAME_LENGTH_IN_BYTES as u64)
+        .into()
 }
 
 /// Returns true iff version numbers are compatible. Returns false otherwise.
@@ -345,11 +362,7 @@ where
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
-    let mut peer = SymmetricallyFramed::<
-        Framed<S, LengthDelimitedCodec>,
-        PeerMessage,
-        Bincode<PeerMessage, PeerMessage>,
-    >::new(length_delimited, SymmetricalBincode::default());
+    let mut peer = SymmetricallyFramed::new(length_delimited, get_bincode_codec());
 
     // Complete Neptune handshake
     let handshake_timeout: u64 = state.cli().handshake_timeout.into();
@@ -531,12 +544,7 @@ where
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
-    let mut peer: tokio_serde::Framed<
-        Framed<S, LengthDelimitedCodec>,
-        PeerMessage,
-        PeerMessage,
-        Bincode<PeerMessage, PeerMessage>,
-    > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
+    let mut peer = SymmetricallyFramed::new(length_delimited, get_bincode_codec());
 
     // Make Neptune handshake
     let outgoing_handshake = PeerMessage::Handshake {
