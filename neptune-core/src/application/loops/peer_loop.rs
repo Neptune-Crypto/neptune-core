@@ -35,6 +35,7 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
+use crate::protocol::consensus::block::MAX_ANNOUNCEMENT_MESSAGE_SIZE;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
 use crate::protocol::consensus::transaction::Transaction;
@@ -1248,6 +1249,20 @@ impl PeerLoopHandler {
             }
             PeerMessage::Transaction(transaction) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Transaction");
+
+                // Early check for oversized announcements to prevent DoS
+                for announcement in &transaction.kernel.announcements {
+                    if announcement.message.len() > MAX_ANNOUNCEMENT_MESSAGE_SIZE {
+                        warn!(
+                            "Received transaction with oversized announcement: {} BFEs (max: {})",
+                            announcement.message.len(),
+                            MAX_ANNOUNCEMENT_MESSAGE_SIZE
+                        );
+                        self.punish(NegativePeerSanction::OversizedAnnouncement)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                }
 
                 let num_inputs: u64 = transaction.kernel.inputs.len().try_into().unwrap();
                 debug!(
