@@ -448,7 +448,9 @@ impl PeerLoopHandler {
         }
 
         // Reject if total memory budget would be exceeded
-        let new_total_bytes = peer_state.fork_reconciliation_bytes.saturating_add(block_size);
+        let new_total_bytes = peer_state
+            .fork_reconciliation_bytes
+            .saturating_add(block_size);
         if new_total_bytes > MAX_FORK_RECONCILIATION_TOTAL_BYTES {
             warn!(
                 "Fork reconciliation memory budget exceeded: {} + {} = {} bytes (max: {} bytes)",
