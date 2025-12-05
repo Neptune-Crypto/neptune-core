@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use anyhow::bail;
 use anyhow::Result;
+use bincode::Options;
 use futures::sink::Sink;
 use futures::sink::SinkExt;
 use futures::stream::TryStream;
@@ -64,6 +65,15 @@ use crate::util_types::mutator_set::removal_record::RemovalRecordValidityError;
 const STANDARD_BLOCK_BATCH_SIZE: usize = 35;
 const MAX_PEER_LIST_LENGTH: usize = 10;
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
+
+/// Maximum size in bytes for a single block during fork reconciliation.
+/// Blocks larger than this are rejected to prevent RAM exhaustion attacks.
+/// 10MB is generous - legitimate blocks with many transactions are typically 1-2MB.
+const MAX_BLOCK_SIZE_IN_FORK_RECONCILIATION: usize = 10 * 1024 * 1024;
+
+/// Maximum total bytes for all blocks in fork_reconciliation_blocks.
+/// This caps overall memory usage during fork resolution.
+const MAX_FORK_RECONCILIATION_TOTAL_BYTES: usize = 100 * 1024 * 1024;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
 const DISCONNECT_CONNECTION: bool = true;
@@ -419,6 +429,40 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
+        // Check block size to prevent RAM exhaustion attacks.
+        // We estimate size using bincode serialization which matches network format.
+        let block_size = bincode::DefaultOptions::new()
+            .serialized_size(received_block.as_ref())
+            .unwrap_or(usize::MAX as u64) as usize;
+
+        // Reject individual blocks that are too large
+        if block_size > MAX_BLOCK_SIZE_IN_FORK_RECONCILIATION {
+            warn!(
+                "Received oversized block during fork reconciliation: {} bytes (max: {} bytes)",
+                block_size, MAX_BLOCK_SIZE_IN_FORK_RECONCILIATION
+            );
+            self.punish(NegativePeerSanction::OversizedBlock).await?;
+            peer_state.fork_reconciliation_blocks.clear();
+            peer_state.fork_reconciliation_bytes = 0;
+            return Ok(());
+        }
+
+        // Reject if total memory budget would be exceeded
+        let new_total_bytes = peer_state.fork_reconciliation_bytes.saturating_add(block_size);
+        if new_total_bytes > MAX_FORK_RECONCILIATION_TOTAL_BYTES {
+            warn!(
+                "Fork reconciliation memory budget exceeded: {} + {} = {} bytes (max: {} bytes)",
+                peer_state.fork_reconciliation_bytes,
+                block_size,
+                new_total_bytes,
+                MAX_FORK_RECONCILIATION_TOTAL_BYTES
+            );
+            self.punish(NegativePeerSanction::OversizedBlock).await?;
+            peer_state.fork_reconciliation_blocks.clear();
+            peer_state.fork_reconciliation_bytes = 0;
+            return Ok(());
+        }
+
         // Does the received block match the fork reconciliation list?
         let received_block_matches_fork_reconciliation_list = if let Some(successor) =
             peer_state.fork_reconciliation_blocks.last()
@@ -460,11 +504,13 @@ impl PeerLoopHandler {
             )))
             .await?;
             peer_state.fork_reconciliation_blocks = vec![];
+            peer_state.fork_reconciliation_bytes = 0;
             return Ok(());
         }
 
         // otherwise, append
         peer_state.fork_reconciliation_blocks.push(*received_block);
+        peer_state.fork_reconciliation_bytes = new_total_bytes;
 
         // Try fetch parent
         let received_block_header = *peer_state
@@ -498,6 +544,7 @@ impl PeerLoopHandler {
         let Some(parent_block) = parent_block else {
             if parent_height.is_genesis() {
                 peer_state.fork_reconciliation_blocks.clear();
+                peer_state.fork_reconciliation_bytes = 0;
                 self.punish(NegativePeerSanction::DifferentGenesis).await?;
                 return Ok(());
             }
@@ -522,6 +569,7 @@ impl PeerLoopHandler {
         // block that we have.
         let fork_reconciliation_event = !peer_state.fork_reconciliation_blocks.is_empty();
         peer_state.fork_reconciliation_blocks.clear();
+        peer_state.fork_reconciliation_bytes = 0;
 
         if let Some(new_block_height) = self.handle_blocks(new_blocks, parent_block).await? {
             // If `BlockNotification` was received during a block reconciliation
