@@ -8,6 +8,7 @@ use std::time::UNIX_EPOCH;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
+use bincode::Options;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::FutureExt;
@@ -17,9 +18,9 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::time::timeout;
 use tokio_serde::formats::Bincode;
-use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::Framed;
 use tokio_util::codec::LengthDelimitedCodec;
@@ -59,6 +60,23 @@ fn get_codec_rules() -> LengthDelimitedCodec {
     let mut codec_rules = LengthDelimitedCodec::new();
     codec_rules.set_max_frame_length(MAX_PEER_FRAME_LENGTH_IN_BYTES);
     codec_rules
+}
+
+/// Returns a bincode codec with allocation limits to prevent OOM attacks.
+///
+/// This prevents "length bomb" attacks where a malicious peer sends a tiny
+/// frame claiming to contain a Vec with billions of elements. Without limits,
+/// bincode would pre-allocate memory based on the claimed length, causing OOM.
+///
+/// The limit is set to match MAX_PEER_FRAME_LENGTH_IN_BYTES (500MB).
+fn get_bincode_codec<Item, SinkItem>() -> Bincode<Item, SinkItem, impl Options + Copy>
+where
+    Item: serde::de::DeserializeOwned,
+    SinkItem: serde::Serialize,
+{
+    bincode::DefaultOptions::new()
+        .with_limit(MAX_PEER_FRAME_LENGTH_IN_BYTES as u64)
+        .into()
 }
 
 /// Returns true iff version numbers are compatible. Returns false otherwise.
@@ -274,6 +292,10 @@ async fn check_if_connection_is_allowed(
 /// Catch and process errors (if any) gracefully.
 ///
 /// All incoming connections from peers must go through this function.
+///
+/// The `handshake_permit` is released after the handshake completes (success or
+/// failure), not when the connection closes. This prevents semaphore starvation
+/// attacks where an attacker holds connections idle to exhaust permits.
 pub(crate) async fn answer_peer<S>(
     stream: S,
     state_lock: GlobalStateLock,
@@ -281,6 +303,7 @@ pub(crate) async fn answer_peer<S>(
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
+    handshake_permit: Option<OwnedSemaphorePermit>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
@@ -297,6 +320,7 @@ where
             main_to_peer_task_rx,
             peer_task_to_main_tx,
             own_handshake_data,
+            handshake_permit,
         )
         .await;
     })
@@ -330,6 +354,9 @@ where
 /// handshake was not completed. The reason for this behavior is that we want
 /// malicious connection attempts to be as resource light as possible. And
 /// allocating thousands of anyhow errors can use a lot of RAM.
+///
+/// The `handshake_permit` is dropped after handshake completes to release the
+/// semaphore slot for new incoming connection attempts.
 async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -337,6 +364,7 @@ async fn answer_peer_inner<S>(
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
+    handshake_permit: Option<OwnedSemaphorePermit>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
@@ -345,11 +373,7 @@ where
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
-    let mut peer = SymmetricallyFramed::<
-        Framed<S, LengthDelimitedCodec>,
-        PeerMessage,
-        Bincode<PeerMessage, PeerMessage>,
-    >::new(length_delimited, SymmetricalBincode::default());
+    let mut peer = SymmetricallyFramed::new(length_delimited, get_bincode_codec());
 
     // Complete Neptune handshake
     let handshake_timeout: u64 = state.cli().handshake_timeout.into();
@@ -418,6 +442,11 @@ where
     // checked in `check_if_connection_is_allowed`. So if we get here, we are
     // good to go.
     info!("Connection accepted from {peer_address}");
+
+    // Release the handshake permit now that handshake is complete.
+    // This allows new incoming connections to start their handshake.
+    // The connection is now governed by max_num_peers, not the semaphore.
+    drop(handshake_permit);
 
     // If necessary, disconnect from another, existing peer.
     if connection_status == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
@@ -531,12 +560,7 @@ where
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
-    let mut peer: tokio_serde::Framed<
-        Framed<S, LengthDelimitedCodec>,
-        PeerMessage,
-        PeerMessage,
-        Bincode<PeerMessage, PeerMessage>,
-    > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
+    let mut peer = SymmetricallyFramed::new(length_delimited, get_bincode_codec());
 
     // Make Neptune handshake
     let outgoing_handshake = PeerMessage::Handshake {
