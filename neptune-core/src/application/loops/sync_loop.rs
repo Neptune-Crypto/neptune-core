@@ -328,8 +328,8 @@ impl SyncLoop {
                         }
                         MainToSync::Status => {
                             tracing::debug!("sync loop received status request, computing ...");
-                            let distance = self.download_state.target().next().value() - self.download_state.original_tip_height().value();
-                            let num_blocks_processed = self.tip.header().height.value() - self.download_state.original_tip_height().value();
+                            let total_span = self.download_state.target().next().value();
+                            let num_blocks_processed = self.tip.header().height.value();
 
                             // Calculating the proportion of blocks covered is
                             // fast but not fast enough. So clone all the
@@ -343,11 +343,11 @@ impl SyncLoop {
                                     let num_blocks_downloaded_but_not_processed = moved_coverage.pop_count();
                                     let total_num_blocks_downloaded = num_blocks_processed + num_blocks_downloaded_but_not_processed;
                                     tracing::debug!(
-                                        "Assembling new SyncProgress object with total span {distance}, \
+                                        "Assembling new SyncProgress object with total span {total_span}, \
                                         {num_blocks_downloaded_but_not_processed} blocks downloaded (but not \
-                                        processed), and {num_blocks_processed} blocks processed."
+                                        processed)."
                                     );
-                                    let status = SyncProgress::new(distance).with_num_blocks_downloaded(total_num_blocks_downloaded);
+                                    let status = SyncProgress::new(total_span).with_num_blocks_downloaded(total_num_blocks_downloaded);
                                     let max_num_tries = 20;
                                     let mut counter = 1;
                                     loop {

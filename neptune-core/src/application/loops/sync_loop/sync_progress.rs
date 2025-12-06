@@ -3,6 +3,9 @@ use serde::Serialize;
 use std::fmt::Display;
 
 /// An object quantifying how far we are in the sync process.
+///
+/// Total number of blocks downloaded relative to total number of blocks on the
+/// chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncProgress {
     num_blocks_downloaded: u64,

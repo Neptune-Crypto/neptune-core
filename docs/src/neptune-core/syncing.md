@@ -85,15 +85,15 @@ Validation of blocks happens relative to an enum `BlockValidator`. In production
 `Production`, which invokes `Block::is_valid`. For tests, `Test` is an alternative that allows testing the sync loop
 relative to random (and thus invalid) blocks.
 
-The `SyncProgress` is an object heuristically indicating how far the sync loop has moved from the initial state (large 
-backlog of blocks) to the intended result (all downloaded and processed). It is a noisy heuristic for at least two
-reasons:
- - There are two distinct tasks, downloading blocks and processing them. Progress in the one task might not coincide
-   with progress in the other.
- - Progress is given relative to a total span of blocks to download and process. However, this total span can increase
-   as new blocks are found while the sync is running. Moreover, if the sync loop starts over (for instance because the
-   previous one timed out or because the node shut down), then the starting point of this total span may have shifted
-   to whatever the new tip height is at the time the new sync loop starts.
+The `SyncProgress` is an object indicating how far the sync is removed from completion relative to very start when the
+only block in possession was the genesis block. The `SyncProgress` reports on the downloading step only, and so you
+could be "100% synced" and have a large backlog of blocks on disk to update the state with. The reason why the
+`SyncProgress` cannot report a progress number relative to the "missing interval" of blocks is because the magnitude of
+this missing interval is not known when syncing across a fork. In particular, exact knowledge of that interval implies
+knowledge of the latest universal common ancestor (LUCA) block, and it is precisely the sync loop's job to figure out
+which block that is. Lastly, it is worth noting that asynchronous messages asking the sync loop to compute the sync
+progress or responses to such a request are ranked lowest on the priority ladder and will be eagerly dropped or not sent
+to begin with if there is strain on the channels.
 
 ### Reorganization While Syncing
 

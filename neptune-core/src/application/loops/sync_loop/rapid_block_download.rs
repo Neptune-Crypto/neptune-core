@@ -22,7 +22,6 @@ pub(crate) struct RapidBlockDownload {
     index_to_filename: HashMap<u64, PathBuf>,
 
     target_height: BlockHeight,
-    original_tip_height: BlockHeight,
 }
 
 impl RapidBlockDownload {
@@ -34,11 +33,6 @@ impl RapidBlockDownload {
     /// The target block height we are syncing to.
     pub(crate) fn target(&self) -> BlockHeight {
         self.target_height
-    }
-
-    // The local (unsynced) tip height when sync started.
-    pub(crate) fn original_tip_height(&self) -> BlockHeight {
-        self.original_tip_height
     }
 
     /// Set up a [`RapidBlockDownload`] state.
@@ -95,7 +89,6 @@ impl RapidBlockDownload {
             coverage,
             index_to_filename,
             target_height,
-            original_tip_height: BlockHeight::genesis(),
         })
     }
 
@@ -331,7 +324,6 @@ impl RapidBlockDownload {
 
     /// Synchronizes the rapid block download state to the new tip.
     pub(crate) fn fast_forward(&mut self, new_tip_height: BlockHeight) {
-        self.original_tip_height = new_tip_height;
         if new_tip_height.value() >= self.coverage.upper_bound {
             self.coverage = self.coverage.clone().expand(new_tip_height.value() + 1);
         }
