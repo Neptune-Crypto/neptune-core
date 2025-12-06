@@ -7,13 +7,14 @@ use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::TxProvingCapability;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::state::mining::mining_status::MiningStatus;
+use crate::state::sync_status::SyncStatus;
 
 /// Dashboard overview data from client.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OverviewData {
     pub tip_digest: Digest,
     pub tip_header: BlockHeader,
-    pub syncing: bool,
+    pub sync_status: SyncStatus,
     pub confirmed_available_balance: NativeCurrencyAmount,
     pub confirmed_total_balance: NativeCurrencyAmount,
     pub unconfirmed_available_balance: NativeCurrencyAmount,
@@ -60,7 +61,7 @@ impl rand::distr::Distribution<OverviewData> for rand::distr::StandardUniform {
         OverviewData {
             tip_digest: rng.random(),
             tip_header: rng.random(),
-            syncing: rng.random(),
+            sync_status: rng.random(),
             confirmed_available_balance: rng.random(),
             confirmed_total_balance: rng.random(),
             unconfirmed_available_balance: rng.random(),

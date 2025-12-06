@@ -176,6 +176,27 @@ impl IntoIterator for ChunkDictionary {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<ChunkDictionary> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ChunkDictionary {
+        ChunkDictionary {
+            dictionary: (0..10)
+                .map(|_| {
+                    (
+                        rng.next_u64(),
+                        (
+                            MmrMembershipProof::new((0..10).map(|_| rng.random()).collect_vec()),
+                            Chunk {
+                                relative_indices: (0..10).map(|_| rng.random()).collect_vec(),
+                            },
+                        ),
+                    )
+                })
+                .collect_vec(),
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use macro_rules_attr::apply;

@@ -40,6 +40,7 @@ use super::consensus::block::Block;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::application::config::network::Network;
 use crate::application::loops::channel::BlockProposalNotification;
+use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::protocol::consensus::block::difficulty_control::max_cumulative_pow_after;
 use crate::protocol::peer::transfer_block::TransferBlock;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
@@ -96,6 +97,7 @@ pub enum NegativePeerSanction {
     InvalidBlockProposal,
     NonFavorableBlockProposal,
     BlockProposalFromBlockedPeer,
+    RequestForUnknownBlock,
 
     UnwantedMessage,
 
@@ -138,6 +140,7 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::BatchBlocksInvalidStartHeight => {
                 "invalid start height of batch blocks"
             }
+            NegativePeerSanction::RequestForUnknownBlock => "request for unknown block",
             NegativePeerSanction::BatchBlocksUnknownRequest => "batch blocks unknown request",
             NegativePeerSanction::InvalidTransaction => "invalid transaction",
             NegativePeerSanction::UnconfirmableTransaction => "unconfirmable transaction",
@@ -194,28 +197,6 @@ impl Display for PositivePeerSanction {
     }
 }
 
-/// Used by main task to manage synchronizations/catch-up. Main task has
-/// a value of this type for each connected peer.
-
-#[derive(Debug, Clone, Copy)]
-pub struct PeerSynchronizationState {
-    pub claimed_max_height: BlockHeight,
-    pub(crate) claimed_max_pow: ProofOfWork,
-    pub synchronization_start: SystemTime,
-    pub last_request_received: Option<SystemTime>,
-}
-
-impl PeerSynchronizationState {
-    pub(crate) fn new(claimed_max_height: BlockHeight, claimed_max_pow: ProofOfWork) -> Self {
-        Self {
-            claimed_max_height,
-            claimed_max_pow,
-            synchronization_start: SystemTime::now(),
-            last_request_received: None,
-        }
-    }
-}
-
 impl Sanction for NegativePeerSanction {
     fn severity(self) -> i32 {
         match self {
@@ -241,6 +222,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
             NegativePeerSanction::BlockProposalNotFound => -1,
             NegativePeerSanction::InvalidBlockProposal => -10,
+            NegativePeerSanction::RequestForUnknownBlock => -5,
             NegativePeerSanction::UnwantedMessage => -1,
             NegativePeerSanction::NonFavorableBlockProposal => -1,
             NegativePeerSanction::BlockProposalFromBlockedPeer => -10,
@@ -498,6 +480,7 @@ pub(crate) enum PeerMessage {
     /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(TransferConnectionStatus),
+    SyncCoverage(SynchronizationBitMask),
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -525,6 +508,7 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => "unable to satisfy batch request",
             PeerMessage::SyncChallenge(_) => "sync challenge",
             PeerMessage::SyncChallengeResponse(_) => "sync challenge response",
+            PeerMessage::SyncCoverage(_) => "sync coverage",
         }
         .to_string()
     }
@@ -552,6 +536,7 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => true,
             PeerMessage::SyncChallenge(_) => false,
             PeerMessage::SyncChallengeResponse(_) => false,
+            PeerMessage::SyncCoverage(_) => true,
         }
     }
 
@@ -559,7 +544,7 @@ impl PeerMessage {
     pub fn ignore_during_sync(&self) -> bool {
         match self {
             PeerMessage::Handshake { .. } => false,
-            PeerMessage::Block(_) => true,
+            PeerMessage::Block(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
@@ -579,6 +564,7 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => false,
             PeerMessage::SyncChallenge(_) => false,
             PeerMessage::SyncChallengeResponse(_) => false,
+            PeerMessage::SyncCoverage(_) => false,
         }
     }
 
@@ -607,6 +593,7 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
+            PeerMessage::SyncCoverage(_) => true,
         }
     }
 }
@@ -1019,6 +1006,9 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
 
             33 => NegativePeerSanction::ReceivedSyncChallenge,
             34 => NegativePeerSanction::UnrelayableTransaction,
+
+            35 => NegativePeerSanction::RequestForUnknownBlock,
+
             _ => unreachable!(),
         }
     }

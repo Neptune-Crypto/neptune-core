@@ -370,6 +370,13 @@ pub struct Args {
     #[clap(long, default_value = "1000", value_parser(RangedI64ValueParser::<usize>::new().range(10..100000)))]
     pub(crate) sync_mode_threshold: usize,
 
+    /// By default the node will attempt to resume a previously aborted sync
+    /// process, whose blocks are stored in a temporary directory. Set this flag
+    /// to instruct the node ensure it is working in its own temporary directory
+    /// if a sync process is started.
+    #[clap(long)]
+    pub(crate) no_resume_sync: bool,
+
     /// IPs of nodes to connect to, e.g.: --peer 8.8.8.8:9798 --peer 8.8.4.4:1337.
     #[structopt(long = "peer")]
     pub peers: Vec<SocketAddr>,
