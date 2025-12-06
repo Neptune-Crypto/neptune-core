@@ -43,7 +43,6 @@ impl RapidBlockDownload {
 
     /// Set up a [`RapidBlockDownload`] state.
     pub(crate) async fn new(
-        highest_block_already_processed: BlockHeight,
         target_height: BlockHeight,
         resume_if_possible: bool,
     ) -> Result<Self, RapidBlockDownloadError> {
@@ -60,10 +59,7 @@ impl RapidBlockDownload {
         };
 
         let mut index_to_filename = HashMap::new();
-        let mut coverage = SynchronizationBitMask::new(
-            highest_block_already_processed.value() + 1,
-            target_height.next().value(),
-        );
+        let mut coverage = SynchronizationBitMask::new(1, target_height.next().value());
 
         // Read and process all the files in the temp directory.
         // There is only something to iterate over if we are resuming from an
@@ -99,7 +95,7 @@ impl RapidBlockDownload {
             coverage,
             index_to_filename,
             target_height,
-            original_tip_height: highest_block_already_processed,
+            original_tip_height: BlockHeight::genesis(),
         })
     }
 
@@ -332,6 +328,16 @@ impl RapidBlockDownload {
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
         Ok(())
     }
+
+    /// Synchronizes the rapid block download state to the new tip.
+    pub(crate) fn fast_forward(&mut self, new_tip_height: BlockHeight) {
+        self.original_tip_height = new_tip_height;
+        if new_tip_height.value() >= self.coverage.upper_bound {
+            self.coverage = self.coverage.clone().expand(new_tip_height.value() + 1);
+        }
+        self.coverage
+            .set_range(self.coverage.lower_bound, new_tip_height.value());
+    }
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -361,18 +367,16 @@ mod tests {
     async fn can_get_stored_block_iff_received() {
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
-        let low = 100;
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download =
-            RapidBlockDownload::new((low - 1).into(), BlockHeight::from(high), false)
-                .await
-                .unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(BlockHeight::from(high), false)
+            .await
+            .unwrap();
 
         // receive 10 blocks
         let mut received_heights = vec![];
         for _ in 0..10 {
-            let height = rng.random_range(low..high);
+            let height = rng.random_range(1..high);
             received_heights.push(height);
             let mut block = rng.random::<Block>();
             block.set_header_height(BlockHeight::from(height));
@@ -418,16 +422,14 @@ mod tests {
     async fn can_make_complete_by_receiving_all_blocks() {
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
-        let low = 100;
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download =
-            RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
-                .await
-                .unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(BlockHeight::from(high), false)
+            .await
+            .unwrap();
 
         // receive all blocks in random order
-        let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
+        let mut blocks_remaining = (1..=high).map(BlockHeight::from).collect_vec();
         while !blocks_remaining.is_empty() {
             let i = rng.random_range(0usize..blocks_remaining.len());
             let height = blocks_remaining.swap_remove(i);
@@ -457,10 +459,10 @@ mod tests {
         let high = 200;
         tip.set_header_height(high.into());
 
-        let mut rapid_block_download_a =
-            RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
-                .await
-                .unwrap();
+        let mut rapid_block_download_a = RapidBlockDownload::new(BlockHeight::from(high), false)
+            .await
+            .unwrap();
+        rapid_block_download_a.fast_forward(BlockHeight::from(low));
 
         // receive half the blocks in random order
         let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
@@ -479,10 +481,10 @@ mod tests {
         assert!(!rapid_block_download_a.is_complete());
 
         // setup new rapid block download state
-        let mut rapid_block_download_b =
-            RapidBlockDownload::new(low.into(), BlockHeight::from(high), true)
-                .await
-                .unwrap();
+        let mut rapid_block_download_b = RapidBlockDownload::new(BlockHeight::from(high), true)
+            .await
+            .unwrap();
+        rapid_block_download_b.fast_forward(BlockHeight::from(low));
         assert!(!rapid_block_download_b.is_complete());
 
         assert!(!blocks_remaining.is_empty());
@@ -514,15 +516,13 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn can_receive_same_block_twice() {
         let mut rng = rng();
-        let low = 100;
         let high = 200;
-        let mut rapid_block_download =
-            RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
-                .await
-                .unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(BlockHeight::from(high), false)
+            .await
+            .unwrap();
 
         // receive all blocks in random order, with repetitions
-        let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
+        let mut blocks_remaining = (1..=high).map(BlockHeight::from).collect_vec();
         let mut blocks_received = vec![];
         while !blocks_remaining.is_empty() {
             if rng.random_bool(0.5f64) && !blocks_received.is_empty() {
@@ -557,15 +557,13 @@ mod tests {
         {
             println!("seed: {seed}");
             let mut rng = StdRng::seed_from_u64(seed);
-            let low = 100;
             let mut high = 200;
-            let mut rapid_block_download =
-                RapidBlockDownload::new(low.into(), BlockHeight::from(high), false)
-                    .await
-                    .unwrap();
+            let mut rapid_block_download = RapidBlockDownload::new(BlockHeight::from(high), false)
+                .await
+                .unwrap();
 
             // receive all blocks in random order, with repetitions
-            let mut blocks_remaining = ((low + 1)..=high).map(BlockHeight::from).collect_vec();
+            let mut blocks_remaining = (1..=high).map(BlockHeight::from).collect_vec();
             let mut blocks_received = vec![];
             while !blocks_remaining.is_empty() {
                 if rng.random_bool(0.5f64) && blocks_received.len() % 5 == 0 {

@@ -84,20 +84,20 @@ pub(crate) struct SyncLoop {
 
 impl SyncLoop {
     pub(crate) async fn new(
-        tip: Block,
+        genesis_block: Block,
         target_height: BlockHeight,
         resume_if_possible: bool,
         block_validator: BlockValidator,
     ) -> Result<(Self, Sender<MainToSync>, Receiver<SyncToMain>), RapidBlockDownloadError> {
-        let download_state =
-            RapidBlockDownload::new(tip.header().height, target_height, resume_if_possible).await?;
+        let mut download_state = RapidBlockDownload::new(target_height, resume_if_possible).await?;
+        download_state.fast_forward(genesis_block.header().height);
         let (main_to_sync_sender, main_to_sync_receiver) =
             mpsc::channel::<MainToSync>(SYNC_LOOP_CHANNEL_CAPACITY);
         let (sync_to_main_sender, sync_to_main_receiver) =
             mpsc::channel::<SyncToMain>(SYNC_LOOP_CHANNEL_CAPACITY);
         Ok((
             Self {
-                tip,
+                tip: genesis_block,
                 download_state,
                 peers: Arc::new(Mutex::new(HashMap::new())),
                 main_channel_sender: sync_to_main_sender,
@@ -393,6 +393,14 @@ impl SyncLoop {
                                 let _ = tokio::task::spawn(
                                     Self::fetch_and_send_block(moved_main_channel_sender, moved_download_state, peer_handle, height)
                                 ).await;
+                            }
+                        }
+                        MainToSync::FastForward{ new_tip } => {
+                            tracing::debug!("sync loop received fast-forward message; fast-forwarding to block {}", new_tip.header().height);
+
+                            if new_tip.header().height > self.tip.header().height {
+                                self.download_state.fast_forward(new_tip.header().height);
+                                self.tip = *new_tip;
                             }
                         }
                     }
@@ -1160,7 +1168,8 @@ mod tests {
     async fn can_sync_from_one_good_peer() {
         let mut rng = rng();
         tracing::info!("starting test ...");
-        let current_tip = rng.random::<Block>();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
         let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
@@ -1181,7 +1190,8 @@ mod tests {
     async fn can_sync_from_many_good_peers() {
         let mut rng = rng();
         tracing::info!("starting test ...");
-        let current_tip = rng.random::<Block>();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
         let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
@@ -1206,7 +1216,8 @@ mod tests {
     async fn can_sync_from_one_flaky_peer() {
         let mut rng = rng();
         tracing::info!("starting test ...");
-        let current_tip = rng.random::<Block>();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
 
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
@@ -1229,7 +1240,8 @@ mod tests {
         let mut rng = rng();
         tracing::info!("starting test ...");
 
-        let current_tip = rng.random::<Block>();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..100));
         let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
@@ -1258,7 +1270,8 @@ mod tests {
         let mut rng = rng();
         tracing::info!("starting test ...");
 
-        let current_tip = rng.random::<Block>();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
         let current_tip_height = current_tip.header().height;
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..200));
@@ -1339,7 +1352,8 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(rng().next_u64());
         tracing::info!("starting test ...");
 
-        let current_tip = rng.random::<Block>();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
         let sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..100));
         let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
@@ -1398,7 +1412,8 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(rng().next_u64());
         tracing::info!("starting test ...");
 
-        let current_tip = rng.random::<Block>();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
         let original_sync_target_height =
             BlockHeight::from(current_tip.header().height.value() + rng.random_range(0..100));
         let mut main_loop = MockMainLoop::new(current_tip, original_sync_target_height).await;
@@ -1449,7 +1464,8 @@ mod tests {
         let mut rng = rng();
         tracing::info!("starting test ...");
 
-        let current_tip = rng.random::<Block>();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
         let current_tip_height = current_tip.header().height;
         let sync_target_height =
             BlockHeight::from(current_tip_height.value() + rng.random_range(20..100));
