@@ -307,7 +307,7 @@ impl SyncLoop {
                             }
                         }
                         MainToSync::SyncCoverage{peer_handle, coverage } => {
-                            tracing::debug!("Got sync coverage message from peer via main");
+                            tracing::debug!("sync loop: got sync coverage message from peer via main");
                             // Record peer's status.
                             {
                                 let mut peers_lock_mut = self.peers.lock().await;
@@ -428,23 +428,32 @@ impl SyncLoop {
                     // terminate.
                     let now = SystemTime::now();
                     let connected_to_peers = !self.peers.lock().await.is_empty();
-                    if !connected_to_peers && last_peer_disconnect_time.and_then(|t| now.duration_since(t).ok()).is_some_and(|d| d > Duration::from_secs(10)) {
+                    let last_heard_too_long_ago = last_peer_disconnect_time
+                        .and_then(|t| now.duration_since(t).ok())
+                        .is_some_and(|d| d > Duration::from_secs(10));
+                    if !connected_to_peers
+                    && last_heard_too_long_ago
+                    && self.main_channel_receiver.is_empty()
+                    && maybe_successors_subtask.is_none()
+                    && !finished_downloading {
                         tracing::warn!("Sync loop not connected to peers for too long; terminating.");
                         break;
                     }
 
-                    // If the last response was ages ago, then the sync loop is
+                    // If the last block arrived ages ago, then the sync loop is
                     // not doing anything any more and it should be terminated.
                     // However, if there are messages on the channel that have
                     // not been read yet, read those first -- maybe they contain
                     // the blocks we are waiting for. Also, the successors sub-
                     // task might still be running, so check for that too.
-                    if now
+                    let no_recent_blocks = now
                         .duration_since(most_recent_receipt.unwrap_or(now))
                         .ok()
-                        .is_none_or(|timestamp| timestamp > ANY_RESPONSE_TIMEOUT)
+                        .is_none_or(|timestamp| timestamp > ANY_RESPONSE_TIMEOUT);
+                    if no_recent_blocks
                     && self.main_channel_receiver.is_empty()
-                    && maybe_successors_subtask.is_none() {
+                    && maybe_successors_subtask.is_none()
+                    && !finished_downloading {
                         tracing::warn!("Most recent block was received a while ago; terminating sync loop.");
                         break;
                     }
@@ -547,7 +556,7 @@ impl SyncLoop {
                 break;
             }
             tracing::warn!("Sync loop: could not send return code to main loop. Is it busy?");
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(10 * send_attempt_counter)).await;
         }
         if !send_success {
             tracing::error!("Sync loop: failed to send message to main loop that job is done.");
