@@ -28,7 +28,7 @@ impl RpcApi for RpcServer {
         let state = self.state.lock_guard().await;
 
         Ok(HeightResponse {
-            height: state.chain.light_state().kernel.header.height.into(),
+            height: state.chain.light_state().kernel.header.height,
         })
     }
 

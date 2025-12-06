@@ -109,13 +109,13 @@ impl Difficulty {
     }
 
     /// Converts a BigUint into Difficulty. Returns None if it doesn’t fit.
-    pub(crate) fn from_biguint(bi: BigUint) -> Option<Self> {
-        if bi.iter_u32_digits().count() > Self::NUM_LIMBS {
+    pub(crate) fn from_biguint(big: BigUint) -> Option<Self> {
+        if big.iter_u32_digits().count() > Self::NUM_LIMBS {
             return None;
         }
 
         Some(Self(
-            bi.iter_u32_digits()
+            big.iter_u32_digits()
                 .take(Self::NUM_LIMBS)
                 .pad_using(Self::NUM_LIMBS, |_| 0u32)
                 .collect_vec()
@@ -729,13 +729,6 @@ mod tests {
         );
     }
 
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic]
-    fn debug_assert_fails() {
-        debug_assert!(false);
-    }
-
     #[proptest]
     fn mul_by_fixed_point_rational_distributes(
         #[strategy(arb())] a: Difficulty,
@@ -806,6 +799,15 @@ mod tests {
         let mut running_diff = diff;
         running_diff >>= a;
         prop_assert_eq!(diff >> a, running_diff);
+    }
+
+    #[test]
+    fn difficulty_endianness_roundtrip() {
+        for difficulty in [Difficulty::MINIMUM, Difficulty::MAXIMUM] {
+            let big: BigUint = difficulty.into();
+            let back = Difficulty::from_biguint(big).expect("Conversion to succeed");
+            assert_eq!(difficulty, back);
+        }
     }
 
     /// Determine the maximum possible cumulative proof-of-work after n blocks given
@@ -962,5 +964,14 @@ mod tests {
         assert!(upper_bound >= calculated_as_f64);
         assert!(lower_bound <= calculated_as_f64);
         assert!(calculated < ProofOfWork::MAXIMUM);
+    }
+
+    #[test]
+    fn pow_endianness_roundtrip() {
+        for pow in [ProofOfWork::MINIMUM, ProofOfWork::MAXIMUM] {
+            let big: BigUint = pow.into();
+            let back = big.try_into().expect("Conversion to succeed");
+            assert_eq!(pow, back);
+        }
     }
 }
