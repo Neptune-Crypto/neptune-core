@@ -458,6 +458,20 @@ impl SyncLoop {
                         break;
                     }
 
+                    // If we have finished downloading but not finished
+                    // processing, then ensure that a tip-successors subtask is
+                    // running.
+                    if finished_downloading && !finished_processing && maybe_successors_subtask.is_none() {
+                        tracing::debug!("Starting new successors subtask task again ...");
+                        let moved_tip = self.tip.clone();
+                        let moved_download_state = self.download_state.clone();
+                        let moved_main_channel_sender = self.main_channel_sender.clone();
+                        let moved_return_sender = successors_sender.clone();
+                        maybe_successors_subtask = Some(tokio::spawn(async move {
+                            Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_sender, self.block_validator).await
+                        }));
+                    }
+
                     if !finished_downloading {
                         // Check all peers for timeouts.
                         let mut reminders = vec![];
