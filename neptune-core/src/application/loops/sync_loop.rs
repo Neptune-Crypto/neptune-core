@@ -743,7 +743,7 @@ impl SyncLoop {
         let send_succeeded = send_attempt_counter != max_num_send_attempts;
         if !send_succeeded {
             tracing::warn!(
-                "Sync loop: could not send message to main loop even after {max_num_send_attempts}."
+                "Sync loop: could not send message to main loop even after {max_num_send_attempts} attempts."
             );
             tracing::warn!("Relying on timeout mechanism to retry in a short while.");
             return;
@@ -769,7 +769,7 @@ impl SyncLoop {
     ) -> bool {
         // send to main
         // important payload, so report on delays
-        let max = 100;
+        let max = 1000;
         for i in 1..=max {
             match channel_to_main.try_send(SyncToMain::TipSuccessor(Box::new(successor.clone()))) {
                 Ok(_) => {
