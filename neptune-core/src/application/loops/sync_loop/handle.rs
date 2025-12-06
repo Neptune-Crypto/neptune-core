@@ -146,7 +146,15 @@ impl SyncLoopHandle {
         let max_number_of_attempts = 20;
         let mut counter = 1;
         loop {
-            if self.sender.try_send(MainToSync::Status).is_err() {
+            // Avoid contributing to reduce channel clog. Only attempt to send
+            // if the channel queue is empty.
+            let queue_is_empty = self.sender.capacity() == self.sender.max_capacity();
+            let mut send_failed = true;
+            if queue_is_empty {
+                send_failed = self.sender.try_send(MainToSync::Status).is_err();
+            }
+
+            if send_failed {
                 // failure: sleep a while and then try again
                 tokio::time::sleep(Duration::from_millis(50 * counter)).await;
                 counter += 1;
