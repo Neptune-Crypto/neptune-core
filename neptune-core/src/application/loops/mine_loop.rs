@@ -1794,7 +1794,7 @@ pub(crate) mod tests {
         println!("initial difficulty: {}", initial_difficulty);
         prev_block.set_header_timestamp_and_difficulty(
             prev_block.header().timestamp,
-            Difficulty::from_biguint(initial_difficulty),
+            Difficulty::from_biguint(initial_difficulty).unwrap(),
         );
 
         let expected_duration = target_block_interval * NUM_BLOCKS;

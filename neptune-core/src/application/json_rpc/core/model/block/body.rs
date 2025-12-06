@@ -25,12 +25,24 @@ impl From<&MmrAccumulator> for RpcMmrAccumulator {
     }
 }
 
+impl From<RpcMmrAccumulator> for MmrAccumulator {
+    fn from(mmr: RpcMmrAccumulator) -> Self {
+        MmrAccumulator::init(mmr.peaks, mmr.leaf_count)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct RpcActiveWindow(pub Vec<u32>);
 
 impl From<&ActiveWindow> for RpcActiveWindow {
     fn from(window: &ActiveWindow) -> Self {
         Self(window.to_vec_u32())
+    }
+}
+
+impl From<RpcActiveWindow> for ActiveWindow {
+    fn from(window: RpcActiveWindow) -> Self {
+        ActiveWindow::from_vec_u32(window.0)
     }
 }
 
@@ -48,6 +60,16 @@ impl From<&MutatorSetAccumulator> for RpcMutatorSetAccumulator {
             aocl: RpcMmrAccumulator::from(&set.aocl),
             swbf_inactive: RpcMmrAccumulator::from(&set.swbf_inactive),
             swbf_active: RpcActiveWindow::from(&set.swbf_active),
+        }
+    }
+}
+
+impl From<RpcMutatorSetAccumulator> for MutatorSetAccumulator {
+    fn from(msa: RpcMutatorSetAccumulator) -> Self {
+        Self {
+            aocl: MmrAccumulator::from(msa.aocl),
+            swbf_inactive: MmrAccumulator::from(msa.swbf_inactive),
+            swbf_active: ActiveWindow::from(msa.swbf_active),
         }
     }
 }
@@ -71,5 +93,16 @@ impl From<&BlockBody> for RpcBlockBody {
             lock_free_mmr_accumulator: RpcMmrAccumulator::from(&body.lock_free_mmr_accumulator),
             block_mmr_accumulator: RpcMmrAccumulator::from(&body.block_mmr_accumulator),
         }
+    }
+}
+
+impl From<RpcBlockBody> for BlockBody {
+    fn from(body: RpcBlockBody) -> Self {
+        BlockBody::new(
+            body.transaction_kernel.into(),
+            body.mutator_set_accumulator.into(),
+            body.lock_free_mmr_accumulator.into(),
+            body.block_mmr_accumulator.into(),
+        )
     }
 }

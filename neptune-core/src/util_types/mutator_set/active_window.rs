@@ -170,10 +170,8 @@ impl ActiveWindow {
         self.sbf.clone()
     }
 
-    pub fn from_vec_u32(vector: &[u32]) -> Self {
-        Self {
-            sbf: vector.to_vec(),
-        }
+    pub fn from_vec_u32(vector: Vec<u32>) -> Self {
+        Self { sbf: vector }
     }
 }
 
