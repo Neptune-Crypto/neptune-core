@@ -17,7 +17,7 @@ use crate::protocol::consensus::block::Block;
 /// process, and which blocks we have yet to receive.
 #[derive(Debug, Clone)]
 pub(crate) struct RapidBlockDownload {
-    temp_directory: PathBuf,
+    temp_dir_full: PathBuf,
     coverage: SynchronizationBitMask,
     index_to_filename: HashMap<u64, PathBuf>,
 
@@ -26,7 +26,7 @@ pub(crate) struct RapidBlockDownload {
 }
 
 impl RapidBlockDownload {
-    fn temp_dir() -> PathBuf {
+    fn temp_dir_base() -> PathBuf {
         let suffix = "rapid-block-download/";
         std::env::temp_dir().join(suffix)
     }
@@ -51,7 +51,7 @@ impl RapidBlockDownload {
             Some(d) => d,
             None => {
                 tracing::debug!("No existing temp directory for syncing found, creating new one.");
-                let temp_directory = Self::temp_dir().join(format!("{}/", rng().next_u64()));
+                let temp_directory = Self::temp_dir_base().join(format!("{}/", rng().next_u64()));
                 tokio::fs::create_dir_all(&temp_directory)
                     .await
                     .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
@@ -95,7 +95,7 @@ impl RapidBlockDownload {
         }
 
         Ok(Self {
-            temp_directory,
+            temp_dir_full: temp_directory,
             coverage,
             index_to_filename,
             target_height,
@@ -113,7 +113,7 @@ impl RapidBlockDownload {
             return None;
         }
 
-        let temp_dir = Self::temp_dir();
+        let temp_dir = Self::temp_dir_base();
         let mut info = tokio::fs::read_dir(&temp_dir)
             .await
             .inspect_err(|e| {
@@ -187,18 +187,27 @@ impl RapidBlockDownload {
     }
 
     /// Delete the temp directory and its contents.
-    pub(crate) async fn clean_up(&self) {
-        if let Err(e) = tokio::fs::remove_dir_all(self.temp_directory.clone()).await {
+    pub(crate) async fn clean_up(&self) -> Result<(), Vec<PathBuf>> {
+        let mut error_directories = vec![];
+        if let Err(e) = tokio::fs::remove_dir_all(self.temp_dir_full.clone()).await {
             tracing::error!(
                 "failed to remove temporary directory '{}' for rapid block download: {e}",
-                self.temp_directory.clone().to_string_lossy()
+                self.temp_dir_full.clone().to_string_lossy()
             );
+            error_directories.push(self.temp_dir_full.clone());
         }
-        if let Err(e) = tokio::fs::remove_dir(Self::temp_dir()).await {
+        if let Err(e) = tokio::fs::remove_dir(Self::temp_dir_base()).await {
             tracing::warn!(
                 "failed to remove temporary directory '{}' for rapid block download: {e}",
-                Self::temp_dir().to_string_lossy()
+                Self::temp_dir_base().to_string_lossy()
             );
+            error_directories.push(Self::temp_dir_base());
+        }
+
+        if error_directories.is_empty() {
+            Ok(())
+        } else {
+            Err(error_directories)
         }
     }
 
@@ -227,7 +236,7 @@ impl RapidBlockDownload {
 
     /// Get the file name for the block.
     fn file_name(&self, block: &Block) -> PathBuf {
-        self.temp_directory.join(block.hash().to_hex())
+        self.temp_dir_full.join(block.hash().to_hex())
     }
 
     /// Store the block in the temp directory and mark it as received, if it
@@ -402,7 +411,7 @@ mod tests {
         }
 
         // clean up
-        rapid_block_download.clean_up().await;
+        let _ = rapid_block_download.clean_up().await;
     }
 
     #[apply(shared_tokio_runtime)]
@@ -435,7 +444,7 @@ mod tests {
         assert!(rapid_block_download.is_complete());
 
         // clean up
-        rapid_block_download.clean_up().await;
+        let _ = rapid_block_download.clean_up().await;
     }
 
     #[ignore = "cannot run in parallel with other tests"]
@@ -499,7 +508,7 @@ mod tests {
         );
 
         // clean up
-        rapid_block_download_b.clean_up().await;
+        let _ = rapid_block_download_b.clean_up().await;
     }
 
     #[apply(shared_tokio_runtime)]
@@ -536,7 +545,7 @@ mod tests {
         assert!(rapid_block_download.is_complete());
 
         // clean up
-        rapid_block_download.clean_up().await;
+        let _ = rapid_block_download.clean_up().await;
     }
 
     #[apply(shared_tokio_runtime)]
@@ -587,7 +596,7 @@ mod tests {
             assert!(rapid_block_download.is_complete());
 
             // clean up
-            rapid_block_download.clean_up().await;
+            let _ = rapid_block_download.clean_up().await;
         }
     }
 }
