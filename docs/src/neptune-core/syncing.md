@@ -95,6 +95,19 @@ reasons:
    previous one timed out or because the node shut down), then the starting point of this total span may have shifted
    to whatever the new tip height is at the time the new sync loop starts.
 
+### Reorganization While Syncing
+
+If there is a reorganization while syncing, then at some point a block validation will fail. When this happens, the sync
+loop terminates and cleans up the temporary directory. At this point the main loop sends a `RequestBlockNotification`
+message to all peers. Responses to this request may (and should) trigger a new sync.
+
+### Sync Failure
+
+If the sync loop fails, whether because of a reorganization or another reason, the default behavior is for the temporary
+directory to be deleted so that future syncs can start from a clean slate and avoid potentially corrupt data. However,
+if the temporary directory could not be deleted, the node logs a `error!` message informing the user to delete them
+manually.
+
 ## Succinct Nodes
 
 ***Note:*** *succinctness is not yet supported. This section describes a future feature.*

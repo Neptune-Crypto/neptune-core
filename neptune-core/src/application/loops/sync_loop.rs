@@ -546,7 +546,15 @@ impl SyncLoop {
         }
 
         // Clean up the temp directory.
-        self.download_state.clean_up().await;
+        if let Err(error_directories) = self.download_state.clean_up().await {
+            for error_directory in error_directories {
+                tracing::error!(
+                    "Failed to delete temporary directory '{}'. You must delete this directory manually in order for \
+                    future syncs to avoid starting from a corrupt state.",
+                    error_directory.display()
+                );
+            }
+        }
     }
 
     async fn fetch_and_send_block(
