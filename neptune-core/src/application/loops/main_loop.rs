@@ -832,11 +832,7 @@ impl MainLoopHandler {
                 // positive and beyond a threshold value.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                 if global_state_mut.sync_mode_criterion(claimed_height, claimed_cumulative_pow)
-                    && global_state_mut
-                        .net
-                        .sync_anchor
-                        .as_ref()
-                        .is_none_or(|sa| sa.cumulative_proof_of_work < claimed_cumulative_pow)
+                    && global_state_mut.net.sync_anchor.as_ref().is_none()
                 {
                     info!(
                         "Starting sync loop because peer {} indicates tip height {}; cumulative pow: {:?}",

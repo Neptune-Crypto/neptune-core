@@ -335,8 +335,10 @@ impl RapidBlockDownload {
         if new_tip_height.value() >= self.coverage.upper_bound {
             self.coverage = self.coverage.clone().expand(new_tip_height.value() + 1);
         }
-        self.coverage
-            .set_range(self.coverage.lower_bound, new_tip_height.value());
+        if new_tip_height.value() >= self.coverage.lower_bound {
+            self.coverage
+                .set_range(self.coverage.lower_bound, new_tip_height.value());
+        }
     }
 }
 
