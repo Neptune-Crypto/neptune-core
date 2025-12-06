@@ -826,10 +826,10 @@ impl MainLoopHandler {
                     return Ok(());
                 }
 
-                // Check if synchronization mode should be activated.
-                // Synchronization mode is entered if accumulated PoW exceeds
-                // our tip and if the height difference is positive and beyond
-                // a threshold value.
+                // Check if synchronization mode should be activated. Sync mode
+                // is entered into if claimed accumulated proof-of-work number
+                // exceeds that of our own tip and if the height difference is
+                // positive and beyond a threshold value.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                 if global_state_mut.sync_mode_criterion(claimed_height, claimed_cumulative_pow)
                     && global_state_mut
@@ -851,12 +851,17 @@ impl MainLoopHandler {
                         claimed_block_digest,
                     ));
 
-                    // Create sync loop with handle.
+                    // Clone info from global state and release write lock ASAP.
+                    let peer_map = global_state_mut.net.peer_map.clone();
                     let network = global_state_mut.cli().network;
                     let current_tip = global_state_mut.chain.light_state().clone();
                     let resume_please = !global_state_mut.cli().no_resume_sync;
+                    drop(global_state_mut);
+
+                    // Create sync loop with handle.
+                    let genesis_block = Block::genesis(network);
                     let mut sync_loop = SyncLoopHandle::new(
-                        current_tip,
+                        genesis_block,
                         claimed_height,
                         BlockValidator::Production { network },
                         resume_please,
@@ -866,12 +871,7 @@ impl MainLoopHandler {
 
                     // Tell sync loop about all known peers.
                     sync_loop.send_add_peer(peer_address).await;
-                    for (peer, _) in global_state_mut
-                        .net
-                        .peer_map
-                        .iter()
-                        .take(SYNC_LOOP_CHANNEL_CAPACITY)
-                    {
+                    for (peer, _) in peer_map.iter().take(SYNC_LOOP_CHANNEL_CAPACITY) {
                         if *peer != peer_address {
                             sync_loop.send_add_peer(*peer).await;
                         }
@@ -882,6 +882,21 @@ impl MainLoopHandler {
 
                     // Pause miner.
                     self.main_to_miner_tx.send(MainToMiner::StartSyncing);
+
+                    // Ask the peer about their block at the height of ouw own
+                    // tip. Either the peer is on the same fork as us and is
+                    // just further ahead; or else the peer is on a different
+                    // fork altogether. In the former case we can safely
+                    // fast-forward to the current tip and this will happen
+                    // automatically when the response to this question comes
+                    // in. In the latter case we need to run a bisection search
+                    // to find LUCA, and that happens as a side effect of the
+                    // sync loop querying random blocks. When those random
+                    // blocks come in, we fast-forward if we can.
+                    self.main_to_peer_broadcast(MainToPeerTask::RequestBlockByHeight {
+                        peer_addr_target: peer_address,
+                        height: current_tip.header().height,
+                    });
                 }
             }
             PeerTaskToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
@@ -1045,7 +1060,32 @@ impl MainLoopHandler {
             }
             PeerTaskToMain::NewSyncBlock(block, peer) => {
                 if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
-                    sync_loop.send_block(block, peer);
+                    // If we already know this block and it is on the canonical
+                    // chain, then we can fast-forward the sync; we are only
+                    // interested in downloading blocks that come after.
+                    let block_digest = block.hash();
+                    let state = self.global_state_lock.lock_guard().await;
+                    let have_block = state
+                        .chain
+                        .archival_state()
+                        .get_block_header(block_digest)
+                        .await
+                        .is_some();
+                    let is_canonical = if have_block {
+                        state
+                            .chain
+                            .archival_state()
+                            .block_belongs_to_canonical_chain(block_digest)
+                            .await
+                    } else {
+                        false
+                    };
+                    if have_block && is_canonical {
+                        info!("Fast-forwarding sync to block {}.", block.header().height);
+                        sync_loop.send_fast_forward_block(block).await;
+                    } else {
+                        sync_loop.send_block(block, peer);
+                    }
                 }
             }
             PeerTaskToMain::SyncCoverage(synchronization_bit_mask, socket_addr) => {

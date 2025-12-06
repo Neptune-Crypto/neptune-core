@@ -27,13 +27,13 @@ pub(crate) struct SyncLoopHandle {
 
 impl SyncLoopHandle {
     pub(crate) async fn new(
-        current_tip: Block,
+        genesis_block: Block,
         target_height: BlockHeight,
         block_validator: BlockValidator,
         resume_if_possible: bool,
     ) -> Self {
         let (state, sender, receiver) = SyncLoop::new(
-            current_tip,
+            genesis_block,
             target_height,
             resume_if_possible,
             block_validator,
@@ -70,6 +70,20 @@ impl SyncLoopHandle {
                 "Note: channel capacity is at {}/{}.",
                 self.sender.capacity(),
                 self.sender.max_capacity()
+            );
+        }
+    }
+
+    pub(crate) async fn send_fast_forward_block(&self, block: Box<Block>) {
+        let new_tip_height = block.header().height;
+        if let Err(e) = self
+            .sender
+            .send(MainToSync::FastForward { new_tip: block })
+            .await
+        {
+            tracing::error!(
+                "Could not fast-forward sync to block {}: {e}.",
+                new_tip_height
             );
         }
     }

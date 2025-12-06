@@ -403,6 +403,33 @@ impl SynchronizationBitMask {
         }
         pop_count
     }
+
+    /// Set bits min through max (ends inclusive).
+    ///
+    /// # Panics
+    ///
+    ///  - If either of the given indices is greater than the upper bound.
+    ///  - If max < min.
+    pub(crate) fn set_range(&mut self, min: u64, max: u64) {
+        assert!(max < self.upper_bound);
+        assert!(min < self.upper_bound);
+        assert!(max >= min);
+        let first_full_limb = min.div_ceil(32);
+        let first_index_in_full_limb = min.div_ceil(32) * 32;
+        let successor_of_last_full_limb = max / 32;
+        let first_index_after_last_full_limb = successor_of_last_full_limb * 32;
+        let offset = usize::try_from(self.lower_bound / 32).unwrap();
+
+        for limb_i in first_full_limb..successor_of_last_full_limb {
+            self.limbs[limb_i as usize - offset] = u32::MAX;
+        }
+        for index in min..u64::min(max, first_index_in_full_limb) {
+            self.set(index);
+        }
+        for index in u64::max(min, first_index_after_last_full_limb)..=max {
+            self.set(index);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -488,33 +515,6 @@ pub mod test {
             self.upper_bound = new_upper_bound;
             self.lower_bound = new_lower_bound;
             self
-        }
-
-        /// Set bits min through max (ends inclusive).
-        ///
-        /// # Panics
-        ///
-        ///  - If either of the given indices is greater than the upper bound.
-        ///  - If max < min.
-        pub(crate) fn set_range(&mut self, min: u64, max: u64) {
-            assert!(max < self.upper_bound);
-            assert!(min < self.upper_bound);
-            assert!(max >= min);
-            let first_full_limb = min.div_ceil(32);
-            let first_index_in_full_limb = min.div_ceil(32) * 32;
-            let successor_of_last_full_limb = max / 32;
-            let first_index_after_last_full_limb = successor_of_last_full_limb * 32;
-            let offset = usize::try_from(self.lower_bound / 32).unwrap();
-
-            for limb_i in first_full_limb..successor_of_last_full_limb {
-                self.limbs[limb_i as usize - offset] = u32::MAX;
-            }
-            for index in min..u64::min(max, first_index_in_full_limb) {
-                self.set(index);
-            }
-            for index in u64::max(min, first_index_after_last_full_limb)..=max {
-                self.set(index);
-            }
         }
     }
 

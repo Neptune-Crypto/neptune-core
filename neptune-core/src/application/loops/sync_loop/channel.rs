@@ -49,6 +49,9 @@ pub(crate) enum MainToSync {
         peer_handle: PeerHandle,
         height: BlockHeight,
     },
+    FastForward {
+        new_tip: Box<Block>,
+    },
 }
 
 pub(crate) enum SuccessorsToSync {

@@ -69,8 +69,8 @@ The sync loop keeps track of which blocks have been downloaded and which ones no
 the `SynchronizationBitMask` (and sometimes `coverage` for short). It is a bit mask along with two bounds. All bits
 below the lower bound are implicitly 1, and all bits above the upper bound are implicitly 0. In between the bits can be
 0 or 1, depending on whether the corresponding block was downloaded. The lower bound coincides with the height of the
-highest block processed by the state update function of the main loop. The upper bound coincides with the target block
-that we are syncing relative to.
+highest block processed so far by the state update function of the main loop. The upper bound coincides with the target
+block that we are syncing relative to (plus one).
 
 This synchronization bit mask is how the sync loop determines which blocks to request from another node who is also
 syncing. Assuming the lower and upper bounds agree, the expression `own_mask & !other_mask` puts zeros in the locations
@@ -107,6 +107,26 @@ If the sync loop fails, whether because of a reorganization or another reason, t
 directory to be deleted so that future syncs can start from a clean slate and avoid potentially corrupt data. However,
 if the temporary directory could not be deleted, the node logs a `error!` message informing the user to delete them
 manually.
+
+### Syncing across a Fork
+
+The lower bound on the synchronization bit mask is initially set to 1, corresponding to (the successor of) the genesis
+block. Immediately after spawning the sync loop, the main loop queries the peer that triggered the sync loop about his
+block at the height of the current tip. Depending on what the peer returns, there are two possibilities.
+
+ 1. The peer returns the same block. In this case the peer is on the same fork but on a higher height. The sync loop can
+    be fast-forwarded to set the lower bound to the successor of the tip. All the blocks prior to the tip and including
+    the tip have already been downloaded and processed.
+ 2. The peer returns an unknown block. In this case the peer is on a different fork and LUCA, the latest universal
+    common ancestor block, is unknown. In this case we do not fast-forward the sync loop, or at least not immediately.
+    The sync loop will ask for uniformly random blocks between 0 and the target height. All incoming blocks are tested:
+     - do we know this block already?
+     - is it on the canonical chain?
+    because if the answer is yes to both then we can (and do) fast-forward the sync loop. If not, the block is treated
+    as a regular sync block -- *i.e.*, marked as downloaded and stored in the temporary directory until it can be fed to
+    the main loop. The `set_new_tip` function will be triggered on the peer's LUCA-successor once it is downloaded and
+    the sync loop starts a tip-successors subtask (which in this very particular context is poorly named because until
+    this task is spawned our own tip is still on our own stale branch and the LUCA-successor does not succeed it).
 
 ## Succinct Nodes
 
