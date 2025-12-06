@@ -446,14 +446,28 @@ impl SyncLoop {
                     // not been read yet, read those first -- maybe they contain
                     // the blocks we are waiting for. Also, the successors sub-
                     // task might still be running, so check for that too.
-                    let no_recent_blocks = now
-                        .duration_since(most_recent_receipt.unwrap_or(now))
-                        .ok()
-                        .is_none_or(|timestamp| timestamp > ANY_RESPONSE_TIMEOUT);
-                    if no_recent_blocks
-                    && self.main_channel_receiver.is_empty()
-                    && maybe_successors_subtask.is_none()
-                    && !finished_downloading {
+                    let no_recent_blocks = most_recent_receipt
+                        .and_then(|timestamp| now.duration_since(timestamp).ok())
+                        .is_none_or(|duration| duration > ANY_RESPONSE_TIMEOUT);
+                    let peers_clone = self.peers.lock().await.clone();
+                    let peers_had_time_to_respond = peers_clone.iter().all(
+                        |(_, state)| state.last_request.and_then(
+                                    |timestamp| now.duration_since(timestamp).ok()
+                                ).is_some_and(|duration| duration > ANY_RESPONSE_TIMEOUT)
+                    );
+                    let requests_were_sent_recently = peers_clone
+                        .iter()
+                        .any(
+                            |(_, state)| state.last_request.and_then(
+                                    |timestamp| now.duration_since(timestamp).ok()
+                                ).is_some_and(|duration| duration < 2*ANY_RESPONSE_TIMEOUT)
+                        );
+                    if peers_had_time_to_respond
+                        && no_recent_blocks
+                        && requests_were_sent_recently
+                        && self.main_channel_receiver.is_empty()
+                        && maybe_successors_subtask.is_none()
+                        && !finished_downloading {
                         tracing::warn!("Most recent block was received a while ago; terminating sync loop.");
                         break;
                     }
@@ -476,7 +490,6 @@ impl SyncLoop {
                         // Check all peers for timeouts.
                         let mut reminders = vec![];
                         let mut punishments = vec![];
-                        let peers_clone = self.peers.lock().await.clone();
                         for (peer_handle, peer_state) in peers_clone {
                             if peer_state
                                 .last_request
@@ -710,13 +723,33 @@ impl SyncLoop {
         );
 
         // Send a request to the peer for that block.
-        // Use `try_send` here so that if the capacity is full, the message is
-        // dropped and we can continue operations within this thread.
-        if let Err(e) = channel_to_sender.try_send(SyncToMain::RequestBlocks(block_requests)) {
-            tracing::warn!("Sync loop: could not send message to main loop; error: {e}");
+        let max_num_send_attempts = 100;
+        let mut send_attempt_counter = 0;
+        loop {
+            if channel_to_sender
+                .try_send(SyncToMain::RequestBlocks(block_requests.clone()))
+                .is_err()
+            {
+                tokio::time::sleep(Duration::from_millis(send_attempt_counter)).await;
+                send_attempt_counter += 1;
+            } else {
+                break;
+            }
+
+            if send_attempt_counter == max_num_send_attempts {
+                break;
+            }
+        }
+        let send_succeeded = send_attempt_counter != max_num_send_attempts;
+        if !send_succeeded {
+            tracing::warn!(
+                "Sync loop: could not send message to main loop even after {max_num_send_attempts}."
+            );
             tracing::warn!("Relying on timeout mechanism to retry in a short while.");
+            return;
         }
 
+        // Else, send succeeded.
         // Record timestamp of last request.
         let now = SystemTime::now();
         let mut peers_lock_mut = peers.lock().await;
