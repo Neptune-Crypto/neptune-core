@@ -34,10 +34,6 @@ pub(crate) mod synchronization_bit_mask;
 
 pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 10;
 
-/// After this long without any response from anyone, the sync loop will
-/// terminate.
-const ANY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(15);
-
 /// After this long without a response from a given peer, that peer will be sent
 /// another block request.
 #[cfg(not(test))]
@@ -128,9 +124,6 @@ impl SyncLoop {
         // by one. Its return value comes to the sync loop over this channel.
         let mut maybe_successors_subtask: Option<JoinHandle<()>> = None;
         let (successors_sender, mut successors_receiver) = mpsc::channel(1);
-
-        // Track the timestamp of the most recent block to be received.
-        let mut most_recent_receipt = None;
 
         // Track the time of disconnect of the last peer.
         let mut last_peer_disconnect_time = None;
@@ -245,7 +238,6 @@ impl SyncLoop {
                                 e.last_response = Some(now);
                                 e.num_blocks_contributed += 1;
                             });
-                            most_recent_receipt = Some(now);
 
                             // Update tip to available successors.
                             if maybe_successors_subtask.is_none() && block.header().height == self.tip.header().height.next() {
@@ -284,7 +276,6 @@ impl SyncLoop {
                                 continue;
                             }
                             assert_eq!(self.download_state.target(), block.header().height);
-                            most_recent_receipt = Some(SystemTime::now());
 
                             // In the special case that the incoming target
                             // block is one ahead of the tip (the block height
@@ -440,38 +431,6 @@ impl SyncLoop {
                         break;
                     }
 
-                    // If the last block arrived ages ago, then the sync loop is
-                    // not doing anything any more and it should be terminated.
-                    // However, if there are messages on the channel that have
-                    // not been read yet, read those first -- maybe they contain
-                    // the blocks we are waiting for. Also, the successors sub-
-                    // task might still be running, so check for that too.
-                    let no_recent_blocks = most_recent_receipt
-                        .and_then(|timestamp| now.duration_since(timestamp).ok())
-                        .is_none_or(|duration| duration > ANY_RESPONSE_TIMEOUT);
-                    let peers_clone = self.peers.lock().await.clone();
-                    let peers_had_time_to_respond = peers_clone.iter().all(
-                        |(_, state)| state.last_request.and_then(
-                                    |timestamp| now.duration_since(timestamp).ok()
-                                ).is_some_and(|duration| duration > ANY_RESPONSE_TIMEOUT)
-                    );
-                    let requests_were_sent_recently = peers_clone
-                        .iter()
-                        .any(
-                            |(_, state)| state.last_request.and_then(
-                                    |timestamp| now.duration_since(timestamp).ok()
-                                ).is_some_and(|duration| duration < 2*ANY_RESPONSE_TIMEOUT)
-                        );
-                    if peers_had_time_to_respond
-                        && no_recent_blocks
-                        && requests_were_sent_recently
-                        && self.main_channel_receiver.is_empty()
-                        && maybe_successors_subtask.is_none()
-                        && !finished_downloading {
-                        tracing::warn!("Most recent block was received a while ago; terminating sync loop.");
-                        break;
-                    }
-
                     // If we have finished downloading but not finished
                     // processing, then ensure that a tip-successors subtask is
                     // running.
@@ -486,6 +445,7 @@ impl SyncLoop {
                         }));
                     }
 
+                    let peers_clone = self.peers.lock().await.clone();
                     if !finished_downloading {
                         // Check all peers for timeouts.
                         let mut reminders = vec![];
