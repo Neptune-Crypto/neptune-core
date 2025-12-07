@@ -1064,6 +1064,7 @@ mod tests {
             broadcast_tx.subscribe(),
             to_main_tx.clone(),
             handshake,
+            None,
         )
         .await
         .unwrap_err();
@@ -1086,6 +1087,7 @@ mod tests {
             broadcast_tx.subscribe(),
             to_main_tx,
             handshake,
+            None,
         )
         .await?;
 
@@ -1129,6 +1131,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await?;
 
@@ -1164,6 +1167,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(answer.is_ok(), "Expect OK on bad magic value");
@@ -1197,6 +1201,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(answer.is_err(), "bad network must result in error");
@@ -1262,6 +1267,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(
@@ -1319,6 +1325,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(answer.is_err(), "max peers exceeded must result in error");
@@ -1469,6 +1476,7 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
+            None,
         )
         .await;
         assert!(
