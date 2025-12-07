@@ -344,6 +344,7 @@ impl SyncLoop {
                                     loop {
                                         if let Err(e) = moved_main_channel_sender.try_send(SyncToMain::Status(status)) {
                                             tracing::warn!("Sync loop: failed to send Status({}) message to main loop: {e}.", status);
+                                            tracing::debug!("Channel capacity is at {}/{}", moved_main_channel_sender.capacity(), moved_main_channel_sender.max_capacity());
                                             tokio::time::sleep(Duration::from_millis(counter * 50)).await;
                                             counter += 1;
                                         } else {
@@ -945,7 +946,7 @@ mod tests {
                     Some(message) = self.sync_loop_handle.recv() => {
                         match message {
                             SyncToMain::Finished(target) => {
-                                tracing::info!("sync loop is finished");
+                                tracing::info!("mock main loop: sync loop is finished");
                                 if self.current_tip_height == target {
                                     self.finished = true;
 
@@ -955,7 +956,7 @@ mod tests {
                                     self.sync_target_height = target;
                                 }
                                 else {
-                                    tracing::warn!("Got Finished({}) message from sync loop but we are not finished yet ({}).", target, self.current_tip_height);
+                                    tracing::warn!("mock main loop: Got Finished({}) message from sync loop but we are not finished yet ({}).", target, self.current_tip_height);
                                 }
                                 break;
                             }
@@ -969,52 +970,52 @@ mod tests {
                                     }
                                 }
                                 else {
-                                    panic!("tip-success is not actual successor");
+                                    panic!("mock main loop: tip-success is not actual successor");
                                 }
                             }
                             SyncToMain::RequestBlocks(block_requests) => {
-                                tracing::debug!("mock main loop received request blocks message ...");
+                                tracing::debug!("mock main loop: received request blocks message ...");
                                 for block_request in block_requests {
                                     if let Some(peer) = self.peers.get_mut(&block_request.peer_handle.clone()) {
                                         if let Some(block) = peer.request(block_request.height).await {
-                                            tracing::debug!("got block from peer; relaying to sync loop");
+                                            tracing::debug!("mock main loop: got block from peer; relaying to sync loop");
                                             self.sync_loop_handle.send_block(Box::new(block), block_request.peer_handle);
-                                            tracing::debug!("done relaying");
+                                            tracing::debug!("mock main loop: done relaying");
                                         } else {
                                             if let MockPeer::Syncing(syncing_peer) = peer {
                                                 if rng().random_bool(0.5_f64) {
                                                     self.sync_loop_handle.send_sync_coverage(block_request.peer_handle, syncing_peer.coverage());
                                                 }
                                             }
-                                            tracing::debug!("no response from peer");
+                                            tracing::debug!("mock main loop: no response from peer");
                                         }
                                     } else {
-                                        tracing::warn!("no such peer -- was peer removed?");
+                                        tracing::warn!("mock main loop: no such peer -- was peer removed?");
                                     }
                                     tokio::task::yield_now().await;
                                 }
                             }
                             SyncToMain::Status(status) => {
-                                tracing::info!("Syncing is {status} complete.");
+                                tracing::info!("mock main loop: Syncing is {status} complete.");
                             }
                             SyncToMain::Error => {
-                                tracing::error!("Error code from sync loop.");
+                                tracing::error!("mock main loop: Error code from sync loop.");
                                 break;
                             }
                             SyncToMain::Punish(peers) => {
-                                tracing::info!("Punishing {} peers for sync timeout.", peers.len());
+                                tracing::info!("mock main loop: Punishing {} peers for sync timeout.", peers.len());
                             }
                             SyncToMain::Coverage{
                                 coverage: _,
                                 peer_handle
                             } => {
-                                tracing::info!("Sending coverage to peer {peer_handle}");
+                                tracing::info!("mock main loop: Sending coverage to peer {peer_handle}");
                             }
                             SyncToMain::SyncBlock{
                                 block,
                                 peer_handle,
                             } => {
-                                tracing::info!("Sending block {} over to {peer_handle}", block.header().height);
+                                tracing::info!("mock main loop: Sending block {} over to {peer_handle}", block.header().height);
                             }
                         }
                     }
@@ -1022,29 +1023,30 @@ mod tests {
                     Some(message) = self.peer_control_receiver.recv() => {
                         match message {
                             PeerControl::AddPeer(peer) => {
-                                tracing::info!("adding peer {}", peer.handle());
+                                tracing::info!("mock main loop: adding peer {}", peer.handle());
                                 self.connect(peer).await;
                             }
                             PeerControl::RemovePeer(handle) => {
-                                tracing::info!("removing peer {}", handle);
+                                tracing::info!("mock main loop: removing peer {}", handle);
                                 self.disconnect(handle).await;
                             }
                         }
                     }
 
                     Some(message) = self.blockchain_tip_control_receiver.recv() => {
-                        tracing::debug!("got new block! while there is {} messages in the peer control channel", self.peer_control_receiver.len());
+                        tracing::debug!("mock main loop: got new block! while there is {} messages in the peer control channel", self.peer_control_receiver.len());
                         match message {
                             BlockchainTipControl::NewBlock(block) => {
-                                tracing::info!("new block was mined; expanding sync target accordingly ******");
+                                tracing::info!("mock main loop: new block was mined; expanding sync target accordingly ******");
                                 self.sync_target_height = self.sync_target_height.next();
                                 self.sync_loop_handle.send_new_target(Box::new(block)).await;
                             }
                         }
-                        tracing::debug!("done relaying new block.");
+                        tracing::debug!("mock main loop: done relaying new block.");
                     }
 
                     _ = ticker.tick() => {
+                        tracing::debug!("mock main loop: sending status request");
                         self.sync_loop_handle.send_status_request().await;
                     }
                 }
