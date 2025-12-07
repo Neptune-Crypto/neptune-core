@@ -76,10 +76,6 @@ const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
 const MAX_BLOCK_SIZE_IN_FORK_RECONCILIATION: usize =
     2 * 8 * ConsensusRuleSet::HardforkAlpha.max_block_size();
 
-/// Maximum total bytes for all blocks in fork_reconciliation_blocks.
-/// This caps overall memory usage during fork resolution.
-const MAX_FORK_RECONCILIATION_TOTAL_BYTES: usize = 100 * 1024 * 1024;
-
 /// Maximum size of a single announcement, in BFieldElements. Typical encrypted
 /// UTXO notifications are ~400 BFEs. This limit provides headroom while
 /// preventing DoS via oversized announcements.
@@ -456,25 +452,6 @@ impl PeerLoopHandler {
             );
             self.punish(NegativePeerSanction::OversizedBlock).await?;
             peer_state.fork_reconciliation_blocks.clear();
-            peer_state.fork_reconciliation_bytes = 0;
-            return Ok(());
-        }
-
-        // Reject if total memory budget would be exceeded
-        let new_total_bytes = peer_state
-            .fork_reconciliation_bytes
-            .saturating_add(block_size);
-        if new_total_bytes > MAX_FORK_RECONCILIATION_TOTAL_BYTES {
-            warn!(
-                "Fork reconciliation memory budget exceeded: {} + {} = {} bytes (max: {} bytes)",
-                peer_state.fork_reconciliation_bytes,
-                block_size,
-                new_total_bytes,
-                MAX_FORK_RECONCILIATION_TOTAL_BYTES
-            );
-            self.punish(NegativePeerSanction::OversizedBlock).await?;
-            peer_state.fork_reconciliation_blocks.clear();
-            peer_state.fork_reconciliation_bytes = 0;
             return Ok(());
         }
 
@@ -519,13 +496,11 @@ impl PeerLoopHandler {
             )))
             .await?;
             peer_state.fork_reconciliation_blocks = vec![];
-            peer_state.fork_reconciliation_bytes = 0;
             return Ok(());
         }
 
         // otherwise, append
         peer_state.fork_reconciliation_blocks.push(*received_block);
-        peer_state.fork_reconciliation_bytes = new_total_bytes;
 
         // Try fetch parent
         let received_block_header = *peer_state
@@ -559,7 +534,6 @@ impl PeerLoopHandler {
         let Some(parent_block) = parent_block else {
             if parent_height.is_genesis() {
                 peer_state.fork_reconciliation_blocks.clear();
-                peer_state.fork_reconciliation_bytes = 0;
                 self.punish(NegativePeerSanction::DifferentGenesis).await?;
                 return Ok(());
             }
@@ -584,7 +558,6 @@ impl PeerLoopHandler {
         // block that we have.
         let fork_reconciliation_event = !peer_state.fork_reconciliation_blocks.is_empty();
         peer_state.fork_reconciliation_blocks.clear();
-        peer_state.fork_reconciliation_bytes = 0;
 
         if let Some(new_block_height) = self.handle_blocks(new_blocks, parent_block).await? {
             // If `BlockNotification` was received during a block reconciliation

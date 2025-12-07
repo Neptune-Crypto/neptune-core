@@ -624,9 +624,6 @@ impl PeerMessage {
 pub struct MutablePeerState {
     pub highest_shared_block_height: BlockHeight,
     pub fork_reconciliation_blocks: Vec<Block>,
-    /// Total estimated bytes of blocks in fork_reconciliation_blocks.
-    /// Used to cap memory usage during fork resolution.
-    pub(crate) fork_reconciliation_bytes: usize,
     pub(crate) sync_challenge: Option<IssuedSyncChallenge>,
 
     /// Timestamp for the last successful sync challenge response.
@@ -640,7 +637,6 @@ impl MutablePeerState {
         Self {
             highest_shared_block_height: block_height,
             fork_reconciliation_blocks: vec![],
-            fork_reconciliation_bytes: 0,
             sync_challenge: None,
             successful_sync_challenge_response_time: None,
         }
