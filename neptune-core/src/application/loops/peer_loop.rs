@@ -65,10 +65,16 @@ const STANDARD_BLOCK_BATCH_SIZE: usize = 35;
 const MAX_PEER_LIST_LENGTH: usize = 10;
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
 
-/// Maximum size in bytes for a single block during fork reconciliation.
-/// Blocks larger than this are rejected to prevent RAM exhaustion attacks.
-/// 10MB is generous - legitimate blocks with many transactions are typically 1-2MB.
-const MAX_BLOCK_SIZE_IN_FORK_RECONCILIATION: usize = 10 * 1024 * 1024;
+/// Maximum size in bytes for a single block during fork reconciliation. Blocks
+/// larger than this are rejected to prevent RAM exhaustion attacks.
+///
+/// This constant is defined for the peer to heuristically enforce a safe upper
+/// bound as a matter of policy, and does not have to determine which consensus
+/// rule set we are on to get an exact value. Note that this policy is only
+/// enforced during fork reconciliation -- in particular, it does not contribute
+/// to block (in)validity as defined in [`Block::validate`].
+const MAX_BLOCK_SIZE_IN_FORK_RECONCILIATION: usize =
+    2 * 8 * ConsensusRuleSet::HardforkAlpha.max_block_size();
 
 /// Maximum total bytes for all blocks in fork_reconciliation_blocks.
 /// This caps overall memory usage during fork resolution.
