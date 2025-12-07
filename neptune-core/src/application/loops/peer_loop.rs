@@ -36,7 +36,6 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
-use crate::protocol::consensus::block::MAX_ANNOUNCEMENT_MESSAGE_SIZE;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
 use crate::protocol::consensus::transaction::Transaction;
@@ -74,6 +73,14 @@ const MAX_BLOCK_SIZE_IN_FORK_RECONCILIATION: usize = 10 * 1024 * 1024;
 /// Maximum total bytes for all blocks in fork_reconciliation_blocks.
 /// This caps overall memory usage during fork resolution.
 const MAX_FORK_RECONCILIATION_TOTAL_BYTES: usize = 100 * 1024 * 1024;
+
+/// Maximum size of a single announcement, in BFieldElements. Typical encrypted
+/// UTXO notifications are ~400 BFEs. This limit provides headroom while
+/// preventing DoS via oversized announcements.
+///
+/// Note that this limit is enforced as a policy for relaying transactions, and
+/// not affect block (in)validity.
+pub(crate) const MAX_ANNOUNCEMENT_MESSAGE_SIZE: usize = 4096;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
 const DISCONNECT_CONNECTION: bool = true;
