@@ -142,14 +142,14 @@ impl SyncLoopHandle {
         }
     }
 
-    pub(crate) async fn send_status_request(&self) {
+    pub(crate) fn send_status_request(&self) {
         // Insist: in case of failure, wait a while then try again. Do this in a
         // separate task so that control can return.
         let moved_sender = self.sender.clone();
-        let _ = tokio::task::spawn(Self::insist_sending_status_request(moved_sender));
+        tokio::task::spawn(Self::weakly_insist_sending_status_request(moved_sender));
     }
 
-    async fn insist_sending_status_request(sender: Sender<MainToSync>) {
+    async fn weakly_insist_sending_status_request(sender: Sender<MainToSync>) {
         let max_number_of_attempts = 20;
         let mut counter = 1;
         loop {

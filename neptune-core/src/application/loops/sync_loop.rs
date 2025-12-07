@@ -1047,7 +1047,7 @@ mod tests {
 
                     _ = ticker.tick() => {
                         tracing::debug!("mock main loop: sending status request");
-                        self.sync_loop_handle.send_status_request().await;
+                        self.sync_loop_handle.send_status_request();
                     }
                 }
             }
