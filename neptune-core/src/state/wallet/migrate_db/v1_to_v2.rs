@@ -357,8 +357,30 @@ mod tests {
             .join("test_data/migrations/wallet_db/v1_to_v2/wallet_db.v1-with-mutxos");
         let wallet_database_path = data_dir.wallet_database_dir_path();
 
+        println!(
+            "Reading v1 database from: {}",
+            test_data_wallet_db_dir.to_string_lossy()
+        );
+        println!(
+            "Contents of v1 source path: {:?}",
+            std::fs::read_dir(&test_data_wallet_db_dir)?.collect::<Vec<_>>()
+        );
+        println!(
+            "Copying v1 database to: {}",
+            wallet_database_path.to_string_lossy()
+        );
+
         // copy DB in test_data to wallet_database_path
         crate::copy_dir_recursive(&test_data_wallet_db_dir, &wallet_database_path)?;
+
+        // Sleep to ensure file-copying has completed, such that DB is populated
+        // with test data. Relevant on CI systems.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+        println!(
+            "Contents of v1 dest path: {:?}",
+            std::fs::read_dir(&test_data_wallet_db_dir)?.collect::<Vec<_>>()
+        );
 
         // open v1 DB file
         let db_v1 =
