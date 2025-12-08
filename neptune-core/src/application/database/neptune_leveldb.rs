@@ -11,6 +11,7 @@ use leveldb_sys::Compression;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::task;
+use tracing::debug;
 
 use super::leveldb::DB;
 
@@ -246,6 +247,10 @@ where
     pub async fn new(db_path: &Path, options: &Options) -> Result<Self> {
         let options_async = OptionsAsync::from(options);
         let path = db_path.to_path_buf();
+        debug!(
+            "Attempting to open new wallet database from: {}",
+            path.to_string_lossy()
+        );
 
         let db =
             task::spawn_blocking(move || NeptuneLevelDbInternal::new(&path, &options_async.into()))
