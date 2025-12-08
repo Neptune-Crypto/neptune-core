@@ -90,3 +90,25 @@ where
     // No preprocessing needed for this table type
     async fn restore_or_new(&mut self) {}
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    impl<K, V> DbtMap<K, V>
+    where
+        K: Clone + Debug + Serialize + DeserializeOwned + Eq + Hash + Send + Sync,
+        V: Clone + Serialize + DeserializeOwned,
+    {
+        /// Delete all entries in the mapping. Must be followed up with a persist. Only suitable for
+        /// tests. Must not be called in production code, without changes.
+        ///
+        /// # Warning
+        ///
+        /// Do not pull this function out from under the test flag, as it requires being followed
+        /// up by a call to persist the changes.
+        pub(crate) async fn clear_test(&mut self) {
+            self.inner.clear_test().await;
+        }
+    }
+}
