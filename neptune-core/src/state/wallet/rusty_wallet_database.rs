@@ -396,6 +396,9 @@ pub(crate) mod tests {
 
         pub(crate) async fn clear_mutxos(&mut self) {
             self.tables.monitored_utxos.clear().await;
+            self.tables.strong_key_to_mutxo.clear_test().await;
+            self.tables.index_set_to_mutxo.clear_test().await;
+            self.persist().await;
         }
 
         pub(crate) async fn clear_expected_utxos(&mut self) {

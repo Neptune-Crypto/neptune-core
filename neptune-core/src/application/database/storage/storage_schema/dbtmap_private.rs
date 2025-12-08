@@ -196,3 +196,49 @@ where
         self.keys_by_index.lock_guard().await.get_all().await
     }
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use futures::FutureExt;
+    use itertools::Itertools;
+
+    use super::*;
+
+    impl<K, V> DbtMapPrivate<K, V>
+    where
+        K: Clone + Debug + Serialize + DeserializeOwned + Eq + Hash + Send + Sync,
+        V: Clone + Serialize + DeserializeOwned,
+    {
+        /// Delete all entries in the mapping.
+        ///
+        /// # Warning
+        ///
+        /// Do not pull this function out from under the test flag before you make sure that the
+        /// cache is handled correctly.
+        pub(in super::super) async fn clear_test(&mut self) {
+            let all_keys = self.all_keys().await;
+            self.keys_by_index
+                .lock_mut_async(|lock| async { lock.clear().await }.boxed())
+                .await;
+
+            let all_keys = all_keys
+                .into_iter()
+                .map(|k| self.map_key_rusty_key(&k))
+                .collect_vec();
+
+            let persist_count = {
+                let mut pending_writes = self.pending_writes.lock_guard_mut().await;
+                for key in all_keys {
+                    pending_writes.write_ops.push(WriteOperation::Delete(key));
+                }
+
+                pending_writes.persist_count
+            };
+
+            self.process_persist_count(persist_count);
+
+            // Is this the correct way of handling cache?
+            self.cache.clear();
+        }
+    }
+}
