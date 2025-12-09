@@ -1523,6 +1523,19 @@ pub trait RPC {
         max_num_blocks: Option<usize>,
     ) -> RpcResult<Vec<(u64, Difficulty)>>;
 
+    /// Upper bound on the total amount of coins spendable now, in particular,
+    /// without counting time-locked coins, but with accounting for the premine,
+    /// the redemptions, and known burns.
+    async fn circulating_supply(token: auth::Token) -> RpcResult<NativeCurrencyAmount>;
+
+    /// Asymptotical limit on the total amount of coins, counting all coins
+    /// already mined or to be mined in the future, disregarding all time-locks,
+    /// counting the premine and redemptions, and accounting for known burns.
+    async fn max_supply(token: auth::Token) -> RpcResult<NativeCurrencyAmount>;
+
+    /// Total amount of coins burned.
+    async fn burned_supply(token: auth::Token) -> RpcResult<NativeCurrencyAmount>;
+
     /******** PEER INTERACTIONS ********/
 
     /// Broadcast transaction notifications for all transactions in this node's
@@ -4033,6 +4046,63 @@ impl RPC for NeptuneRPCServer {
         }
 
         Ok(difficulties)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn circulating_supply(
+        self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+    ) -> RpcResult<NativeCurrencyAmount> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .circulating_supply()
+            .await)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn max_supply(
+        self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+    ) -> RpcResult<NativeCurrencyAmount> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .max_supply()
+            .await)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn burned_supply(
+        self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+    ) -> RpcResult<NativeCurrencyAmount> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .burned_supply()
+            .await)
     }
 
     // documented in trait. do not add doc-comment.
