@@ -373,13 +373,11 @@ mod tests {
         // copy DB in test_data to wallet_database_path
         crate::copy_dir_recursive(&test_data_wallet_db_dir, &wallet_database_path)?;
 
-        // Sleep to ensure file-copying has completed, such that DB is populated
-        // with test data. Relevant on CI systems.
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
+        // Sleep to ensure data copying is completed on CI machines.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         println!(
             "Contents of v1 dest path: {:?}",
-            std::fs::read_dir(&test_data_wallet_db_dir)?.collect::<Vec<_>>()
+            std::fs::read_dir(&wallet_database_path)?.collect::<Vec<_>>()
         );
 
         // open v1 DB file
