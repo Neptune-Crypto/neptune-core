@@ -1248,6 +1248,15 @@ impl GlobalState {
             restored_mutxos += 1;
         }
 
+        // Only set sync label if sync label was never set, since this function
+        // only restores wallet databases when *no* membership proofs are known,
+        // not merely if they are not synced. In other words: This function only
+        // guarantees that all membership proofs are synced to current tip in
+        // the case that all monitored UTXOs are new to the wallet database.
+        if self.wallet_state.wallet_db.get_sync_label() == Digest::default() {
+            self.wallet_state.wallet_db.set_sync_label(tip_hash).await;
+        }
+
         self.wallet_state.wallet_db.persist().await;
         info!("Successfully restored {restored_mutxos} monitored UTXOs to wallet database");
 
