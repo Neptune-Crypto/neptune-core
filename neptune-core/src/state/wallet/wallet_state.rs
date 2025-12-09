@@ -1568,7 +1568,7 @@ impl WalletState {
 
     /// Process all outputs in a block under the assumption that the node has
     /// access to an archival mutator set.
-    async fn process_outputs_no_maintain_mps(
+    pub(crate) async fn process_outputs_no_maintain_mps(
         &mut self,
         block: &Block,
         incoming: &HashMap<AdditionRecord, IncomingUtxo>,

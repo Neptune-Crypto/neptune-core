@@ -543,6 +543,14 @@ pub struct Args {
     #[clap(long)]
     pub(crate) scan_keys: Option<usize>,
 
+    /// Construct an maintain a UTXO index
+    ///
+    /// If set, all announcements, inputs, and outputs in all processed blocks
+    /// will be indexed in a database that enables a fast rescan for the
+    /// discovery of all balance-affecting inputs and outputs of all blocks.
+    #[clap(long)]
+    pub(crate) utxo_index: bool,
+
     /// Enable JSON/HTTP RPC.
     /// You can optionally specify an address and port (default: 127.0.0.1:9797).
     /// If not given, RPC is disabled.

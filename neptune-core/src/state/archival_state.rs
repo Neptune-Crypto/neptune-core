@@ -18,6 +18,7 @@ use tracing::debug;
 use tracing::warn;
 
 pub(crate) mod import_blocks_from_files;
+pub(crate) mod rusty_utxo_index;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
@@ -41,6 +42,7 @@ use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
 use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
+use crate::state::archival_state::rusty_utxo_index::RustyUtxoIndex;
 use crate::state::database::BlockFileLocation;
 use crate::state::database::BlockIndexKey;
 use crate::state::database::BlockIndexValue;
@@ -59,6 +61,7 @@ use crate::BFieldElement;
 pub(crate) const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub(crate) const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
 pub(crate) const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
+pub(crate) const ARCHIVAL_ANNOUNCEMENT_INDEX_DIRECTORY_NAME: &str = "announcement_index";
 
 /// Provides interface to historic blockchain data which consists of
 ///  * block-data stored in individual files (append-only)
@@ -92,6 +95,11 @@ pub struct ArchivalState {
 
     /// Archival-MMR of the block digests belonging to the canonical chain.
     pub(crate) archival_block_mmr: RustyArchivalBlockMmr,
+
+    /// Mapping from block digest to a list of (flag, receiver_id) pairs for all
+    /// announcement in the block. This index is only maintained if the node has
+    /// been started with the
+    pub(crate) utxo_index: RustyUtxoIndex,
 
     /// The network that this node is on. Used to simplify method interfaces.
     network: Network,
@@ -186,6 +194,34 @@ impl ArchivalState {
         let archival_bmmr = RustyArchivalBlockMmr::connect(db).await;
 
         Ok(archival_bmmr)
+    }
+
+    async fn initialize_utxo_index(data_dir: &DataDirectory) -> Result<RustyUtxoIndex> {
+        let announcement_dir_path = data_dir.archival_announcement_index_dir_path();
+        DataDirectory::create_dir_if_not_exists(&announcement_dir_path).await?;
+
+        let path = announcement_dir_path.clone();
+        let result = NeptuneLevelDb::new(&path, &create_db_if_missing()).await;
+
+        let db = match result {
+            Ok(db) => db,
+            Err(e) => {
+                tracing::error!(
+                    "Could not open archival MMR database at {}: {e}",
+                    announcement_dir_path.display()
+                );
+                panic!(
+                    "Could not open database; do not know how to proceed. Panicking.\n\
+                    If you suspect the database may be corrupted, consider renaming the directory {}\
+                     or removing it altogether. Or perhaps a node is already running?",
+                     announcement_dir_path.display()
+                );
+            }
+        };
+
+        let utxo_index = RustyUtxoIndex::connect(db).await;
+
+        Ok(utxo_index)
     }
 
     /// Find the path connecting two blocks. Every path involves going down some
@@ -310,6 +346,18 @@ impl ArchivalState {
             .await
             .expect("Must be able to initialize block index database");
         debug!("Got block index database");
+
+        // UTXO index is always initialized. But only populated with blocks if
+        // this index is activated. It's always populated with the genesis block
+        // though.
+        let mut utxo_index = ArchivalState::initialize_utxo_index(&data_dir)
+            .await
+            .expect("Must be able to initialize announcement index database");
+
+        if utxo_index.sync_label() == Digest::default() {
+            utxo_index.index_block(&genesis_block).await;
+        }
+
         let genesis_block = Box::new(genesis_block);
         Self {
             data_dir,
@@ -318,6 +366,7 @@ impl ArchivalState {
             archival_mutator_set,
             archival_block_mmr,
             network,
+            utxo_index,
         }
     }
 
@@ -614,6 +663,47 @@ impl ArchivalState {
             .ammr_mut()
             .append(new_block.hash())
             .await;
+    }
+
+    /// Apply a new block to the UTXO index.
+    ///
+    /// This method handles reorganizations, but all predecessors of this block
+    /// must be known and stored in the block index database for it to work.
+    ///
+    /// # Panics
+    /// - If any of the predecessor blocks have not been applied to the block
+    ///   index database.
+    pub(crate) async fn update_utxo_index(&mut self, new_block: &Block) {
+        let current_sync = self.utxo_index.sync_label();
+        let new_block_hash = new_block.hash();
+
+        // Index all not-yet-indexed blocks preceding the new block. In the
+        // common case, where the new block is the direct descendant of the
+        // block that was previously applied, only one block will be processed
+        // here. This path-finding logic allows for an efficient common-case
+        // processing, and an effcient "catchup" behavior where the UTXO index
+        // is many block behind the rest of the archival state.
+        let (_, _, missing_blocks) = self.find_path(current_sync, new_block_hash).await;
+        for missing in missing_blocks {
+            // This optimization means that we don't have to read the full
+            // blocks from disk in case it was already processed.
+            if self.utxo_index.block_was_indexed(missing).await {
+                continue;
+            }
+
+            if missing == new_block_hash {
+                // Avoid reading the new block from disk if it's already in
+                // memory.
+                self.utxo_index.index_block(new_block).await;
+            } else {
+                let missing = self
+                    .get_block(missing)
+                    .await
+                    .expect("Fetching block must succeed")
+                    .expect("missing block must exist before processed by UTXO index");
+                self.utxo_index.index_block(&missing).await;
+            }
+        }
     }
 
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
