@@ -153,12 +153,12 @@ mod tests {
     use crate::application::database::storage::storage_schema::RustyKey;
     use crate::application::database::storage::storage_schema::RustyValue;
     use crate::application::database::NeptuneLevelDb;
+    use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
     use crate::state::Timestamp;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
-    use crate::DataDirectory;
 
     /// tests migrating a simulated v0 wallet db to v1.
     ///
@@ -242,7 +242,7 @@ mod tests {
         Ok(())
     }
 
-    /// tests migrating a "real" v0 wallet db to v1.
+    /// tests migrating a "real" v0 wallet db to current version.
     ///
     /// This test uses a copy of a small v0 testnet database that is stored
     /// inside the test_data directory.
@@ -277,23 +277,23 @@ mod tests {
         crate::copy_dir_recursive(&test_data_wallet_db_dir, &wallet_database_path)?;
 
         // open v0 DB file
-        tracing::info!("opening existing v0 DB for migration to v1");
+        tracing::info!("opening existing v0 DB for migration to current version");
         let db_v0 =
             NeptuneLevelDb::new(&wallet_database_path, &leveldb::options::Options::new()).await?;
 
         println!("dump of v0 database");
         db_v0.dump_database().await;
 
-        // connect to v0 Db with v1 RustyWalletDatabase.  This is where the
+        // connect to v0 Db with current RustyWalletDatabase.  This is where the
         // migration occurs.
-        let wallet_db_v1 = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
+        let wallet_db_upgraded = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
 
-        // dump the (migrated) v1 database to stdout
-        println!("dump of v1 (upgraded) database");
-        wallet_db_v1.storage().db().dump_database().await;
+        // dump the (migrated) database to stdout
+        println!("dump of upgraded database");
+        wallet_db_upgraded.storage().db().dump_database().await;
 
-        // obtain v1 sent-transactions and verify len is 1.
-        let sent_transactions = wallet_db_v1.sent_transactions();
+        // obtain current version sent-transactions and verify len is 1.
+        let sent_transactions = wallet_db_upgraded.sent_transactions();
         assert_eq!(sent_transactions.len().await, 1);
 
         // obtain first transaction
@@ -340,34 +340,6 @@ mod tests {
                     sync_label,
                 }
             }
-        }
-    }
-
-    mod worker {
-        use std::path::PathBuf;
-
-        use super::*;
-
-        pub(super) fn crate_root() -> PathBuf {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        }
-
-        // opens wallet db
-        pub(super) async fn open_db(
-            data_dir: &DataDirectory,
-        ) -> anyhow::Result<NeptuneLevelDb<RustyKey, RustyValue>> {
-            let wallet_database_path = data_dir.wallet_database_dir_path();
-            println!(
-                "path {} exists: {}",
-                wallet_database_path.display(),
-                wallet_database_path.exists()
-            );
-            DataDirectory::create_dir_if_not_exists(&wallet_database_path).await?;
-            NeptuneLevelDb::new(
-                &wallet_database_path,
-                &crate::application::database::create_db_if_missing(),
-            )
-            .await
         }
     }
 }
