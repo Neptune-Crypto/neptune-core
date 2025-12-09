@@ -1648,10 +1648,14 @@ impl ArchivalState {
                 Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
                 Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             ),
-            // TODO: add data for UTXO with AOCL leaf index 78179. Apparently
-            // 0.1 NPT was burned here (receiver digest set to zero and
-            // lock script "burn"). However, unless we know the block we have no
-            // way of verifying this claim.
+            (
+                BlockHeight::from(16815),
+                1,
+                NativeCurrencyAmount::coins_from_str("0.10000").unwrap(),
+                LockScript::burn().hash(),
+                Digest::try_from_hex("01000000000000000200000000000000030000000000000004000000000000000500000000000000").unwrap(),
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            ),
             (
                 BlockHeight::from(16999),
                 3,
