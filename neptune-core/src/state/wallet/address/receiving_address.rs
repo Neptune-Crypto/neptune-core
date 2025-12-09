@@ -83,6 +83,13 @@ impl ReceivingAddress {
         }
     }
 
+    pub(crate) fn flag(&self) -> BFieldElement {
+        match self {
+            ReceivingAddress::Generation(addr) => addr.flag(),
+            ReceivingAddress::Symmetric(addr) => addr.flag(),
+        }
+    }
+
     /// generates a [Announcement] for an output Utxo
     ///
     /// The announcement contains a [`Vec<BFieldElement>`] with fields:

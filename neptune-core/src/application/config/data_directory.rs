@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::application::config::network::Network;
+use crate::state::archival_state::ARCHIVAL_ANNOUNCEMENT_INDEX_DIRECTORY_NAME;
 use crate::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
 use crate::state::archival_state::BLOCK_INDEX_DB_NAME;
 use crate::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;
@@ -197,6 +198,16 @@ impl DataDirectory {
     pub fn archival_block_mmr_dir_path(&self) -> PathBuf {
         self.database_dir_path()
             .join(Path::new(ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME))
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    ///
+    /// The archival block MMR database director path
+    ///
+    /// This directory lives within `DataDirectory::database_dir_path()`.
+    pub(crate) fn archival_announcement_index_dir_path(&self) -> PathBuf {
+        self.database_dir_path()
+            .join(Path::new(ARCHIVAL_ANNOUNCEMENT_INDEX_DIRECTORY_NAME))
     }
 
     ///////////////////////////////////////////////////////////////////////////
