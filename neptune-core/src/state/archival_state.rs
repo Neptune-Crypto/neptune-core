@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use anyhow::bail;
 use anyhow::Result;
 use memmap2::MmapOptions;
+use num_traits::CheckedSub;
 use num_traits::Zero;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::io::AsyncSeekExt;
@@ -18,7 +21,9 @@ pub(crate) mod import_blocks_from_files;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
+use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
+use crate::api::export::Utxo;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::database::create_db_if_missing;
 use crate::application::database::storage::storage_schema::traits::*;
@@ -28,8 +33,13 @@ use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
 use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::block_height::BLOCKS_PER_GENERATION;
+use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
+use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::state::database::BlockFileLocation;
 use crate::state::database::BlockIndexKey;
@@ -38,11 +48,13 @@ use crate::state::database::BlockRecord;
 use crate::state::database::FileRecord;
 use crate::state::database::LastFileRecord;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::rusty_archival_block_mmr::RustyArchivalBlockMmr;
+use crate::BFieldElement;
 
 pub(crate) const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub(crate) const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -1406,6 +1418,249 @@ impl ArchivalState {
         self.archival_mutator_set.persist().await;
 
         Ok(())
+    }
+
+    /// Compute the circulating supply heuristically, measured in Neptune coins.
+    ///
+    /// This number counts (all):
+    ///  - the premine
+    ///  - the redemption claims fund (because of reboot)
+    ///  - all liquid mined coins up until this block height
+    ///  - mined time-locked coins provided that the time-lock has expired.
+    ///
+    /// It does not count coins that were mined and whose time-lock is still
+    /// active.
+    ///
+    /// Also, the amounts of known burn events are taken into account.
+    ///
+    /// The heuristic comes from three simplifications:
+    ///  1. We assume that every block that was mined did in fact mine the
+    ///     maximum allowable coinbase amount, whereas in fact miners are
+    ///     allowed to mint less than the subsidy.
+    ///  2. We assume that time-locked coins expire exactly one full generation
+    ///     after they are minted, when in fact they expire based on timestamps
+    ///     and not based on block heights.
+    ///  3. We assume all known burns are accounted for, whereas there might be
+    ///     more.
+    pub async fn circulating_supply(&self) -> NativeCurrencyAmount {
+        let premine = PREMINE_MAX_SIZE;
+        let claims_pool = INITIAL_BLOCK_SUBSIDY
+            .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
+
+        let block_height = self.get_tip().await.header().height;
+        let mined_liquid = Block::mined_immediately_liquid_supply(block_height);
+        let mined_released = Block::mined_timelocked_and_released_supply(block_height);
+
+        let burned = self.burned_supply().await;
+
+        debug!("premine: {premine}");
+        debug!("claims pool: {claims_pool}");
+        debug!("mined liquid: {mined_liquid}");
+        debug!("mined released: {mined_released}");
+        debug!("burned: {burned}");
+
+        (premine + claims_pool + mined_liquid + mined_released)
+            .checked_sub(&burned)
+            .unwrap_or(NativeCurrencyAmount::zero())
+    }
+
+    /// Compute the asymptotical supply of the limit heuristically, measured in
+    /// Neptune coins.
+    ///
+    /// This number counts (all):
+    ///  - the premine
+    ///  - the redemption claims fund (because of reboot)
+    ///  - all mined coins, liquid or time-locked, between genesis and the last nau.
+    ///
+    /// Also, the amounts of known burn events are taken into account.
+    pub async fn max_supply(&self) -> NativeCurrencyAmount {
+        let premine = PREMINE_MAX_SIZE;
+        let claims_pool = INITIAL_BLOCK_SUBSIDY
+            .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
+
+        let block_height = BlockHeight::from(BLOCKS_PER_GENERATION * 130);
+        let mined = Block::mined_supply(block_height);
+
+        let burned = self.burned_supply().await;
+
+        debug!("premine: {premine}");
+        debug!("claims pool: {claims_pool}");
+        debug!("mined: {mined}");
+        debug!("burned: {burned}");
+
+        (premine + claims_pool + mined)
+            .checked_sub(&burned)
+            .unwrap_or(NativeCurrencyAmount::zero())
+    }
+
+    /// Compute the total amount of all coins burned, according to all known
+    /// burn events.
+    pub async fn burned_supply(&self) -> NativeCurrencyAmount {
+        let mut burned = NativeCurrencyAmount::zero();
+        for utxo in self.authentic_burns().await {
+            burned += utxo.get_native_currency_amount();
+        }
+        burned
+    }
+
+    /// Produce a list of verified burned UTXOs.
+    ///
+    /// Start from the suggestion of [`Self::known_burns`] and verify them
+    /// against the given state.
+    pub async fn authentic_burns(&self) -> Vec<Utxo> {
+        let mut authentic_burns = vec![];
+
+        let known_burns = Self::known_burns();
+
+        debug!("Validating {} known burns.", known_burns.len());
+
+        for (
+            block_height,
+            output_index,
+            amount,
+            lock_script_hash,
+            sender_randomness,
+            receiver_digest,
+        ) in Self::known_burns()
+        {
+            // Verify that lock script hash is that of burn lock script or that
+            // receiver digest is all-zeros (either suffices).
+            if receiver_digest != Digest::new(bfe_array![0;5])
+                && lock_script_hash != LockScript::burn().hash()
+            {
+                debug!(
+                    "Burn {}/{} could not be validated because the receiver \
+                    digest =/= (0,0,0,0,0) and the lock script hash does not \
+                    agree with the burn lock script.",
+                    block_height, output_index
+                );
+                continue;
+            }
+
+            // Get block.
+            let candidate_block_digests = self.block_height_to_block_digests(block_height).await;
+            let mut canonical_block_digest = Digest::default();
+            for candidate_block_digest in candidate_block_digests {
+                if self
+                    .block_belongs_to_canonical_chain(candidate_block_digest)
+                    .await
+                {
+                    canonical_block_digest = candidate_block_digest;
+                }
+            }
+            let Ok(Some(block)) = self.get_block(canonical_block_digest).await else {
+                debug!(
+                    "Burn {}/{} could not be validated because no block with \
+                    digest {canonical_block_digest:x} was found.",
+                    block_height, output_index
+                );
+                continue;
+            };
+
+            // Get output.
+            let Some(&output) = block.body().transaction_kernel.outputs.get(output_index) else {
+                debug!(
+                    "Burn {}/{} could not be validated because referenced \
+                    block does not contain any outputs with the given index \
+                    {output_index}.",
+                    block_height, output_index
+                );
+                continue;
+            };
+
+            // Re-create UTXO.
+            let utxo = Utxo::new_native_currency(lock_script_hash, amount);
+
+            // Re-create addition record.
+            let addition_record = commit(Tip5::hash(&utxo), sender_randomness, receiver_digest);
+
+            // On match, append UTXOs to running list.
+            if output == addition_record {
+                debug!(
+                    "UTXO {block_height}/{output_index} ({:x}) with {} coins were burned.",
+                    addition_record.canonical_commitment,
+                    utxo.get_native_currency_amount()
+                );
+                authentic_burns.push(utxo);
+            } else if block
+                .body()
+                .transaction_kernel
+                .outputs
+                .contains(&addition_record)
+            {
+                let correct_index = block
+                    .body()
+                    .transaction_kernel
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, d)| **d == addition_record)
+                    .map(|(i, _d)| i)
+                    .unwrap();
+                warn!(
+                    "UTXO {:x} was burned but index is not {output_index} but {correct_index}. Fix the code, dummy! ;-)",
+                    addition_record.canonical_commitment
+                );
+                authentic_burns.push(utxo);
+            } else {
+                debug!(
+                    "Burn {}/{} could not be validated because referenced \
+                    output does not agree with recreated addition record.",
+                    block_height, output_index
+                );
+                debug!(
+                    "Addition record {block_height}/{output_index}: {:x}",
+                    output.canonical_commitment
+                );
+                debug!(
+                    "Re-created digest: {:x}",
+                    addition_record.canonical_commitment
+                );
+            }
+        }
+
+        authentic_burns
+    }
+
+    /// Return a list of "known" burn events.
+    ///
+    /// The list is given as a vector of (block-height, output-index, amount,
+    /// lock-script-hash, sender_randomness, receiver_digest) tuples.
+    ///
+    /// Note that this list is not definite since, in theory, a deep
+    /// reorganization could undo these burns.
+    pub fn known_burns() -> Vec<(
+        BlockHeight,
+        usize,
+        NativeCurrencyAmount,
+        Digest,
+        Digest,
+        Digest,
+    )> {
+        vec![
+            (
+                BlockHeight::from(16452),
+                1,
+                NativeCurrencyAmount::coins_from_str("0.10396").unwrap(),
+                // Since we don't know the lock script hash of this UTXO, we
+                // actually can't authenticate the amount in this burn.
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            ),
+            // TODO: add data for UTXO with AOCL leaf index 78179. Apparently
+            // 0.1 NPT was burned here (receiver digest set to zero and
+            // lock script "burn"). However, unless we know the block we have no
+            // way of verifying this claim.
+            (
+                BlockHeight::from(16999),
+                3,
+                NativeCurrencyAmount::coins_from_str("1526640.00000").unwrap(),
+                LockScript::burn().hash(),
+                Digest::try_from_hex("01000000000000000200000000000000030000000000000004000000000000000500000000000000").unwrap(),
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            ),
+        ]
     }
 }
 
@@ -4066,5 +4321,11 @@ pub(super) mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn can_produce_list_of_known_burns() {
+        let burns = ArchivalState::known_burns(); // no crash
+        assert!(!burns.is_empty());
     }
 }
