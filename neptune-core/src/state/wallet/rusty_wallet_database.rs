@@ -71,8 +71,11 @@ impl RustyWalletDatabase {
         let schema_version = tables.schema_version.get();
 
         // if the DB is brand-new then we set the schema version to the most
-        // recent value, since there's nothing to migrate.
-        let is_new_db = tables.sync_label.get() == Digest::default();
+        // recent value, since there's nothing to migrate. The wallet database
+        // only considered new if schema_version *and* sync_label have default
+        // values since some wallet-DBs might have been populated without the
+        // sync label being set, because of recovery functions' past behavior.
+        let is_new_db = schema_version == 0 && tables.sync_label.get() == Digest::default();
         if is_new_db {
             tables.schema_version.set(WALLET_DB_SCHEMA_VERSION).await;
             storage.persist().await;
