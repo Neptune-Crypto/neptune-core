@@ -200,7 +200,7 @@ impl LockScriptAndWitness {
 impl<'a> Arbitrary<'a> for LockScriptAndWitness {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let program = Program::arbitrary(u)?;
-        let tokens = Digest::arbitrary(u)?.reversed().values().to_vec();
+        let tokens = Digest::arbitrary(u)?.values().to_vec();
         Ok(LockScriptAndWitness::new_with_tokens(program, tokens))
     }
 }
