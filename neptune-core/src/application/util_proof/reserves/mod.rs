@@ -140,18 +140,14 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
 
         // let npt_typesc_digest = .values();
 
-        let rustfield_leafcount = rustfield!(MmrAccumulator::leaf_count);
-        let rustfield_peaks = rustfield!(MmrAccumulator::peaks);
         let rustfield_membershipproof = rustfield!(WitnessMemory::membership_proof);
         let rustfield_senderrandomness = rustfield!(MsMembershipProof::sender_randomness);
         let rustfield_aoclleafindex = rustfield!(MsMembershipProof::aocl_leaf_index);
         let rustfield_receiverpreimage = rustfield!(MsMembershipProof::receiver_preimage);
-        let rustfield_authpathaocl = rustfield!(WitnessMemory::auth_path_aocl);
-        let rustfield_authenticationpath = rustfield!(WitnessMemory::authentication_path);
         let rustfield_utxo = rustfield!(WitnessMemory::utxo);
         let rustfield_utxodigest = rustfield!(WitnessMemory::utxo_digest);
         // let rustfield_lockscripthash = rustfield!(Utxo::lock_script_hash);
-        let rustfield_coins = rustfield!(Utxo::coins);
+
         // let rustfield_typescripthash = rustfield!(Coin::type_script_hash);
         // let rustfield_state = rustfield!(Coin::state);
         let audit_preloaded_data = library.import(Box::new(
@@ -161,14 +157,16 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             >::default(),
         )); // TODO
         let payload = triton_asm! {
-            push {tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            // _
+
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
             // *w
             {&WitnessMemory::get_field("aocl")}
             // *aocl
 
             // prepare the value for '7.'
             dup 0
-            {&rustfield_peaks}
+            {&{&MmrAccumulator::get_field("peaks")}}
             // *aocl *aocl_peaks
 
             // read `receiver_digest`
@@ -215,7 +213,7 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             /* pasted '7.' from <removal_records_integrity.rs>
             ============== */
             /* 7. */
-            dup 6 {&rustfield_leafcount}
+            dup 6 {&MmrAccumulator::get_field("leaf_count")}
             // *aocl *aocl_peaks [canonical_commitment] *num_leafs
 
             addi 1 read_mem {u64_stack_size} pop 1
@@ -229,8 +227,8 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             // *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            {&rustfield_authpathaocl}
-            {&rustfield_authenticationpath}
+            {&WitnessMemory::get_field("auth_path_aocl")}
+            {&WitnessMemory::get_field("authentication_path")}
             // *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index] *auth_path
             swap 2
             // *aocl *aocl_peaks [canonical_commitment] *auth_path [aocl_leaf_index] [num_leafs]
@@ -282,10 +280,10 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             pop 1
             // *aocl [computed_bloom_indices]
             write_io 5
-            // *aocl
 
             /* finish of the things from the RR integrity file
             ____________________________ */
+            // *aocl
 
             call {lib_bagpeaks}
             write_io 5
@@ -299,7 +297,7 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
             {&rustfield_utxo}
-            {&rustfield_coins}
+            {&Utxo::get_field("coins")}
             // *coins
             read_mem 1 addi 2
             // SI_coins *coins[0]
