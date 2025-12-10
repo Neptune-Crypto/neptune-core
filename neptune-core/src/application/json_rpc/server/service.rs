@@ -346,6 +346,57 @@ impl RpcApi for RpcServer {
         })
     }
 
+    async fn get_circulating_supply_call(
+        &self,
+        _request: GetCirculatingSupplyRequest,
+    ) -> RpcResult<GetCirculatingSupplyResponse> {
+        Ok(GetCirculatingSupplyResponse {
+            amount: self
+                .state
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .circulating_supply()
+                .await
+                .into(),
+        })
+    }
+
+    async fn get_max_supply_call(
+        &self,
+        _request: GetMaxSupplyRequest,
+    ) -> RpcResult<GetMaxSupplyResponse> {
+        Ok(GetMaxSupplyResponse {
+            amount: self
+                .state
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .max_supply()
+                .await
+                .into(),
+        })
+    }
+
+    async fn get_burned_supply_call(
+        &self,
+        _request: GetBurnedSupplyRequest,
+    ) -> RpcResult<GetBurnedSupplyResponse> {
+        Ok(GetBurnedSupplyResponse {
+            amount: self
+                .state
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .burned_supply()
+                .await
+                .into(),
+        })
+    }
+
     async fn get_blocks_call(&self, request: GetBlocksRequest) -> RpcResult<GetBlocksResponse> {
         // Reverse get_blocks is not supported yet.
         // Might be reconsidered after "succinctness" as it might give it a purpose.
@@ -549,6 +600,7 @@ pub mod tests {
     use std::collections::HashSet;
 
     use macro_rules_attr::apply;
+    use num_traits::Zero;
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
 
@@ -563,9 +615,15 @@ pub mod tests {
     use crate::application::json_rpc::core::api::rpc::RpcApi;
     use crate::application::json_rpc::core::api::rpc::RpcError;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
+    use crate::application::json_rpc::core::model::message::GetBurnedSupplyRequest;
+    use crate::application::json_rpc::core::model::message::GetCirculatingSupplyRequest;
+    use crate::application::json_rpc::core::model::message::GetMaxSupplyRequest;
     use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::protocol::consensus::block::block_height::BlockHeight;
+    use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+    use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+    use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
@@ -1007,5 +1065,32 @@ pub mod tests {
                 .unwrap_err(),
             RpcError::SubmitBlock(SubmitBlockError::InvalidBlock)
         );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn supply_methods_return_reasonable_results() {
+        let rpc_server = test_rpc_server().await;
+        let circulating_supply = rpc_server
+            .get_circulating_supply_call(GetCirculatingSupplyRequest)
+            .await
+            .unwrap();
+        let max_supply = rpc_server
+            .get_max_supply_call(GetMaxSupplyRequest)
+            .await
+            .unwrap();
+        let burned_supply = rpc_server
+            .get_burned_supply_call(GetBurnedSupplyRequest)
+            .await
+            .unwrap();
+
+        let premine = PREMINE_MAX_SIZE;
+        let claims_pool = INITIAL_BLOCK_SUBSIDY
+            .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
+        assert_eq!(premine + claims_pool, circulating_supply.amount.into());
+
+        // equal up to tiny error
+        assert!(NativeCurrencyAmount::coins(42_000_000) >= max_supply.amount.into());
+
+        assert_eq!(NativeCurrencyAmount::zero(), burned_supply.amount.into());
     }
 }
