@@ -1504,7 +1504,12 @@ impl WalletState {
                 );
 
                 self.wallet_db
-                    .mark_mutxo_as_spent(*mutxo_list_index, block)
+                    .mark_mutxo_as_spent(
+                        *mutxo_list_index,
+                        block.hash(),
+                        block.header().timestamp,
+                        block.header().height,
+                    )
                     .await;
             }
 
@@ -1613,7 +1618,12 @@ impl WalletState {
     ) {
         for (_, mutxo_list_index) in spent_inputs.values() {
             self.wallet_db
-                .mark_mutxo_as_spent(*mutxo_list_index, block)
+                .mark_mutxo_as_spent(
+                    *mutxo_list_index,
+                    block.hash(),
+                    block.header().timestamp,
+                    block.header().height,
+                )
                 .await;
         }
     }

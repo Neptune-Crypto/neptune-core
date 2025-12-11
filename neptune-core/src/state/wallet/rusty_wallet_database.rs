@@ -14,6 +14,7 @@ use crate::api::export::AdditionRecord;
 use crate::api::export::BlockHeight;
 use crate::api::export::Timestamp;
 use crate::application::database::storage::storage_schema::traits::*;
+use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
@@ -144,6 +145,11 @@ impl RustyWalletDatabase {
         &self.tables.monitored_utxos
     }
 
+    /// Mapping from index set digest to monitored UTXO list index.
+    pub(crate) fn index_set_to_mutxo(&self) -> &DbtMap<Digest, Index> {
+        &self.tables.index_set_to_mutxo
+    }
+
     /// Return existing monitored UTXO by list index in the list of all
     /// monitored UTXOs.
     ///
@@ -232,9 +238,15 @@ impl RustyWalletDatabase {
     /// # Panics
     ///
     /// - If index for monitored UTXO is out of range.
-    pub(crate) async fn mark_mutxo_as_spent(&mut self, mutxo_list_index: Index, block: &Block) {
+    pub(crate) async fn mark_mutxo_as_spent(
+        &mut self,
+        mutxo_list_index: Index,
+        block_hash: Digest,
+        block_timestamp: Timestamp,
+        block_height: BlockHeight,
+    ) {
         let mut spent_mutxo = self.tables.monitored_utxos.get(mutxo_list_index).await;
-        spent_mutxo.mark_as_spent(block);
+        spent_mutxo.mark_as_spent(block_hash, block_timestamp, block_height);
         self.tables
             .monitored_utxos
             .set(mutxo_list_index, spent_mutxo)
