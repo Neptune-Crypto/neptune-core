@@ -742,6 +742,11 @@ impl WalletState {
             .map(|rr| rr.absolute_indices)
             .collect();
 
+        // Early return if no inputs in block - nothing could be spent
+        if confirmed_absolute_index_sets.is_empty() {
+            return HashMap::default();
+        }
+
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut spent_own_utxos = HashMap::default();
 
@@ -1716,6 +1721,11 @@ impl WalletState {
             monitored_utxos: &mut DbtVec<MonitoredUtxo>,
             incoming: &HashMap<AdditionRecord, IncomingUtxo>,
         ) -> HashMap<StrongUtxoKey, u64> {
+            // Early return if no incoming UTXOs - no duplicates possible
+            if incoming.is_empty() {
+                return HashMap::default();
+            }
+
             let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();
             let stream = monitored_utxos.stream().await;
             pin_mut!(stream); // needed for iteration
