@@ -39,42 +39,9 @@ struct WitnessMemory {
     // lock_script_and_witness: LockScriptAndWitness,
     utxo_digest: Digest,
 }
+
 #[derive(Debug)]
 pub struct The(WitnessMemory, Claim);
-impl SecretWitness for The {
-    fn standard_input(&self) -> PublicInput {
-        PublicInput {
-            individual_tokens: self.claim().input,
-        }
-    }
-    fn output(&self) -> Vec<tasm_lib::triton_vm::prelude::BFieldElement> {
-        self.claim().output
-    }
-    fn claim(&self) -> Claim {
-        self.1.clone()
-    }
-
-    fn program(&self) -> tasm_lib::triton_vm::prelude::Program {
-        ConsensusProgram::program(self)
-    }
-
-    fn nondeterminism(&self) -> NonDeterminism {
-        NonDeterminism {
-            individual_tokens: vec![],
-            digests: vec![],
-            ram: {
-                let mut m = std::collections::HashMap::default();
-                encode_to_memory(
-                    &mut m,
-                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                    &self.0,
-                );
-                m
-            },
-        }
-    }
-}
-
 impl The {
     pub fn claim_inputs(c: Claim, receiver_digest: Digest, release_date: Digest) -> Claim {
         c.with_input(
@@ -123,6 +90,41 @@ impl The {
         )
     }
 }
+
+impl SecretWitness for The {
+    fn standard_input(&self) -> PublicInput {
+        PublicInput {
+            individual_tokens: self.claim().input,
+        }
+    }
+    fn output(&self) -> Vec<tasm_lib::triton_vm::prelude::BFieldElement> {
+        self.claim().output
+    }
+    fn claim(&self) -> Claim {
+        self.1.clone()
+    }
+
+    fn program(&self) -> tasm_lib::triton_vm::prelude::Program {
+        ConsensusProgram::program(self)
+    }
+
+    fn nondeterminism(&self) -> NonDeterminism {
+        NonDeterminism {
+            individual_tokens: vec![],
+            digests: vec![],
+            ram: {
+                let mut m = std::collections::HashMap::default();
+                encode_to_memory(
+                    &mut m,
+                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                    &self.0,
+                );
+                m
+            },
+        }
+    }
+}
+
 impl ConsensusProgram for The {
     fn library_and_code(
         &self,
