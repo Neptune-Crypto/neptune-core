@@ -1889,6 +1889,22 @@ impl GlobalState {
         if self.chain.is_archival_node() {
             self.restore_monitored_utxos_from_archival_mutator_set()
                 .await;
+
+            // CRITICAL FIX: Clear DbtVec caches after bulk restoration
+            // Without this, the caches grow unbounded during restoration of 1000s of UTXOs
+            // causing OOM when wallet has many transactions
+
+            let ams = self
+                .chain
+                .archival_state_mut()
+                .archival_mutator_set
+                .ams_mut();
+
+            ams.aocl.delete_cache().await;
+
+            ams.swbf_inactive.delete_cache().await;
+
+            ams.chunks.delete_cache().await;
             return Ok(());
         }
 
