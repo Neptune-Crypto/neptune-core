@@ -709,6 +709,18 @@ impl WalletState {
         &self,
         transaction_kernel: &TransactionKernel,
     ) -> HashMap<AbsoluteIndexSet, (Utxo, u64)> {
+        let confirmed_absolute_index_sets: HashSet<_> = transaction_kernel
+            .inputs
+            .iter()
+            .map(|rr| rr.absolute_indices)
+            .collect();
+
+        // Early return if no inputs in block - nothing could be spent
+        if confirmed_absolute_index_sets.is_empty() {
+            return HashMap::default();
+        }
+
+        let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut spent_own_utxos = HashMap::default();
 
         for index_set in transaction_kernel
@@ -1631,7 +1643,38 @@ impl WalletState {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
         maintain_membership_proofs_in_wallet: bool,
-    ) -> anyhow::Result<()> {
+    ) -> Result<Vec<IncomingUtxoRecoveryData>> {
+        /// Get potential duplicates, to avoid registering same UTXO twice.
+        ///
+        /// The set of potential duplicates, UTXOs that have, potentially
+        /// already been added by this wallet. Used for a later check to avoid
+        /// adding the same UTXO twice. Since we don't know the AOCL leaf
+        /// index of the incoming transaction, these are only potential
+        /// duplicates, not certain duplicates.
+        async fn potential_duplicates(
+            monitored_utxos: &mut DbtVec<MonitoredUtxo>,
+            incoming: &HashMap<AdditionRecord, IncomingUtxo>,
+        ) -> HashMap<StrongUtxoKey, u64> {
+            // Early return if no incoming UTXOs - no duplicates possible
+            if incoming.is_empty() {
+                return HashMap::default();
+            }
+
+            let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();
+            let stream = monitored_utxos.stream().await;
+            pin_mut!(stream); // needed for iteration
+
+            while let Some((i, monitored_utxo)) = stream.next().await {
+                let addition_record = monitored_utxo.addition_record();
+                let strong_key = StrongUtxoKey::new(addition_record, monitored_utxo.aocl_index());
+                if incoming.contains_key(&addition_record) {
+                    maybe_duplicates.insert(strong_key, i);
+                }
+            }
+
+            maybe_duplicates
+        }
+
         let tx_kernel = &block.kernel.body.transaction_kernel;
 
         let spent_inputs = self.scan_for_spent_utxos(tx_kernel).await;
