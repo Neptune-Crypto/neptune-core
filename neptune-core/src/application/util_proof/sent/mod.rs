@@ -8,21 +8,29 @@
 - ✔️ output the digest of the `sender_randomness` (as reusing it won't allow to put the UTXO again, and its sole role is shifting the AR)
 - no need to check the recipient digest as it doesn't add anything under the current assumptions */
 
+use std::sync::OnceLock;
+
 use tasm_lib::{
     field as rustfield,
-    memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+    memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
     prelude::{Digest, Library, TasmObject, TasmStruct},
-    triton_vm::isa::triton_asm,
+    triton_vm::{
+        isa::triton_asm,
+        prelude::BFieldCodec,
+        proof::Claim,
+        vm::{NonDeterminism, PublicInput},
+    },
     twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator,
 };
 
 use crate::{
     api::export::{NativeCurrencyAmount, Utxo},
+    protocol::proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
     util_types::mutator_set::ms_membership_proof::MsMembershipProof,
 };
 
 #[derive(TasmObject, tasm_lib::triton_vm::prelude::BFieldCodec, Debug)]
-pub(crate) struct WitnessMemory {
+struct WitnessMemory {
     /// AOCL for the block
     aocl: MmrAccumulator,
     ///
@@ -32,24 +40,90 @@ pub(crate) struct WitnessMemory {
     utxo_digest: Digest,
 }
 #[derive(Debug)]
-pub struct PublicData {
-    /// `receiver_digest`;
-    /// `release_date` ([add `MINING_REWARD_TIME_LOCK_PERIOD`](https://github.com/Neptune-Crypto/neptune-core/blob/5c1c6ef2ca1e282a05c7dc5300e742c92758fbfb/neptune-core/src/protocol/consensus/type_scripts/native_currency.rs#L365))
-    input: (Digest, crate::api::export::Timestamp),
-    /// `sender_randomness` digest;
-    /// AOCL digest;
-    /// `lock_postimage` of the address;
-    /// the amount
-    /// the timelocked amount
-    output: (
-        Digest,
-        Digest,
-        Digest,
-        NativeCurrencyAmount,
-        NativeCurrencyAmount,
-    ),
+pub struct The(WitnessMemory, Claim);
+impl SecretWitness for The {
+    fn standard_input(&self) -> PublicInput {
+        PublicInput {
+            individual_tokens: self.claim().input,
+        }
+    }
+    fn output(&self) -> Vec<tasm_lib::triton_vm::prelude::BFieldElement> {
+        self.claim().output
+    }
+    fn claim(&self) -> Claim {
+        self.1.clone()
+    }
+
+    fn program(&self) -> tasm_lib::triton_vm::prelude::Program {
+        ConsensusProgram::program(self)
+    }
+
+    fn nondeterminism(&self) -> NonDeterminism {
+        NonDeterminism {
+            individual_tokens: vec![],
+            digests: vec![],
+            ram: {
+                let mut m = std::collections::HashMap::default();
+                encode_to_memory(
+                    &mut m,
+                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                    &self.0,
+                );
+                m
+            },
+        }
+    }
 }
-impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for PublicData {
+
+impl The {
+    pub fn claim_inputs(c: Claim, receiver_digest: Digest, release_date: Digest) -> Claim {
+        c.with_input(
+            [
+                release_date.reversed().values(),
+                receiver_digest.reversed().values(),
+            ]
+            .concat(),
+        )
+    }
+    pub fn claim_outputs(
+        c: Claim,
+        sender_randomness_digest: Digest,
+        aocl_digest: Digest,
+        lock_postimage: Digest,
+        amount: NativeCurrencyAmount,
+        amount_timelocked: NativeCurrencyAmount,
+    ) -> Claim {
+        c.with_output(
+            [
+                sender_randomness_digest.values().to_vec(),
+                aocl_digest.values().into(),
+                lock_postimage.values().into(),
+                amount.encode(),
+                amount_timelocked.encode(),
+            ]
+            .concat(),
+        )
+    }
+
+    pub fn new(
+        c: Claim,
+        witness_aocl: MmrAccumulator,
+        witness_membershipproof: MsMembershipProof,
+        witness_utxo: Utxo,
+        witness_utxodigest: Digest,
+    ) -> The {
+        The(
+            WitnessMemory {
+                aocl: witness_aocl,
+                membership_proof: witness_membershipproof,
+                utxo: witness_utxo,
+                utxo_digest: witness_utxodigest,
+            },
+            c,
+        )
+    }
+}
+impl ConsensusProgram for The {
     fn library_and_code(
         &self,
     ) -> (
@@ -225,6 +299,8 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
     }
 
     fn hash(&self) -> Digest {
-        todo!()
+        static DIGEST: OnceLock<Digest> = OnceLock::new();
+
+        *DIGEST.get_or_init(|| ConsensusProgram::program(self).hash())
     }
 }
