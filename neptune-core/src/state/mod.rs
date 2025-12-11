@@ -746,6 +746,93 @@ impl GlobalState {
         height
     }
 
+    /// Rescan the specified (inclusive) range of blocks for spends of UTXOs.
+    /// Only works for nodes that maintain a UTXO index.
+    ///
+    /// # Panics
+    /// - If start block height is greater than end block height
+    pub(crate) async fn rescan_outgoing(
+        &mut self,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> Result<()> {
+        let first: u64 = first.into();
+        let last: u64 = last.into();
+        assert!(
+            first <= last,
+            "Must call function with a non-empty range. Got range: {first}..={last}."
+        );
+
+        for block_height in first..=last {
+            let Some(block_hash) = self
+                .chain
+                .archival_state()
+                .archival_block_mmr
+                .ammr()
+                .try_get_leaf(block_height)
+                .await
+            else {
+                warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
+                return Ok(());
+            };
+
+            let Some(index_set_digests) = self
+                .chain
+                .archival_state()
+                .utxo_index
+                .index_set_digests(block_hash)
+                .await
+            else {
+                bail!("Block with hash {block_hash:x} not processed by the UTXO index.")
+            };
+
+            let mut spent_mutxo_list_indices = vec![];
+            for index_set_digest in index_set_digests {
+                if let Some(mutxo_list_index) = self
+                    .wallet_state
+                    .wallet_db
+                    .index_set_to_mutxo()
+                    .get(&index_set_digest)
+                    .await
+                {
+                    spent_mutxo_list_indices.push(mutxo_list_index);
+                }
+            }
+
+            // If no matches, do not load block. Continue to next block.
+            if spent_mutxo_list_indices.is_empty() {
+                continue;
+            }
+
+            debug!(
+                "Found {} spent UTXOs in block with height {block_height}",
+                spent_mutxo_list_indices.len()
+            );
+
+            // Only getting the header from the archival state and not the whole
+            // block is very fast.
+            let block_header = self
+                .chain
+                .archival_state()
+                .get_block_header(block_hash)
+                .await
+                .expect("Must have block header for known block");
+
+            for mutxo_list_index in spent_mutxo_list_indices {
+                self.wallet_state
+                    .wallet_db
+                    .mark_mutxo_as_spent(
+                        mutxo_list_index,
+                        block_hash,
+                        block_header.timestamp,
+                        block_header.height,
+                    )
+                    .await
+            }
+        }
+
+        Ok(())
+    }
     /// Rescan the specified (inclusive) range of blocks for incoming UTXOs for
     /// the specified list of spending keys. Only works for nodes that maintain
     /// a UTXO index.
@@ -3322,11 +3409,10 @@ mod tests {
         );
     }
 
-    mod restore_monitored_utxo_data {
-
+    mod rescan_wallet {
         use super::*;
 
-        // #[traced_test]
+        #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn monitored_utxos_from_rescan_of_incoming_utxos() {
             let network = Network::Main;
@@ -3423,6 +3509,11 @@ mod tests {
                 );
             }
         }
+    }
+
+    mod restore_monitored_utxo_data {
+
+        use super::*;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

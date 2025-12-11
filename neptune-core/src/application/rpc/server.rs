@@ -2201,12 +2201,16 @@ impl NeptuneRPCServer {
                         )
                         .await
                     {
+                        let block_hash = spending_block.hash();
+                        let block_height = spending_block.header().height;
                         warn!(
-                            "Claimed UTXO was spent in block {:x}; which has height {}",
-                            spending_block.hash(),
-                            spending_block.header().height
+                            "Claimed UTXO was spent in block {block_hash:x}; which has height {block_height}",
                         );
-                        monitored_utxo.mark_as_spent(&spending_block);
+                        monitored_utxo.mark_as_spent(
+                            spending_block.hash(),
+                            spending_block.header().timestamp,
+                            spending_block.header().height,
+                        );
                     } else {
                         error!("Claimed UTXO's mutator set membership proof was invalid but we could not find the block in which it was spent. This is most likely a bug in the software.");
                     }
