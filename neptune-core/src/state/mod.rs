@@ -832,9 +832,73 @@ impl GlobalState {
 
         Ok(())
     }
-    /// Rescan the specified (inclusive) range of blocks for incoming UTXOs for
-    /// the specified list of spending keys. Only works for nodes that maintain
-    /// a UTXO index.
+
+    /// Rescan the specified (inclusive) range of blocks for incoming UTXOs that
+    /// were added as expected UTXOs to the wallet database.
+    pub(crate) async fn rescan_expected_incoming(
+        &mut self,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> Result<()> {
+        let first: u64 = first.into();
+        let last: u64 = last.into();
+        assert!(
+            first <= last,
+            "Must call function with a non-empty range. Got range: {first}..={last}."
+        );
+
+        let stream = self
+            .wallet_state
+            .wallet_db
+            .expected_utxos()
+            .stream_values()
+            .await;
+        pin_mut!(stream); // needed for iteration
+
+        let mut expected_addition_records = HashMap::new();
+        while let Some(eutxo) = stream.next().await {
+            expected_addition_records.insert(eutxo.addition_record, eutxo);
+        }
+
+        for block_height in first..=last {
+            let Some(addition_records) = self
+                .chain
+                .archival_state()
+                .addition_record_indices_for_block_by_height(block_height)
+                .await
+            else {
+                warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
+                return Ok(());
+            };
+
+            let mut received_utxos = vec![];
+            for ar in addition_records {
+                let Some(expected) = expected_addition_records.get(&ar) else {
+                    continue;
+                };
+            }
+
+            // let mutxos = MonitoredUtxo::new_from_block_hash(
+            //     utxo,
+            //     max_number_of_mps_stored,
+            //     aocl_leaf_index,
+            //     sender_randomness,
+            //     receiver_preimage,
+            //     confirmed_in,
+            // );
+
+            // let our_addition_records: HashMap<_, _> = addition_records
+            //     .into_iter()
+            //     .filter(|(ar, _)| expected_addition_records.contains(&ar))
+            //     .collect();
+        }
+
+        todo!()
+    }
+
+    /// Rescan the specified (inclusive) range of blocks for incoming UTXOs that
+    /// were announced on-chain, for the specified list of spending keys. Only
+    /// works for nodes that maintain a UTXO index.
     ///
     /// # Panics
     /// - If start block height is greater than end block height
