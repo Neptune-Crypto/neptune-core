@@ -1852,7 +1852,9 @@ impl GlobalState {
 
         // Get new membership proofs from mutator set accumulator, in case
         // wallet didn't set these from block data.
-        if !maintain_mps_in_wallet {
+        // OPTIMIZATION: Only restore membership proofs if we actually received UTXOs in this block.
+        // During sync, existing UTXOs don't need their proofs updated until sync completes.
+        if !maintain_mps_in_wallet && !received_utxos.is_empty() {
             self.restore_monitored_utxos_from_archival_mutator_set()
                 .await;
         }
