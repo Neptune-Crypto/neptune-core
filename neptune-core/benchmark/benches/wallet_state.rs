@@ -172,7 +172,10 @@ mod maintain_membership_proofs {
                         .unwrap();
 
                     global_state
-                        .restore_monitored_utxos_from_archival_mutator_set(Some(recovery_data))
+                        .restore_monitored_utxos_from_archival_mutator_set(
+                            Some(recovery_data),
+                            true,
+                        )
                         .await
                 });
             });
