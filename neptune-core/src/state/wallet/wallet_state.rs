@@ -720,7 +720,6 @@ impl WalletState {
             return HashMap::default();
         }
 
-        let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut spent_own_utxos = HashMap::default();
 
         for index_set in transaction_kernel
@@ -1666,7 +1665,8 @@ impl WalletState {
 
             while let Some((i, monitored_utxo)) = stream.next().await {
                 let addition_record = monitored_utxo.addition_record();
-                let strong_key = StrongUtxoKey::new(addition_record, monitored_utxo.aocl_index());
+                let strong_key =
+                    StrongUtxoKey::new(addition_record, monitored_utxo.aocl_leaf_index);
                 if incoming.contains_key(&addition_record) {
                     maybe_duplicates.insert(strong_key, i);
                 }
@@ -1720,7 +1720,7 @@ impl WalletState {
             && self.wallet_db.monitored_utxos().is_empty().await
         {
             self.wallet_db.set_sync_label(block.hash()).await;
-            return Ok(());
+            return Ok(vec![]);
         }
 
         let msa_state = previous_mutator_set_accumulator.clone();
@@ -1750,8 +1750,8 @@ impl WalletState {
         };
 
         // write UTXO-recovery data to disk.
-        for item in incoming_utxo_recovery_data_list {
-            self.store_utxo_ms_recovery_data(item)
+        for item in &incoming_utxo_recovery_data_list {
+            self.store_utxo_ms_recovery_data(item.clone())
                 .await
                 .expect("Failed to store mutator set recovery data to file.");
         }
@@ -1769,7 +1769,7 @@ impl WalletState {
 
         self.wallet_db.set_sync_label(block.hash()).await;
 
-        Ok(())
+        Ok(incoming_utxo_recovery_data_list)
     }
 
     /// writes prepared utxo claim data to disk
