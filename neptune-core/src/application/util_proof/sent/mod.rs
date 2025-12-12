@@ -60,11 +60,11 @@ impl The {
     ) -> Claim {
         c.with_output(
             [
+                lock_postimage.values().into(),
                 sender_randomness_digest.values().to_vec(),
                 aocl_digest.values().into(),
                 amount.encode(),
                 amount_timelocked.encode(),
-                lock_postimage.values().into(),
             ]
             .concat(),
         )
@@ -162,6 +162,14 @@ impl ConsensusProgram for The {
         let payload = triton_asm! {
             /* pasted from <reserves.rs>
             ============== */
+            // _
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            {&rustfield_utxo}
+            {&Utxo::get_field("lock_script_hash")}
+            read_mem 5
+            pop 1
+            // [lock_script_digest]
+            write_io 5
             // _
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
@@ -289,14 +297,6 @@ impl ConsensusProgram for The {
             // num_coins num_coins *eof amount timelocked_amount utxo_amount' utxo_is_timelocked'
             pop 1 write_io 8
             // num_coins num_coins *eof amount
-
-            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            {&rustfield_utxo}
-            {&Utxo::get_field("lock_script_hash")}
-            read_mem 5
-            pop 1
-            // _ [lock_script_digest]
-            write_io 5
         };
 
         let imports = library.all_imports();
