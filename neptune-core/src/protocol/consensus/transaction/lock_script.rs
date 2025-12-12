@@ -4,7 +4,6 @@ use std::sync::Arc;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
-use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
@@ -12,7 +11,6 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use super::utxo::Utxo;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
@@ -154,11 +152,12 @@ impl LockScriptAndWitness {
 
     /// Determine if the given UTXO can be unlocked with this
     /// lock-script-and-witness pair.
-    pub fn can_unlock(&self, utxo: &Utxo) -> bool {
+    #[cfg(test)]
+    pub fn can_unlock(&self, utxo: &super::utxo::Utxo) -> bool {
         if self.program.hash() != utxo.lock_script_hash() {
             return false;
         }
-        let any_digest = rand::rng().random::<Digest>();
+        let any_digest = rand::Rng::random::<Digest>(&mut rand::rng());
         self.halts_gracefully(any_digest.values().into())
     }
 
@@ -173,10 +172,9 @@ impl LockScriptAndWitness {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Proof, CreateProofError> {
-        let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);
         ProofBuilder::new()
             .program(self.program.clone())
-            .claim(claim)
+            .claim(Claim::new(self.program.hash()).with_input(public_input.individual_tokens))
             .nondeterminism(|| self.nondeterminism())
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
