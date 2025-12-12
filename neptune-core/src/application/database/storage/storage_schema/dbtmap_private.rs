@@ -4,6 +4,7 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -15,7 +16,6 @@ use super::SimpleRustyReader;
 use super::WriteOperation;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_vec::traits::StorageVecBase;
-use crate::application::database::storage::storage_vec::Index;
 use crate::application::locks::tokio::AtomicRw;
 
 /// A level-DB backed insertion-only mapping from keys to values.
@@ -23,12 +23,16 @@ use crate::application::locks::tokio::AtomicRw;
 /// The reason that remove functionality is not supported is that the
 /// underlying [`DbtVec`] does not support removal of an arbitrary element, it
 /// only supports push and pop operations, so there would be no efficient way
-/// of removing a key from the maps list of keys by index.
+/// of removing a key from the maps list of keys by index. As an alternative to
+/// deleting individual elements, the entire mapping can be cleared.
 pub(super) struct DbtMapPrivate<K, V> {
     pub(super) name: String,
     pub(super) reader: Arc<SimpleRustyReader>,
     pub(super) prefix_map_key: u8,
-    pub(super) cache: HashMap<K, (V, Index)>,
+
+    /// Cache that supports deletion of records. A `None` value means that the
+    /// value has been deleted.
+    pub(super) cache: HashMap<K, Option<V>>,
     pub(super) pending_writes: AtomicRw<PendingWrites>,
 
     /// A list of all keys in the mapping, sorted by insertion order.
@@ -46,6 +50,7 @@ where
             .field("name", &self.name)
             .field("key_prefix", &self.prefix_map_key)
             .field("cache", &self.cache)
+            .field("persist_count", &self.persist_count)
             .finish()
     }
 }
@@ -53,7 +58,7 @@ where
 impl<K, V> DbtMapPrivate<K, V>
 where
     K: Clone + Debug + Serialize + DeserializeOwned + Eq + Hash + Send + Sync,
-    V: Clone + Serialize + DeserializeOwned,
+    V: Clone + Debug + Serialize + DeserializeOwned,
 {
     pub(super) async fn new(
         pending_writes: AtomicRw<PendingWrites>,
@@ -87,6 +92,10 @@ where
         }
     }
 
+    /// Clear cache in case persisting happend *prior* to the insertion of new
+    /// write operations. Must be called before the modification of any cache,
+    /// since cache values will otherwise be deleted prior to the corresponding
+    /// writes.
     fn process_persist_count(&mut self, pending_writes_persist_count: usize) {
         if pending_writes_persist_count > self.persist_count {
             self.cache.clear();
@@ -107,8 +116,8 @@ where
     #[inline]
     pub(super) async fn contains_key(&self, key: &K) -> bool {
         // First check cache.
-        if self.cache.contains_key(key) {
-            return true;
+        if let Some(cache_entry) = self.cache.get(key) {
+            return cache_entry.is_some();
         }
 
         // Then check persisted storage
@@ -116,22 +125,16 @@ where
         self.reader.get(rkey).await.is_some()
     }
 
-    /// Returns the value and the key index referenced by the key.
-    #[inline]
-    async fn inner_get(&self, key: &K) -> Option<(V, Index)> {
+    /// Returns the value referenced by the key.
+    pub(super) async fn get(&self, key: &K) -> Option<V> {
         // First check cache
         if let Some(v) = self.cache.get(key) {
-            return Some(v.to_owned());
+            return v.as_ref().map(|v| v.to_owned());
         }
 
         // Then check persisted storage
         let rkey = self.map_key_rusty_key(key);
         self.reader.get(rkey).await.map(|val| val.into_any())
-    }
-
-    /// Returns the value referenced by the key.
-    pub(super) async fn get(&self, key: &K) -> Option<V> {
-        self.inner_get(key).await.map(|(v, _)| v)
     }
 
     /// Inserts a key-value pair into the map.
@@ -141,18 +144,12 @@ where
     /// If the map did have this key present, the value is updated, and the old
     /// value is returned.
     pub(super) async fn insert(&mut self, key: K, value: V) -> Option<V> {
-        let previous_val = self.inner_get(&key).await.map(|x| x.to_owned());
+        let previous_val = self.get(&key).await.map(|x| x.to_owned());
 
         // Add key to key list iff key is new
-        let key_index = match previous_val {
-            Some((_, key_index)) => key_index,
-            None => {
-                // Hold lock to ensure consistent length reading/index pair
-                let mut keys_by_index = self.keys_by_index.lock_guard_mut().await;
-                let key_index = keys_by_index.len().await;
-                keys_by_index.push(key.clone()).await;
-                key_index
-            }
+        if previous_val.is_none() {
+            let mut keys_by_index = self.keys_by_index.lock_guard_mut().await;
+            keys_by_index.push(key.clone()).await;
         };
 
         // Add to write list
@@ -162,19 +159,16 @@ where
 
             pending_writes.write_ops.push(WriteOperation::Write(
                 key_as_rusty_key,
-                RustyValue::from_any(&(value.clone(), key_index)),
+                RustyValue::from_any(&value),
             ));
             pending_writes.persist_count
         };
         self.process_persist_count(persist_count);
 
         // Update cache
-        let prev_cache_value = self.cache.insert(key, (value, key_index));
-        if let Some((_, prev_key_index)) = prev_cache_value {
-            debug_assert_eq!(prev_key_index, key_index, "Key index cannot change");
-        }
+        self.cache.insert(key, Some(value));
 
-        previous_val.map(|(v, _)| v)
+        previous_val
     }
 
     #[inline]
@@ -195,50 +189,38 @@ where
     pub(super) async fn all_keys(&self) -> Vec<K> {
         self.keys_by_index.lock_guard().await.get_all().await
     }
-}
 
-#[cfg(test)]
-pub(crate) mod tests {
-    use futures::FutureExt;
-    use itertools::Itertools;
+    /// Delete all entries in the map.
+    ///
+    /// ### Warning: This function puts all keys into memory, so the caller
+    /// should ensure that this does not take up excessive space.
+    pub(super) async fn clear(&mut self) {
+        let all_keys = {
+            let mut keys = self.keys_by_index.lock_guard_mut().await;
+            let all_keys = keys.get_all().await;
+            keys.clear().await;
+            all_keys
+        };
 
-    use super::*;
+        let rusty_keys = all_keys
+            .iter()
+            .map(|k| self.map_key_rusty_key(k))
+            .collect_vec();
 
-    impl<K, V> DbtMapPrivate<K, V>
-    where
-        K: Clone + Debug + Serialize + DeserializeOwned + Eq + Hash + Send + Sync,
-        V: Clone + Serialize + DeserializeOwned,
-    {
-        /// Delete all entries in the mapping.
-        ///
-        /// # Warning
-        ///
-        /// Do not pull this function out from under the test flag before you make sure that the
-        /// cache is handled correctly.
-        pub(in super::super) async fn clear_test(&mut self) {
-            let all_keys = self.all_keys().await;
-            self.keys_by_index
-                .lock_mut_async(|lock| async { lock.clear().await }.boxed())
-                .await;
+        let persist_count = {
+            let mut pending_writes = self.pending_writes.lock_guard_mut().await;
+            for key in rusty_keys {
+                pending_writes.write_ops.push(WriteOperation::Delete(key));
+            }
 
-            let all_keys = all_keys
-                .into_iter()
-                .map(|k| self.map_key_rusty_key(&k))
-                .collect_vec();
+            pending_writes.persist_count
+        };
 
-            let persist_count = {
-                let mut pending_writes = self.pending_writes.lock_guard_mut().await;
-                for key in all_keys {
-                    pending_writes.write_ops.push(WriteOperation::Delete(key));
-                }
+        self.process_persist_count(persist_count);
 
-                pending_writes.persist_count
-            };
-
-            self.process_persist_count(persist_count);
-
-            // Is this the correct way of handling cache?
-            self.cache.clear();
+        // Ensure that the cache reflects that all values have been deleted.
+        for key in all_keys {
+            self.cache.insert(key.clone(), None);
         }
     }
 }

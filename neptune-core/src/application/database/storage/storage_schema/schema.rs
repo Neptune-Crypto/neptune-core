@@ -166,7 +166,7 @@ impl DbtSchema {
     pub async fn new_map<K, V>(&mut self, name: &str) -> DbtMap<K, V>
     where
         K: Clone + Debug + Serialize + DeserializeOwned + Eq + Hash + Send + Sync,
-        V: Clone + Serialize + DeserializeOwned + Send + Sync,
+        V: Clone + Debug + Serialize + DeserializeOwned + Send + Sync,
     {
         let key_prefixes = [self.table_count, self.table_count + 1];
         self.table_count += 2;
