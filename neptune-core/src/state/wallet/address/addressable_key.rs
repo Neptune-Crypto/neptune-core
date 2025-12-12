@@ -9,6 +9,7 @@ use super::common;
 use super::generation_address;
 use super::receiving_address::ReceivingAddress;
 use super::symmetric_key;
+use crate::api::export::Network;
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
@@ -79,6 +80,14 @@ impl KeyType {
     /// returns all available `AddressableKeyType`
     pub fn all_types() -> Vec<KeyType> {
         vec![Self::Generation, Self::Symmetric]
+    }
+
+    /// returns human-readable-prefix (hrp) for a given network
+    pub fn get_hrp(&self, network: Network) -> String {
+        match self {
+            Self::Generation => generation_address::GenerationReceivingAddress::get_hrp(network),
+            Self::Symmetric => symmetric_key::SymmetricKey::get_hrp(network).to_string(),
+        }
     }
 }
 
