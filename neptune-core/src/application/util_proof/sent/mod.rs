@@ -4,7 +4,7 @@
 - ✔️ check the UTXO canonical commitment is in the AOCL
 - ✔️ output the digest of the AOCL
 - ✔️ output the digest of the `sender_randomness` (as reusing it won't allow to put the UTXO again, and its sole role is shifting the AR)
-- no need to check the recipient digest as it doesn't add anything under the current assumptions */
+- ✔️ the recipient digest is in the public inputs */
 
 use std::sync::OnceLock;
 
@@ -62,9 +62,9 @@ impl The {
             [
                 sender_randomness_digest.values().to_vec(),
                 aocl_digest.values().into(),
-                lock_postimage.values().into(),
                 amount.encode(),
                 amount_timelocked.encode(),
+                lock_postimage.values().into(),
             ]
             .concat(),
         )
@@ -288,6 +288,15 @@ impl ConsensusProgram for The {
             call {lib_add_all_amounts_and_check_time_lock}
             // num_coins num_coins *eof amount timelocked_amount utxo_amount' utxo_is_timelocked'
             pop 1 write_io 8
+            // num_coins num_coins *eof amount
+
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            {&rustfield_utxo}
+            {&Utxo::get_field("lock_script_hash")}
+            read_mem 5
+            pop 1
+            // _ [lock_script_digest]
+            write_io 5
         };
 
         let imports = library.all_imports();
