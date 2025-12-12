@@ -190,16 +190,17 @@ impl ConsensusProgram for The {
 
             /* ## this segment diverges from the pasted code
             *it only affects the output sequence* */
-            dup 4
-            dup 4
-            dup 4
-            dup 4
-            dup 4
             push 0
             push 0
             push 0
             push 0
             push 0
+            dup 9
+            dup 9
+            dup 9
+            dup 9
+            dup 9
+            hash
             write_io 5
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
