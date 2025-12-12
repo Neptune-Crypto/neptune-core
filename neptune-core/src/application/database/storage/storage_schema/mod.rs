@@ -622,60 +622,87 @@ mod tests {
         // initialize storage
         let mut rusty_storage = SimpleRustyStorage::new(db);
         let mut persisted_map = rusty_storage.schema.new_map::<u64, u64>("test-map").await;
-        let mut hashmap: HashMap<u64, u64> = HashMap::default();
+        let mut hashmap: HashMap<u64, u64>;
 
-        assert!(persisted_map.is_empty().await);
+        // Outer loop body ends with a clear. So this test that the mapping
+        // works consistently after a clear.
+        let num_clears = 7;
+        for _ in 0..num_clears {
+            hashmap = HashMap::default();
+            assert_eq!(0, persisted_map.len().await);
+            assert!(persisted_map.all_keys().await.is_empty());
+            assert!(persisted_map.is_empty().await);
 
-        // Insert elements
-        let mut rng = rand::rng();
-        let mut inserted_keys = vec![];
-        for i in 0..NUM_INSERTIONS {
-            let key = random();
-            inserted_keys.push(key);
+            // Insert elements
+            let mut rng = rand::rng();
+            let mut inserted_keys = vec![];
+            for i in 0..NUM_INSERTIONS {
+                let key = random();
+                inserted_keys.push(key);
 
-            let value = random();
+                let value = random();
 
-            assert!(!persisted_map.contains_key(&key).await);
-            assert!(persisted_map.get(&key).await.is_none());
-            assert!(
-                persisted_map.insert(key, value).await.is_none(),
-                "Key must be new"
-            );
-            assert!(!persisted_map.is_empty().await);
-            assert_eq!(i + 1, persisted_map.len().await);
-            assert_eq!(value, persisted_map.get(&key).await.unwrap());
-            assert!(persisted_map.contains_key(&key).await);
+                assert!(!persisted_map.contains_key(&key).await);
+                assert!(persisted_map.get(&key).await.is_none());
+                assert!(
+                    persisted_map.insert(key, value).await.is_none(),
+                    "Key must be new"
+                );
+                assert!(!persisted_map.is_empty().await);
+                assert_eq!(i + 1, persisted_map.len().await);
+                assert_eq!(value, persisted_map.get(&key).await.unwrap());
+                assert!(persisted_map.contains_key(&key).await);
 
-            if rng.random_bool(0.05) {
+                if rng.random_bool(0.05) {
+                    rusty_storage.persist().await;
+                }
+
+                let new_value = value + 1;
+                assert_eq!(
+                    value,
+                    persisted_map.insert(key, new_value).await.unwrap(),
+                    "Inserting value for existing key must return original value"
+                );
+                hashmap.insert(key, new_value);
+            }
+            assert_eq!(NUM_INSERTIONS, persisted_map.len().await);
+
+            for (key, value) in &hashmap {
+                assert_eq!(*value, persisted_map.get(key).await.unwrap());
+                assert!(persisted_map.contains_key(key).await);
+            }
+            assert_eq!(NUM_INSERTIONS, persisted_map.len().await);
+
+            assert_eq!(inserted_keys, persisted_map.all_keys().await);
+
+            rusty_storage.persist().await;
+
+            for (key, value) in &hashmap {
+                assert_eq!(*value, persisted_map.get(key).await.unwrap());
+                assert!(persisted_map.contains_key(key).await);
+            }
+            assert_eq!(NUM_INSERTIONS, persisted_map.len().await);
+            assert_eq!(inserted_keys, persisted_map.all_keys().await);
+
+            // Clear map and verify that all read-out data is consistent, with and
+            // without persistence.
+            persisted_map.clear().await;
+            for key in hashmap.keys() {
+                assert!(persisted_map.get(key).await.is_none());
+                assert!(!persisted_map.contains_key(key).await);
+            }
+            assert_eq!(0, persisted_map.len().await);
+            assert!(persisted_map.all_keys().await.is_empty());
+            assert!(persisted_map.is_empty().await);
+
+            if rng.random_bool(0.5) {
                 rusty_storage.persist().await;
             }
-
-            let new_value = value + 1;
-            assert_eq!(
-                value,
-                persisted_map.insert(key, new_value).await.unwrap(),
-                "Inserting value for existing key must return original value"
-            );
-            hashmap.insert(key, new_value);
+            for key in hashmap.keys() {
+                assert!(persisted_map.get(key).await.is_none());
+                assert!(!persisted_map.contains_key(key).await);
+            }
         }
-        assert_eq!(NUM_INSERTIONS, persisted_map.len().await);
-
-        for (key, value) in &hashmap {
-            assert_eq!(*value, persisted_map.get(key).await.unwrap());
-            assert!(persisted_map.contains_key(key).await);
-        }
-        assert_eq!(NUM_INSERTIONS, persisted_map.len().await);
-
-        assert_eq!(inserted_keys, persisted_map.all_keys().await);
-
-        rusty_storage.persist().await;
-
-        for (key, value) in &hashmap {
-            assert_eq!(*value, persisted_map.get(key).await.unwrap());
-            assert!(persisted_map.contains_key(key).await);
-        }
-        assert_eq!(NUM_INSERTIONS, persisted_map.len().await);
-        assert_eq!(inserted_keys, persisted_map.all_keys().await);
     }
 
     #[apply(shared_tokio_runtime)]

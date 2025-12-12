@@ -17,7 +17,8 @@ use crate::application::locks::tokio::AtomicRw;
 /// a key/value pair is inserted, it cannot be removed again. However, existing
 /// values can be overwritten. If some notion of deletion is required, the
 /// value entries must be declared such that they can be marked as deleted by
-/// the caller.
+/// the caller. As an alternative to deleting individual elements, the entire
+/// mapping can be cleared.
 #[derive(Debug)]
 pub struct DbtMap<K, V> {
     inner: DbtMapPrivate<K, V>,
@@ -26,7 +27,7 @@ pub struct DbtMap<K, V> {
 impl<K, V> DbtMap<K, V>
 where
     K: Clone + Debug + Serialize + DeserializeOwned + Eq + Hash + Send + Sync,
-    V: Clone + Serialize + DeserializeOwned,
+    V: Clone + Debug + Serialize + DeserializeOwned,
 {
     // DbtMap cannot be instantiated directly outside of storage_schema module
     // use [Schema::new_map()]
@@ -78,6 +79,11 @@ where
     pub async fn all_keys(&self) -> Vec<K> {
         self.inner.all_keys().await
     }
+
+    /// Delete all entries in the map.
+    pub async fn clear(&mut self) {
+        self.inner.clear().await
+    }
 }
 
 #[async_trait::async_trait]
@@ -89,26 +95,4 @@ where
     #[inline]
     // No preprocessing needed for this table type
     async fn restore_or_new(&mut self) {}
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    impl<K, V> DbtMap<K, V>
-    where
-        K: Clone + Debug + Serialize + DeserializeOwned + Eq + Hash + Send + Sync,
-        V: Clone + Serialize + DeserializeOwned,
-    {
-        /// Delete all entries in the mapping. Must be followed up with a persist. Only suitable for
-        /// tests. Must not be called in production code, without changes.
-        ///
-        /// # Warning
-        ///
-        /// Do not pull this function out from under the test flag, as it requires being followed
-        /// up by a call to persist the changes.
-        pub(crate) async fn clear_test(&mut self) {
-            self.inner.clear_test().await;
-        }
-    }
 }
