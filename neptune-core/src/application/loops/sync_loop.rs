@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 use crate::api::export::BlockHeight;
-use crate::application::loops::main_loop::block_validator::BlockValidator;
+use crate::application::loops::sync_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::MainToSync;
 use crate::application::loops::sync_loop::channel::SuccessorsToSync;
@@ -26,6 +26,7 @@ use crate::application::loops::sync_loop::sync_progress::SyncProgress;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
+mod block_validator;
 pub(crate) mod channel;
 pub(crate) mod handle;
 pub(crate) mod rapid_block_download;
@@ -79,7 +80,7 @@ pub(crate) struct SyncLoop {
 }
 
 impl SyncLoop {
-    pub(crate) async fn new(
+    async fn new(
         genesis_block: Block,
         target_height: BlockHeight,
         resume_if_possible: bool,
@@ -842,6 +843,7 @@ mod tests {
     use rand::SeedableRng;
     use tokio::sync::Mutex;
 
+    use crate::api::export::Network;
     use crate::application::loops::sync_loop::handle::SyncLoopHandle;
     use crate::protocol::consensus::block::Block;
     use crate::tests::shared_tokio_runtime;
@@ -884,7 +886,7 @@ mod tests {
                 sync_target_height
             );
             let sync_loop_handle =
-                SyncLoopHandle::new(current_tip, sync_target_height, BlockValidator::Test, false)
+                SyncLoopHandle::new(current_tip, sync_target_height, Network::Testnet(0), false)
                     .await;
             let (peer_control_sender, peer_control_receiver) = mpsc::channel::<PeerControl>(10);
             let (blockchain_tip_control_sender, blockchain_tip_control_receiver) =

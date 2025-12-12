@@ -5,7 +5,8 @@ use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
 use crate::api::export::BlockHeight;
-use crate::application::loops::main_loop::block_validator::BlockValidator;
+use crate::api::export::Network;
+use crate::application::loops::sync_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::MainToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
@@ -29,9 +30,10 @@ impl SyncLoopHandle {
     pub(crate) async fn new(
         genesis_block: Block,
         target_height: BlockHeight,
-        block_validator: BlockValidator,
+        network: Network,
         resume_if_possible: bool,
     ) -> Self {
+        let block_validator = BlockValidator::from_network(network);
         let (state, sender, receiver) = SyncLoop::new(
             genesis_block,
             target_height,

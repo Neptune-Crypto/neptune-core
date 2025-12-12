@@ -1,4 +1,3 @@
-pub(crate) mod block_validator;
 pub mod proof_upgrader;
 pub(crate) mod upgrade_incentive;
 
@@ -38,7 +37,6 @@ use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::connect_to_peers::answer_peer;
 use crate::application::loops::connect_to_peers::call_peer;
 use crate::application::loops::connect_to_peers::precheck_incoming_connection_is_allowed;
-use crate::application::loops::main_loop::block_validator::BlockValidator;
 use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
@@ -856,13 +854,9 @@ impl MainLoopHandler {
 
                     // Create sync loop with handle.
                     let genesis_block = Block::genesis(network);
-                    let mut sync_loop = SyncLoopHandle::new(
-                        genesis_block,
-                        claimed_height,
-                        BlockValidator::Production { network },
-                        resume_please,
-                    )
-                    .await;
+                    let mut sync_loop =
+                        SyncLoopHandle::new(genesis_block, claimed_height, network, resume_please)
+                            .await;
                     sync_loop.start();
 
                     // Tell sync loop about all known peers.
