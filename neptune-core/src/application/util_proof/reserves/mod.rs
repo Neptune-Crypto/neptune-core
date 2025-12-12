@@ -59,17 +59,17 @@ pub struct PublicData {
     /// `receiver_digest`;
     /// `release_date` ([add `MINING_REWARD_TIME_LOCK_PERIOD`](https://github.com/Neptune-Crypto/neptune-core/blob/5c1c6ef2ca1e282a05c7dc5300e742c92758fbfb/neptune-core/src/protocol/consensus/type_scripts/native_currency.rs#L365))
     input: (Digest, Timestamp),
+    /// `lock_postimage` of the address;
     /// the record to check if the reserve is still unspent;
     /// AOCL digest;
     /// the 'reserve'
     /// the timelocked 'reserve'
-    /// `lock_postimage` of the address;
     output: (
+        Digest,
         crate::util_types::mutator_set::removal_record::RemovalRecord,
         Digest,
         NativeCurrencyAmount,
         NativeCurrencyAmount,
-        Digest,
     ),
 }
 impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for PublicData {
@@ -157,6 +157,14 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             >::default(),
         )); // TODO
         let payload = triton_asm! {
+            // _
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            {&rustfield_utxo}
+            {&Utxo::get_field("lock_script_hash")}
+            read_mem 5
+            pop 1
+            // [lock_script_digest]
+            write_io 5
             // _
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
@@ -312,14 +320,6 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             // num_coins num_coins *eof amount timelocked_amount utxo_amount' utxo_is_timelocked'
             pop 1 write_io 8
             // num_coins num_coins *eof amount
-
-            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            {&rustfield_utxo}
-            {&Utxo::get_field("lock_script_hash")}
-            read_mem 5
-            pop 1
-            // _ [lock_script_digest]
-            write_io 5
 
             // _______________________________
             // left-over from an approach when I didn't get to the useful snippet
