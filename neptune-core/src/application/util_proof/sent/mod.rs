@@ -1,8 +1,6 @@
 /*
-- ~~either output the UTXO "(must be in the standard lock-script)\ (must be in the coins)"~~
-- either
-    - ✔️ output the address lock part
-    - ✔️ output the ammount(s)
+- ✔️ output the address lock part
+- ✔️ output the ammount(s)
 - ✔️ check the UTXO canonical commitment is in the AOCL
 - ✔️ output the digest of the AOCL
 - ✔️ output the digest of the `sender_randomness` (as reusing it won't allow to put the UTXO again, and its sole role is shifting the AR)
