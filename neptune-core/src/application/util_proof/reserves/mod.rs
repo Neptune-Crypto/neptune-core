@@ -61,15 +61,15 @@ pub struct PublicData {
     input: (Digest, Timestamp),
     /// the record to check if the reserve is still unspent;
     /// AOCL digest;
-    /// `lock_postimage` of the address;
     /// the 'reserve'
     /// the timelocked 'reserve'
+    /// `lock_postimage` of the address;
     output: (
         crate::util_types::mutator_set::removal_record::RemovalRecord,
         Digest,
+        NativeCurrencyAmount,
+        NativeCurrencyAmount,
         Digest,
-        NativeCurrencyAmount,
-        NativeCurrencyAmount,
     ),
 }
 impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for PublicData {
@@ -312,13 +312,17 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             // num_coins num_coins *eof amount timelocked_amount utxo_amount' utxo_is_timelocked'
             pop 1 write_io 8
             // num_coins num_coins *eof amount
+
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            {&rustfield_utxo}
+            {&Utxo::get_field("lock_script_hash")}
+            read_mem 5
+            pop 1
+            // _ [lock_script_digest]
+            write_io 5
+
             // _______________________________
             // left-over from an approach when I didn't get to the useful snippet
-            // push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            // {&rustfield_utxo}
-            // {&rustfield_lockscripthash}
-            // read_mem 5
-            // pop 1
             // // [lock_script_digest]
             // dup 4
             // dup 4
@@ -326,8 +330,6 @@ impl crate::protocol::proof_abstractions::tasm::program::ConsensusProgram for Pu
             // dup 4
             // dup 4
             // // [lock_script_digest] [lock_script_digest]
-            // write_io 5
-            // // [lock_script_digest]
             // push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
             // {&WitnessMemory::get_field("lock_preimage")}
             // // [lock_script_digest] *lock_preimage
