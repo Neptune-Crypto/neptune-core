@@ -11,7 +11,8 @@ Let’s say you want to add a new method called `submit_block`.
 2. **Create request and response types**
 
    * In `json_rpc::core::model::message`, define a matching pair of structs:
-     `SubmitBlockRequest` and `SubmitBlockResponse`.
+     `SubmitBlockRequest` and `SubmitBlockResponse`. Note that the `Request` must derive
+     `Serialize_tuple, Deserialize_tuple` whereas the `Response` must derive `Serialize, Deserialize`.
 
 3. **Update the RPC API**
 
