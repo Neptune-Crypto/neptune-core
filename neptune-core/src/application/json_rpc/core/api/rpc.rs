@@ -268,6 +268,29 @@ pub trait RpcApi: Sync + Send {
         request: FindUtxoOriginRequest,
     ) -> RpcResult<FindUtxoOriginResponse>;
 
+    async fn circulating_supply(&self) -> RpcResult<CirculatingSupplyResponse> {
+        self.circulating_supply_call(CirculatingSupplyRequest {})
+            .await
+    }
+    async fn circulating_supply_call(
+        &self,
+        _request: CirculatingSupplyRequest,
+    ) -> RpcResult<CirculatingSupplyResponse>;
+
+    async fn max_supply(&self) -> RpcResult<MaxSupplyResponse> {
+        self.max_supply_call(MaxSupplyRequest {}).await
+    }
+    async fn max_supply_call(&self, _request: MaxSupplyRequest) -> RpcResult<MaxSupplyResponse>;
+
+    async fn burned_supply(&self) -> RpcResult<BurnedSupplyResponse> {
+        self.burned_supply_call(BurnedSupplyRequest {}).await
+    }
+
+    async fn burned_supply_call(
+        &self,
+        _request: BurnedSupplyRequest,
+    ) -> RpcResult<BurnedSupplyResponse>;
+
     /* Wallet */
 
     async fn get_blocks(

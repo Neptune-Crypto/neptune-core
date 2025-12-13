@@ -96,6 +96,15 @@ pub enum RpcMethods {
     #[namespace(Namespace::Archival)]
     FindUtxoOrigin,
 
+    #[namespace(Namespace::Archival)]
+    CirculatingSupply,
+
+    #[namespace(Namespace::Archival)]
+    MaxSupply,
+
+    #[namespace(Namespace::Archival)]
+    BurnedSupply,
+
     #[namespace(Namespace::Wallet)]
     GetBlocks,
 

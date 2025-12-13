@@ -206,6 +206,30 @@ enum Command {
         max_num_blocks: Option<usize>,
     },
 
+    /// Shows the circulating supply of Neptune coins.
+    ///
+    /// "Circulating" means "not time-locked" or "time-locked but with an
+    /// expired release date".
+    ///
+    /// This number is computed rapidly but heuristically:
+    ///  - It assumes that every block mined minted the maximum allowable
+    ///    coinbase.
+    ///  - It assumes that time-locks expire after exactly 160815 blocks,
+    ///    corresponding to one generation.
+    ///  - It assumes all burns are known.
+    CirculatingSupply,
+
+    /// Shows the asymptotical limit on the supply of Neptune coins.
+    ///
+    /// This number is computed rapidly but heuristically:
+    ///  - It assumes that every block mined in the past or to be mined in the
+    ///    future mints the maximum allowable coinbase.
+    ///  - It assumes that all burns are known (even future ones).
+    MaxSupply,
+
+    /// Shows the total supply of Neptune coins that were burned.
+    BurnedSupply,
+
     /******** PEER INTERACTIONS ********/
     /// Broadcast transaction notifications for all transactions in mempool.
     BroadcastMempoolTransactions,
@@ -1045,6 +1069,21 @@ async fn main() -> Result<()> {
             println!(
                 "Greatest difficulty in specified range:\n{difficulty} at block height {height}."
             )
+        }
+
+        Command::CirculatingSupply => {
+            let circulating_supply = client.circulating_supply(ctx, token).await??;
+            println!("{}", circulating_supply.display_lossless());
+        }
+
+        Command::MaxSupply => {
+            let max_supply = client.max_supply(ctx, token).await??;
+            println!("{}", max_supply.display_lossless());
+        }
+
+        Command::BurnedSupply => {
+            let burned_supply = client.burned_supply(ctx, token).await??;
+            println!("{}", burned_supply.display_lossless());
         }
 
         /******** PEER INTERACTIONS ********/

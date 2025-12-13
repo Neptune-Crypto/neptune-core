@@ -264,6 +264,36 @@ pub struct FindUtxoOriginResponse {
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
+pub struct CirculatingSupplyRequest {}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CirculatingSupplyResponse {
+    pub amount: RpcNativeCurrencyAmount,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct MaxSupplyRequest {}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaxSupplyResponse {
+    pub amount: RpcNativeCurrencyAmount,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct BurnedSupplyRequest {}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BurnedSupplyResponse {
+    pub amount: RpcNativeCurrencyAmount,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
 pub struct GetBlocksRequest {
     pub from_height: RpcBlockHeight,
     pub to_height: RpcBlockHeight,
