@@ -984,7 +984,6 @@ pub(crate) mod tests {
     use arbitrary::Arbitrary;
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
-    use block_header::tests::random_block_header;
     use difficulty_control::Difficulty;
     use itertools::Itertools;
     use macro_rules_attr::apply;
@@ -2152,7 +2151,7 @@ pub(crate) mod tests {
         rng.fill_bytes(&mut unstructured_source);
         let mut unstructured = arbitrary::Unstructured::new(&unstructured_source);
 
-        let mut predecessor_header = random_block_header();
+        let mut predecessor_header = rng.random::<BlockHeader>();
         predecessor_header.difficulty = Difficulty::from(difficulty);
         let predecessor_body = BlockBody::new(
             TransactionKernelProxy::arbitrary(&mut unstructured)
@@ -2170,7 +2169,7 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let mut successor_header = random_block_header();
+        let mut successor_header = rng.random::<BlockHeader>();
         successor_header.prev_block_digest = predecessor_block.hash();
         // note that successor's difficulty is random
         let successor_body = BlockBody::new(

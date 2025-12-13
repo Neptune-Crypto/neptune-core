@@ -8,8 +8,8 @@ use tokio::sync::mpsc;
 
 use crate::api::export::Network;
 use crate::application::config::cli_args;
-use crate::application::loops::channel::MainToPeerTask;
-use crate::application::loops::channel::PeerTaskToMain;
+use crate::application::loops::peer_loop::channel::MainToPeerTask;
+use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::peer::handshake_data::VersionString;
 use crate::protocol::peer::peer_info::PeerConnectionInfo;
