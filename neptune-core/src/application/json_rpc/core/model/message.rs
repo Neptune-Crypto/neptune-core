@@ -264,31 +264,31 @@ pub struct FindUtxoOriginResponse {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetCirculatingSupplyRequest;
+pub struct CirculatingSupplyRequest {}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetCirculatingSupplyResponse {
+pub struct CirculatingSupplyResponse {
     pub amount: RpcNativeCurrencyAmount,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetMaxSupplyRequest;
+pub struct MaxSupplyRequest {}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetMaxSupplyResponse {
+pub struct MaxSupplyResponse {
     pub amount: RpcNativeCurrencyAmount,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetBurnedSupplyRequest;
+pub struct BurnedSupplyRequest {}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetBurnedSupplyResponse {
+pub struct BurnedSupplyResponse {
     pub amount: RpcNativeCurrencyAmount,
 }
 
