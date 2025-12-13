@@ -346,11 +346,11 @@ impl RpcApi for RpcServer {
         })
     }
 
-    async fn get_circulating_supply_call(
+    async fn circulating_supply_call(
         &self,
-        _request: GetCirculatingSupplyRequest,
-    ) -> RpcResult<GetCirculatingSupplyResponse> {
-        Ok(GetCirculatingSupplyResponse {
+        _request: CirculatingSupplyRequest,
+    ) -> RpcResult<CirculatingSupplyResponse> {
+        Ok(CirculatingSupplyResponse {
             amount: self
                 .state
                 .lock_guard()
@@ -363,11 +363,8 @@ impl RpcApi for RpcServer {
         })
     }
 
-    async fn get_max_supply_call(
-        &self,
-        _request: GetMaxSupplyRequest,
-    ) -> RpcResult<GetMaxSupplyResponse> {
-        Ok(GetMaxSupplyResponse {
+    async fn max_supply_call(&self, _request: MaxSupplyRequest) -> RpcResult<MaxSupplyResponse> {
+        Ok(MaxSupplyResponse {
             amount: self
                 .state
                 .lock_guard()
@@ -380,11 +377,11 @@ impl RpcApi for RpcServer {
         })
     }
 
-    async fn get_burned_supply_call(
+    async fn burned_supply_call(
         &self,
-        _request: GetBurnedSupplyRequest,
-    ) -> RpcResult<GetBurnedSupplyResponse> {
-        Ok(GetBurnedSupplyResponse {
+        _request: BurnedSupplyRequest,
+    ) -> RpcResult<BurnedSupplyResponse> {
+        Ok(BurnedSupplyResponse {
             amount: self
                 .state
                 .lock_guard()
@@ -615,9 +612,6 @@ pub mod tests {
     use crate::application::json_rpc::core::api::rpc::RpcApi;
     use crate::application::json_rpc::core::api::rpc::RpcError;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
-    use crate::application::json_rpc::core::model::message::GetBurnedSupplyRequest;
-    use crate::application::json_rpc::core::model::message::GetCirculatingSupplyRequest;
-    use crate::application::json_rpc::core::model::message::GetMaxSupplyRequest;
     use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -1070,18 +1064,9 @@ pub mod tests {
     #[apply(shared_tokio_runtime)]
     async fn supply_methods_return_reasonable_results() {
         let rpc_server = test_rpc_server().await;
-        let circulating_supply = rpc_server
-            .get_circulating_supply_call(GetCirculatingSupplyRequest)
-            .await
-            .unwrap();
-        let max_supply = rpc_server
-            .get_max_supply_call(GetMaxSupplyRequest)
-            .await
-            .unwrap();
-        let burned_supply = rpc_server
-            .get_burned_supply_call(GetBurnedSupplyRequest)
-            .await
-            .unwrap();
+        let circulating_supply = rpc_server.circulating_supply().await.unwrap();
+        let max_supply = rpc_server.max_supply().await.unwrap();
+        let burned_supply = rpc_server.burned_supply().await.unwrap();
 
         let premine = PREMINE_MAX_SIZE;
         let claims_pool = INITIAL_BLOCK_SUBSIDY
