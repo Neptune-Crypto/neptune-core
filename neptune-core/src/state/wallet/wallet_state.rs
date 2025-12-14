@@ -2057,8 +2057,6 @@ impl WalletState {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
-    use std::sync::Arc;
-
     use generation_address::GenerationSpendingKey;
     use macro_rules_attr::apply;
     use num_traits::Zero;
@@ -2116,17 +2114,17 @@ pub(crate) mod tests {
     /// Create an outgoing transaction. Helper function.
     ///
     /// Panics on insufficient balance.
-    async fn outgoing_transaction(
+    pub async fn outgoing_transaction(
         alice_global_lock: &mut GlobalStateLock,
         amount: NativeCurrencyAmount,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         change_key: SpendingKey,
-    ) -> Result<Arc<Transaction>> {
-        let mut rng = rand::rng();
-        let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+        rness: crate::tests::shared::Randomness<0, 2>,
+    ) -> Result<crate::api::export::TxCreationArtifacts> {
+        let an_address = GenerationReceivingAddress::derive_from_seed(rness.digests[0]);
         let tx_output =
-            TxOutput::onchain_native_currency(amount, rng.random(), an_address.into(), false);
+            TxOutput::onchain_native_currency(amount, rness.digests[1], an_address.into(), false);
 
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key)
@@ -2138,8 +2136,6 @@ pub(crate) mod tests {
             .tip()
             .header()
             .height;
-        let network = alice_global_lock.cli().network;
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         alice_global_lock
             .api()
             .tx_initiator_internal()
@@ -2148,10 +2144,9 @@ pub(crate) mod tests {
                 fee,
                 timestamp,
                 config,
-                consensus_rule_set,
+                ConsensusRuleSet::infer_from(alice_global_lock.cli().network, block_height),
             )
             .await
-            .map(|tx| tx.transaction)
     }
 
     #[apply(shared_tokio_runtime)]
@@ -2290,7 +2285,7 @@ pub(crate) mod tests {
     ///
     /// Note that this function is probabilistic. Block is invalid, both wrt.
     /// PoW and proof.
-    async fn bob_mines_one_block(
+    pub(crate) async fn bob_mines_one_block(
         network: Network,
     ) -> (Block, GlobalStateLock, GenerationSpendingKey) {
         let mut rng = rand::rng();
@@ -3579,6 +3574,7 @@ pub(crate) mod tests {
                 NativeCurrencyAmount::coins(1),
                 now,
                 change_key,
+                rng.random(),
             )
             .await
             .unwrap();
@@ -3589,7 +3585,7 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*tx1).clone(), UpgradePriority::Critical)
+                .mempool_insert(tx1.transaction().clone(), UpgradePriority::Critical)
                 .await;
 
             // generate a second transaction
@@ -3600,6 +3596,7 @@ pub(crate) mod tests {
                 NativeCurrencyAmount::coins(1),
                 now,
                 change_key,
+                rng.random(),
             )
             .await
             .unwrap();
@@ -3609,7 +3606,7 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*tx2).clone(), UpgradePriority::Critical)
+                .mempool_insert(tx2.transaction().clone(), UpgradePriority::Critical)
                 .await;
 
             // verify that the mempool contains two transactions
@@ -3626,6 +3623,7 @@ pub(crate) mod tests {
                     NativeCurrencyAmount::coins(1),
                     now,
                     change_key,
+                    rng.random()
                 )
                 .await
                 .is_err(),
@@ -4113,11 +4111,15 @@ pub(crate) mod tests {
                 NativeCurrencyAmount::coins(1),
                 timestamp,
                 change_key,
+                rand::rng().random(),
             )
             .await
             .unwrap();
 
-            let block_1a = invalid_block_with_transaction(&genesis, spending_tx_1a.into());
+            let block_1a = invalid_block_with_transaction(
+                &genesis,
+                spending_tx_1a.transaction().clone().into(),
+            );
             let block_1b = invalid_empty_block(&genesis, network);
             let block_2b = invalid_empty_block(&block_1b, network);
             alice_global_lock
@@ -4168,6 +4170,7 @@ pub(crate) mod tests {
                 NativeCurrencyAmount::coins(1),
                 timestamp,
                 change_key,
+                rand::rng().random(),
             )
             .await;
 
