@@ -1100,7 +1100,7 @@ mod tests {
     use crate::protocol::consensus::type_scripts::time_lock::TimeLock;
     use crate::protocol::consensus::type_scripts::time_lock::TimeLockWitness;
     use crate::protocol::consensus::type_scripts::TypeScriptWitness;
-    use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;

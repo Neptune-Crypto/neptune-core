@@ -8,7 +8,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::protocol::consensus::block::Block;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +35,7 @@ pub struct PredecessorIsValid {
     pub witness: PredecessorIsValidWitness,
 }
 
-impl ConsensusProgram for PredecessorIsValid {
+impl TritonProgram for PredecessorIsValid {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
     }
@@ -51,9 +51,9 @@ impl ConsensusProgram for PredecessorIsValid {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
 
-    impl ConsensusProgramSpecification for PredecessorIsValid {
+    impl TritonProgramSpecification for PredecessorIsValid {
         fn source(&self) {
             todo!()
         }

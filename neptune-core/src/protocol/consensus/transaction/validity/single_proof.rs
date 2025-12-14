@@ -34,7 +34,7 @@ use crate::protocol::consensus::transaction::validity::tasm::claims::generate_ty
 use crate::protocol::consensus::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriClaim;
 use crate::protocol::consensus::transaction::Claim;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
@@ -317,7 +317,7 @@ pub(crate) fn produce_single_proof_mock(valid_mock: bool) -> Proof {
     }
 }
 
-impl ConsensusProgram for SingleProof {
+impl TritonProgram for SingleProof {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
@@ -780,12 +780,12 @@ pub(crate) mod tests {
     use crate::protocol::consensus::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::ConsensusError;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
 
-    impl ConsensusProgramSpecification for SingleProof {
+    impl TritonProgramSpecification for SingleProof {
         fn source(&self) {
             let stark: Stark = Stark::default();
             let own_program_digest: Digest = tasm::own_program_digest();

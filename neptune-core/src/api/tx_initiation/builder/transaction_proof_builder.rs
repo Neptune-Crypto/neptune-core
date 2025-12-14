@@ -42,7 +42,7 @@ use crate::protocol::consensus::transaction::validity::single_proof::SingleProof
 use crate::protocol::consensus::transaction::validity::single_proof::SingleProofWitness;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::update_branch::UpdateWitness;
 use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::SecretWitness;
 use crate::state::transaction::transaction_details::TransactionDetails;

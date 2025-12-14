@@ -27,7 +27,7 @@ use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::protocol::consensus::transaction::BFieldCodec;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::verifier::verify;
 use crate::protocol::proof_abstractions::SecretWitness;
@@ -486,7 +486,7 @@ pub mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::NeptuneProof;
     use crate::application::triton_vm_job_queue::vm_job_queue;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
     use crate::tests::shared_tokio_runtime;
 
     impl ProofCollection {
@@ -584,7 +584,7 @@ pub mod tests {
     impl ProofCollection {
         pub(crate) fn can_produce(primitive_witness: &PrimitiveWitness) -> bool {
             fn witness_halts_gracefully(
-                program: impl ConsensusProgramSpecification,
+                program: impl TritonProgramSpecification,
                 witness: impl SecretWitness,
             ) -> bool {
                 program

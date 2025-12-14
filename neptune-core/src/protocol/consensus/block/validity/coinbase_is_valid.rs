@@ -8,7 +8,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::protocol::consensus::block::Block;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 
 /// Verifies that the coinbase *amount* is in line with the issuance schedule.
@@ -36,7 +36,7 @@ pub struct CoinbaseIsValid {
     witness: CoinbaseIsValidWitness,
 }
 
-impl ConsensusProgram for CoinbaseIsValid {
+impl TritonProgram for CoinbaseIsValid {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
     }
@@ -52,9 +52,9 @@ impl ConsensusProgram for CoinbaseIsValid {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
 
-    impl ConsensusProgramSpecification for CoinbaseIsValid {
+    impl TritonProgramSpecification for CoinbaseIsValid {
         fn source(&self) {
             todo!()
         }

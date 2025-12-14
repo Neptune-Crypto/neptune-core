@@ -32,3 +32,4 @@ often.
 |  400..500 | [`amount`](models/blockchain/type_scripts/amount/mod.rs)                                                                       |
 |  500..510 | [`GenerateCollectTypeScriptsClaim`](models/blockchain/transaction/validity/tasm/claims/generate_collect_type_scripts_claim.rs) |
 |  510..520 | [`CollectTypeScripts`](models/blockchain/transaction/validity/collect_type_scripts.rs)                                         |
+|  520..530 | [`util::proof::sent`](application/util_proof/sent/mod.rs)                                                                                   |

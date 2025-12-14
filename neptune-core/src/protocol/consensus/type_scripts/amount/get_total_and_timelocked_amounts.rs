@@ -118,7 +118,7 @@ mod test {
     use crate::protocol::consensus::transaction::utxo::Coin;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::time_lock::TimeLock;
-    use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 
     impl Algorithm for GetTotalAndTimeLockedAmounts {
         fn rust_shadow(
