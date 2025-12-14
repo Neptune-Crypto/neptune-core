@@ -18,7 +18,7 @@ macro_rules! state_lock_call_mut_async {
     };
 }
 
-/// for calling an immutable async callback fn with correct StateLock variant
+/// For calling an immutable `async` callback `fn` with correct `StateLock` variant
 /// this appears impossible to do without a macro.
 macro_rules! state_lock_call_async {
     ($state_lock:expr, $func:expr, $($arg:expr),*) => {
@@ -38,7 +38,7 @@ macro_rules! state_lock_call_async {
     };
 }
 
-/// returns name of current function.
+/// Returns name of current function.
 macro_rules! fn_name_bare {
     () => {{
         fn f() {}
