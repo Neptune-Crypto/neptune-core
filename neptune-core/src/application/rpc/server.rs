@@ -4180,7 +4180,7 @@ impl RPC for NeptuneRPCServer {
             .cloned())
     }
 
-    // crashes if `tx_ix` out of its bound
+    // Crashes if `tx_ix` out of its bound. https://github.com/Neptune-Crypto/neptune-core/issues/816
     async fn prove_transfer(
         self,
         context: ::tarpc::context::Context,
