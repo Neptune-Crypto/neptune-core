@@ -360,6 +360,12 @@ impl GenerationReceivingAddress {
     /// it would be nice to standardize on a single prefix-len.  6 chars seems a
     /// bit much.  maybe we could shorten generation prefix to 4 somehow, eg:
     /// ngkm --> neptune-generation-key-mainnet
+    ///
+    /// # Deprecated
+    ///
+    /// Use [super::receiving_address::ReceivingAddress::to_display_bech32m_abbreviated]
+    /// instead.
+    #[deprecated = "suffix length inconsistent with alternative abbreviations"]
     pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
         let bech32 = self.to_bech32m(network)?;
         let first_len = Self::get_hrp(network).len() + 8usize;

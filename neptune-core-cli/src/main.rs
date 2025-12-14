@@ -9,6 +9,7 @@ use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -38,6 +39,7 @@ use neptune_cash::state::wallet::coin_with_possible_timelock::CoinWithPossibleTi
 use neptune_cash::state::wallet::secret_key_material::SecretKeyMaterial;
 use neptune_cash::state::wallet::utxo_notification::PrivateNotificationData;
 use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
 use neptune_cash::state::wallet::wallet_file::WalletFile;
 use neptune_cash::state::wallet::wallet_file::WalletFileContext;
 use neptune_cash::state::wallet::wallet_status::WalletStatus;
@@ -51,6 +53,7 @@ use tarpc::tokio_serde::formats::Json;
 use crate::models::claim_utxo::ClaimUtxoFormat;
 use crate::models::utxo_transfer_entry::UtxoTransferEntry;
 use crate::parser::beneficiary::Beneficiary;
+use crate::parser::full_or_abbreviated_address::FullOrAbbreviatedAddress;
 use crate::parser::hex_digest::HexDigest;
 
 const SELF: &str = "self";
@@ -136,26 +139,6 @@ enum Command {
 
     /// Get next unused generation receiving address
     NextReceivingAddress,
-
-    /// Get the nth generation receiving address.
-    ///
-    /// Ignoring the ones that have been generated in the past; re-generate them
-    /// if necessary. Do not increment any counters or modify state in any way.
-    NthReceivingAddress {
-        index: usize,
-
-        #[clap(long, default_value_t)]
-        network: Network,
-    },
-
-    /// Get a static generation receiving address, for premine recipients.
-    ///
-    /// This command is an alias for `nth-receiving-address 0`. It will be
-    /// disabled after mainnet launch.
-    PremineReceivingAddress {
-        #[clap(long, default_value_t)]
-        network: Network,
-    },
 
     /// list known coins
     ListCoins,
@@ -330,6 +313,26 @@ enum Command {
     /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
 
+    /// Re-scan a single block for incoming UTXOs sent to a given address.
+    ///
+    /// If for whatever reason something went wrong in the course of scanning
+    /// blocks for incoming UTXOs, an inbound UTXO would be undetected by the
+    /// wallet. In that case, this command forces the wallet to look again at
+    /// the indicated block with the given address or derivation index as hint.
+    ///
+    /// Usage:
+    ///
+    /// `> neptune-cli rescan --block 13 --address nolgam1...`
+    Rescan {
+        /// block height
+        #[arg(long, value_parser = BlockSelector::from_str)]
+        block: BlockSelector,
+
+        /// address to which the UTXO was supposedly sent
+        #[clap(long)]
+        address: String,
+    },
+
     /******** RegTest Mode ********/
     /// mine a series of blocks to the node's wallet. (regtest network only)
     MineBlocksToWallet {
@@ -347,6 +350,26 @@ enum Command {
 
     /// displays path to wallet secrets file
     WhichWallet {
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
+    /// Get the nth generation receiving address.
+    ///
+    /// Ignoring the ones that have been generated in the past; re-generate them
+    /// if necessary. Do not increment any counters or modify state in any way.
+    NthReceivingAddress {
+        index: usize,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
+    /// Get a static generation receiving address, for premine recipients.
+    ///
+    /// This command is an alias for `nth-receiving-address 0`. It will be
+    /// disabled after mainnet launch.
+    PremineReceivingAddress {
         #[clap(long, default_value_t)]
         network: Network,
     },
@@ -376,6 +399,22 @@ enum Command {
     ShamirShare {
         t: usize,
         n: usize,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
+    /// Given a receiving address derived by this wallet, find the associated
+    /// derivation index.
+    ///
+    /// This command does not require a connection to neptune-core; it reads the
+    /// wallet directly. Also, this command iterates until a match is found;
+    /// if the given address does not come from the current wallet then this
+    /// command will run indefinitely and the user must manually abort it.
+    ///
+    /// Usage: `neptune-cli index-of nolgam1...`
+    IndexOf {
+        address: String,
 
         #[clap(long, default_value_t)]
         network: Network,
@@ -528,10 +567,10 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Command::NthReceivingAddress { network, index } => {
-            return get_nth_receiving_address(*network, args.data_dir.clone(), *index);
+            return print_nth_receiving_address(*network, args.data_dir.clone(), *index);
         }
         Command::PremineReceivingAddress { network } => {
-            return get_nth_receiving_address(*network, args.data_dir.clone(), 0);
+            return print_nth_receiving_address(*network, args.data_dir.clone(), 0);
         }
         Command::ShamirCombine { t, network } => {
             let wallet_dir =
@@ -718,6 +757,27 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
+        Command::IndexOf { address, network } => {
+            // Parse on client.
+            let Some(full_or_abbreviated_address) =
+                FullOrAbbreviatedAddress::parse(address, *network)
+            else {
+                println!("Could not parse address.");
+                return Ok(());
+            };
+
+            // Read from disk directly.
+            let wallet_entropy = get_wallet_entropy(*network, args.data_dir.clone())?;
+
+            // Report on key type.
+            let key_type = full_or_abbreviated_address.key_type();
+            println!("key type: {}", key_type);
+
+            // Iterate until match.
+            find_index_of(full_or_abbreviated_address, wallet_entropy, *network).await?;
+
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -763,7 +823,8 @@ async fn main() -> Result<()> {
         | Command::ShamirCombine { .. }
         | Command::ShamirShare { .. }
         | Command::NthReceivingAddress { .. }
-        | Command::PremineReceivingAddress { .. } => {
+        | Command::PremineReceivingAddress { .. }
+        | Command::IndexOf { .. } => {
             unreachable!("Case should be handled earlier.")
         }
 
@@ -1313,6 +1374,45 @@ async fn main() -> Result<()> {
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
         }
 
+        Command::Rescan { block, address } => {
+            // Get network from server.
+            let network = client.network(ctx).await??;
+
+            // Parse on client.
+            let Some(full_or_abbreviated_address) =
+                FullOrAbbreviatedAddress::parse(&address, network)
+            else {
+                println!("Could not parse address.");
+                return Ok(());
+            };
+
+            // Read from disk directly.
+            let wallet_entropy = get_wallet_entropy(network, args.data_dir.clone())?;
+
+            // Report on key type.
+            let key_type = full_or_abbreviated_address.key_type();
+            println!("key type: {}", key_type);
+
+            // Iterate until match.
+            let derivation_index =
+                find_index_of(full_or_abbreviated_address, wallet_entropy, network).await?;
+
+            // Make RPC call.
+            match client
+                .rescan(ctx, token, block, derivation_index, key_type)
+                .await?
+            {
+                Ok(number) => {
+                    println!("Recovered {number} previously unknown UTXOs.");
+                }
+                Err(e) => {
+                    println!("Failed to scan block {block}: {e}.");
+                }
+            }
+
+            return Ok(());
+        }
+
         /******** RegTest Mode *********/
         Command::MineBlocksToWallet { num_blocks } => {
             println!("Sending command to mine block(s).");
@@ -1355,15 +1455,9 @@ async fn get_cookie_hint(client: &RPCClient, args: &Config) -> anyhow::Result<au
     }
 }
 
-/// Get the nth receiving address directly from the wallet.
-///
-/// Read the wallet file directly; avoid going through the RPC interface of
-/// `neptune-core`.
-fn get_nth_receiving_address(
-    network: Network,
-    data_dir: Option<PathBuf>,
-    index: usize,
-) -> Result<()> {
+/// Get the [`WalletEntropy`] directly from the file system; without going
+/// through neptune-core.
+fn get_wallet_entropy(network: Network, data_dir: Option<PathBuf>) -> Result<WalletEntropy> {
     let wallet_dir = DataDirectory::get(data_dir.clone(), network)?.wallet_directory_path();
 
     // Get wallet object, create various wallet secret files
@@ -1374,19 +1468,28 @@ fn get_nth_receiving_address(
         wallet_file_name.display(),
     );
 
-    println!("{}", wallet_file_name.display());
-
     let wallet_file = match WalletFile::read_from_file(&wallet_file_name) {
         Ok(ws) => ws,
         Err(e) => {
-            eprintln!(
+            bail!(
                 "Could not open wallet file at {}. Got error: {e}",
                 wallet_file_name.to_string_lossy()
             );
-            return Ok(());
         }
     };
-    let wallet_entropy = wallet_file.entropy();
+    Ok(wallet_file.entropy())
+}
+
+/// Print the nth receiving address.
+///
+/// Read the wallet file directly; avoid going through the RPC interface of
+/// `neptune-core`.
+fn print_nth_receiving_address(
+    network: Network,
+    data_dir: Option<PathBuf>,
+    index: usize,
+) -> Result<()> {
+    let wallet_entropy = get_wallet_entropy(network, data_dir)?;
 
     let nth_spending_key = wallet_entropy.nth_generation_spending_key(index as u64);
     let nth_receiving_address = nth_spending_key.to_address();
@@ -1402,6 +1505,43 @@ fn get_nth_receiving_address(
 
     println!("{nth_address_as_string}");
     Ok(())
+}
+
+async fn find_index_of(
+    full_or_abbreviated_address: FullOrAbbreviatedAddress,
+    wallet_entropy: WalletEntropy,
+    network: Network,
+) -> Result<u64> {
+    let key_type = full_or_abbreviated_address.key_type();
+
+    for index in 0u64.. {
+        let nth_address = wallet_entropy.nth_receiving_address(index, key_type);
+        match &full_or_abbreviated_address {
+            FullOrAbbreviatedAddress::Full(receiving_address) => {
+                if receiving_address == &nth_address {
+                    println!("index: {index}");
+                    return Ok(index);
+                }
+            }
+            FullOrAbbreviatedAddress::Abbreviated(abb) => {
+                if abb.to_string(network) == nth_address.to_bech32m_abbreviated(network)?
+                    || abb.to_string(network)
+                        == nth_address.to_display_bech32m_abbreviated(network)?
+                {
+                    println!("index: {index}");
+                    return Ok(index);
+                }
+            }
+        }
+
+        if index.is_multiple_of(1000) && index != 0 {
+            println!("Tried indices [0:{index}], no match yet ...");
+        }
+
+        tokio::time::sleep(Duration::from_micros(250)).await;
+    }
+
+    bail!("unreachable");
 }
 
 // processes utxo-notifications in TxParams outputs, if any.
