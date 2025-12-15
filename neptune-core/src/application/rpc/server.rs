@@ -3679,13 +3679,7 @@ impl RPC for NeptuneRPCServer {
         }
 
         // get expected UTXOs
-        for expected_utxo in state
-            .wallet_state
-            .wallet_db
-            .expected_utxos()
-            .get_all()
-            .await
-        {
+        for expected_utxo in state.wallet_state.wallet_db.all_expected_utxos().await {
             if present_addition_records.insert(expected_utxo.addition_record) {
                 ui_utxos.push(UiUtxo {
                     received: UtxoStatusEvent::Expected,

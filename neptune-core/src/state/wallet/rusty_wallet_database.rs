@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 
+use futures::Stream;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
@@ -9,6 +10,7 @@ use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
 use super::wallet_db_tables::WalletDbTables;
 use super::wallet_db_tables::WALLET_DB_SCHEMA_VERSION;
+use crate::api::export::AdditionRecord;
 use crate::api::export::BlockHeight;
 use crate::api::export::Timestamp;
 use crate::application::database::storage::storage_schema::traits::*;
@@ -17,6 +19,7 @@ use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::storage::storage_vec::traits::StorageVecBase;
+use crate::application::database::storage::storage_vec::traits::StorageVecStream;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
 use crate::protocol::consensus::block::Block;
@@ -298,14 +301,116 @@ impl RustyWalletDatabase {
         MonitoredUtxoInsertResult::New(list_index)
     }
 
-    /// get expected_utxos.
-    pub fn expected_utxos(&self) -> &DbtVec<ExpectedUtxo> {
-        &self.tables.expected_utxos
+    /// Return an [`ExpectedUtxo`] if any with a matching addition record exists.
+    pub(crate) async fn expected_utxo_by_addition_record(
+        &self,
+        addition_record: &AdditionRecord,
+    ) -> Option<ExpectedUtxo> {
+        debug_assert_eq!(
+            self.tables.addition_record_to_expected_utxo.len().await,
+            self.tables.expected_utxos.len().await,
+            "Index for expected UTXOs must match list of expected UTXOs"
+        );
+
+        let list_index = self
+            .tables
+            .addition_record_to_expected_utxo
+            .get(addition_record)
+            .await;
+
+        match list_index {
+            Some(i) => Some(self.tables.expected_utxos.get(i).await),
+            None => None,
+        }
     }
 
-    /// get mutable expected_utxos.
-    pub fn expected_utxos_mut(&mut self) -> &mut DbtVec<ExpectedUtxo> {
-        &mut self.tables.expected_utxos
+    /// Return all expected UTXOs
+    pub(crate) async fn stream_expected_utxos(
+        &self,
+    ) -> impl Stream<Item = (Index, ExpectedUtxo)> + '_ {
+        self.tables.expected_utxos.stream().await
+    }
+
+    /// Mark the expected UTXO matching the addition record as received. Does
+    /// nothing if an expected UTXO with this addition record does not exist
+    /// in the database.
+    pub(crate) async fn mark_expected_utxo_as_received(
+        &mut self,
+        addition_record: &AdditionRecord,
+        block_hash: Digest,
+        block_timestamp: Timestamp,
+    ) {
+        debug_assert_eq!(
+            self.tables.addition_record_to_expected_utxo.len().await,
+            self.tables.expected_utxos.len().await,
+            "Index for expected UTXOs must match list of expected UTXOs"
+        );
+
+        let list_index = self
+            .tables
+            .addition_record_to_expected_utxo
+            .get(addition_record)
+            .await;
+
+        let Some(list_index) = list_index else {
+            return;
+        };
+
+        let mut entry = self.tables.expected_utxos.get(list_index).await;
+
+        entry.mined_in_block = Some((block_hash, block_timestamp));
+
+        self.tables.expected_utxos.set(list_index, entry).await;
+    }
+
+    /// Insert an expected UTXO into the wallet database. The insertion of a
+    /// duplicate is guaranteed to not modify the database. Duplicates are
+    /// identified by their addition records. So two expected UTXOs with the
+    /// same addition record cannot be added to the wallet database.
+    ///
+    /// All insertions of [`ExpectedUtxo`]s into the database must go through
+    /// this method to ensure indexing consistency.
+    pub(crate) async fn insert_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
+        // Check for duplicated entries
+        if self
+            .tables
+            .addition_record_to_expected_utxo
+            .contains_key(&expected_utxo.addition_record)
+            .await
+        {
+            return;
+        }
+
+        let list_index = self.tables.expected_utxos.len().await;
+        self.tables
+            .addition_record_to_expected_utxo
+            .insert(expected_utxo.addition_record, list_index)
+            .await;
+
+        self.tables.expected_utxos.push(expected_utxo).await;
+
+        debug_assert_eq!(
+            self.tables.addition_record_to_expected_utxo.len().await,
+            self.tables.expected_utxos.len().await,
+            "Index for expected UTXOs must match list of expected UTXOs"
+        );
+    }
+
+    /// Convenience method for loading all expected UTXOs into memory.
+    pub(crate) async fn all_expected_utxos(&self) -> Vec<ExpectedUtxo> {
+        self.tables.expected_utxos.get_all().await
+    }
+
+    /// Return the number of expected UTXOs in the database.
+    pub(crate) async fn num_expected_utxos(&self) -> u64 {
+        self.tables.expected_utxos.len().await
+    }
+
+    /// Delete all expected UTXOs and associated indexing data from the
+    /// database.
+    pub(crate) async fn clear_expected_utxos(&mut self) {
+        self.tables.expected_utxos.clear().await;
+        self.tables.addition_record_to_expected_utxo.clear().await;
     }
 
     /// get sent transactions
@@ -404,6 +509,10 @@ pub(crate) mod tests {
             &self.storage
         }
 
+        pub(crate) fn expected_utxos(&self) -> &DbtVec<ExpectedUtxo> {
+            &self.tables.expected_utxos
+        }
+
         pub(crate) fn strong_keys(&self) -> &DbtMap<StrongUtxoKey, u64> {
             &self.tables.strong_key_to_mutxo
         }
@@ -414,8 +523,24 @@ pub(crate) mod tests {
             self.tables.index_set_to_mutxo.clear().await;
         }
 
-        pub(crate) async fn clear_expected_utxos(&mut self) {
-            self.tables.expected_utxos.clear().await;
+        pub(crate) async fn assert_expected_utxo_integrity(&self) {
+            let num_eutxos = self.tables.expected_utxos.len().await;
+            assert_eq!(
+                num_eutxos,
+                self.tables.addition_record_to_expected_utxo.len().await
+            );
+
+            for i in 0..num_eutxos {
+                let elem = self.tables.expected_utxos.get(i).await;
+                assert_eq!(
+                    i,
+                    self.tables
+                        .addition_record_to_expected_utxo
+                        .get(&elem.addition_record)
+                        .await
+                        .unwrap()
+                );
+            }
         }
 
         pub(crate) async fn assert_mutxo_lookup_integrity(&self) {

@@ -50,7 +50,6 @@ use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
 use crate::application::database::storage::storage_vec::traits::*;
-use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
@@ -629,7 +628,7 @@ impl WalletState {
 
     /// Returns the number of expected UTXOs in the database.
     pub(crate) async fn num_expected_utxos(&self) -> u64 {
-        self.wallet_db.expected_utxos().len().await
+        self.wallet_db.num_expected_utxos().await
     }
 
     /// adds a [SentTransaction] to the wallet db
@@ -676,16 +675,13 @@ impl WalletState {
         count
     }
 
-    // note: does not verify we do not have any dups.
+    /// Add an [`ExpectedUtxo`] to the database, ensuring no duplicates.
     pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
         if !expected_utxo.utxo.all_type_script_states_are_valid() {
             warn!("adding expected UTXO with unknown type scripts or invalid states to expected UTXOs database");
         }
 
-        self.wallet_db
-            .expected_utxos_mut()
-            .push(expected_utxo)
-            .await;
+        self.wallet_db.insert_expected_utxo(expected_utxo).await;
     }
 
     // If any output UTXO(s) are going back to our wallet (eg change utxo)
@@ -803,16 +799,15 @@ impl WalletState {
     pub(crate) async fn scan_for_expected_utxos<'a>(
         &'a self,
         addition_records: &'a [AdditionRecord],
-    ) -> impl Iterator<Item = IncomingUtxo> + 'a {
-        let expected_utxos = self.wallet_db.expected_utxos().get_all().await;
-        let expected_utxos: HashMap<_, _> = expected_utxos
-            .into_iter()
-            .map(|eu| (eu.addition_record, eu))
-            .collect();
+    ) -> Vec<IncomingUtxo> {
+        let mut ret = vec![];
+        for ar in addition_records {
+            if let Some(expected_utxo) = self.wallet_db.expected_utxo_by_addition_record(ar).await {
+                ret.push((&expected_utxo).into());
+            }
+        }
 
-        addition_records
-            .iter()
-            .filter_map(move |a| expected_utxos.get(a).map(|eu| eu.into()))
+        ret
     }
 
     /// Scan the block for guesser fee UTXOs that this wallet can unlock.
@@ -848,18 +843,11 @@ impl WalletState {
     }
 
     /// check if wallet already has the provided `expected_utxo`
-    /// perf:
-    ///
-    /// this fn is o(n) with the number of ExpectedUtxo stored.  Iteration is
-    /// performed from newest to oldest based on expectation that we will most
-    /// often be working with recent ExpectedUtxos.
     pub async fn has_expected_utxo(&self, addition_record: AdditionRecord) -> bool {
-        let len = self.wallet_db.expected_utxos().len().await;
         self.wallet_db
-            .expected_utxos()
-            .stream_many_values((0..len).rev())
-            .any(|eu| futures::future::ready(eu.addition_record == addition_record))
+            .expected_utxo_by_addition_record(&addition_record)
             .await
+            .is_some()
     }
 
     /// find the `MonitoredUtxo` that matches `utxo` and sender randomness, if
@@ -890,24 +878,6 @@ impl WalletState {
 
     /// Delete all ExpectedUtxo that exceed a certain age
     ///
-    /// note: It is questionable if this method should ever be called
-    ///       as presently implemented.
-    ///
-    /// issues:
-    ///   1. expiration does not consider if utxo has been
-    ///      claimed by wallet or not.
-    ///   2. expiration thresholds are based on time, not
-    ///      # of blocks.
-    ///   3. what if a deep re-org occurs after ExpectedUtxo
-    ///      have been expired?  possible loss of funds.
-    ///
-    /// Fundamentally, any time we remove an ExpectedUtxo we risk a possible
-    /// loss of funds in the future.
-    ///
-    /// for now, it may be best to simply leave all ExpectedUtxo in the wallet
-    /// database forever.  This is the safest way to prevent a possible loss of
-    /// funds.
-    ///
     /// note: DbtVec does not have a remove().
     ///       So it is implemented by clearing all ExpectedUtxo from DB and
     ///       adding back those that are not stale.
@@ -921,24 +891,26 @@ impl WalletState {
         let cutoff_for_unreceived = Timestamp::now() - Timestamp::seconds(UNRECEIVED_UTXO_SECS);
         let cutoff_for_received = Timestamp::now() - Timestamp::seconds(RECEIVED_UTXO_SECS);
 
-        let expected_utxos = self.wallet_db.expected_utxos().get_all().await;
+        let mut kept_eutxos = vec![];
+        {
+            let stream = self.wallet_db.stream_expected_utxos().await;
+            pin_mut!(stream); // needed for iteration
 
-        let keep_indexes = expected_utxos
-            .iter()
-            .enumerate()
-            .filter(|(_, eu)| match eu.mined_in_block {
-                Some((_bh, registered_timestamp)) => registered_timestamp >= cutoff_for_received,
-                None => eu.notification_received >= cutoff_for_unreceived,
-            })
-            .map(|(idx, _)| idx);
+            while let Some((_, eutxo)) = stream.next().await {
+                let keep = match eutxo.mined_in_block {
+                    Some((_, mined_at)) => mined_at >= cutoff_for_received,
+                    None => eutxo.notification_received >= cutoff_for_unreceived,
+                };
+                if keep {
+                    kept_eutxos.push(eutxo);
+                }
+            }
+        }
 
-        self.wallet_db.expected_utxos_mut().clear().await;
+        self.wallet_db.clear_expected_utxos().await;
 
-        for idx in keep_indexes.rev() {
-            self.wallet_db
-                .expected_utxos_mut()
-                .push(expected_utxos[idx].clone())
-                .await;
+        for eutxo in kept_eutxos {
+            self.wallet_db.insert_expected_utxo(eutxo).await;
         }
     }
 
@@ -1674,8 +1646,7 @@ impl WalletState {
             .mutator_set_update()
             .expect("Block received as argument must have mutator set update");
 
-        let offchain_received_outputs =
-            self.scan_for_expected_utxos(&additions).await.collect_vec();
+        let offchain_received_outputs = self.scan_for_expected_utxos(&additions).await;
         let guesser_fee_outputs = self.scan_for_guesser_fee_utxos(block);
 
         debug!(
@@ -1743,23 +1714,15 @@ impl WalletState {
         }
 
         // Mark all expected UTXOs that were received in this block as received
-        let updates = self
-            .wallet_db
-            .expected_utxos()
-            .get_all()
-            .await
-            .into_iter()
-            .enumerate()
-            .filter(|(_, eu)| {
-                offchain_received_outputs
-                    .iter()
-                    .any(|au| au.addition_record() == eu.addition_record)
-            })
-            .map(|(idx, mut eu)| {
-                eu.mined_in_block = Some((block.hash(), block.kernel.header.timestamp));
-                (idx as Index, eu)
-            });
-        self.wallet_db.expected_utxos_mut().set_many(updates).await;
+        for output in offchain_received_outputs {
+            self.wallet_db
+                .mark_expected_utxo_as_received(
+                    &output.addition_record(),
+                    block.hash(),
+                    block.kernel.header.timestamp,
+                )
+                .await;
+        }
 
         self.wallet_db.set_sync_label(block.hash()).await;
 
@@ -3842,6 +3805,11 @@ pub(crate) mod tests {
                         .len(),
                 );
             }
+
+            wallet_state
+                .wallet_db
+                .assert_expected_utxo_integrity()
+                .await;
         }
 
         #[traced_test]
@@ -3884,8 +3852,7 @@ pub(crate) mod tests {
 
             let ret_with_tx_containing_utxo = wallet
                 .scan_for_expected_utxos(&mock_tx_containing_expected_utxo.kernel.outputs)
-                .await
-                .collect_vec();
+                .await;
             assert_eq!(1, ret_with_tx_containing_utxo.len());
 
             // Call scan but with another input. Verify that it returns the empty list
@@ -3898,9 +3865,10 @@ pub(crate) mod tests {
             let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
             let ret_with_tx_without_utxo = wallet
                 .scan_for_expected_utxos(&tx_without_utxo.kernel.outputs)
-                .await
-                .collect_vec();
+                .await;
             assert!(ret_with_tx_without_utxo.is_empty());
+
+            wallet.wallet_db.assert_expected_utxo_integrity().await;
         }
 
         #[traced_test]
@@ -3916,49 +3884,50 @@ pub(crate) mod tests {
                 NativeCurrencyAmount::coins(14),
             );
 
-            // Add a UTXO notification
+            // Add four expected UTXOs
             let mut addition_records = vec![];
-            let ar = wallet
-                .add_expected_utxo(ExpectedUtxo::new(
+            for _ in 0..4 {
+                let eutxo = ExpectedUtxo::new(
                     mock_utxo.clone(),
                     rand::random(),
                     rand::random(),
                     UtxoNotifier::Myself,
-                ))
-                .await;
-            addition_records.push(ar);
-
-            // Add three more
-            for _ in 0..3 {
-                let ar_new = wallet
-                    .add_expected_utxo(ExpectedUtxo::new(
-                        mock_utxo.clone(),
-                        rand::random(),
-                        rand::random(),
-                        UtxoNotifier::Myself,
-                    ))
-                    .await;
-                addition_records.push(ar_new);
+                );
+                addition_records.push(eutxo.addition_record);
+                wallet.add_expected_utxo(eutxo).await;
             }
 
-            // Test with a UTXO that was received
-            // Manipulate the time this entry was inserted
-            let two_weeks_as_sec = 60 * 60 * 24 * 7 * 2;
-            let eu_idx = 0;
-            let mut eu = wallet.wallet_db.expected_utxos().get(eu_idx).await;
+            // Verify nothing happens when no expected UTXOs are received
+            assert_eq!(4, wallet.wallet_db.expected_utxos().len().await);
+            wallet.prune_stale_expected_utxos().await;
+            assert_eq!(4, wallet.wallet_db.expected_utxos().len().await);
+            wallet.wallet_db.assert_expected_utxo_integrity().await;
 
-            // modify mined_in_block field.
-            eu.mined_in_block = Some((
-                Digest::default(),
-                Timestamp::now() - Timestamp::seconds(two_weeks_as_sec),
-            ));
-
-            // update db
-            wallet.wallet_db.expected_utxos_mut().set(eu_idx, eu).await;
+            // Test with a UTXO that was received two weeks ago
+            let two_weeks_ago = Timestamp::now() - Timestamp::days(14);
+            wallet
+                .wallet_db
+                .mark_expected_utxo_as_received(&addition_records[0], rand::random(), two_weeks_ago)
+                .await;
 
             assert_eq!(4, wallet.wallet_db.expected_utxos().len().await);
             wallet.prune_stale_expected_utxos().await;
             assert_eq!(3, wallet.wallet_db.expected_utxos().len().await);
+            wallet.wallet_db.assert_expected_utxo_integrity().await;
+
+            // Mark all as received
+            for ar in addition_records {
+                wallet
+                    .wallet_db
+                    .mark_expected_utxo_as_received(&ar, rand::random(), two_weeks_ago)
+                    .await;
+            }
+
+            assert_eq!(3, wallet.wallet_db.expected_utxos().len().await);
+            wallet.prune_stale_expected_utxos().await;
+            assert_eq!(0, wallet.wallet_db.expected_utxos().len().await);
+
+            wallet.wallet_db.assert_expected_utxo_integrity().await;
         }
 
         /// demonstrates/tests that if wallet-db is not persisted after an
@@ -4055,6 +4024,10 @@ pub(crate) mod tests {
                     expect,
                     restored_wallet.wallet_db.expected_utxos().len().await
                 );
+                restored_wallet
+                    .wallet_db
+                    .assert_expected_utxo_integrity()
+                    .await;
             }
         }
     }

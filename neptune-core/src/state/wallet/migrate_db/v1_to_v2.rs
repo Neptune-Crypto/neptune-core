@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 use futures::pin_mut;
 use tasm_lib::prelude::Tip5;
 use tracing::debug;
+use tracing::trace;
 
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::storage::storage_vec::traits::*;
@@ -11,8 +14,10 @@ use crate::state::wallet::wallet_db_tables::WalletDbTables;
 /// migrates wallet db with schema-version v1 to v2
 ///
 /// Changes between v1 and v2:
-/// - Add mapping from AOCL leaf index to a list of indices into the monitored
-///   UTXOs list.
+/// - Add mapping from addition record to list index into list of expected
+///   UTXOS.
+/// - Add mapping from (addition_record, aocl_leaf_index) pair to list index
+///   into the list of monitored UTXOs.
 /// - Add mapping from hash(absolute index set) to index into the list of
 ///   monitored UTXOs.
 /// - Change monitored UTXO field `confirmed_in_block` from `Option<T>` to `T`
@@ -25,7 +30,8 @@ use crate::state::wallet::wallet_db_tables::WalletDbTables;
 /// Older databases are migrated simply by iterating over all monitored UTXOs,
 /// finding their AOCL leaf index and the two required digests from their
 /// respective mutator set membership proofs and then inserting the key-value
-/// pairs into the new mappings.
+/// pairs into the new mappings. And by iterating over all expected UTXOs and
+/// adding an index value for it, removing duplicates based on addition records.
 pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<()> {
     // reset the schema, so we start with table_count = 0.
     storage.reset_schema();
@@ -53,10 +59,11 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
     let strong_key_to_mutxo = &mut tables.strong_key_to_mutxo;
     let index_set_to_mutxo = &mut tables.index_set_to_mutxo;
 
-    let stream = mutxos_v1.stream().await;
-    pin_mut!(stream); // needed for iteration
+    /* Migrate monitored UTXOs */
+    let mutxo_stream = mutxos_v1.stream().await;
+    pin_mut!(mutxo_stream); // needed for iteration
 
-    while let Some((list_index, mutxo_v1)) = stream.next().await {
+    while let Some((list_index, mutxo_v1)) = mutxo_stream.next().await {
         let msmp = mutxo_v1
             .blockhash_to_membership_proof
             .iter()
@@ -129,6 +136,54 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
         "Mismatch:\nnum_mutxos_v2: {num_mutxos_v2}\nnum_index_set_entries: {num_index_set_entries}"
     );
 
+    /* Create index for expected UTXOs, ensuring no duplicates */
+
+    // I don't have a reasonable expectation that expected UTXOs are *not*
+    // duplicated in many real databases out there. So to create the index,
+    // we must clear the expected UTXO list and build it again.
+    let all_eutxos = tables.expected_utxos.get_all().await;
+    debug!("Found {} expected UTXOs for migration", all_eutxos.len());
+    tables.expected_utxos.clear().await;
+    tables.addition_record_to_expected_utxo.clear().await;
+
+    let mut seen = HashSet::new();
+    for eutxo in all_eutxos {
+        let addition_record = eutxo.addition_record;
+        if !seen.contains(&addition_record) {
+            let list_index = tables.expected_utxos.len().await;
+            tables
+                .addition_record_to_expected_utxo
+                .insert(addition_record, list_index)
+                .await;
+
+            tables.expected_utxos.push(eutxo).await;
+
+            seen.insert(addition_record);
+
+            trace!("Migrated expected UTXO to index {list_index}",);
+        }
+    }
+    trace!(
+        "Length after deduplication (expected_utxos): {}",
+        tables.expected_utxos.len().await
+    );
+    trace!(
+        "Length after deduplication (addition_record_to_expected_utxo): {}",
+        tables.addition_record_to_expected_utxo.len().await
+    );
+
+    let num_eutxos = tables.expected_utxos.len().await;
+    let num_eutxo_indices = tables.addition_record_to_expected_utxo.len().await;
+    let num_seen: u64 = seen.len().try_into().unwrap();
+    assert_eq!(
+        num_eutxos, num_eutxo_indices,
+        "Mismatch:\nnum_eutxos: {num_eutxos}\nnum_eutxo_indices: {num_eutxo_indices}"
+    );
+    assert_eq!(
+        num_seen, num_eutxo_indices,
+        "Mismatch:\nnum_seen: {num_seen}\nnum_eutxo_indices: {num_eutxo_indices}"
+    );
+
     // set schema version to v2 since migration is complete
     tables.schema_version.set(2).await;
 
@@ -184,6 +239,8 @@ mod tests {
     use crate::application::database::storage::storage_schema::RustyValue;
     use crate::application::database::NeptuneLevelDb;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
+    use crate::state::wallet::expected_utxo::ExpectedUtxo;
+    use crate::state::wallet::expected_utxo::UtxoNotifier;
     use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::state::BlockHeight;
@@ -213,14 +270,27 @@ mod tests {
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn migrate() -> anyhow::Result<()> {
+        fn fake_utxo(num_coins: u32) -> Utxo {
+            Utxo::new_native_currency(
+                LockScript::anyone_can_spend().hash(),
+                NativeCurrencyAmount::coins(num_coins),
+            )
+        }
+
+        fn fake_eutxo(num_coins: u32) -> ExpectedUtxo {
+            ExpectedUtxo::new(
+                fake_utxo(num_coins),
+                Digest::default(),
+                Digest::default(),
+                UtxoNotifier::Myself,
+            )
+        }
+
         fn fake_v1_mutxo(
             aocl_leaf_index: u64,
             num_coins: u32,
         ) -> migration::schema_v1::MonitoredUtxo {
-            let utxo = Utxo::new_native_currency(
-                LockScript::anyone_can_spend().hash(),
-                NativeCurrencyAmount::coins(num_coins),
-            );
+            let utxo = fake_utxo(num_coins);
             let mut mutxo = migration::schema_v1::MonitoredUtxo::new(utxo, 2);
 
             let msmp = MsMembershipProof {
@@ -276,6 +346,12 @@ mod tests {
             }
             assert_eq!(wallet_db_v1.monitored_utxos.len().await, 7);
 
+            // Create expected UTXOs list with one duplicate
+            let expected_utxos = vec![fake_eutxo(2), fake_eutxo(2), fake_eutxo(3)];
+            for eutxo in expected_utxos {
+                wallet_db_v1.expected_utxos.push(eutxo).await;
+            }
+
             wallet_db_v1.storage.persist().await;
 
             println!("dump of v1 database");
@@ -291,6 +367,11 @@ mod tests {
         // connect to v1 Db with v2 RustyWalletDatabase.  This is where the
         // migration occurs.
         let wallet_db_v2 = RustyWalletDatabase::try_connect_and_migrate(db_v1).await?;
+        assert_eq!(
+            2,
+            wallet_db_v2.expected_utxos().len().await,
+            "New expected UTXO len must be 2, because of the removal of a duplicate."
+        );
 
         println!("dump of v2 (upgraded) database");
         wallet_db_v2.storage().db().dump_database().await;
@@ -340,6 +421,21 @@ mod tests {
         }
 
         wallet_db_v2.assert_mutxo_lookup_integrity().await;
+
+        wallet_db_v2.assert_expected_utxo_integrity().await;
+
+        // verify duplicated expected UTXO was removed
+        assert_eq!(2, wallet_db_v2.expected_utxos().len().await);
+        let all_eutxos = wallet_db_v2
+            .all_expected_utxos()
+            .await
+            .into_iter()
+            .map(|x| x.addition_record)
+            .collect_vec();
+        assert_eq!(
+            vec![fake_eutxo(2).addition_record, fake_eutxo(3).addition_record],
+            all_eutxos
+        );
 
         Ok(())
     }
@@ -402,6 +498,7 @@ mod tests {
         pub(super) struct RustyWalletDatabase {
             pub storage: SimpleRustyStorage,
             pub monitored_utxos: DbtVec<migration::schema_v1::MonitoredUtxo>,
+            pub expected_utxos: DbtVec<ExpectedUtxo>,
             pub sync_label: DbtSingleton<Digest>,
             pub schema_version: DbtSingleton<u16>,
         }
@@ -419,6 +516,12 @@ mod tests {
                     .schema
                     .new_vec::<migration::schema_v1::MonitoredUtxo>("monitored_utxos")
                     .await;
+                storage.schema.table_count = WalletDbTables::expected_utxo_table_count();
+                let expected_utxos = storage
+                    .schema
+                    .new_vec::<ExpectedUtxo>("expected_utxos")
+                    .await;
+
                 storage.schema.table_count = WalletDbTables::sync_label_table_count();
                 let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
 
@@ -428,6 +531,7 @@ mod tests {
                 Self {
                     storage,
                     monitored_utxos,
+                    expected_utxos,
                     sync_label,
                     schema_version,
                 }
