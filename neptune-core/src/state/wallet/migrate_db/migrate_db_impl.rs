@@ -75,6 +75,8 @@ pub(crate) async fn migrate_range(
             _ => panic!("schema version {apply_version} is unknown"),
         }
 
+        // Must persist after each migration, since migrate calls reset schema
+        // which throws away ephemeral (non-persisted) data.
         storage.persist().await;
         tracing::debug!("persisted wallet db after migration to v{}", apply_version);
     }

@@ -108,6 +108,13 @@ impl RustyWalletDatabase {
                             WALLET_DB_SCHEMA_VERSION,
                         )
                         .await?;
+
+                        // Reload table data after migration to get rid of
+                        // potential ephemeral (non-persisted) data such as
+                        // vector length, in case the migration changed any
+                        // vector lengths, e.g. due to deduplication.
+                        storage.reset_schema();
+                        tables = WalletDbTables::load_schema_in_order(&mut storage).await;
                     } else {
                         return Err(WalletDbConnectError::SchemaVersionTooLow {
                             found: schema_version,
