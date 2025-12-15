@@ -1012,11 +1012,76 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
+    /// Returns a [`HashMap`] of [`AdditionRecord`] to  AOCL leaf index for all
+    /// outputs in a given block. Returns `None` if no block at the specified
+    /// height is known. Also returns the block hash.
+    ///
+    /// Never loads the entire block from disk. Only reads from the database, so
+    /// performace should be good.
+    /// # Panics
+    ///
+    ///  - If the database is corrupted.
+    pub(crate) async fn addition_record_indices_for_block_by_height(
+        &self,
+        block_height: u64,
+    ) -> Option<(HashMap<AdditionRecord, u64>, Digest)> {
+        // Special-case for genesis block
+        if block_height == BlockHeight::genesis().value() {
+            let genesis_hash = self.genesis_block().hash();
+            return Some((
+                self.genesis_block()
+                    .body()
+                    .transaction_kernel()
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ar)| (*ar, i as u64))
+                    .collect::<HashMap<_, _>>(),
+                genesis_hash,
+            ));
+        }
+
+        let Some(block_hash) = self
+            .archival_block_mmr
+            .ammr()
+            .try_get_leaf(block_height)
+            .await
+        else {
+            warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
+            return None;
+        };
+
+        let block_record = self
+            .get_block_record(block_hash)
+            .await
+            .expect("Must know block record of canonical and non-genesis block");
+        let aocl_leaf_indices = block_record.min_aocl_index..=block_record.max_aocl_index();
+        let addition_records = self
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .get_leaf_range_inclusive_async(aocl_leaf_indices.clone())
+            .await;
+        Some((
+            addition_records
+                .into_iter()
+                .map(|digest| AdditionRecord {
+                    canonical_commitment: digest,
+                })
+                .zip(aocl_leaf_indices)
+                .collect::<HashMap<_, _>>(),
+            block_hash,
+        ))
+    }
+
     /// Returns a [`HashMap`] of [`AdditionRecord`] to [`Option`] of AOCL leaf
     /// index (`u64`) for all outputs in a given block. If the block is not
     /// canonical, the indices are all `None`, and conversely, if the block is
     /// canonical then the indices point into the current mutator set AOCL.
     /// If the block does not live in the archival state, return `None`.
+    ///
+    /// If the block is canonical this method never loads the entire blocks from
+    /// disk. So in that case, it is guaranteed to perform well.
     ///
     /// # Panics
     ///

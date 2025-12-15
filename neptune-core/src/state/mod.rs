@@ -91,9 +91,12 @@ use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
+use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_input::TxInput;
+use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -748,6 +751,8 @@ impl GlobalState {
     /// Rescan the specified (inclusive) range of blocks for spends of UTXOs.
     /// Only works for nodes that maintain a UTXO index.
     ///
+    /// Never loads the entire block from disk, so performance is good.
+    ///
     /// # Panics
     /// - If start block height is greater than end block height
     pub(crate) async fn rescan_outgoing(
@@ -832,9 +837,124 @@ impl GlobalState {
 
         Ok(())
     }
-    /// Rescan the specified (inclusive) range of blocks for incoming UTXOs for
-    /// the specified list of spending keys. Only works for nodes that maintain
-    /// a UTXO index.
+
+    /// Rescan the specified (inclusive) range of blocks for incoming UTXOs that
+    /// were added as expected UTXOs to the wallet database.  Only works for
+    /// nodes that maintain a UTXO index.
+    ///
+    /// Never loads the entire block from disk, so performance is good.
+    ///
+    /// # Panics
+    /// - If start block height is greater than end block height
+    pub(crate) async fn rescan_expected_incoming(
+        &mut self,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> Result<()> {
+        let first: u64 = first.into();
+        let last: u64 = last.into();
+        assert!(
+            first <= last,
+            "Must call function with a non-empty range. Got range: {first}..={last}."
+        );
+
+        let num_mps_per_utxo = self.cli.number_of_mps_per_utxo;
+
+        let mut recovery_list = vec![];
+        for block_height in first..=last {
+            let Some((addition_records, block_hash)) = self
+                .chain
+                .archival_state()
+                .addition_record_indices_for_block_by_height(block_height)
+                .await
+            else {
+                warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
+                return Ok(());
+            };
+
+            let own_utxos = self
+                .wallet_state
+                .scan_for_expected_utxos(addition_records.keys())
+                .await;
+
+            if own_utxos.is_empty() {
+                trace!("No expected UTXOs found in block of height {block_height}");
+                continue;
+            }
+
+            // Load block header to get relevant block meta-information
+            let block_header = self
+                .chain
+                .archival_state()
+                .get_block_header(block_hash)
+                .await
+                .expect("Must have block header for canonical block");
+
+            // recovery list will only contain not-already processed UTXOs, so
+            // there will be no duplication of records, either in the database
+            // nor in the incoming_randomness recovery file from this method.
+            let block_info = (block_hash, block_header.timestamp, block_header.height);
+
+            for incoming_utxo in own_utxos {
+                let addition_record = incoming_utxo.addition_record();
+                let IncomingUtxo {
+                    utxo,
+                    sender_randomness,
+                    receiver_preimage,
+                    ..
+                } = incoming_utxo.to_owned();
+                let aocl_index = *addition_records
+                    .get(&addition_record)
+                    .expect("Block must have addition record for matching expected UTXO");
+                let mutxo = MonitoredUtxo::new_from_block_info(
+                    utxo.clone(),
+                    num_mps_per_utxo,
+                    aocl_index,
+                    sender_randomness,
+                    receiver_preimage,
+                    block_info,
+                );
+
+                let strong_key = mutxo.strong_utxo_key();
+
+                match self.wallet_state.wallet_db.insert_mutxo(mutxo).await {
+                    MonitoredUtxoInsertResult::New(_) => {
+                        // UTXO was not seen by wallet-db before.
+                        let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
+                            utxo,
+                            sender_randomness,
+                            receiver_preimage,
+                            aocl_index,
+                        };
+                        recovery_list.push(utxo_ms_recovery_data);
+                    }
+                    MonitoredUtxoInsertResult::Existing(_) => {
+                        // This UTXO was already seen by wallet-db. This is either a reorganization,
+                        // or the reapplication of an already-processed block. Either way, update
+                        // the block hash in which the UTXO was received.
+                        self.wallet_state
+                            .wallet_db
+                            .update_mutxo_confirmation_block(&strong_key, block_info)
+                            .await;
+                    }
+                }
+            }
+        }
+
+        // write UTXO-recovery data to disk.
+        for incoming_randomness in recovery_list {
+            self.wallet_state
+                .store_utxo_ms_recovery_data(incoming_randomness)
+                .await
+                .expect("Failed to store mutator set recovery data to file.");
+        }
+
+        Ok(())
+    }
+
+    /// Rescan the specified (inclusive) range of blocks for incoming UTXOs that
+    /// were announced on-chain, for the specified list of spending keys. Only
+    /// works for nodes that maintain a UTXO index.
     ///
     /// # Panics
     /// - If start block height is greater than end block height
@@ -950,7 +1070,7 @@ impl GlobalState {
                 .len()
                 .try_into()
                 .expect("Can always convert usize to u64");
-            let aocl_leaf_count_before_block = block
+            let num_aocl_leafs_before_block = block
                 .body()
                 .mutator_set_accumulator_without_guesser_fees()
                 .aocl
@@ -966,7 +1086,7 @@ impl GlobalState {
                 .process_outputs_no_maintain_mps(
                     &block,
                     &all_incoming_utxos,
-                    aocl_leaf_count_before_block,
+                    num_aocl_leafs_before_block,
                     num_mps_per_utxo,
                 )
                 .await;
@@ -1468,7 +1588,7 @@ impl GlobalState {
                 .await
                 .expect("Confirming block header must exist");
 
-            let mut restored_mutxo = MonitoredUtxo::new_from_block_hash(
+            let mut restored_mutxo = MonitoredUtxo::new_from_block_info(
                 incoming_utxo.utxo,
                 self.wallet_state.configuration.num_mps_per_utxo,
                 incoming_utxo.aocl_index,
@@ -3411,6 +3531,28 @@ mod tests {
     mod rescan_wallet {
         use super::*;
 
+        /// Build a block with the specified output. Includes change outputs if
+        /// balance exceeds output value. Call with amount set to None to send
+        /// entire balance to the specified address.
+        async fn block_with_tx_output(
+            gsl: &mut GlobalStateLock,
+            amount: Option<NativeCurrencyAmount>,
+            receiver: ReceivingAddress,
+        ) -> Block {
+            let parent_block = gsl.lock_guard().await.chain.light_state().clone();
+            let timestamp = parent_block.header().timestamp + Timestamp::months(7);
+            let amount = match amount {
+                Some(amt) => amt,
+                None => {
+                    let gs = gsl.lock_guard().await;
+                    let wallet_status = gs.get_wallet_status_for_tip().await;
+                    wallet_status.available_confirmed(timestamp)
+                }
+            };
+            let tx = helper::send_coins(gsl, amount, receiver, timestamp).await;
+            invalid_block_with_transaction(&parent_block, tx)
+        }
+
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn monitored_utxos_from_rescan_of_incoming_utxos() {
@@ -3433,31 +3575,36 @@ mod tests {
                 .await
                 .wallet_state
                 .nth_spending_key(KeyType::Symmetric, 103);
+            let third_party_address =
+                GenerationReceivingAddress::derive_from_seed(Digest::default());
 
-            // Create two blocks, each with an incoming UTXO with an announcement.
-            let genesis = Block::genesis(network);
-            let tx_a = helper::send_coins(
+            // Create four blocks, where the two first has two outputs to
+            // Alice, 3rd has one, and 4th has zero.
+            let block1 = block_with_tx_output(
                 &mut alice,
-                NativeCurrencyAmount::coins(10),
+                Some(NativeCurrencyAmount::coins(10)),
                 generation_key.to_address(),
-                genesis.header().timestamp + Timestamp::months(7),
             )
             .await;
-            let block1 = invalid_block_with_transaction(&genesis, tx_a);
-            alice.set_new_tip(block1.clone()).await.unwrap();
-
-            let tx_b = helper::send_coins(
+            alice.set_new_tip(block1).await.unwrap();
+            let block2 = block_with_tx_output(
                 &mut alice,
-                NativeCurrencyAmount::coins(3),
+                Some(NativeCurrencyAmount::coins(3)),
                 sym_key.to_address(),
-                block1.header().timestamp + Timestamp::months(8),
             )
             .await;
-            let block2 = invalid_block_with_transaction(&block1, tx_b);
-            alice.set_new_tip(block2.clone()).await.unwrap();
+            alice.set_new_tip(block2).await.unwrap();
+            let block3 = block_with_tx_output(
+                &mut alice,
+                Some(NativeCurrencyAmount::coins(1)),
+                third_party_address.into(),
+            )
+            .await;
+            alice.set_new_tip(block3).await.unwrap();
+            let block4 = block_with_tx_output(&mut alice, None, third_party_address.into()).await;
+            alice.set_new_tip(block4).await.unwrap();
 
             let mut alice = alice.lock_guard_mut().await;
-
             alice
                 .wallet_state
                 .bump_derivation_counter(KeyType::Generation, 104)
@@ -3471,40 +3618,50 @@ mod tests {
                 .get_all_known_spending_keys()
                 .collect_vec();
 
-            // Notice that the scan only finds announced UTXOs, so it won't find
-            // the premine UTXO. Also notice that both transaction also include
-            // a change output, so each transaction adds two UTXOs to Alice's
-            // wallet.
-            let scan_ranges = [
-                (0u64, 0u64),
-                (0, 1),
-                (0, 2),
-                (1, 1),
-                (1, 2),
-                (2, 2),
-                (0, 100),
+            // Notice that all transactions include a change output. So txs
+            // going to Alice adds two UTXOs to the wallet, and txs to a 3rd
+            // party adds one UTXO. Alice is also premine receiver.
+            let scan_range_to_num_expected_utxos = [
+                ((0, 0), 1),
+                ((0, 1), 3),
+                ((0, 2), 5),
+                ((0, 3), 6),
+                ((0, 4), 6),
+                ((1, 1), 2),
+                ((1, 2), 4),
+                ((1, 3), 5),
+                ((1, 4), 5),
+                ((2, 2), 2),
+                ((2, 3), 3),
+                ((2, 4), 3),
+                ((3, 3), 1),
+                ((3, 4), 1),
+                ((4, 4), 0),
+                ((0, 100), 6),
             ];
-            let num_expected_mutxos = [0, 2, 4, 2, 4, 2, 4];
-            for ((first, last), num_expected) in scan_ranges.into_iter().zip_eq(num_expected_mutxos)
-            {
+            for ((first, last), num_expected) in scan_range_to_num_expected_utxos {
                 // Clear databases, to verify rescanning works.
                 alice.wallet_state.wallet_db.clear_mutxos().await;
-                alice.wallet_state.wallet_db.clear_expected_utxos().await;
 
                 alice
                     .rescan_announced_incoming(all_keys.clone(), first.into(), last.into())
                     .await
                     .unwrap();
+                alice
+                    .rescan_expected_incoming(first.into(), last.into())
+                    .await
+                    .unwrap();
+                alice
+                    .rescan_outgoing(first.into(), last.into())
+                    .await
+                    .unwrap();
+                alice
+                    .restore_monitored_utxos_from_archival_mutator_set()
+                    .await;
                 assert_eq!(
                     num_expected,
-                    alice
-                        .wallet_state
-                        .wallet_db
-                        .monitored_utxos()
-                        .get_all()
-                        .await
-                        .len(),
-                    "Premine UTXO must be found after rescanning the genesis block"
+                    alice.wallet_state.wallet_db.monitored_utxos().len().await,
+                    "Expected {num_expected} after scanning range {first}..={last}"
                 );
             }
         }

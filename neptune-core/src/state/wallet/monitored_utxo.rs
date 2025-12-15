@@ -121,7 +121,7 @@ impl MonitoredUtxo {
         }
     }
 
-    pub(crate) fn new_from_block_hash(
+    pub(crate) fn new_from_block_info(
         utxo: Utxo,
         max_number_of_mps_stored: usize,
         aocl_leaf_index: u64,

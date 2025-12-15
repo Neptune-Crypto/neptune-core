@@ -796,11 +796,15 @@ impl WalletState {
     /// [`Utxo`], [sender randomness](IncomingUtxo::sender_randomness),
     /// [receiver preimage](IncomingUtxo::receiver_preimage), and the addition
     /// record can be inferred from these three fields.
-    pub(crate) async fn scan_for_expected_utxos<'a>(
+    pub(crate) async fn scan_for_expected_utxos<'a, I>(
         &'a self,
-        addition_records: &'a [AdditionRecord],
-    ) -> Vec<IncomingUtxo> {
-        let mut ret = vec![];
+        addition_records: I,
+    ) -> Vec<IncomingUtxo>
+    where
+        I: IntoIterator<Item = &'a AdditionRecord>,
+    {
+        let mut ret = Vec::new();
+
         for ar in addition_records {
             if let Some(expected_utxo) = self.wallet_db.expected_utxo_by_addition_record(ar).await {
                 ret.push((&expected_utxo).into());
@@ -1363,6 +1367,11 @@ impl WalletState {
 
         let mut changed_mps = vec![];
         let mut incoming_utxo_recovery_data_list = vec![];
+        let block_info = (
+            block.hash(),
+            block.header().timestamp,
+            block.header().height,
+        );
         for addition_record in &addition_records {
             // Don't pull this declaration out of the for-loop since the hash map can grow
             // within this loop.
@@ -1462,7 +1471,7 @@ impl WalletState {
 
                         // Update `confirmed_in_block` data to reflect potential reorg.
                         self.wallet_db
-                            .update_mutxo_confirmation_block(&strong_key, block)
+                            .update_mutxo_confirmation_block(&strong_key, block_info)
                             .await;
                     }
                 }
@@ -1560,6 +1569,12 @@ impl WalletState {
             .mutator_set_update()
             .expect("Block received as argument must have mutator set update");
 
+        let block_info = (
+            block.hash(),
+            block.header().timestamp,
+            block.header().height,
+        );
+
         for addition_record in additions {
             if let Some(incoming_utxo) = incoming.get(&addition_record) {
                 let IncomingUtxo {
@@ -1597,7 +1612,7 @@ impl WalletState {
                         // or the reapplication of an already-processed block. Either way, update
                         // the block hash in which the UTXO was received.
                         self.wallet_db
-                            .update_mutxo_confirmation_block(&strong_key, block)
+                            .update_mutxo_confirmation_block(&strong_key, block_info)
                             .await;
                     }
                 }
