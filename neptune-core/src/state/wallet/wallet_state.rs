@@ -788,19 +788,22 @@ impl WalletState {
     /// Scan the given list of addition records for items that match with list
     /// of expected incoming UTXOs, and returns expected UTXOs that are present.
     ///
-    /// note: this algorithm is o(n) + o(m) where:
-    ///   n = number of ExpectedUtxo in database. (all-time)
-    ///   m = number of transaction outputs.
+    /// note: this algorithm is o(n) where:
+    ///   n = number of transaction outputs.
     ///
-    /// Returns an iterator of [IncomingUtxo], which in turn contains a
+    /// Returns an list of [IncomingUtxo], which in turn contains a
     /// [`Utxo`], [sender randomness](IncomingUtxo::sender_randomness),
     /// [receiver preimage](IncomingUtxo::receiver_preimage), and the addition
     /// record can be inferred from these three fields.
-    pub(crate) async fn scan_for_expected_utxos<'a>(
+    pub(crate) async fn scan_for_expected_utxos<'a, I>(
         &'a self,
-        addition_records: &'a [AdditionRecord],
-    ) -> Vec<IncomingUtxo> {
-        let mut ret = vec![];
+        addition_records: I,
+    ) -> Vec<IncomingUtxo>
+    where
+        I: IntoIterator<Item = &'a AdditionRecord>,
+    {
+        let mut ret = Vec::new();
+
         for ar in addition_records {
             if let Some(expected_utxo) = self.wallet_db.expected_utxo_by_addition_record(ar).await {
                 ret.push((&expected_utxo).into());
@@ -1047,6 +1050,10 @@ impl WalletState {
         let current_counter = self.spending_key_counter(key_type);
 
         if current_counter < new_counter {
+            debug!(
+                "Adding {} new {key_type} keys to wallet",
+                new_counter - current_counter
+            );
             match key_type {
                 KeyType::Generation => {
                     self.wallet_db.set_generation_key_counter(new_counter).await;
@@ -1389,6 +1396,11 @@ impl WalletState {
 
         let mut changed_mps = vec![];
         let mut incoming_utxo_recovery_data_list = vec![];
+        let block_info = (
+            block.hash(),
+            block.header().timestamp,
+            block.header().height,
+        );
         for addition_record in &addition_records {
             // Don't pull this declaration out of the for-loop since the hash map can grow
             // within this loop.
@@ -1488,7 +1500,7 @@ impl WalletState {
 
                         // Update `confirmed_in_block` data to reflect potential reorg.
                         self.wallet_db
-                            .update_mutxo_confirmation_block(&strong_key, block)
+                            .update_mutxo_confirmation_block(&strong_key, block_info)
                             .await;
                     }
                 }
@@ -1586,14 +1598,32 @@ impl WalletState {
             .mutator_set_update()
             .expect("Block received as argument must have mutator set update");
 
+        let block_info = (
+            block.hash(),
+            block.header().timestamp,
+            block.header().height,
+        );
+
         for addition_record in additions {
             if let Some(incoming_utxo) = incoming.get(&addition_record) {
                 let IncomingUtxo {
                     utxo,
                     sender_randomness,
                     receiver_preimage,
-                    ..
+                    is_guesser_fee,
                 } = incoming_utxo.to_owned();
+
+                info!(
+                    "Received UTXO in block {:x}, height {}\nvalue = {}\n\
+                    is guesser fee: {is_guesser_fee}\ntime-lock: {}\n\n",
+                    block.hash(),
+                    block.kernel.header.height,
+                    utxo.get_native_currency_amount(),
+                    utxo.release_date()
+                        .map(|t| t.standard_format())
+                        .unwrap_or_else(|| "none".into()),
+                );
+
                 let aocl_index = aocl_leaf_count;
                 let mutxo = MonitoredUtxo::new(
                     utxo.clone(),
@@ -1623,7 +1653,7 @@ impl WalletState {
                         // or the reapplication of an already-processed block. Either way, update
                         // the block hash in which the UTXO was received.
                         self.wallet_db
-                            .update_mutxo_confirmation_block(&strong_key, block)
+                            .update_mutxo_confirmation_block(&strong_key, block_info)
                             .await;
                     }
                 }
@@ -1837,8 +1867,8 @@ impl WalletState {
                     ));
                 }
             } else {
-                let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
-                unsynced.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
+                let wse = WalletStatusElement::new(mutxo.aocl_leaf_index, mutxo.utxo);
+                unsynced.push(wse);
             }
         }
 

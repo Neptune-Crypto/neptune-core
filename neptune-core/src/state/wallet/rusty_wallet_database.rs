@@ -23,7 +23,6 @@ use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::application::database::storage::storage_vec::traits::StorageVecStream;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
-use crate::protocol::consensus::block::Block;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -213,7 +212,7 @@ impl RustyWalletDatabase {
     pub(crate) async fn update_mutxo_confirmation_block(
         &mut self,
         strong_utxo_key: &StrongUtxoKey,
-        block: &Block,
+        block_info: (Digest, Timestamp, BlockHeight),
     ) {
         let list_index = self
             .tables
@@ -222,11 +221,7 @@ impl RustyWalletDatabase {
             .await
             .expect("Expected UTXO key must be present in database");
         let mut existing_mutxo = self.tables.monitored_utxos.get(list_index).await;
-        existing_mutxo.confirmed_in_block = (
-            block.hash(),
-            block.kernel.header.timestamp,
-            block.kernel.header.height,
-        );
+        existing_mutxo.confirmed_in_block = block_info;
         self.tables
             .monitored_utxos
             .set(list_index, existing_mutxo)
@@ -529,6 +524,7 @@ pub(crate) mod tests {
             &self.tables.strong_key_to_mutxo
         }
 
+        /// Delete all monitored UTXOs and associated lookup tables.
         pub(crate) async fn clear_mutxos(&mut self) {
             self.tables.monitored_utxos.clear().await;
             self.tables.strong_key_to_mutxo.clear().await;
