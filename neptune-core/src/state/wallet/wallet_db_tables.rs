@@ -103,6 +103,8 @@ pub(super) struct WalletDbTables {
 
     /// list of off-chain utxos we are expecting to receive in a future block.
     // table number: 1
+    ///
+    /// Length must match [`Self::addition_record_to_expected_utxo`].
     pub(super) expected_utxos: DbtVec<ExpectedUtxo>,
 
     /// list of transactions sent by this wallet.
@@ -152,6 +154,13 @@ pub(super) struct WalletDbTables {
     ///
     /// Each `monitored_utxo` *must* be represented as an element in this map.
     pub(super) index_set_to_mutxo: DbtMap<Digest, Index>,
+
+    /// table numbers 12 + 13
+    /// Mapping from [`AdditionRecord`] to [`ExpectedUtxo`], for fast lookup of
+    /// [`ExpectedUtxo`].
+    ///
+    /// Length must match [`Self::expected_utxos`].
+    pub(super) addition_record_to_expected_utxo: DbtMap<AdditionRecord, Index>,
 }
 
 impl WalletDbTables {
@@ -196,6 +205,11 @@ impl WalletDbTables {
 
         let index_set_to_mutxo = storage.schema.new_map("absolute_index_set_to_mutxo").await;
 
+        let addition_record_to_expected_utxo = storage
+            .schema
+            .new_map("addition_record_to_expected_utxo")
+            .await;
+
         WalletDbTables {
             sync_label,
             monitored_utxos,
@@ -207,6 +221,7 @@ impl WalletDbTables {
             schema_version,
             strong_key_to_mutxo,
             index_set_to_mutxo,
+            addition_record_to_expected_utxo,
         }
     }
 
@@ -230,6 +245,10 @@ pub(crate) mod tests {
 
         pub(crate) fn sync_label_table_count() -> u8 {
             3
+        }
+
+        pub(crate) fn expected_utxo_table_count() -> u8 {
+            1
         }
     }
 }
