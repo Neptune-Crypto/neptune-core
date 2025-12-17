@@ -1024,7 +1024,7 @@ impl ArchivalState {
     pub(crate) async fn addition_record_indices_for_block_by_height(
         &self,
         block_height: u64,
-    ) -> Option<(HashMap<AdditionRecord, u64>, Digest)> {
+    ) -> Option<(HashMap<AdditionRecord, Vec<u64>>, Digest)> {
         // Special-case for genesis block
         if block_height == BlockHeight::genesis().value() {
             let genesis_hash = self.genesis_block().hash();

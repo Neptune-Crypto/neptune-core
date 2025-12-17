@@ -788,11 +788,10 @@ impl WalletState {
     /// Scan the given list of addition records for items that match with list
     /// of expected incoming UTXOs, and returns expected UTXOs that are present.
     ///
-    /// note: this algorithm is o(n) + o(m) where:
-    ///   n = number of ExpectedUtxo in database. (all-time)
-    ///   m = number of transaction outputs.
+    /// note: this algorithm is o(n) where:
+    ///   n = number of transaction outputs.
     ///
-    /// Returns an iterator of [IncomingUtxo], which in turn contains a
+    /// Returns an list of [IncomingUtxo], which in turn contains a
     /// [`Utxo`], [sender randomness](IncomingUtxo::sender_randomness),
     /// [receiver preimage](IncomingUtxo::receiver_preimage), and the addition
     /// record can be inferred from these three fields.
@@ -1051,6 +1050,10 @@ impl WalletState {
         let current_counter = self.spending_key_counter(key_type);
 
         if current_counter < new_counter {
+            debug!(
+                "Adding {} new {key_type} keys to wallet",
+                new_counter - current_counter
+            );
             match key_type {
                 KeyType::Generation => {
                     self.wallet_db.set_generation_key_counter(new_counter).await;
@@ -1581,8 +1584,20 @@ impl WalletState {
                     utxo,
                     sender_randomness,
                     receiver_preimage,
-                    ..
+                    is_guesser_fee,
                 } = incoming_utxo.to_owned();
+
+                info!(
+                    "Received UTXO in block {:x}, height {}\nvalue = {}\n\
+                    is guesser fee: {is_guesser_fee}\ntime-lock: {}\n\n",
+                    block.hash(),
+                    block.kernel.header.height,
+                    utxo.get_native_currency_amount(),
+                    utxo.release_date()
+                        .map(|t| t.standard_format())
+                        .unwrap_or_else(|| "none".into()),
+                );
+
                 let aocl_index = aocl_leaf_count;
                 let mutxo = MonitoredUtxo::new(
                     utxo.clone(),
@@ -1828,8 +1843,8 @@ impl WalletState {
                     ));
                 }
             } else {
-                let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
-                unsynced.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
+                let wse = WalletStatusElement::new(mutxo.aocl_leaf_index, mutxo.utxo);
+                unsynced.push(wse);
             }
         }
 

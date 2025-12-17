@@ -748,6 +748,39 @@ impl GlobalState {
         height
     }
 
+    /// Rescan the specified (inclusive) range of blocks for transactions
+    /// involving all keys known to the wallet. Only works for nodes that
+    /// maintain a UTXO index.
+    ///
+    /// # Panics
+    /// - If start block height is greater than end block height
+    pub(crate) async fn rescan_wallet(
+        &mut self,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> Result<()> {
+        assert!(
+            first <= last,
+            "Must call function with a non-empty range. Got range: {first}..={last}."
+        );
+
+        let all_keys = self
+            .wallet_state
+            .get_all_known_spending_keys()
+            .collect_vec();
+
+        // All incoming UTXOs must be registered before handling the spending of
+        // UTXOs, otherwise spends will not be registered.
+        self.rescan_announced_incoming(all_keys, first, last)
+            .await?;
+        self.rescan_expected_incoming(first, last).await?;
+        self.rescan_outgoing(first, last).await?;
+        self.restore_monitored_utxos_from_archival_mutator_set()
+            .await;
+
+        Ok(())
+    }
+
     /// Rescan the specified (inclusive) range of blocks for spends of UTXOs.
     /// Only works for nodes that maintain a UTXO index.
     ///
@@ -881,6 +914,11 @@ impl GlobalState {
                 trace!("No expected UTXOs found in block of height {block_height}");
                 continue;
             }
+
+            debug!(
+                "Found {} claimable UTXOs in block height {block_height}, from expected UTXOs.",
+                own_utxos.len()
+            );
 
             // Load block header to get relevant block meta-information
             let block_header = self
@@ -1061,7 +1099,7 @@ impl GlobalState {
             }
 
             debug!(
-                "Found {} claimable UTXOs in block height {block_height}.",
+                "Found {} claimable UTXOs in block height {block_height}, from announcements.",
                 all_incoming_utxos.len()
             );
 
@@ -2953,13 +2991,31 @@ mod tests {
         /// Send coins to somewhere.
         ///
         /// Make the transaction. Update state accordingly. Return the
-        /// transaction.
+        /// transaction. Fee in returned transaction is set to zero.
         pub(crate) async fn send_coins(
             sender: &mut GlobalStateLock,
-            amount: NativeCurrencyAmount,
-            destination: ReceivingAddress,
+            outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
             timestamp: Timestamp,
         ) -> Transaction {
+            let outputs = sender
+                .api()
+                .tx_initiator()
+                .generate_tx_outputs(outputs)
+                .await;
+            let utxos_sent_to_self = sender
+                .lock_guard()
+                .await
+                .wallet_state
+                .extract_expected_utxos(outputs.iter(), UtxoNotifier::Myself);
+
+            sender
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .add_expected_utxos(utxos_sent_to_self)
+                .await;
+
+            let amount = outputs.total_native_coins();
             let inputs = sender
                 .api()
                 .tx_initiator()
@@ -2967,11 +3023,6 @@ mod tests {
                 .await
                 .into_iter()
                 .collect_vec();
-            let outputs = sender
-                .api()
-                .tx_initiator()
-                .generate_tx_outputs(vec![OutputFormat::AddressAndAmount(destination, amount)])
-                .await;
             let transaction_details = TransactionDetailsBuilder::default()
                 .inputs(inputs.into())
                 .outputs(outputs)
@@ -3243,8 +3294,7 @@ mod tests {
         drop(alice_gsl); // drop lock to free up api
         let tx_a = helper::send_coins(
             &mut alice,
-            NativeCurrencyAmount::coins(10),
-            rando.into(),
+            vec![(rando.into(), NativeCurrencyAmount::coins(10))],
             timestamp_2,
         )
         .await;
@@ -3312,8 +3362,7 @@ mod tests {
         drop(alice_gsl); // drop lock to free up api
         let tx_b = helper::send_coins(
             &mut alice,
-            NativeCurrencyAmount::coins(5),
-            rando.into(),
+            vec![(rando.into(), NativeCurrencyAmount::coins(5))],
             timestamp_5,
         )
         .await;
@@ -3531,25 +3580,15 @@ mod tests {
     mod rescan_wallet {
         use super::*;
 
-        /// Build a block with the specified output. Includes change outputs if
-        /// balance exceeds output value. Call with amount set to None to send
-        /// entire balance to the specified address.
-        async fn block_with_tx_output(
+        /// Build a block with the specified outputs. Includes change outputs if
+        /// balance exceeds output value.
+        async fn block_with_outputs(
             gsl: &mut GlobalStateLock,
-            amount: Option<NativeCurrencyAmount>,
-            receiver: ReceivingAddress,
+            outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
         ) -> Block {
             let parent_block = gsl.lock_guard().await.chain.light_state().clone();
             let timestamp = parent_block.header().timestamp + Timestamp::months(7);
-            let amount = match amount {
-                Some(amt) => amt,
-                None => {
-                    let gs = gsl.lock_guard().await;
-                    let wallet_status = gs.get_wallet_status_for_tip().await;
-                    wallet_status.available_confirmed(timestamp)
-                }
-            };
-            let tx = helper::send_coins(gsl, amount, receiver, timestamp).await;
+            let tx = helper::send_coins(gsl, outputs, timestamp).await;
             invalid_block_with_transaction(&parent_block, tx)
         }
 
@@ -3577,42 +3616,64 @@ mod tests {
                 .nth_spending_key(KeyType::Symmetric, 103);
             let third_party_address =
                 GenerationReceivingAddress::derive_from_seed(Digest::default());
-
-            // Create four blocks, where the two first has two outputs to
-            // Alice, 3rd has one, and 4th has zero.
-            let block1 = block_with_tx_output(
-                &mut alice,
-                Some(NativeCurrencyAmount::coins(10)),
-                generation_key.to_address(),
-            )
-            .await;
-            alice.set_new_tip(block1).await.unwrap();
-            let block2 = block_with_tx_output(
-                &mut alice,
-                Some(NativeCurrencyAmount::coins(3)),
-                sym_key.to_address(),
-            )
-            .await;
-            alice.set_new_tip(block2).await.unwrap();
-            let block3 = block_with_tx_output(
-                &mut alice,
-                Some(NativeCurrencyAmount::coins(1)),
-                third_party_address.into(),
-            )
-            .await;
-            alice.set_new_tip(block3).await.unwrap();
-            let block4 = block_with_tx_output(&mut alice, None, third_party_address.into()).await;
-            alice.set_new_tip(block4).await.unwrap();
-
-            let mut alice = alice.lock_guard_mut().await;
             alice
+                .lock_guard_mut()
+                .await
                 .wallet_state
                 .bump_derivation_counter(KeyType::Generation, 104)
                 .await;
             alice
+                .lock_guard_mut()
+                .await
                 .wallet_state
                 .bump_derivation_counter(KeyType::Symmetric, 104)
                 .await;
+
+            // Create four blocks, where the two first has two outputs to
+            // Alice, 3rd has one, and 4th has zero.
+            let block1 = block_with_outputs(
+                &mut alice,
+                vec![(
+                    generation_key.to_address(),
+                    NativeCurrencyAmount::coins(10),
+                    UtxoNotificationMedium::OnChain,
+                )],
+            )
+            .await;
+            alice.set_new_tip(block1).await.unwrap();
+            let block2 = block_with_outputs(
+                &mut alice,
+                vec![(
+                    sym_key.to_address(),
+                    NativeCurrencyAmount::coins(3),
+                    UtxoNotificationMedium::OnChain,
+                )],
+            )
+            .await;
+            alice.set_new_tip(block2).await.unwrap();
+            let block3 = block_with_outputs(
+                &mut alice,
+                vec![(
+                    third_party_address.into(),
+                    NativeCurrencyAmount::coins(1),
+                    UtxoNotificationMedium::OnChain,
+                )],
+            )
+            .await;
+            alice.set_new_tip(block3).await.unwrap();
+            let block4 = block_with_outputs(
+                &mut alice,
+                vec![(
+                    third_party_address.into(),
+                    NativeCurrencyAmount::coins(19),
+                    UtxoNotificationMedium::OnChain,
+                )],
+            )
+            .await;
+            alice.set_new_tip(block4).await.unwrap();
+
+            let mut alice = alice.lock_guard_mut().await;
+
             let all_keys = alice
                 .wallet_state
                 .get_all_known_spending_keys()
@@ -3662,6 +3723,151 @@ mod tests {
                     num_expected,
                     alice.wallet_state.wallet_db.monitored_utxos().len().await,
                     "Expected {num_expected} after scanning range {first}..={last}"
+                );
+            }
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn wallet_history_from_rescan() {
+            let network = Network::Main;
+
+            let cli_args = cli_args::Args {
+                network,
+                utxo_index: true,
+                ..Default::default()
+            };
+
+            for notification_medium in [
+                UtxoNotificationMedium::OffChain,
+                UtxoNotificationMedium::OnChain,
+            ] {
+                let mut alice =
+                    mock_genesis_global_state(0, WalletEntropy::devnet_wallet(), cli_args.clone())
+                        .await;
+
+                let own_genkey_a = alice
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .nth_spending_key(KeyType::Generation, 102);
+                let own_genkey_b = alice
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .nth_spending_key(KeyType::Generation, 232);
+                let own_symkey = alice
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .nth_spending_key(KeyType::Symmetric, 103);
+                let third_party_address =
+                    GenerationReceivingAddress::derive_from_seed(Digest::default());
+
+                alice
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .bump_derivation_counter(KeyType::Generation, 233)
+                    .await;
+                alice
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .bump_derivation_counter(KeyType::Symmetric, 104)
+                    .await;
+
+                // Build a list of blocks sending lots of UTXOs around to self, such
+                // that the wallet's balance never changes from the initial 20
+                // coins.
+                for i in 1..=10 {
+                    let outputs = vec![
+                        (
+                            own_genkey_a.to_address(),
+                            NativeCurrencyAmount::coins(1),
+                            notification_medium,
+                        ),
+                        (
+                            own_genkey_b.to_address(),
+                            NativeCurrencyAmount::coins(2),
+                            notification_medium,
+                        ),
+                        (
+                            own_genkey_b.to_address(),
+                            NativeCurrencyAmount::coins(i),
+                            notification_medium,
+                        ),
+                        (
+                            own_symkey.to_address(),
+                            NativeCurrencyAmount::coins(1),
+                            notification_medium,
+                        ),
+                    ];
+                    let block = block_with_outputs(&mut alice, outputs).await;
+                    alice.set_new_tip(block).await.unwrap();
+                }
+
+                // Balance is still 20. Now send 15 coins to someone else, over
+                // multiple blocks.
+                for i in 1..=5 {
+                    let output = vec![(third_party_address.into(), NativeCurrencyAmount::coins(i))];
+                    let block = block_with_outputs(&mut alice, output).await;
+                    alice.set_new_tip(block).await.unwrap();
+                }
+
+                let mut alice = alice.lock_guard_mut().await;
+                let mut balance_history = alice.get_balance_history().await;
+
+                assert!(
+                    !alice.get_balance_history().await.is_empty(),
+                    "History list must not be empty after balance changes"
+                );
+
+                // Clear tables and rescan, and verify restored history.
+                alice.wallet_state.wallet_db.clear_mutxos().await;
+                assert!(
+                    alice
+                        .wallet_state
+                        .wallet_db
+                        .monitored_utxos()
+                        .is_empty()
+                        .await,
+                    "MUTXO list must be empty after clear"
+                );
+                assert!(
+                    alice.get_balance_history().await.is_empty(),
+                    "History list must be empty after clear"
+                );
+
+                alice
+                    .rescan_wallet(0u64.into(), 15u64.into())
+                    .await
+                    .unwrap();
+                let mut balance_history_again = alice.get_balance_history().await;
+
+                assert_eq!(
+                    balance_history.len(),
+                    balance_history_again.len(),
+                    "balance history from rescan must agree with original"
+                );
+
+                // Demand equality under permutation, so sort by block height,
+                // then amount.
+                balance_history_again.sort_unstable_by(|a, b| (a.2, a.3).cmp(&(b.2, b.3)));
+                balance_history.sort_unstable_by(|a, b| (a.2, a.3).cmp(&(b.2, b.3)));
+
+                assert_eq!(
+                    balance_history, balance_history_again,
+                    "Balance histories must agree after clear and rescan"
+                );
+                assert!(
+                    !alice
+                        .wallet_state
+                        .wallet_db
+                        .monitored_utxos()
+                        .is_empty()
+                        .await,
+                    "Must be non-empty after rescan"
                 );
             }
         }
