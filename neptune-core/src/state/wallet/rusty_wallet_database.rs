@@ -267,6 +267,15 @@ impl RustyWalletDatabase {
             .await;
     }
 
+    /// Check if the wallet database contains a [`MonitoredUtxo`] with the
+    /// specified [`StrongUtxoKey`].
+    pub(crate) async fn has_mutxo(&self, strong_utxo_key: &StrongUtxoKey) -> bool {
+        self.tables
+            .strong_key_to_mutxo
+            .contains_key(strong_utxo_key)
+            .await
+    }
+
     /// Insert a new [`MonitoredUtxo`] into the wallet's database and return the
     /// index of the inserted element, if this monitored UTXO is new. If the
     /// monitored UTXO is already known to the wallet database, the index of the
