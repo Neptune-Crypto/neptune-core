@@ -50,6 +50,7 @@ use crate::state::database::BlockIndexValue;
 use crate::state::database::BlockRecord;
 use crate::state::database::FileRecord;
 use crate::state::database::LastFileRecord;
+use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -1025,6 +1026,70 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
+    /// Return the list of `[StrongUtxoKey]` of the guesser rewards for the
+    /// specified block belonging to the canonical chain.
+    ///
+    /// Returns none if no block of the specified height belonging to the
+    /// canonical chain is known.
+    ///
+    /// Perf: Does not read block from disk.
+    ///
+    /// # Panics
+    ///
+    ///  - If the database is corrupted.
+    pub(crate) async fn guesser_reward_strong_keys_for_block(
+        &self,
+        block_height: u64,
+    ) -> Option<Vec<StrongUtxoKey>> {
+        if block_height == BlockHeight::genesis().value() {
+            return Some(vec![]);
+        }
+
+        let Some(block_hash) = self
+            .archival_block_mmr
+            .ammr()
+            .try_get_leaf(block_height)
+            .await
+        else {
+            warn!("Attempted to get addition records for block height {block_height} which is not known.");
+            return None;
+        };
+
+        let block_record = self
+            .get_block_record(block_hash)
+            .await
+            .expect("Must know block record of canonical and non-genesis block");
+
+        // The protocol dictates that the timelocked UTXO comes first, then the
+        // liquid.
+        let leaf_index_timelocked = block_record.max_aocl_index() - 1;
+        let addition_record_timelocked = self
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .get_leaf_async(leaf_index_timelocked)
+            .await;
+
+        let leaf_index_liquid = block_record.max_aocl_index();
+        let addition_record_liquid = self
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .get_leaf_async(leaf_index_liquid)
+            .await;
+
+        Some(vec![
+            StrongUtxoKey::new(
+                AdditionRecord::new(addition_record_timelocked),
+                leaf_index_timelocked,
+            ),
+            StrongUtxoKey::new(
+                AdditionRecord::new(addition_record_liquid),
+                leaf_index_liquid,
+            ),
+        ])
+    }
+
     /// Returns a [`HashMap`] of [`AdditionRecord`] to  AOCL leaf indices for
     /// all outputs in a given block. Returns `None` if no block at the
     /// specified height is known. Also returns the block hash. AOCL leaf
@@ -1060,7 +1125,7 @@ impl ArchivalState {
                 .try_get_leaf(block_height)
                 .await
             else {
-                warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
+                warn!("Attempted to get addition records for block height {block_height} which is not known.");
                 return None;
             };
 

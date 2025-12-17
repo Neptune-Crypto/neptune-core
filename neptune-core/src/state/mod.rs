@@ -52,6 +52,7 @@ use wallet::wallet_status::WalletStatus;
 
 use crate::api;
 use crate::api::export::NeptuneProof;
+use crate::api::export::ReceivingAddress;
 use crate::api::export::SpendingKey;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
@@ -772,9 +773,10 @@ impl GlobalState {
 
         // All incoming UTXOs must be registered before handling the spending of
         // UTXOs, otherwise spends will not be registered.
+        self.rescan_guesser_rewards(first, last).await;
         self.rescan_announced_incoming(all_keys, first, last)
             .await?;
-        self.rescan_expected_incoming(first, last).await?;
+        self.rescan_expected_incoming(first, last).await;
         self.rescan_outgoing(first, last).await?;
         self.restore_monitored_utxos_from_archival_mutator_set()
             .await;
@@ -872,19 +874,131 @@ impl GlobalState {
         Ok(())
     }
 
+    /// Rescan the specified (inclusive) range of blocks for guesser rewards to
+    /// this node's wallet.
+    ///
+    /// # Panics
+    /// - If start block height is greater than end block height
+    pub(crate) async fn rescan_guesser_rewards(&mut self, first: BlockHeight, last: BlockHeight) {
+        let first: u64 = first.into();
+        let last: u64 = last.into();
+        assert!(
+            first <= last,
+            "Must call function with a non-empty range. Got range: {first}..={last}."
+        );
+
+        let own_guesser_key: SpendingKey =
+            self.wallet_state.wallet_entropy.guesser_fee_key().into();
+        let num_mps_per_mutxo = self.cli().number_of_mps_per_utxo;
+
+        let mut recovery_list = vec![];
+        for block_height in first..=last {
+            let Some(block_hash) = self
+                .chain
+                .archival_state()
+                .archival_block_mmr
+                .ammr()
+                .try_get_leaf(block_height)
+                .await
+            else {
+                warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
+                return;
+            };
+
+            let block_header = self
+                .chain
+                .archival_state()
+                .get_block_header(block_hash)
+                .await
+                .expect("Must have block header for canonical block");
+
+            if !block_header.was_guessed_by(&own_guesser_key.to_address()) {
+                continue;
+            }
+
+            // Check if the two guesser rewards have already been added to the
+            // wallet.
+            let guesser_rewards = self
+                .chain
+                .archival_state()
+                .guesser_reward_strong_keys_for_block(block_height)
+                .await
+                .expect("Must know block if block hash could be found");
+
+            let mut all_present = true;
+            for guesser_reward in &guesser_rewards {
+                if !self.wallet_state.wallet_db.has_mutxo(guesser_reward).await {
+                    all_present = false;
+                    break;
+                }
+            }
+
+            if all_present {
+                debug!(
+                    "Block {block_height} was guessed by us, but this was already registered by the wallet"
+                );
+                continue;
+            }
+
+            info!("Block {block_height} was guessed by us, and not registered by the wallet.");
+
+            // Load entire block from disk since we need some data that we have
+            // no other way to get.
+            let block = self
+                .chain
+                .archival_state()
+                .get_block(block_hash)
+                .await
+                .unwrap()
+                .expect("Block in archival MMR must be present on disk");
+
+            let sender_randomness = block_hash;
+            for (guesser_utxo, guesser_strong_key) in block
+                .kernel
+                .guesser_fee_utxos()
+                .expect("Stored block must have guesser UTXOs")
+                .into_iter()
+                .zip_eq(guesser_rewards)
+            {
+                let mutxo = MonitoredUtxo::new(
+                    guesser_utxo.clone(),
+                    num_mps_per_mutxo,
+                    guesser_strong_key.aocl_index,
+                    sender_randomness,
+                    own_guesser_key.privacy_preimage(),
+                    &block,
+                );
+                self.wallet_state.wallet_db.insert_mutxo(mutxo).await;
+
+                // UTXO was not seen by wallet-db before, so we assume
+                // we don't have recovery data for it.
+                let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
+                    utxo: guesser_utxo,
+                    sender_randomness,
+                    receiver_preimage: own_guesser_key.privacy_preimage(),
+                    aocl_index: guesser_strong_key.aocl_index,
+                };
+                recovery_list.push(utxo_ms_recovery_data);
+            }
+        }
+
+        // write UTXO-recovery data to disk.
+        for recovery_data in recovery_list {
+            self.wallet_state
+                .store_utxo_ms_recovery_data(recovery_data)
+                .await
+                .expect("Failed to store mutator set recovery data to file.");
+        }
+    }
+
     /// Rescan the specified (inclusive) range of blocks for incoming UTXOs that
-    /// were added as expected UTXOs to the wallet database.  Only works for
-    /// nodes that maintain a UTXO index.
+    /// were added as expected UTXOs to the wallet database.
     ///
     /// Never loads the entire block from disk, so performance is good.
     ///
     /// # Panics
     /// - If start block height is greater than end block height
-    pub(crate) async fn rescan_expected_incoming(
-        &mut self,
-        first: BlockHeight,
-        last: BlockHeight,
-    ) -> Result<()> {
+    pub(crate) async fn rescan_expected_incoming(&mut self, first: BlockHeight, last: BlockHeight) {
         let first: u64 = first.into();
         let last: u64 = last.into();
         assert!(
@@ -903,7 +1017,7 @@ impl GlobalState {
                 .await
             else {
                 warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
-                return Ok(());
+                return;
             };
 
             let own_utxos = self
@@ -987,14 +1101,12 @@ impl GlobalState {
         }
 
         // write UTXO-recovery data to disk.
-        for incoming_randomness in recovery_list {
+        for recovery_data in recovery_list {
             self.wallet_state
-                .store_utxo_ms_recovery_data(incoming_randomness)
+                .store_utxo_ms_recovery_data(recovery_data)
                 .await
                 .expect("Failed to store mutator set recovery data to file.");
         }
-
-        Ok(())
     }
 
     /// Rescan the specified (inclusive) range of blocks for incoming UTXOs that
@@ -3717,12 +3829,7 @@ mod tests {
                     .unwrap();
                 alice
                     .rescan_expected_incoming(first.into(), last.into())
-                    .await
-                    .unwrap();
-                alice
-                    .rescan_outgoing(first.into(), last.into())
-                    .await
-                    .unwrap();
+                    .await;
                 alice
                     .restore_monitored_utxos_from_archival_mutator_set()
                     .await;

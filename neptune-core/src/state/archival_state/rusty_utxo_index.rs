@@ -120,7 +120,8 @@ impl RustyUtxoIndex {
     }
 
     /// Return the digests of all absolute index sets of the removal records in
-    /// this block.
+    /// this block. Returns `None` if the block was never processed by the UTXO
+    /// index.
     pub(crate) async fn index_set_digests(&self, block_hash: Digest) -> Option<Vec<Digest>> {
         self.tables.index_set_digests.get(&block_hash).await
     }
