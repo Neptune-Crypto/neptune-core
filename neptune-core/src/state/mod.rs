@@ -889,6 +889,8 @@ impl GlobalState {
 
         let own_guesser_key: SpendingKey =
             self.wallet_state.wallet_entropy.guesser_fee_key().into();
+        let own_guesser_address = own_guesser_key.to_address();
+        let receiver_preimage = own_guesser_key.privacy_preimage();
         let num_mps_per_mutxo = self.cli().number_of_mps_per_utxo;
 
         let mut recovery_list = vec![];
@@ -912,7 +914,8 @@ impl GlobalState {
                 .await
                 .expect("Must have block header for canonical block");
 
-            if !block_header.was_guessed_by(&own_guesser_key.to_address()) {
+            if !block_header.was_guessed_by(&own_guesser_address) {
+                trace!("block {block_height} not guessed by us.");
                 continue;
             }
 
@@ -965,7 +968,7 @@ impl GlobalState {
                     num_mps_per_mutxo,
                     guesser_strong_key.aocl_index,
                     sender_randomness,
-                    own_guesser_key.privacy_preimage(),
+                    receiver_preimage,
                     &block,
                 );
                 self.wallet_state.wallet_db.insert_mutxo(mutxo).await;
@@ -975,7 +978,7 @@ impl GlobalState {
                 let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
                     utxo: guesser_utxo,
                     sender_randomness,
-                    receiver_preimage: own_guesser_key.privacy_preimage(),
+                    receiver_preimage,
                     aocl_index: guesser_strong_key.aocl_index,
                 };
                 recovery_list.push(utxo_ms_recovery_data);
@@ -3697,6 +3700,8 @@ mod tests {
     }
 
     mod rescan_wallet {
+        use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
+
         use super::*;
 
         /// Build a block with the specified outputs. Includes change outputs if
@@ -3830,15 +3835,73 @@ mod tests {
                 alice
                     .rescan_expected_incoming(first.into(), last.into())
                     .await;
-                alice
-                    .restore_monitored_utxos_from_archival_mutator_set()
-                    .await;
                 assert_eq!(
                     num_expected,
                     alice.wallet_state.wallet_db.monitored_utxos().len().await,
                     "Expected {num_expected} after scanning range {first}..={last}"
                 );
             }
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn rescan_guesser_rewards() {
+            let network = Network::Main;
+
+            let cli_args = cli_args::Args {
+                network,
+                ..Default::default()
+            };
+
+            let mut alice =
+                mock_genesis_global_state(0, WalletEntropy::new_random(), cli_args.clone()).await;
+            let mut alice = alice.lock_guard_mut().await;
+            let alice_guesser_key: SpendingKey =
+                alice.wallet_state.wallet_entropy.guesser_fee_key().into();
+
+            let guesser_fraction = 1f64;
+            let mut block1 =
+                invalid_empty_block1_with_guesser_fraction(network, guesser_fraction).await;
+            block1.set_header_guesser_address(alice_guesser_key.to_address());
+
+            alice.set_new_tip(block1).await.unwrap();
+
+            let balance_timestamp = alice.chain.light_state().header().timestamp;
+            let expected_balance = NativeCurrencyAmount::coins(64);
+
+            assert_eq!(
+                expected_balance,
+                alice
+                    .get_wallet_status_for_tip()
+                    .await
+                    .available_confirmed(balance_timestamp),
+                "Must have liquide balance of 64 after successful guess"
+            );
+
+            alice.wallet_state.wallet_db.clear_mutxos().await;
+
+            assert_eq!(
+                NativeCurrencyAmount::zero(),
+                alice
+                    .get_wallet_status_for_tip()
+                    .await
+                    .available_confirmed(balance_timestamp),
+                "Must have zero balance after clearing monitored UTXOs"
+            );
+            alice
+                .rescan_guesser_rewards(0u64.into(), 15u64.into())
+                .await;
+            alice
+                .restore_monitored_utxos_from_archival_mutator_set()
+                .await;
+            assert_eq!(
+                expected_balance,
+                alice
+                    .get_wallet_status_for_tip()
+                    .await
+                    .available_confirmed(balance_timestamp),
+                "Must have liquid balance of 64 after rescan of guesser rewards"
+            );
         }
 
         #[traced_test]
@@ -3936,8 +3999,19 @@ mod tests {
                 }
 
                 let mut alice = alice.lock_guard_mut().await;
-                let mut balance_history = alice.get_balance_history().await;
 
+                let balance_timestamp = alice.chain.light_state().header().timestamp;
+                let expected_balance = NativeCurrencyAmount::coins(5);
+                let balance = alice
+                    .get_wallet_status_for_tip()
+                    .await
+                    .available_confirmed(balance_timestamp);
+                assert_eq!(
+                    expected_balance, balance,
+                    "Balance must be 5 after getting 20 and sending 15"
+                );
+
+                let mut balance_history = alice.get_balance_history().await;
                 assert!(
                     !alice.get_balance_history().await.is_empty(),
                     "History list must not be empty after balance changes"
@@ -3959,36 +4033,48 @@ mod tests {
                     "History list must be empty after clear"
                 );
 
-                alice
-                    .rescan_wallet(0u64.into(), 15u64.into())
-                    .await
-                    .unwrap();
-                let mut balance_history_again = alice.get_balance_history().await;
+                // Loop with two iterations to ensure wallet rescan is
+                // idempotent.
+                for _ in 0..2 {
+                    alice
+                        .rescan_wallet(0u64.into(), 15u64.into())
+                        .await
+                        .unwrap();
+                    let balance_again = alice
+                        .get_wallet_status_for_tip()
+                        .await
+                        .available_confirmed(balance_timestamp);
+                    assert_eq!(
+                        expected_balance, balance_again,
+                        "Balance must be 5 after wallet rescan"
+                    );
+                    let mut balance_history_again = alice.get_balance_history().await;
 
-                assert_eq!(
-                    balance_history.len(),
-                    balance_history_again.len(),
-                    "balance history from rescan must agree with original"
-                );
+                    assert_eq!(
+                        balance_history.len(),
+                        balance_history_again.len(),
+                        "balance history from rescan must agree with original"
+                    );
 
-                // Demand equality under permutation, so sort by block height,
-                // then amount.
-                balance_history_again.sort_unstable_by(|a, b| (a.2, a.3).cmp(&(b.2, b.3)));
-                balance_history.sort_unstable_by(|a, b| (a.2, a.3).cmp(&(b.2, b.3)));
+                    // Demand equality under permutation, so sort by block height,
+                    // then amount.
+                    balance_history_again.sort_unstable_by(|a, b| (a.2, a.3).cmp(&(b.2, b.3)));
+                    balance_history.sort_unstable_by(|a, b| (a.2, a.3).cmp(&(b.2, b.3)));
 
-                assert_eq!(
-                    balance_history, balance_history_again,
-                    "Balance histories must agree after clear and rescan"
-                );
-                assert!(
-                    !alice
-                        .wallet_state
-                        .wallet_db
-                        .monitored_utxos()
-                        .is_empty()
-                        .await,
-                    "Must be non-empty after rescan"
-                );
+                    assert_eq!(
+                        balance_history, balance_history_again,
+                        "Balance histories must agree after clear and rescan"
+                    );
+                    assert!(
+                        !alice
+                            .wallet_state
+                            .wallet_db
+                            .monitored_utxos()
+                            .is_empty()
+                            .await,
+                        "Must be non-empty after rescan"
+                    );
+                }
             }
         }
     }

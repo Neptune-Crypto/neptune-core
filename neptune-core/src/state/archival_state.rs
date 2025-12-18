@@ -1027,7 +1027,8 @@ impl ArchivalState {
     }
 
     /// Return the list of `[StrongUtxoKey]` of the guesser rewards for the
-    /// specified block belonging to the canonical chain.
+    /// specified block belonging to the canonical chain. Can be used to check
+    /// if a wallet has already registered guesser reward UTXOs.
     ///
     /// Returns none if no block of the specified height belonging to the
     /// canonical chain is known.
