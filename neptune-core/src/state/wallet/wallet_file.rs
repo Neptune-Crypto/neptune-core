@@ -20,7 +20,6 @@ pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";
 pub const WALLET_OUTGOING_SECRETS_FILE_NAME: &str = "outgoing_randomness.dat";
 pub const WALLET_INCOMING_SECRETS_FILE_NAME: &str = "incoming_randomness.dat";
 const STANDARD_WALLET_NAME: &str = "standard_wallet";
-const STANDARD_WALLET_VERSION: u8 = 0;
 pub const WALLET_DB_NAME: &str = "wallet";
 pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 
@@ -151,12 +150,12 @@ impl WalletFile {
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
             secret_seed,
-            version: STANDARD_WALLET_VERSION,
+            version: secret_seed.version(),
         }
     }
 
     fn new_random() -> Self {
-        Self::new(SecretKeyMaterial(rng().random()))
+        Self::new(SecretKeyMaterial::V1(rng().random()))
     }
 
     pub fn entropy(&self) -> WalletEntropy {
