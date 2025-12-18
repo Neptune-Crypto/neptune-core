@@ -58,7 +58,15 @@ impl TryFrom<&Announcement> for AnnouncementFlags {
 /// assumed to be part of the state of all nodes that also maintain a UTXO
 /// index.
 ///
+/// The purpose of the UTXO index is to speed up the rescanning of historical
+/// blocks, and to serve 3rd parties with information required to detect
+/// incoming and outgoing UTXOs as quickly as possible. It assumes the presence
+/// of an [`ArchivalState`]. Any decision about tables in the UTXO index should
+/// be made in the light of allowing clients or 3rd parties to discover balance-
+/// affecting input or output UTXOs in historical blocks as quickly as possible.
+///
 /// [`ArchivalMutatorSet`]: crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet
+/// [`ArchivalState`]: crate::state::archival_state::ArchivalState
 #[derive(Debug)]
 struct UtxoIndexTables {
     #[allow(dead_code)]
@@ -68,7 +76,7 @@ struct UtxoIndexTables {
 
     /// Mapping from block hash to the list of announcement keys contained in
     /// the block. The order of the announcements in the block matches the order
-    /// of the announcement flags, the value of this mapping.
+    /// of the announcement flags in the value of this mapping.
     pub(super) announcements: DbtMap<Digest, Vec<AnnouncementFlags>>,
 
     /// Mapping from block hash to the list of digests of the aboslute indices
