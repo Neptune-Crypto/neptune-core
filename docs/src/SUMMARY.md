@@ -23,6 +23,7 @@
   - [Generating Addresses](./user-guides/generating-addresses.md)
   - [Scan Mode](./user-guides/scan-mode.md)
   - [Shamir Secret Sharing](./user-guides/shamir-secret-sharing.md)
+  - [Wallet Rescan](./user-guides/wallet-rescan.md)
 - [Contributing](./contributing.md)
   - [Git Workflow](./contributing/git-workflow.md)
   - [Git Message](./contributing/git-message.md)
