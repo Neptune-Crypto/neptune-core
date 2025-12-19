@@ -329,6 +329,50 @@ pub struct SubmitTransactionResponse {
     pub success: bool,
 }
 
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanAnnouncedRequest {
+    pub first: RpcBlockHeight,
+    pub last: RpcBlockHeight,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanAnnouncedResponse {}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanExpectedRequest {
+    pub first: RpcBlockHeight,
+    pub last: RpcBlockHeight,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanExpectedResponse {}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanOutgoingRequest {
+    pub first: RpcBlockHeight,
+    pub last: RpcBlockHeight,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanOutgoingResponse {}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanGuesserRewardsRequest {
+    pub first: RpcBlockHeight,
+    pub last: RpcBlockHeight,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanGuesserRewardsResponse {}
+
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct GetBlockTemplateRequest {

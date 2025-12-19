@@ -114,6 +114,18 @@ pub enum RpcMethods {
     #[namespace(Namespace::Wallet)]
     SubmitTransaction,
 
+    #[namespace(Namespace::Wallet)]
+    RescanAnnounced,
+
+    #[namespace(Namespace::Wallet)]
+    RescanExpected,
+
+    #[namespace(Namespace::Wallet)]
+    RescanOutgoing,
+
+    #[namespace(Namespace::Wallet)]
+    RescanGuesserRewards,
+
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
 

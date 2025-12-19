@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use itertools::Itertools;
 use tracing::debug;
 
 use crate::api::export::ReceivingAddress;
@@ -525,6 +526,99 @@ impl RpcApi for RpcServer {
         Ok(SubmitTransactionResponse {
             success: response.is_ok(),
         })
+    }
+
+    async fn rescan_announced_call(
+        &self,
+        request: RescanAnnouncedRequest,
+    ) -> RpcResult<RescanAnnouncedResponse> {
+        if request.first > request.last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let all_keys = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_all_known_spending_keys()
+            .collect_vec();
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::RescanAnnounced {
+                first: request.first,
+                last: request.last,
+                keys: all_keys,
+            })
+            .await;
+
+        Ok(RescanAnnouncedResponse {})
+    }
+
+    async fn rescan_expected_call(
+        &self,
+        request: RescanExpectedRequest,
+    ) -> RpcResult<RescanExpectedResponse> {
+        if request.first > request.last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::RescanExpected {
+                first: request.first,
+                last: request.last,
+            })
+            .await;
+
+        Ok(RescanExpectedResponse {})
+    }
+
+    async fn rescan_outgoing_call(
+        &self,
+        request: RescanOutgoingRequest,
+    ) -> RpcResult<RescanOutgoingResponse> {
+        if request.first > request.last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::RescanOutgoing {
+                first: request.first,
+                last: request.last,
+            })
+            .await;
+
+        Ok(RescanOutgoingResponse {})
+    }
+
+    async fn rescan_guesser_rewards_call(
+        &self,
+        request: RescanGuesserRewardsRequest,
+    ) -> RpcResult<RescanGuesserRewardsResponse> {
+        if request.first > request.last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::RescanGuesserRewards {
+                first: request.first,
+                last: request.last,
+            })
+            .await;
+
+        Ok(RescanGuesserRewardsResponse {})
     }
 
     async fn get_block_template_call(

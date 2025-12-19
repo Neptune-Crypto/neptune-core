@@ -52,7 +52,6 @@ use wallet::wallet_status::WalletStatus;
 
 use crate::api;
 use crate::api::export::NeptuneProof;
-use crate::api::export::ReceivingAddress;
 use crate::api::export::SpendingKey;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
@@ -748,40 +747,6 @@ impl GlobalState {
         debug!("call to get_latest_balance_height() took {time_secs} seconds");
 
         height
-    }
-
-    /// Rescan the specified (inclusive) range of blocks for transactions
-    /// involving all keys known to the wallet. Only works for nodes that
-    /// maintain a UTXO index.
-    ///
-    /// # Panics
-    /// - If start block height is greater than end block height
-    pub(crate) async fn rescan_wallet(
-        &mut self,
-        first: BlockHeight,
-        last: BlockHeight,
-    ) -> Result<()> {
-        assert!(
-            first <= last,
-            "Must call function with a non-empty range. Got range: {first}..={last}."
-        );
-
-        let all_keys = self
-            .wallet_state
-            .get_all_known_spending_keys()
-            .collect_vec();
-
-        // All incoming UTXOs must be registered before handling the spending of
-        // UTXOs, otherwise spends will not be registered.
-        self.rescan_guesser_rewards(first, last).await;
-        self.rescan_announced_incoming(all_keys, first, last)
-            .await?;
-        self.rescan_expected_incoming(first, last).await;
-        self.rescan_outgoing(first, last).await?;
-        self.restore_monitored_utxos_from_archival_mutator_set()
-            .await;
-
-        Ok(())
     }
 
     /// Rescan the specified (inclusive) range of blocks for spends of UTXOs.
@@ -2885,6 +2850,46 @@ mod tests {
         async fn force_wallet_membership_proof_maintance(&mut self) {
             self.lock_mut(|x| x.force_wallet_membership_proof_maintance = true)
                 .await;
+        }
+    }
+
+    impl GlobalState {
+        /// Rescan the specified (inclusive) range of blocks for transactions
+        /// involving all keys known to the wallet. Only works for nodes that
+        /// maintain a UTXO index.
+        ///
+        /// # Panics
+        /// - If start block height is greater than end block height
+        ///
+        /// Only included as a test function since caller should always specify
+        /// the specific kind of rescan that they want, not use a catch-all,
+        /// since all these functions are very slow.
+        pub(crate) async fn rescan_wallet(
+            &mut self,
+            first: BlockHeight,
+            last: BlockHeight,
+        ) -> Result<()> {
+            assert!(
+                first <= last,
+                "Must call function with a non-empty range. Got range: {first}..={last}."
+            );
+
+            let all_keys = self
+                .wallet_state
+                .get_all_known_spending_keys()
+                .collect_vec();
+
+            // All incoming UTXOs must be registered before handling the spending of
+            // UTXOs, otherwise spends will not be registered.
+            self.rescan_guesser_rewards(first, last).await;
+            self.rescan_announced_incoming(all_keys, first, last)
+                .await?;
+            self.rescan_expected_incoming(first, last).await;
+            self.rescan_outgoing(first, last).await?;
+            self.restore_monitored_utxos_from_archival_mutator_set()
+                .await;
+
+            Ok(())
         }
     }
 

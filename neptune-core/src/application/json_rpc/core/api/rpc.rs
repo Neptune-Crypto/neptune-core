@@ -66,6 +66,12 @@ pub enum RpcError {
     #[error("Failed to submit block: {0}")]
     SubmitBlock(SubmitBlockError),
 
+    #[error("Invalid block range")]
+    BlockRangeError,
+
+    #[error("Endpoint requires UTXO index which is not present")]
+    UtxoIndexNotPresent,
+
     // Common case errors
     #[error("Invalid address provided in arguments")]
     InvalidAddress,
@@ -331,6 +337,62 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: SubmitTransactionRequest,
     ) -> RpcResult<SubmitTransactionResponse>;
+
+    async fn rescan_announced(
+        &self,
+        first: RpcBlockHeight,
+        last: RpcBlockHeight,
+    ) -> RpcResult<RescanAnnouncedResponse> {
+        self.rescan_announced_call(RescanAnnouncedRequest { first, last })
+            .await
+    }
+
+    async fn rescan_announced_call(
+        &self,
+        request: RescanAnnouncedRequest,
+    ) -> RpcResult<RescanAnnouncedResponse>;
+
+    async fn rescan_expected(
+        &self,
+        first: RpcBlockHeight,
+        last: RpcBlockHeight,
+    ) -> RpcResult<RescanExpectedResponse> {
+        self.rescan_expected_call(RescanExpectedRequest { first, last })
+            .await
+    }
+
+    async fn rescan_expected_call(
+        &self,
+        request: RescanExpectedRequest,
+    ) -> RpcResult<RescanExpectedResponse>;
+
+    async fn rescan_outgoing(
+        &self,
+        first: RpcBlockHeight,
+        last: RpcBlockHeight,
+    ) -> RpcResult<RescanOutgoingResponse> {
+        self.rescan_outgoing_call(RescanOutgoingRequest { first, last })
+            .await
+    }
+
+    async fn rescan_outgoing_call(
+        &self,
+        request: RescanOutgoingRequest,
+    ) -> RpcResult<RescanOutgoingResponse>;
+
+    async fn rescan_guesser_rewards(
+        &self,
+        first: RpcBlockHeight,
+        last: RpcBlockHeight,
+    ) -> RpcResult<RescanGuesserRewardsResponse> {
+        self.rescan_guesser_rewards_call(RescanGuesserRewardsRequest { first, last })
+            .await
+    }
+
+    async fn rescan_guesser_rewards_call(
+        &self,
+        request: RescanGuesserRewardsRequest,
+    ) -> RpcResult<RescanGuesserRewardsResponse>;
 
     /* Mining */
 

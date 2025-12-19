@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 
+use crate::api::export::SpendingKey;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::Block;
@@ -117,6 +118,23 @@ pub enum RPCServerToMain {
 
     // Used by JSON-RPC
     SubmitTx(Box<Transaction>),
+    RescanAnnounced {
+        first: BlockHeight,
+        last: BlockHeight,
+        keys: Vec<SpendingKey>,
+    },
+    RescanExpected {
+        first: BlockHeight,
+        last: BlockHeight,
+    },
+    RescanOutgoing {
+        first: BlockHeight,
+        last: BlockHeight,
+    },
+    RescanGuesserRewards {
+        first: BlockHeight,
+        last: BlockHeight,
+    },
 }
 
 pub trait Cancelable: Send + Sync {

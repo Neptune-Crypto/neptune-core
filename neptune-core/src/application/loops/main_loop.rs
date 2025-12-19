@@ -1806,7 +1806,6 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
-
             RPCServerToMain::BroadcastMempoolTransactions => {
                 info!("Broadcasting transaction notifications for all shareable transactions in mempool");
 
@@ -1937,6 +1936,78 @@ impl MainLoopHandler {
                     sync_loop_handle.send_status_request();
                     debug!("sent status request to sync loop.");
                 }
+
+                Ok(false)
+            }
+            RPCServerToMain::RescanAnnounced { first, last, keys } => {
+                info!("Rescanning block range {first}..={last} for announced UTXOs");
+
+                // Holds a write-lock over global state, so problematic if it
+                // takes too long.
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::RescanAnnounced");
+
+                let mut global_state_lock = self.global_state_lock.clone();
+                tokio::task::spawn(async move {
+                    let mut state = global_state_lock.lock_guard_mut().await;
+                    let _ = state.rescan_announced_incoming(keys, first, last).await;
+                    state
+                        .restore_monitored_utxos_from_archival_mutator_set()
+                        .await;
+                });
+
+                Ok(false)
+            }
+            RPCServerToMain::RescanExpected { first, last } => {
+                info!("Rescanning block range {first}..={last} for expected UTXOs");
+
+                // Holds a write-lock over global state, so problematic if it
+                // takes too long.
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::NewBlRescanExpectedockFound");
+
+                let mut global_state_lock = self.global_state_lock.clone();
+                tokio::task::spawn(async move {
+                    let mut state = global_state_lock.lock_guard_mut().await;
+                    let _ = state.rescan_expected_incoming(first, last).await;
+                    state
+                        .restore_monitored_utxos_from_archival_mutator_set()
+                        .await;
+                });
+
+                Ok(false)
+            }
+            RPCServerToMain::RescanOutgoing { first, last } => {
+                info!("Rescanning block range {first}..={last} for spent UTXOs");
+
+                // Holds a write-lock over global state, so problematic if it
+                // takes too long.
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::RescanOutgoing");
+
+                let mut global_state_lock = self.global_state_lock.clone();
+                tokio::task::spawn(async move {
+                    let mut state = global_state_lock.lock_guard_mut().await;
+                    let _ = state.rescan_outgoing(first, last).await;
+                    state
+                        .restore_monitored_utxos_from_archival_mutator_set()
+                        .await;
+                });
+
+                Ok(false)
+            }
+            RPCServerToMain::RescanGuesserRewards { first, last } => {
+                info!("Rescanning block range {first}..={last} for guesser reward UTXOs");
+
+                // Holds a write-lock over global state, so problematic if it
+                // takes too long.
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::RescanGuesserRewards");
+
+                let mut global_state_lock = self.global_state_lock.clone();
+                tokio::task::spawn(async move {
+                    let mut state = global_state_lock.lock_guard_mut().await;
+                    let _ = state.rescan_guesser_rewards(first, last).await;
+                    state
+                        .restore_monitored_utxos_from_archival_mutator_set()
+                        .await;
+                });
 
                 Ok(false)
             }
@@ -3012,9 +3083,8 @@ mod tests {
     }
 
     mod peer_messages {
-        use crate::api::export::BlockHeight;
-
         use super::*;
+        use crate::api::export::BlockHeight;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
