@@ -28,7 +28,7 @@ use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct StrongUtxoKey {
     addition_record: AdditionRecord,
-    aocl_index: u64,
+    pub(crate) aocl_index: u64,
 }
 
 impl StrongUtxoKey {

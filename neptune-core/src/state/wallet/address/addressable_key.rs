@@ -200,7 +200,9 @@ impl SpendingKey {
     }
 
     /// Scans all announcements in a `Transaction` and return all
-    /// UTXOs that are recognized by this spending key.
+    /// UTXOs that are announced and recognized by this spending key. Does not
+    /// verify that the announced UTXOs are actually present. This is the
+    /// caller's responsibility..
     ///
     /// Note that a single `Transaction` may represent an entire block.
     ///
@@ -208,6 +210,11 @@ impl SpendingKey {
     ///
     ///  - Logs a warning for any announcement targeted at this key that cannot
     ///    be decrypted.
+    ///
+    /// # Warning
+    ///
+    /// Only scans the matching announcements. Does not verify that the
+    /// announced UTXO is actually an output in the transaction.
     pub(crate) fn scan_for_announced_utxos(
         &self,
         tx_kernel: &TransactionKernel,
