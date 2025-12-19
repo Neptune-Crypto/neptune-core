@@ -1628,6 +1628,39 @@ pub trait RPC {
         tx_artifacts: TxCreationArtifacts,
     ) -> RpcResult<()>;
 
+    /// Rescan the specified inclusive range for incoming UTXOS that were sent
+    /// with associated on-chain announements.
+    async fn rescan_announced(
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()>;
+
+    /// Rescan the specified inclusive range for incoming UTXOS that were have
+    /// been added as expected UTXOs to the node's wallet.
+    async fn rescan_expected(
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()>;
+
+    /// Rescan the specified inclusive range for outgoing UTXOs, i.e. the
+    /// spending of UTXOs by the node's wallet. Can be used to recreate a
+    /// transaction history.
+    async fn rescan_outgoing(
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()>;
+
+    /// Rescan the specified inclusive range for blocks that were successfully
+    /// guessed by this node.
+    async fn rescan_guesser_rewards(
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()>;
+
     /// Send coins to one or more recipients
     ///
     /// note: sending is rate-limited to 2 sends per block until block
@@ -3170,6 +3203,118 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn rescan_announced(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if first > last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let all_keys = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_all_known_spending_keys()
+            .collect_vec();
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::RescanAnnounced {
+                first,
+                last,
+                keys: all_keys,
+            })
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn rescan_expected(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if first > last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::RescanExpected { first, last })
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn rescan_outgoing(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if first > last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::RescanOutgoing { first, last })
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn rescan_guesser_rewards(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if first > last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::RescanGuesserRewards { first, last })
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn send(
         mut self,
         _ctx: context::Context,
@@ -4271,6 +4416,12 @@ pub mod error {
         #[error("regtest error: {0}")]
         RegTestError(String),
 
+        #[error("invalid block range")]
+        BlockRangeError,
+
+        #[error("node not started with UTXO index")]
+        UtxoIndexNotPresent,
+
         #[error("wallet error: {0}")]
         WalletError(String),
 
@@ -4647,6 +4798,22 @@ mod tests {
             NativeCurrencyAmount::one_nau(),
         )
             .into();
+        let _ = rpc_server
+            .clone()
+            .rescan_announced(ctx, token, 0u64.into(), 14u64.into())
+            .await;
+        let _ = rpc_server
+            .clone()
+            .rescan_expected(ctx, token, 0u64.into(), 14u64.into())
+            .await;
+        let _ = rpc_server
+            .clone()
+            .rescan_outgoing(ctx, token, 0u64.into(), 14u64.into())
+            .await;
+        let _ = rpc_server
+            .clone()
+            .rescan_guesser_rewards(ctx, token, 0u64.into(), 14u64.into())
+            .await;
         let _ = rpc_server
             .clone()
             .send(
