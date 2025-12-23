@@ -7,6 +7,7 @@ use tracing::debug;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
+use crate::api::export::TransactionProof;
 use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
@@ -707,6 +708,57 @@ impl RpcApi for RpcServer {
 
         Ok(block_hashes)
     }
+
+    async fn transactions_call(&self, _: TransactionsRequest) -> RpcResult<TransactionsResponse> {
+        let transactions = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .fee_density_iter()
+            .map(|(txkid, _)| txkid)
+            .collect();
+
+        Ok(TransactionsResponse { transactions })
+    }
+
+    async fn get_transaction_kernel_call(
+        &self,
+        request: GetTransactionKernelRequest,
+    ) -> RpcResult<GetTransactionKernelResponse> {
+        let transaction = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .get(request.id)
+            .cloned();
+
+        Ok(GetTransactionKernelResponse {
+            kernel: transaction.map(|t| (&t.kernel).into()),
+        })
+    }
+
+    async fn get_transaction_proof_call(
+        &self,
+        request: GetTransactionProofRequest,
+    ) -> RpcResult<GetTransactionProofResponse> {
+        let transaction = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .get(request.id)
+            .cloned();
+
+        Ok(GetTransactionProofResponse {
+            proof: transaction.and_then(|t| match t.proof {
+                // Proofs of witness-backed transactions shouldn't be exposed.
+                TransactionProof::Witness(_) => None,
+                other => Some(other.into()),
+            }),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -743,6 +795,7 @@ pub mod tests {
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
+    use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::mining::block_proposal::BlockProposal;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -750,6 +803,7 @@ pub mod tests {
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
     use crate::BFieldElement;
@@ -1016,7 +1070,7 @@ pub mod tests {
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn off_node_wallets_behave_correctly() {
+    async fn remote_wallets_behave_correctly() {
         let mut rpc_server = test_rpc_server().await;
         let network = rpc_server.state.cli().network;
 
@@ -1187,6 +1241,55 @@ pub mod tests {
                 .unwrap_err(),
             RpcError::SubmitBlock(SubmitBlockError::InvalidBlock)
         );
+    }
+
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
+    async fn mempool_calls_are_consistent(
+        #[strategy(0usize..10)] tx_count: usize,
+        #[strategy(0usize..=#tx_count)] sp_count: usize,
+    ) {
+        let mut rpc_server = test_rpc_server().await;
+
+        // Create some witness txs to be added into mempool.
+        let mut txs = make_plenty_mock_transaction_supported_by_primitive_witness(tx_count);
+        // Make some of txs SP-backed so we can test proof extraction.
+        for index in 0..sp_count {
+            txs[index].proof = TransactionProof::invalid();
+        }
+
+        // Insert transactions to mempool.
+        for tx in &txs {
+            rpc_server
+                .state
+                .lock_guard_mut()
+                .await
+                .mempool_insert(tx.clone(), UpgradePriority::Irrelevant)
+                .await;
+        }
+
+        // Test mempool size matches what we are expecting.
+        let mempool_txs = rpc_server.transactions().await.unwrap().transactions;
+        assert_eq!(mempool_txs.len(), tx_count);
+
+        for tx in txs {
+            let id = tx.txid();
+
+            // Test transaction kernel can be extracted and contents match.
+            let kernel = rpc_server.get_transaction_kernel(id).await.unwrap().kernel;
+            assert!(kernel.is_some());
+            assert_eq!(tx.kernel, kernel.unwrap().into());
+
+            // Test transaction proofs can be extracted and contents match.
+            let proof = rpc_server.get_transaction_proof(id).await.unwrap().proof;
+            match tx.proof {
+                // Witness-backed transactions proofs cannot be exposed as it exposes private data.
+                TransactionProof::Witness(_) => assert!(proof.is_none()),
+                _ => {
+                    assert!(proof.is_some());
+                    assert_eq!(proof.unwrap(), tx.proof.into());
+                }
+            }
+        }
     }
 
     #[apply(shared_tokio_runtime)]
