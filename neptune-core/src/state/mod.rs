@@ -1286,7 +1286,7 @@ impl GlobalState {
     ///    that don't have any membership proofs.
     pub async fn restore_monitored_utxos_from_archival_mutator_set(
         &mut self,
-        mut new_utxos: Option<Vec<IncomingUtxoRecoveryData>>,
+        new_utxos: Option<Vec<IncomingUtxoRecoveryData>>,
         process_all: bool,
     ) {
         let tip_hash = self.chain.light_state().hash();
@@ -1349,7 +1349,7 @@ impl GlobalState {
         };
 
         for i in start_index..end_index {
-            let mut monitored_utxo = monitored_utxos.get(i).await;
+            let monitored_utxo = self.wallet_state.wallet_db.monitored_utxos().get(i).await;
 
             if monitored_utxo.is_synced_to(tip_hash) {
                 trace!("Not restoring because UTXO is marked as synced");
@@ -1878,7 +1878,8 @@ impl GlobalState {
                     || self.force_wallet_membership_proof_maintance
             }
         };
-        self.wallet_state
+        let received_utxos = self
+            .wallet_state
             .update_wallet_state_with_new_block(
                 &parent_ms_accumulator.unwrap_or_default(),
                 &new_tip,

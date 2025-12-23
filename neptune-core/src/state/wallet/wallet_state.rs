@@ -1637,6 +1637,13 @@ impl WalletState {
     /// If function is called without maintaining membership proofs, the caller
     /// must ensure membership proofs are updated after the call to this
     /// function.
+    ///
+    /// # Return Value
+    ///
+    ///  - `Err(_)` if [`Self::process_inputs_and_outputs_maintain_mps`] returns
+    ///    an error.
+    ///  - Otherwise, `Ok` of Vec of [`IncomingUtxoRecoveryData`] corresponding
+    ///    to UTXOs received in this block.
     pub async fn update_wallet_state_with_new_block(
         &mut self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
