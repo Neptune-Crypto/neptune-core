@@ -525,6 +525,27 @@ impl TransactionKernelModifier {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<TransactionKernel> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionKernel {
+        TransactionKernel {
+            inputs: (0..10).map(|_| rng.random()).collect_vec(),
+            outputs: (0..10).map(|_| rng.random()).collect_vec(),
+            announcements: (0..10).map(|_| rng.random()).collect_vec(),
+            fee: rng.random::<NativeCurrencyAmount>().abs(),
+            coinbase: if rng.random_bool(0.5) {
+                Some(rng.random())
+            } else {
+                None
+            },
+            timestamp: rng.random(),
+            mutator_set_hash: rng.random(),
+            merge_bit: rng.random(),
+            mast_sequences: OnceLock::new(),
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use itertools::Itertools;

@@ -322,7 +322,7 @@ impl BlockHeader {
     }
 }
 
-#[cfg(feature = "mock-rpc")]
+#[cfg(any(feature = "mock-rpc", test))]
 impl rand::distr::Distribution<BlockHeader> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockHeader {
         BlockHeader {
@@ -353,25 +353,6 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn random_block_header() -> BlockHeader {
-        let mut rng = rand::rng();
-        BlockHeader {
-            version: rng.random(),
-            height: BlockHeight::from(rng.random::<u64>()),
-            prev_block_digest: rng.random(),
-            timestamp: rng.random(),
-            pow: rng.random(),
-            cumulative_proof_of_work: ProofOfWork::new(
-                rng.random::<[u32; ProofOfWork::NUM_LIMBS]>(),
-            ),
-            difficulty: Difficulty::new(rng.random::<[u32; Difficulty::NUM_LIMBS]>()),
-            guesser_receiver_data: GuesserReceiverData {
-                receiver_digest: rng.random(),
-                lock_script_hash: rng.random(),
-            },
-        }
-    }
-
     proptest::proptest! {
         #[test]
         fn test_block_header_decode(block_header in proptest_arbitrary_interop::arb::<BlockHeader>()) {
@@ -399,7 +380,7 @@ pub(crate) mod tests {
 
     #[test]
     fn block_header_display_impl() {
-        let block_header = random_block_header();
+        let block_header = rng().random::<BlockHeader>();
         println!("{block_header}");
     }
 }

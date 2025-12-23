@@ -5,18 +5,21 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use tasm_lib::prelude::Digest;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::database::create_db_if_missing;
 use crate::application::database::NeptuneLevelDb;
 use crate::application::database::WriteBatchAsync;
+use crate::application::loops::sync_loop::sync_progress::SyncProgress;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
 use crate::state::database::PeerDatabases;
+use crate::state::sync_status::SyncStatus;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 
@@ -34,40 +37,53 @@ pub(crate) struct SyncAnchor {
     pub(crate) block_mmr: MmrAccumulator,
 
     /// Indicates the block that we have currently synced to under this anchor.
-    pub(crate) champion: Option<(BlockHeight, Digest)>,
+    pub(crate) champion: (BlockHeight, Digest),
 
     /// The last time this anchor was either created or updated.
     pub(crate) updated: SystemTime,
+
+    /// How much progress have we made so far?
+    pub(crate) status: SyncProgress,
 }
 
 impl SyncAnchor {
     pub(crate) fn new(
         claimed_cumulative_pow: ProofOfWork,
         claimed_block_mmra: MmrAccumulator,
+        claimed_height: BlockHeight,
+        claimed_block_digest: Digest,
     ) -> Self {
+        let status = SyncProgress::new(claimed_block_mmra.num_leafs());
         Self {
             cumulative_proof_of_work: claimed_cumulative_pow,
             block_mmr: claimed_block_mmra,
-            champion: None,
+            champion: (claimed_height, claimed_block_digest),
             updated: SystemTime::now(),
+            status,
         }
     }
 
+    /// Determine if the incoming block is the new champion.
+    ///
+    /// This is true if the champion is not set yet, or if its height is smaller
+    /// than that of the incoming block.
+    pub(crate) fn incoming_block_is_new_champion(
+        &self,
+        incoming_block_height: BlockHeight,
+    ) -> bool {
+        self.champion.0 < incoming_block_height
+    }
+
+    /// Modify the sync anchor to point to the new incoming block, if its height
+    /// is larger.
     pub(crate) fn catch_up(&mut self, height: BlockHeight, block_hash: Digest) {
-        let new_champion = Some((height, block_hash));
-        let updated = SystemTime::now();
-        match self.champion {
-            Some((current_height, _)) => {
-                if current_height < height {
-                    self.champion = new_champion;
-                    self.updated = updated;
-                }
-            }
-            None => {
-                self.champion = new_champion;
-                self.updated = updated;
-            }
-        };
+        let new_champion = (height, block_hash);
+        let now = SystemTime::now();
+
+        if self.champion.0 <= new_champion.0 {
+            self.champion = new_champion;
+            self.updated = now;
+        }
     }
 }
 
@@ -85,8 +101,12 @@ pub struct NetworkingState {
 
     /// This value is only Some if the instance is running an archival node
     /// that is currently in sync mode (downloading blocks in batches).
-    /// Only the main task may update this flag
+    /// Only the main task may update this flag.
     pub(crate) sync_anchor: Option<SyncAnchor>,
+
+    /// Tracks status of sync process: whether it is active, or how far it has
+    /// progressed. This value may be updated by the main task or by peers.
+    pub sync_status: SyncStatus,
 
     /// Read-only value set at random during startup
     pub instance_id: u128,
@@ -114,6 +134,7 @@ impl NetworkingState {
             peer_map,
             peer_databases,
             sync_anchor: None,
+            sync_status: SyncStatus::Unknown,
             instance_id: rand::random(),
             freeze: false,
             disconnection_times: HashMap::new(),

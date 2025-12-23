@@ -4733,10 +4733,10 @@ pub(crate) mod tests {
         use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
         use crate::application::loops::mine_loop::create_block_transaction;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
+        use crate::application::loops::peer_loop::channel::MainToPeerTask;
         use crate::protocol::consensus::block::block_height::BlockHeight;
         use crate::protocol::consensus::block::block_transaction::BlockTransaction;
         use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-        use crate::MainToPeerTask;
         use crate::PEER_CHANNEL_CAPACITY;
 
         #[traced_test]

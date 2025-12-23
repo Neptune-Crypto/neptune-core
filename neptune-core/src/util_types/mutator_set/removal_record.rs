@@ -263,6 +263,16 @@ pub(crate) enum RemovalRecordValidityError {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<RemovalRecord> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> RemovalRecord {
+        RemovalRecord {
+            absolute_indices: rng.random(),
+            target_chunks: rng.random(),
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::Itertools;

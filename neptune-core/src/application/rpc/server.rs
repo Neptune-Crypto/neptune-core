@@ -3003,6 +3003,15 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        // Ask the main loop to update state, but do not wait for the answer.
+        if let Err(e) = self
+            .rpc_server_to_main_tx
+            .try_send(RPCServerToMain::UpdateStatus)
+        {
+            error!("Could not send message to main loop: {e}.");
+        }
+
+        // Assemble data.
         let now = Timestamp::now();
         let state = self.state.lock_guard().await;
         let tip_digest = {
@@ -3010,7 +3019,7 @@ impl RPC for NeptuneRPCServer {
             state.chain.light_state().hash()
         };
         let tip_header = *state.chain.light_state().header();
-        let syncing = state.net.sync_anchor.is_some();
+        let syncing = state.net.sync_status;
         let mempool_size = {
             log_slow_scope!(fn_name!() + "::mempool.get_size()");
             state.mempool.get_size()
@@ -3063,7 +3072,7 @@ impl RPC for NeptuneRPCServer {
         Ok(OverviewData {
             tip_digest,
             tip_header,
-            syncing,
+            sync_status: syncing,
             confirmed_available_balance,
             confirmed_total_balance,
             unconfirmed_available_balance,

@@ -15,6 +15,7 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::config::network::Network;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -41,7 +42,6 @@ use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::MainToPeerTask;
 
 pub(crate) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
 
