@@ -92,7 +92,6 @@ use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_input::TxInput;
-use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -1286,8 +1285,7 @@ impl GlobalState {
     ///    that don't have any membership proofs.
     pub async fn restore_monitored_utxos_from_archival_mutator_set(
         &mut self,
-        new_utxos: Option<Vec<IncomingUtxoRecoveryData>>,
-        process_all: bool,
+        ignore_all_but_trailing: Option<usize>,
     ) {
         let tip_hash = self.chain.light_state().hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
@@ -1320,29 +1318,23 @@ impl GlobalState {
         let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
         trace!("monitored_utxos.len() = {num_mutxos}");
 
-        // OPTIMIZATION: Only process newly added UTXOs during sync (when process_all=false),
-        // avoiding O(n) iteration over all UTXOs. During normal operation (process_all=true),
-        // we process all UTXOs to ensure they have valid membership proofs.
-        let (start_index, end_index) = if process_all {
-            // Fallback: process all UTXOs
-            trace!("Processing all {} monitored UTXOs", num_mutxos);
-            (0, num_mutxos)
-        } else if let Some(ref new_utxos_list) = new_utxos {
-            // Only process newly added UTXOs (at the end of the list) - sync optimization
-            let new_count = new_utxos_list.len() as u64;
-
-            let start = num_mutxos.saturating_sub(new_count);
+        // Determine start and end index of monitored UTXOs to be maintained.
+        let (start_index, end_index) = if let Some(tail_length) = ignore_all_but_trailing {
+            // Optimization: if `ignore_all_but_trailing` is some tail length
+            // (as it is during sync, for instance), then we can avoid touching
+            // all monitored UTXOs by skipping ahead to the start of the tail.
+            let start = num_mutxos.saturating_sub(tail_length as u64);
 
             trace!(
                 "Processing {} new monitored UTXOs (indices {}-{})",
-                new_count,
+                tail_length,
                 start,
                 num_mutxos - 1
             );
 
             (start, num_mutxos)
         } else {
-            // Process all UTXOs (e.g., during periodic resync)
+            // Default case: process all UTXOs (e.g., during periodic resync)
             trace!("Processing all {} monitored UTXOs", num_mutxos);
 
             (0, num_mutxos)
@@ -1897,21 +1889,17 @@ impl GlobalState {
                 // Existing UTXOs will be restored once sync completes.
 
                 if !received_utxos.is_empty() {
-                    self.restore_monitored_utxos_from_archival_mutator_set(
-                        Some(received_utxos),
-                        false, // Only process new UTXOs during sync
-                    )
+                    self.restore_monitored_utxos_from_archival_mutator_set(Some(
+                        received_utxos.len(),
+                    ))
                     .await;
                 }
             } else {
                 // Normal operation: restore ALL UTXOs to ensure they have valid
                 // membership proofs immediately after each block.
 
-                self.restore_monitored_utxos_from_archival_mutator_set(
-                    Some(received_utxos),
-                    true, // Process all UTXOs during normal operation
-                )
-                .await;
+                self.restore_monitored_utxos_from_archival_mutator_set(None)
+                    .await;
             }
         }
 
@@ -1945,7 +1933,7 @@ impl GlobalState {
 
         // do we have an archival mutator set?
         if self.chain.is_archival_node() {
-            self.restore_monitored_utxos_from_archival_mutator_set(None, true)
+            self.restore_monitored_utxos_from_archival_mutator_set(None)
                 .await;
 
             // CRITICAL FIX: Clear DbtVec caches after bulk restoration
@@ -3504,7 +3492,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set(None, true)
+                            .restore_monitored_utxos_from_archival_mutator_set(None)
                             .await
                     }
                 };
@@ -3588,7 +3576,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set(None, true)
+                            .restore_monitored_utxos_from_archival_mutator_set(None)
                             .await
                     }
                 }
@@ -3762,7 +3750,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set(None, true)
+                            .restore_monitored_utxos_from_archival_mutator_set(None)
                             .await
                     }
                 };
@@ -3820,7 +3808,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set(None, true)
+                            .restore_monitored_utxos_from_archival_mutator_set(None)
                             .await
                     }
                 };

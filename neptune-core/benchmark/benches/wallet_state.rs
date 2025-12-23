@@ -178,10 +178,7 @@ mod maintain_membership_proofs {
 
                     if update_msmps {
                         global_state
-                            .restore_monitored_utxos_from_archival_mutator_set(
-                                Some(recovery_data),
-                                true,
-                            )
+                            .restore_monitored_utxos_from_archival_mutator_set(None)
                             .await
                     }
                 });
