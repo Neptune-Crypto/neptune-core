@@ -8,6 +8,9 @@
 - ✔️ output the digest of the `sender_randomness` (as reusing it won't allow to put the UTXO again, and its sole role is shifting the AR)
 - ✔️ the recipient digest is in the public inputs */
 
+#[cfg(test)]
+mod spec;
+
 use std::sync::OnceLock;
 
 use tasm_lib::{
@@ -134,6 +137,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         // _ *w
         {&rustfield_senderrandomness} // omits `{&rustfield_membershipproof}` from <../reserves>
+        addi {Digest::LEN - 1}
         read_mem {Digest::LEN}
         pop 1
         // *aocl *aocl_peaks [receiver_digest] [sender_randomness]
@@ -187,6 +191,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_aoclleafindex} // omits `{&rustfield_membershipproof}` from <../reserves>
+        addi {u64_stack_size - 1}
         read_mem {u64_stack_size}
         pop 1
         // *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
