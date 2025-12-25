@@ -1,11 +1,10 @@
 //! implements an RPC server and client based on [tarpc]
 //!
-//! request and response data is json serialized.
+//! Request and response data is JSON-serialized.
 //!
-//! It is presently easiest to create a tarpc client in rust.
-//! To do so, one should add neptune-cash as a dependency and
-//! then do something like:
-//!
+//! It is presently easiest to create a `tarpc` client in Rust.
+//! To do so, one should add `neptune-cash` as a dependency and
+//! then do something like the following.
 //! ```no_run
 //! use anyhow::Result;
 //! use neptune_cash::application::rpc::server::RPCClient;
@@ -2285,7 +2284,7 @@ impl NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn cookie_hint(self, _: context::Context) -> RpcResult<auth::CookieHint> {
         log_slow_scope!(fn_name!());
 
@@ -2299,14 +2298,14 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn network(self, _: context::Context) -> RpcResult<Network> {
         log_slow_scope!(fn_name!());
 
         Ok(self.state.cli().network)
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn own_listen_address_for_peers(
         self,
         _context: context::Context,
@@ -2320,7 +2319,7 @@ impl RPC for NeptuneRPCServer {
         Ok(listen_port.map(|port| SocketAddr::new(listen_for_peers_ip, port)))
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn own_instance_id(
         self,
         _context: context::Context,
@@ -2332,7 +2331,7 @@ impl RPC for NeptuneRPCServer {
         Ok(self.state.lock_guard().await.net.instance_id)
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn block_height(self, _: context::Context, token: auth::Token) -> RpcResult<BlockHeight> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2681,7 +2680,7 @@ impl RPC for NeptuneRPCServer {
             .await)
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn peer_info(self, _: context::Context, token: auth::Token) -> RpcResult<Vec<PeerInfo>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2697,7 +2696,7 @@ impl RPC for NeptuneRPCServer {
             .collect())
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn all_punished_peers(
         self,
         _context: tarpc::context::Context,
@@ -2710,7 +2709,7 @@ impl RPC for NeptuneRPCServer {
 
         let global_state = self.state.lock_guard().await;
 
-        // Get all connected peers
+        // get all connected peers
         for (socket_address, peer_info) in &global_state.net.peer_map {
             if peer_info.standing().is_negative() {
                 sanctions_in_memory.insert(socket_address.ip(), peer_info.standing());
@@ -2719,7 +2718,7 @@ impl RPC for NeptuneRPCServer {
 
         let sanctions_in_db = global_state.net.all_peer_sanctions_in_database();
 
-        // Combine result for currently connected peers and previously connected peers but
+        // combine result for currently connected peers and previously connected peers but
         // use result for currently connected peer if there is an overlap
         let mut all_sanctions = sanctions_in_memory;
         for (ip_addr, sanction) in sanctions_in_db {
@@ -2731,7 +2730,7 @@ impl RPC for NeptuneRPCServer {
         Ok(all_sanctions)
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn validate_address(
         self,
         _ctx: context::Context,
@@ -4189,80 +4188,74 @@ impl RPC for NeptuneRPCServer {
         utxo_ix: usize,
         block: Digest,
     ) -> RpcResult<(Claim, NeptuneProof)> {
-        if let Some(block) = self
+        let block = self
             .state
             .lock_async(|s| Box::pin(s.chain.archival_state().get_block(block)))
-            .await?
-        {
-            // .block_index_db.get(
-            //     crate::state::database::BlockIndexKey::Block(
-            //         // s.chain.blockchain_archival_state().archival_state.block_height_to_block_digests(block_height).await
-            //         b
-            //     )
-            // )
-            if let Some(tx_output) = self
-                .state
-                .lock_async(|s| s.wallet_state.wallet_db.sent_transactions().get(tx_ix))
-                .await
-                .tx_outputs
-                .get(utxo_ix)
+            .await?.ok_or::<error::RpcError>(todo![])?;
+        
+        // .block_index_db.get(
+        //     crate::state::database::BlockIndexKey::Block(
+        //         // s.chain.blockchain_archival_state().archival_state.block_height_to_block_digests(block_height).await
+        //         b
+        //     )
+        // )
+        let tx_output = self
+            .state
+            .lock_async(|s| s.wallet_state.wallet_db.sent_transactions().get(tx_ix))
+            .await
+            .tx_outputs
+            .get(utxo_ix).ok_or::<error::RpcError>(todo![])?;
+        
+        // let utxo = tx.tx_outputs.utxos_iter().into_iter().skip(utxo_ix).next()?;//.map_err(todo![])?;
+        let utxo = tx_output.utxo();
+        let aocl = block.body().block_mmr_accumulator;
+        let sender_randomness = tx_output.sender_randomness();
+        let sent = sent::new(
+            sent::claim_outputs(
+                sent::claim_inputs(
+                    tasm_lib::triton_vm::proof::Claim::new(sent::hash()),
+                    tx_output.receiver_digest(),
+                    utxo.release_date().unwrap_or_default(),
+                ),
+                sender_randomness.hash(),
+                aocl.bag_peaks(),
+                utxo.lock_script_hash(),
+                tx_output.native_currency_amount(),
+                // todo!("makes sense just to ditch this part")
+            ),
+            aocl,
+            sender_randomness,
             {
-                // let utxo = tx.tx_outputs.utxos_iter().into_iter().skip(utxo_ix).next()?;//.map_err(todo![])?;
-                let utxo = tx_output.utxo();
-                let aocl = block.body().block_mmr_accumulator;
-                let sender_randomness = tx_output.sender_randomness();
-                let sent = sent::new(
-                    sent::claim_outputs(
-                        sent::claim_inputs(
-                            tasm_lib::triton_vm::proof::Claim::new(sent::hash()),
-                            tx_output.receiver_digest(),
-                            utxo.release_date().unwrap_or_default(),
-                        ),
-                        sender_randomness.hash(),
-                        aocl.bag_peaks(),
-                        utxo.lock_script_hash(),
-                        tx_output.native_currency_amount(),
-                        // todo!("makes sense just to ditch this part")
-                    ),
-                    aocl,
-                    sender_randomness,
-                    {
-                        let additionr = tx_output.addition_record();
-                        block
-                            .merkle_tree()
-                            .leafs()
-                            .position(|additioncommitment| {
-                                *additioncommitment == additionr.canonical_commitment
-                            })
-                            // .enumerate().find()
-                            .ok_or(todo!())?
-                    } as u64,
-                    utxo,
-                    Tip5::hash_varlen(utxo.encode().as_slice()),
-                );
-                // ProofBuilder::new().program(sent::The.program()).claim(claim);
-                let claim = sent.claim();
-                Ok((
-                    claim,
-                    sent.prove(
-                        claim,
-                        sent.nondeterminism(),
-                        vm_job_queue(),
-                        TritonVmProofJobOptionsBuilder::new()
-                            .job_priority(
-                                // @skaunov guess we don't want to interfere with anything.
-                                api::export::TritonVmJobPriority::Lowest,
-                            )
-                            .build(),
+                let additionr = tx_output.addition_record();
+                block
+                .merkle_tree()
+                .leafs()
+                .position(|additioncommitment| {
+                    *additioncommitment == additionr.canonical_commitment
+                })
+                // .enumerate().find()
+                .ok_or::<error::RpcError>(todo![])
+            }? as u64,
+            utxo,
+            Tip5::hash_varlen(utxo.encode().as_slice()),
+        );
+        // ProofBuilder::new().program(sent::The.program()).claim(claim);
+        let claim = sent.claim();
+        Ok((
+            claim,
+            sent.prove(
+                claim,
+                sent.nondeterminism(),
+                vm_job_queue(),
+                TritonVmProofJobOptionsBuilder::new()
+                    .job_priority(
+                        // @skaunov guess we don't want to interfere with anything.
+                        api::export::TritonVmJobPriority::Lowest,
                     )
-                    .await?,
-                ))
-            } else {
-                Err(todo![])
-            }
-        } else {
-            Err(todo!())
-        }
+                    .build(),
+            )
+            .await?,
+        ))
     }
 }
 
@@ -4369,8 +4362,8 @@ pub mod error {
         }
     }
 
-    // convert anyhow::Error to an RpcError::Failed.
-    // note that anyhow Error is not serializable.
+    // convert `anyhow::Error` to an `RpcError::Failed`.
+    // note that `anyhow` `Error` is not serializable.
     impl From<anyhow::Error> for RpcError {
         fn from(e: anyhow::Error) -> Self {
             Self::Failed(e.to_string())
@@ -4424,8 +4417,8 @@ mod tests {
     use crate::protocol::peer::NegativePeerSanction;
     use crate::protocol::peer::PeerSanction;
     use crate::protocol::proof_abstractions::mast_hash::MastHash;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::address::generation_address::GenerationSpendingKey;
+    use crate::state::wallet::address::address_the_generation::GenerationSpendingKey;
+    use crate::state::wallet::address::address_the_generation::ReceivingAddressForTheGeneration;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
@@ -4831,7 +4824,8 @@ mod tests {
             "Devnet wallet on genesis block must have one spendable input (since timelock has passed)."
         );
 
-        let third_party_address = GenerationReceivingAddress::derive_from_seed(Default::default());
+        let third_party_address =
+            ReceivingAddressForTheGeneration::derive_from_seed(Default::default());
         let inputs = rpc_server
             .clone()
             .select_spendable_inputs(
@@ -5790,7 +5784,7 @@ mod tests {
         use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
         use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
         use crate::state::mining::block_proposal::BlockProposal;
-        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+        use crate::state::wallet::address::address_the_generation::ReceivingAddressForTheGeneration;
         use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::blocks::invalid_empty_block;
@@ -5801,7 +5795,7 @@ mod tests {
             let genesis = Block::genesis(network);
             let mut block1 = invalid_empty_block(&genesis, network);
             let mut rng = StdRng::seed_from_u64(3409875378456);
-            let guesser_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+            let guesser_address = ReceivingAddressForTheGeneration::derive_from_seed(rng.random());
             block1.set_header_guesser_address(guesser_address.into());
 
             let guess_challenge =
@@ -6646,7 +6640,7 @@ mod tests {
 
         mod worker {
             use super::*;
-            use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+            use crate::state::wallet::address::address_the_generation::ReceivingAddressForTheGeneration;
             use crate::state::wallet::address::symmetric_key::SymmetricKey;
             use crate::state::wallet::address::SpendingKey;
 
@@ -6733,7 +6727,7 @@ mod tests {
                 // --- Setup. generate an output that our wallet cannot claim. ---
                 let external_receiving_address: ReceivingAddress = match recipient_key_type {
                     KeyType::Generation => {
-                        GenerationReceivingAddress::derive_from_seed(rng.random()).into()
+                        ReceivingAddressForTheGeneration::derive_from_seed(rng.random()).into()
                     }
                     KeyType::Symmetric => SymmetricKey::from_seed(rng.random()).into(),
                 };
