@@ -1014,6 +1014,19 @@ impl MainLoopHandler {
 
                 debug!("main loop received block proposal from peer loop");
 
+                // If the block proposal confirms a transaction we initiated,
+                // let the user know.
+                let num_own_txs_confirmed = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .mempool
+                    .own_transactions_confirmed_by_block(block.as_ref())
+                    .len();
+                if num_own_txs_confirmed > 0 {
+                    info!("Block proposal confirms {num_own_txs_confirmed} own transactions.");
+                }
+
                 // Due to race-conditions, we need to verify that this
                 // block proposal is still the immediate child of tip. If it is,
                 // and it has a higher guesser fee than what we're currently
