@@ -1998,6 +1998,8 @@ pub trait RPC {
     /// # }
     async fn shutdown(token: auth::Token) -> RpcResult<bool>;
 
+    /// # Panics
+    /// The implementation detail is when `tx_ix` is out of its bound it crashes the node until <https://github.com/Neptune-Crypto/neptune-core/issues/816> is done.
     async fn prove_transfer(
         token: auth::Token,
         tx_ix: u64,
@@ -4179,7 +4181,6 @@ impl RPC for NeptuneRPCServer {
             .cloned())
     }
 
-    // Crashes if `tx_ix` out of its bound. https://github.com/Neptune-Crypto/neptune-core/issues/816
     async fn prove_transfer(
         self,
         context: ::tarpc::context::Context,
@@ -4188,6 +4189,9 @@ impl RPC for NeptuneRPCServer {
         utxo_ix: usize,
         block: Digest,
     ) -> RpcResult<(Claim, NeptuneProof)> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
         let block = self
             .state
             .lock_async(|s| Box::pin(s.chain.archival_state().get_block(block)))
