@@ -576,15 +576,21 @@ pub(crate) fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std
             format!("not a directory: {}", source.display()),
         ));
     }
+    debug!("source is directory; good.");
     std::fs::create_dir_all(destination)?;
+    debug!("created directory at {}.", destination.to_string_lossy());
     for entry in std::fs::read_dir(source)? {
+        debug!("got entry from directory");
         let entry = entry?;
+        debug!("entry is: {}", entry.path().to_string_lossy());
         let dest_path = &destination.join(entry.file_name());
+        debug!("destination path is {}", dest_path.to_string_lossy());
         if entry.path().is_dir() {
             copy_dir_recursive(&entry.path(), dest_path)?;
         } else {
             std::fs::copy(entry.path(), dest_path)?;
         }
+        debug!("copy success.");
     }
     Ok(())
 }
