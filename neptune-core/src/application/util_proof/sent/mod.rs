@@ -128,11 +128,11 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // prepare the value for '7.'
         dup 0
         {&MmrAccumulator::get_field("peaks")}
-        // *aocl *aocl_peaks
+        // _ *aocl *aocl_peaks
 
         // read `receiver_digest`
         read_io 5
-        // *aocl *aocl_peaks [receiver_digest]
+        // _ *aocl *aocl_peaks [receiver_digest]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         // _ *w
@@ -140,7 +140,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         addi {Digest::LEN - 1}
         read_mem {Digest::LEN}
         pop 1
-        // *aocl *aocl_peaks [receiver_digest] [sender_randomness]
+        // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
         /* ## this segment diverges from the pasted code
         *it only affects the output sequence*
@@ -161,11 +161,11 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         // _ *w
         {&rustfield_utxo}
-        // *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
+        // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
     };
 
     let main = triton_asm! {
-        // *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
+        // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
         read_mem 1
         addi 2
         // _ utxo_size *utxo+1
@@ -173,47 +173,47 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // _ *utxo+1 utxo_size
         call {lib_hash_varlen}
         hint utxo_hash = stack[0..5]
-        // *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
+        // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxodigest}
         read_mem 5 pop 1
         assert_vector
-        // *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
+        // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
         call {lib_ms_commit}
-        // *aocl *aocl_peaks [canonical_commitment]
+        // _ *aocl *aocl_peaks [canonical_commitment]
 
         /* 7. */
         dup 6 {&MmrAccumulator::get_field("leaf_count")}
-        // *aocl *aocl_peaks [canonical_commitment] *num_leafs
+        // _ *aocl *aocl_peaks [canonical_commitment] *num_leafs
 
         read_mem {u64_stack_size - 1} pop 1
-        // *aocl *aocl_peaks [canonical_commitment] [num_leafs]
+        // _ *aocl *aocl_peaks [canonical_commitment] [num_leafs]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_aoclleafindex} // omits `{&rustfield_membershipproof}` from <../reserves>
         addi {u64_stack_size - 1}
         read_mem {u64_stack_size}
         pop 1
-        // *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
+        // _ *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&WitnessMemory::get_field("auth_path_aocl")}
         {&WitnessMemory::get_field("authentication_path")}
         // *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index] *auth_path
         swap 2
-        // *aocl *aocl_peaks [canonical_commitment] *auth_path [aocl_leaf_index] [num_leafs]
+        // _ *aocl *aocl_peaks [canonical_commitment] *auth_path [aocl_leaf_index] [num_leafs]
         swap 3
-        // *aocl *aocl_peaks [num_leafs] *auth_path [aocl_leaf_index] [canonical_commitment]
+        // _ *aocl *aocl_peaks [num_leafs] *auth_path [aocl_leaf_index] [canonical_commitment]
         swap 1
-        // *aocl *aocl_peaks [num_leafs] *auth_path [canonical_commitment] [aocl_leaf_index]
+        // _ *aocl *aocl_peaks [num_leafs] *auth_path [canonical_commitment] [aocl_leaf_index]
         swap 2
-        // *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment] *auth_path
+        // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment] *auth_path
 
         call {lib_mmr_verify}
         assert
-        // *aocl
+        // _ *aocl
 
         /* finish of the code pasted from the beginning <reserves.rs>
         ____________________________ */
@@ -233,18 +233,18 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxo}
         {&Utxo::get_field("coins")}
-        // *coins
+        // _ *coins
         read_mem 1 addi 2
-        // SI_coins *coins[0]
+        // _ SI_coins *coins[0]
         push 0 swap
-        // SI_coins 0 *coins[0]
+        // _ SI_coins 0 *coins[0]
         push 0
         push 0
         push 0
         push 0
-        // SI_coins 0 *coins[0] amount timelocked_amount utxo_amount utxo_is_timelocked
+        // _ SI_coins 0 *coins[0] amount timelocked_amount utxo_amount utxo_is_timelocked
         call {lib_add_all_amounts_and_check_time_lock}
-        // num_coins num_coins *eof amount timelocked_amount utxo_amount' utxo_is_timelocked'
+        // _ num_coins num_coins *eof amount timelocked_amount utxo_amount' utxo_is_timelocked'
 
         /* ____________________________
         finish of the code pasted from <reserves.rs> */
