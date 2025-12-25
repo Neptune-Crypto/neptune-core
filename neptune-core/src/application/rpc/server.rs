@@ -1998,6 +1998,17 @@ pub trait RPC {
     /// # }
     async fn shutdown(token: auth::Token) -> RpcResult<bool>;
 
+    /// A [`NeptuneProof`] will argument that the tx UTXO (determined by the indices, see below) transferred 
+    /// the `amount` (it discloses) of [`NativeCurrency`] to the address with the components it discloses 
+    /// (`receiver_digest` & `lock_postimange`). The UTXO is binded by hashing `sender_randomness` which serves for 
+    /// identification between the similar transfers.
+    /// 
+    /// The data is taken from the wallet of this node. `tx_ix` & `utxo_ix` are indicies for getting the UTXO you
+    /// want to prove from the wallet.
+    /// 
+    /// The `block` is needed to prove the UTXO was mined. It's determined by its [`Digest`], the relevant data 
+    /// is taken from this node DB. During verification the same data will be pulled from the same block.
+    /// 
     /// # Panics
     /// The implementation detail is when `tx_ix` is out of its bound it crashes the node until <https://github.com/Neptune-Crypto/neptune-core/issues/816> is done.
     async fn prove_transfer(
