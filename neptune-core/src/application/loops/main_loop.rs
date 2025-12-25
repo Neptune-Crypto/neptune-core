@@ -747,10 +747,20 @@ impl MainLoopHandler {
 
                     // Report.
                     info!(
-                        "Last block from peer is new canonical tip: {:x}; height: {}",
+                        "Block {} from peer is new canonical tip: {:x}",
+                        last_block.header().height,
                         last_block.hash(),
-                        last_block.header().height
                     );
+                    if global_state_mut.cli().compose || global_state_mut.cli().guess {
+                        let block_subsidy = Block::block_subsidy(last_block.header().height);
+                        let guesser_fee = last_block.body().transaction_kernel.fee;
+                        let guesser_fee_fraction =
+                            guesser_fee.to_nau_f64() / block_subsidy.to_nau_f64();
+                        info!(
+                            "Block subsidy: {block_subsidy} / guesser fee: {guesser_fee} ({}%)",
+                            100.0 * guesser_fee_fraction
+                        );
+                    }
 
                     // Update status.
                     global_state_mut.net.sync_status = SyncStatus::Synced;
