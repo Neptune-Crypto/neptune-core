@@ -520,6 +520,7 @@ impl MainLoopHandler {
         }
 
         // Then notify all peers about shareable transactions.
+        let mut num_notifications_sent = 0;
         for updated in update_results {
             if let MempoolUpdateJobResult::Success {
                 new_transaction, ..
@@ -528,8 +529,12 @@ impl MainLoopHandler {
                 if let Ok(pmsg) = new_transaction.as_ref().try_into() {
                     let pmsg = MainToPeerTask::TransactionNotification(pmsg);
                     self.main_to_peer_broadcast(pmsg);
+                    num_notifications_sent += 1;
                 }
             }
+        }
+        if num_notifications_sent > 0 {
+            info!("Broadcast {num_notifications_sent} transaction-notifications for Updated transactions.");
         }
 
         // Tell miner that it can now continue either composing or guessing.
