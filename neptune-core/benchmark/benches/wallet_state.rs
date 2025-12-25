@@ -173,8 +173,7 @@ mod maintain_membership_proofs {
                             &block2,
                             maintain_msmps_from_block_data,
                         )
-                        .await
-                        .unwrap();
+                        .await;
 
                     if update_msmps {
                         global_state

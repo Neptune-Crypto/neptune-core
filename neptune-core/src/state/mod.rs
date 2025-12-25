@@ -1848,7 +1848,7 @@ impl GlobalState {
                 &new_tip,
                 maintain_mps_in_wallet,
             )
-            .await?;
+            .await;
 
         // Get new membership proofs from mutator set accumulator, in case
         // wallet didn't set these from block data.

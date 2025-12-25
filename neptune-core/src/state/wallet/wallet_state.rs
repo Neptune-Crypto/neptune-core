@@ -407,7 +407,7 @@ impl WalletState {
                     genesis,
                     maintain_mps,
                 )
-                .await?;
+                .await;
 
             // No db-persisting here, as all of state should preferably be
             // persisted at the same time.
@@ -1263,10 +1263,36 @@ impl WalletState {
         recovered_outputs
     }
 
-    /// Process all outputs from a block under the assumption that the node does
-    /// *not* have accesss to an archival mutator set. This means that all
-    /// membership proofs must be maintained from the outputs and inputs
-    /// contained in the block.
+    /// Process the inputs and outputs in the given block.
+    ///
+    /// "Process" means update the database of monitored UTXOs with an eye to a)
+    /// updating mutator set membership proofs of monitored UTXOs, b) marking
+    /// monitored UTXOs a spent, c) adding new monitored UTXOs. Function (a) is
+    /// useful if there is no access to an archival mutator set; if there is,
+    /// then you probably want just (b) and (c) and for that purpose you can use
+    /// [`Self::process_outputs_no_maintain_mps`] and
+    /// [`Self::process_inputs_no_maintain_mps`] instead.
+    ///
+    /// # Effect
+    ///
+    ///  - Updates the mutator set membership proofs monitored UTXOs in the
+    ///    database.
+    ///  - Adds new monitored UTXOs in the database, if the block generates
+    ///    UTXOs destined for us.
+    ///  - Marks monitored UTXOs as spent, if spent in this block.
+    ///
+    /// # Return Value
+    ///
+    /// A list of UTXOs with spending data, spendable by this wallet, generated
+    /// by the givenblock.
+    ///
+    /// # Panics
+    ///
+    ///  - If some membership proofs cannot be updated with a removal.
+    ///  - If a local sanity check fails: as we apply addition and removal
+    ///    record updates to our own membership proofs, we keep a mutator set
+    ///    accumulator in sync; at the end this mutator set accumulator must
+    ///    agree with the mutator set after the block.
     async fn process_inputs_and_outputs_maintain_mps(
         &mut self,
         block: &Block,
@@ -1274,7 +1300,7 @@ impl WalletState {
         spent_inputs: &HashMap<AbsoluteIndexSet, (Utxo, u64)>,
         mut msa_state: MutatorSetAccumulator,
         num_mps_per_utxo: usize,
-    ) -> anyhow::Result<Vec<IncomingUtxoRecoveryData>> {
+    ) -> Vec<IncomingUtxoRecoveryData> {
         /// Preprocess all own monitored UTXOs prior to processing of the block.
         ///
         /// Returns
@@ -1537,7 +1563,7 @@ impl WalletState {
                 .await;
         }
 
-        anyhow::Ok(incoming_utxo_recovery_data_list)
+        incoming_utxo_recovery_data_list
     }
 
     /// Process all outputs in a block under the assumption that the node has
@@ -1631,7 +1657,7 @@ impl WalletState {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
         maintain_membership_proofs_in_wallet: bool,
-    ) -> anyhow::Result<()> {
+    ) {
         let tx_kernel = &block.kernel.body.transaction_kernel;
 
         let spent_inputs = self.scan_for_spent_utxos(tx_kernel).await;
@@ -1677,7 +1703,7 @@ impl WalletState {
             && self.wallet_db.monitored_utxos().is_empty().await
         {
             self.wallet_db.set_sync_label(block.hash()).await;
-            return Ok(());
+            return;
         }
 
         let msa_state = previous_mutator_set_accumulator.clone();
@@ -1691,7 +1717,7 @@ impl WalletState {
                 msa_state,
                 self.configuration.num_mps_per_utxo,
             )
-            .await?
+            .await
         } else {
             let recovery_list = self
                 .process_outputs_no_maintain_mps(
@@ -1725,8 +1751,6 @@ impl WalletState {
         }
 
         self.wallet_db.set_sync_label(block.hash()).await;
-
-        Ok(())
     }
 
     /// writes prepared utxo claim data to disk
@@ -2748,8 +2772,7 @@ pub(crate) mod tests {
                 &block1,
                 true,
             )
-            .await
-            .unwrap();
+            .await;
         assert_eq!(2, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
         assert_eq!(
             2,
@@ -2771,8 +2794,7 @@ pub(crate) mod tests {
                     &block1,
                     wallet_maintains_mp,
                 )
-                .await
-                .unwrap();
+                .await;
             assert_eq!(2, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
             assert_eq!(
                 2,
@@ -2853,8 +2875,7 @@ pub(crate) mod tests {
                     &new_block,
                     maintain_mps,
                 )
-                .await
-                .unwrap();
+                .await;
             bob.chain
                 .archival_state_mut()
                 .write_block_as_tip(&new_block)
@@ -4377,8 +4398,7 @@ pub(crate) mod tests {
                         &block_1,
                         maintain_mps,
                     )
-                    .await
-                    .unwrap();
+                    .await;
 
                 let wallet_status = alice_wallet_state
                     .get_wallet_status(
@@ -4694,8 +4714,7 @@ pub(crate) mod tests {
                     &new_block,
                     maintain_mps,
                 )
-                .await
-                .unwrap();
+                .await;
 
             // Lo! composer utxos
             let wallet_status = rando
@@ -4833,8 +4852,7 @@ pub(crate) mod tests {
                     &new_block,
                     maintain_mps,
                 )
-                .await
-                .unwrap();
+                .await;
 
             // Lo! composer utxos
             let wallet_status = global_state_lock

@@ -134,8 +134,7 @@ mod tests {
                         &next_block,
                         maintain_mps,
                     )
-                    .await
-                    .unwrap();
+                    .await;
             }
 
             let alice_mutxos = get_monitored_utxos(&alice).await;
@@ -196,8 +195,7 @@ mod tests {
                 &block_1,
                 maintain_mps,
             )
-            .await
-            .unwrap();
+            .await;
         assert_eq!(
             2,
             alice_wallet.wallet_db.expected_utxos().len().await,
@@ -255,16 +253,14 @@ mod tests {
                 &block_2,
                 maintain_mps,
             )
-            .await
-            .unwrap();
+            .await;
         alice_wallet
             .update_wallet_state_with_new_block(
                 &block_2.mutator_set_accumulator_after().unwrap(),
                 &block_3,
                 maintain_mps,
             )
-            .await
-            .unwrap();
+            .await;
 
         let alice_mutxos_block3 = get_monitored_utxos(&alice_wallet).await;
         assert_eq!(2, alice_mutxos_block3.len(), "Still only two MUTXOs");
@@ -821,8 +817,7 @@ mod tests {
                 &first_block_continuing_spree,
                 maintain_mps,
             )
-            .await
-            .unwrap();
+            .await;
         let alice_monitored_utxos_after_continued_spree: Vec<_> =
             get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await
@@ -958,8 +953,7 @@ mod tests {
                 &block_3_b,
                 maintain_mps,
             )
-            .await
-            .unwrap();
+            .await;
 
         let alice_monitored_utxos_3b: Vec<_> =
             get_monitored_utxos(&alice.lock_guard().await.wallet_state)
@@ -1015,8 +1009,7 @@ mod tests {
                 &second_block_continuing_spree,
                 maintain_mps,
             )
-            .await
-            .unwrap();
+            .await;
 
         // Verify that we have two membership proofs of `forked_utxo`: one
         // matching abandoned block and one matching block_3b.
