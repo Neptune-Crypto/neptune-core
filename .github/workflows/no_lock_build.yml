@@ -27,3 +27,6 @@ jobs:
 
       - name: Build
         run: cargo build --all --release
+        env:
+          CC: clang
+          CXX: clang++
