@@ -143,7 +143,8 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
         /* ## this segment diverges from the pasted code
-        *it only affects the output sequence* */
+        *it only affects the output sequence*
+        it fills `Claim::output` with `sender_randomness_digest` */
         push 0
         push 0
         push 0
@@ -164,6 +165,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
     };
 
     let main = triton_asm! {
+        // *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
         read_mem 1
         addi 2
         // _ utxo_size *utxo+1
@@ -175,7 +177,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxodigest}
-        read_mem 5
+        read_mem 5 pop 1
         assert_vector
         // *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
@@ -186,7 +188,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         dup 6 {&MmrAccumulator::get_field("leaf_count")}
         // *aocl *aocl_peaks [canonical_commitment] *num_leafs
 
-        addi 1 read_mem {u64_stack_size} pop 1
+        read_mem {u64_stack_size - 1} pop 1
         // *aocl *aocl_peaks [canonical_commitment] [num_leafs]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
