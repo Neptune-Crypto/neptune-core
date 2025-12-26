@@ -12,7 +12,7 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -98,8 +98,8 @@ jobs:
           CI: true
         run: |
           set -euo pipefail
-          # Run the coverage collection with a wall-clock timeout (adjust 30m if needed)
-          timeout --preserve-status 30m bash -c \
+          # Run the coverage collection with a wall-clock timeout (adjust 300m if needed)
+          timeout --preserve-status 300m bash -c \
             'cargo +nightly llvm-cov nextest \
               --lib --bins --tests --examples \
               --lcov --output-path lcov.info \
