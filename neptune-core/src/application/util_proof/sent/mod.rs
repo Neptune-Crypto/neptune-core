@@ -10,6 +10,8 @@
 
 #[cfg(test)]
 mod spec;
+#[cfg(test)]
+mod tests;
 
 use std::sync::OnceLock;
 
@@ -200,17 +202,16 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         pop 1
         // _ *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
 
+        pick {u64_stack_size * 2 + 5}
+        pick {u64_stack_size * 2 + 5}
+        pick {u64_stack_size * 2 + 5}
+        pick {u64_stack_size * 2 + 5}
+        pick {u64_stack_size * 2 + 5}
+        // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment]
+
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&WitnessMemory::get_field("auth_path_aocl")}
         {&WitnessMemory::get_field("authentication_path")}
-        // *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index] *auth_path
-        swap 2
-        // _ *aocl *aocl_peaks [canonical_commitment] *auth_path [aocl_leaf_index] [num_leafs]
-        swap 3
-        // _ *aocl *aocl_peaks [num_leafs] *auth_path [aocl_leaf_index] [canonical_commitment]
-        swap 1
-        // _ *aocl *aocl_peaks [num_leafs] *auth_path [canonical_commitment] [aocl_leaf_index]
-        swap 2
         // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment] *auth_path
 
         call {lib_mmr_verify}

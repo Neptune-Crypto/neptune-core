@@ -27,7 +27,7 @@ impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgram
 {
     fn source(&self) {
         // get in the current program's hash digest
-        let self_digest: Digest = tasm::builtins::own_program_digest();
+        // let self_digest: Digest = tasm::builtins::own_program_digest();
 
         // read standard input
         let publicinput_releasedate = tasm::builtins::tasmlib_io_read_stdin___bfe();
