@@ -119,6 +119,15 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Mining)]
     SubmitBlock,
+
+    #[namespace(Namespace::Mempool)]
+    Transactions,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionKernel,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionProof,
 }
 
 #[cfg(test)]

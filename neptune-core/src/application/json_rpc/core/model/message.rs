@@ -14,6 +14,7 @@ use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplat
 use crate::application::json_rpc::core::model::wallet::block::*;
 use crate::application::json_rpc::core::model::wallet::mutator_set::*;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
+use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -352,4 +353,38 @@ pub struct SubmitBlockRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SubmitBlockResponse {
     pub success: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionsRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionsResponse {
+    pub transactions: Vec<RpcTransactionKernelId>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTransactionKernelRequest {
+    pub id: RpcTransactionKernelId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTransactionKernelResponse {
+    pub kernel: Option<RpcTransactionKernel>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTransactionProofRequest {
+    pub id: RpcTransactionKernelId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTransactionProofResponse {
+    pub proof: Option<RpcTransactionProof>,
 }

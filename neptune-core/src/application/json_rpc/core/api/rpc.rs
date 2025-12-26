@@ -9,6 +9,7 @@ use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
+use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernelId;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
 use crate::application::json_rpc::core::model::json::JsonError;
@@ -358,4 +359,38 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: SubmitBlockRequest,
     ) -> RpcResult<SubmitBlockResponse>;
+
+    /* Mempool */
+
+    async fn transactions(&self) -> RpcResult<TransactionsResponse> {
+        self.transactions_call(TransactionsRequest {}).await
+    }
+    async fn transactions_call(
+        &self,
+        request: TransactionsRequest,
+    ) -> RpcResult<TransactionsResponse>;
+
+    async fn get_transaction_kernel(
+        &self,
+        id: RpcTransactionKernelId,
+    ) -> RpcResult<GetTransactionKernelResponse> {
+        self.get_transaction_kernel_call(GetTransactionKernelRequest { id })
+            .await
+    }
+    async fn get_transaction_kernel_call(
+        &self,
+        request: GetTransactionKernelRequest,
+    ) -> RpcResult<GetTransactionKernelResponse>;
+
+    async fn get_transaction_proof(
+        &self,
+        id: RpcTransactionKernelId,
+    ) -> RpcResult<GetTransactionProofResponse> {
+        self.get_transaction_proof_call(GetTransactionProofRequest { id })
+            .await
+    }
+    async fn get_transaction_proof_call(
+        &self,
+        request: GetTransactionProofRequest,
+    ) -> RpcResult<GetTransactionProofResponse>;
 }
