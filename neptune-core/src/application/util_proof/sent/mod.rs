@@ -95,7 +95,8 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
     let lib_bagpeaks = library.import(Box::new(tasm_lib::mmr::bag_peaks::BagPeaks));
     let release_date = library.kmalloc(1);
     let lib_add_all_amounts_and_check_time_lock = library.import(
-        Box::new(crate::protocol::consensus::type_scripts::amount::add_all_amounts_and_check_time_lock::AddAllAmountsAndCheckTimeLock {
+        Box::new(crate::protocol::consensus::type_scripts::amount::
+        add_all_amounts_and_check_time_lock::AddAllAmountsAndCheckTimeLock {
             digest_source: crate::protocol::consensus::type_scripts::amount::total_amount_main_loop::DigestSource::
             Hardcode(crate::protocol::consensus::type_scripts::native_currency::NativeCurrency.hash()),
             release_date,
@@ -116,14 +117,14 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         {&Utxo::get_field("lock_script_hash")}
         read_mem 5
         pop 1
-        // [lock_script_digest]
+        // _ [lock_script_digest]
         write_io 5
         // _
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        // *w
+        // _ *w
         {&WitnessMemory::get_field("aocl")}
-        // *aocl
+        // _ *aocl
 
         // prepare the value for '7.'
         dup 0
@@ -142,9 +143,10 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         pop 1
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
-        /* ## this segment diverges from the pasted code
-        *it only affects the output sequence*
-        it fills `Claim::output` with `sender_randomness_digest` */
+        /* fill `Claim::output` with `sender_randomness_digest`
+
+        ## this segment diverges from the pasted code
+        *it only affects the output sequence* */
         push 0
         push 0
         push 0
@@ -224,7 +226,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         write_io 5
 
         read_io 1
-        // release_date
+        // _ release_date
         // https://github.com/Neptune-Crypto/neptune-core/blob/5c1c6ef2ca1e282a05c7dc5300e742c92758fbfb/neptune-core/src/protocol/consensus/type_scripts/native_currency.rs#L133C13-L135C18
         push {release_date.write_address()}
         write_mem 1
