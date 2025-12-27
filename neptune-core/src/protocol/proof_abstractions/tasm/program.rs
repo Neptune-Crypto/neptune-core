@@ -25,7 +25,7 @@ pub enum ConsensusError {
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
 /// block validity.
 ///
-/// This trait is required for benchmarks, but is not part of the public API.
+/// This trait is required to be public for benchmarks, but is not part of the API.
 #[doc(hidden)]
 pub trait ConsensusProgram
 where
@@ -45,8 +45,8 @@ where
 
     /// The [program](Self::program)'s hash [digest](Digest).
     //
-    // note: we do not provide a default impl because implementors should cache
-    // their Digest with OnceLock.
+    // Note: we do not provide a default `impl` because implementors should cache
+    // their `Digest` with `OnceLock`.
     fn hash(&self) -> Digest;
 
     /// Run the program and generate a proof for it, assuming running halts
@@ -101,7 +101,7 @@ pub(crate) async fn prove_consensus_program(
     triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
 ) -> Result<Proof, CreateProofError> {
-    // regtest mode: just return a mock (empty) Proof
+    // regtest mode: just return a mock (empty) `Proof`
     if proof_job_options.job_settings.network.use_mock_proof() {
         return Ok(Proof::valid_mock(claim));
     }
@@ -184,6 +184,9 @@ pub mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest::test_runner::TestCaseResult;
     use tasm_lib::triton_vm;
     use tracing::debug;
 
@@ -191,6 +194,7 @@ pub mod tests {
     use crate::api::export::Network;
     use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+    use crate::protocol::proof_abstractions::SecretWitness;
     use crate::protocol::proof_abstractions::tasm::environment;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::tests::shared::files::test_helper_data_dir;
@@ -246,12 +250,12 @@ pub mod tests {
 
     pub(crate) trait ConsensusProgramSpecification: ConsensusProgram {
         /// The canonical reference source code for the consensus program, written in
-        /// the subset of rust that the tasm-lang compiler understands. To run this
+        /// the subset of Rust that the Tasm-lang compiler understands. To run this
         /// program, call [`Self::run_rust`], which spawns a new thread, boots the
         /// environment, and executes the program.
         fn source(&self);
 
-        /// Run the source program natively in rust, but with the emulated TritonVM
+        /// Run the source program natively in Rust, but with the emulated TritonVM
         /// environment for input, output, nondeterminism, and program digest.
         fn run_rust(
             &self,
@@ -314,13 +318,13 @@ pub mod tests {
 
         /// `Ok(())` iff the given input & non-determinism triggers the failure of
         /// either the instruction `assert` or `assert_vector`, and if that
-        /// instruction's error ID is one of the expected error IDs.
+        /// instruction's error id is one of the expected error ids.
         fn test_assertion_failure(
             &self,
             public_input: PublicInput,
             non_determinism: NonDeterminism,
             expected_error_ids: &[i128],
-        ) -> proptest::test_runner::TestCaseResult {
+        ) -> TestCaseResult {
             let fail =
                 |reason: String| Err(proptest::test_runner::TestCaseError::Fail(reason.into()));
 
@@ -352,6 +356,45 @@ pub mod tests {
             };
 
             Ok(())
+        }
+
+        /// TODO might be a good idea to return one `Vec` and assert both results are the same
+        fn propassert_both_rust_tasm_returns_the_output(
+            &self,
+            // p: impl ConsensusProgramSpecification, 
+            /* TODO this should be the associated type actually, but probably even 
+            for the bigger trait */
+            sw: impl SecretWitness
+        ) -> TestCaseResult {
+            let o = sw.output();
+            let rust = self.run_rust(
+                &sw.standard_input(),
+                sw.nondeterminism(),
+            ).expect("Rust run should pass");
+            prop_assert!(&o.eq(&rust), "Rust output was different\n{rust:?}|run output\n{o:?}|claim output");
+            // prop_assert_eq!(&o, &rust, "Rust output was different\n{rust}|run output\n{o}|claim output\n{}|claim output original", sw.output());
+
+            let t = self.run_tasm(
+                &sw.standard_input(),
+                sw.nondeterminism(),
+            ).unwrap_or_else(|e| match e {
+                ConsensusError::RustShadowPanic(rsp) => {
+                    panic!("Tasm run failed due to rust shadow panic (?): {rsp}");
+                }
+                ConsensusError::TritonVMPanic(err, instruction_error) => {
+                    panic!("Tasm run failed due to VM panic: {instruction_error}:\n{err}");
+                }
+            });
+            Ok(prop_assert!(&o.eq(&t), "Triton output was different\n{t:?}|run output\n{o:?}|claim output"))
+        }
+
+        fn assert_rust_and_tasm_fail(
+            &self, sw: impl SecretWitness,
+            expected_error_ids: &[i128],
+        ) {
+            self.test_assertion_failure(
+                sw.standard_input(), sw.nondeterminism(), expected_error_ids
+            ).unwrap()
         }
     }
 
