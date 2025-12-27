@@ -25,7 +25,7 @@ pub enum ConsensusError {
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
 /// block validity.
 ///
-/// This trait is required for benchmarks, but is not part of the public API.
+/// This trait is required to be public for benchmarks, but is not part of the API.
 #[doc(hidden)]
 pub trait ConsensusProgram
 where
@@ -45,8 +45,8 @@ where
 
     /// The [program](Self::program)'s hash [digest](Digest).
     //
-    // note: we do not provide a default impl because implementors should cache
-    // their Digest with OnceLock.
+    // Note: we do not provide a default `impl` because implementors should cache
+    // their `Digest` with `OnceLock`.
     fn hash(&self) -> Digest;
 
     /// Run the program and generate a proof for it, assuming running halts
@@ -101,7 +101,7 @@ pub(crate) async fn prove_consensus_program(
     triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
 ) -> Result<Proof, CreateProofError> {
-    // regtest mode: just return a mock (empty) Proof
+    // regtest mode: just return a mock (empty) `Proof`
     if proof_job_options.job_settings.network.use_mock_proof() {
         return Ok(Proof::valid_mock(claim));
     }
@@ -184,6 +184,7 @@ pub mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use proptest::prop_assert;
     use tasm_lib::triton_vm;
     use tracing::debug;
 
@@ -246,12 +247,12 @@ pub mod tests {
 
     pub(crate) trait ConsensusProgramSpecification: ConsensusProgram {
         /// The canonical reference source code for the consensus program, written in
-        /// the subset of rust that the tasm-lang compiler understands. To run this
+        /// the subset of Rust that the Tasm-lang compiler understands. To run this
         /// program, call [`Self::run_rust`], which spawns a new thread, boots the
         /// environment, and executes the program.
         fn source(&self);
 
-        /// Run the source program natively in rust, but with the emulated TritonVM
+        /// Run the source program natively in Rust, but with the emulated TritonVM
         /// environment for input, output, nondeterminism, and program digest.
         fn run_rust(
             &self,
@@ -353,6 +354,31 @@ pub mod tests {
 
             Ok(())
         }
+
+        /// TODO might be a good idea to return one `Vec` and assert both results are the same
+        fn assert_both_rust_and_tasm_halt_gracefully(
+            &self,
+            // p: impl ConsensusProgramSpecification, 
+            /* TODO this should be the associated type actually, but probably even 
+            for the bigger trait */
+            sw: impl crate::protocol::proof_abstractions::SecretWitness
+        ) -> [Vec<BFieldElement>; 2] {[
+            self.run_rust(
+                &sw.standard_input(),
+                sw.nondeterminism(),
+            ).expect("rust run should pass"),
+            self.run_tasm(
+                &sw.standard_input(),
+                sw.nondeterminism(),
+            ).unwrap_or_else(|e| match e {
+                ConsensusError::RustShadowPanic(rsp) => {
+                    panic!("Tasm run failed due to rust shadow panic (?): {rsp}");
+                }
+                ConsensusError::TritonVMPanic(err, instruction_error) => {
+                    panic!("Tasm run failed due to VM panic: {instruction_error}:\n{err}");
+                }
+            })
+        ]}
     }
 
     /// Derive a file name from the claim, includes the extension
