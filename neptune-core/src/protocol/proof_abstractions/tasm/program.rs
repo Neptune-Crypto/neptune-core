@@ -185,6 +185,8 @@ pub mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest::test_runner::TestCaseResult;
     use tasm_lib::triton_vm;
     use tracing::debug;
 
@@ -192,6 +194,7 @@ pub mod tests {
     use crate::api::export::Network;
     use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+    use crate::protocol::proof_abstractions::SecretWitness;
     use crate::protocol::proof_abstractions::tasm::environment;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::tests::shared::files::test_helper_data_dir;
@@ -315,13 +318,13 @@ pub mod tests {
 
         /// `Ok(())` iff the given input & non-determinism triggers the failure of
         /// either the instruction `assert` or `assert_vector`, and if that
-        /// instruction's error ID is one of the expected error IDs.
+        /// instruction's error id is one of the expected error ids.
         fn test_assertion_failure(
             &self,
             public_input: PublicInput,
             non_determinism: NonDeterminism,
             expected_error_ids: &[i128],
-        ) -> proptest::test_runner::TestCaseResult {
+        ) -> TestCaseResult {
             let fail =
                 |reason: String| Err(proptest::test_runner::TestCaseError::Fail(reason.into()));
 
@@ -356,18 +359,22 @@ pub mod tests {
         }
 
         /// TODO might be a good idea to return one `Vec` and assert both results are the same
-        fn assert_both_rust_and_tasm_halt_gracefully(
+        fn propassert_both_rust_tasm_returns_the_output(
             &self,
             // p: impl ConsensusProgramSpecification, 
             /* TODO this should be the associated type actually, but probably even 
             for the bigger trait */
-            sw: impl crate::protocol::proof_abstractions::SecretWitness
-        ) -> [Vec<BFieldElement>; 2] {[
-            self.run_rust(
+            sw: impl SecretWitness
+        ) -> TestCaseResult {
+            let o = sw.output();
+            let rust = self.run_rust(
                 &sw.standard_input(),
                 sw.nondeterminism(),
-            ).expect("rust run should pass"),
-            self.run_tasm(
+            ).expect("Rust run should pass");
+            prop_assert!(&o.eq(&rust), "Rust output was different\n{rust:?}|run output\n{o:?}|claim output");
+            // prop_assert_eq!(&o, &rust, "Rust output was different\n{rust}|run output\n{o}|claim output\n{}|claim output original", sw.output());
+
+            let t = self.run_tasm(
                 &sw.standard_input(),
                 sw.nondeterminism(),
             ).unwrap_or_else(|e| match e {
@@ -377,8 +384,18 @@ pub mod tests {
                 ConsensusError::TritonVMPanic(err, instruction_error) => {
                     panic!("Tasm run failed due to VM panic: {instruction_error}:\n{err}");
                 }
-            })
-        ]}
+            });
+            Ok(prop_assert!(&o.eq(&t), "Triton output was different\n{t:?}|run output\n{o:?}|claim output"))
+        }
+
+        fn assert_rust_and_tasm_fail(
+            &self, sw: impl SecretWitness,
+            expected_error_ids: &[i128],
+        ) {
+            self.test_assertion_failure(
+                sw.standard_input(), sw.nondeterminism(), expected_error_ids
+            ).unwrap()
+        }
     }
 
     /// Derive a file name from the claim, includes the extension
