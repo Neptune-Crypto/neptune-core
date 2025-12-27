@@ -98,12 +98,15 @@ jobs:
           CI: true
         run: |
           set -euo pipefail
+          # Enable command tracing for better debug logs
+          set -x
+
           # Run the coverage collection with a wall-clock timeout (adjust 300m if needed)
+          # NOTE: --skip flags are passed to nextest (they must appear before "--" which we remove here).
           timeout --preserve-status 300m bash -c \
             'cargo +nightly llvm-cov nextest \
               --lib --bins --tests --examples \
               --lcov --output-path lcov.info \
-              -- \
               --skip mine_20_blocks_in_40_seconds \
               --skip hash_rate_independent_of_tx_size \
               --skip blocks_with_0_to_10_inputs_and_successors_are_valid \
@@ -114,6 +117,11 @@ jobs:
               --skip can_sync_with_moving' 2>&1 | tee coverage_output.log || true
 
           cargo_exit=${PIPESTATUS[0]:-1}
+
+          # Detect timeout from the timeout command (124) and print a clearer message
+          if [ "$cargo_exit" -eq 124 ]; then
+            echo "ERROR: Coverage collection timed out (timeout returned 124). Consider increasing timeout or skipping long tests."
+          fi
 
           echo "=== Last lines of coverage output ==="
           tail -n 200 coverage_output.log || true
