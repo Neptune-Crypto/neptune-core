@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -30,6 +31,7 @@ use tracing::info;
 use tracing::warn;
 
 use crate::application::config::cli_args;
+use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
@@ -136,7 +138,12 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
         },
     };
     if cli.restrict_peers_to_list {
-        let allowed_ips: Vec<std::net::IpAddr> = cli.peers.iter().map(|p| p.ip()).collect();
+        let allowed_ips: Vec<std::net::IpAddr> = cli
+            .peers
+            .iter()
+            .filter_map(multiaddr_to_socketaddr)
+            .map(|p| p.ip())
+            .collect();
         let is_allowed = allowed_ips.contains(&connecting_ip);
         if !is_allowed {
             debug!("Rejecting incoming connection from unlisted peer {connecting_ip} due to --restrict-peers-to-list",);
@@ -198,7 +205,12 @@ async fn check_if_connection_is_allowed(
         .await;
 
     // (But ignore bad standing if the peer is a CLI argument.)
-    if standing.is_some_and(|s| s.is_bad()) && !cli_arguments.peers.contains(peer_address) {
+    let cli_peers = cli_arguments
+        .peers
+        .iter()
+        .filter_map(multiaddr_to_socketaddr)
+        .collect::<HashSet<_>>();
+    if standing.is_some_and(|s| s.is_bad()) && !cli_peers.contains(peer_address) {
         let ip = peer_address.ip();
         debug!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
@@ -734,6 +746,7 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
+    use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
     use crate::protocol::peer::handshake_data::VersionString;
     use crate::protocol::peer::peer_info::PeerInfo;
     use crate::protocol::peer::InternalConnectionStatus;
@@ -837,12 +850,13 @@ mod tests {
     fn precheck_incoming_connection_is_allowed_test() {
         let mut cli = cli_args::Args::default();
         let socket_address = get_dummy_socket_address(0);
+
         assert!(
             precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
             "Default behavior: connection allowed"
         );
 
-        cli.peers.push(socket_address);
+        cli.peers.push(socketaddr_to_multiaddr(socket_address));
         assert!(
             precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
             "Incoming allowed when incoming is specified peer"
