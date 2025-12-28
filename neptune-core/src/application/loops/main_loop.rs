@@ -1256,7 +1256,7 @@ impl MainLoopHandler {
         let cli_args = self.global_state_lock.cli();
         let global_state = self.global_state_lock.lock_guard().await;
         let connected_peers = global_state.net.peer_map.values().cloned().collect_vec();
-        let own_instance_id = global_state.net.instance_id;
+        let own_instance_id = global_state.net.instance_id();
         let own_handshake_data = global_state.get_own_handshakedata();
         drop(global_state);
 

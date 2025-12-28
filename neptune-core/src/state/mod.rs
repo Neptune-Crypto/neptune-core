@@ -1602,7 +1602,7 @@ impl GlobalState {
             tip_header: *self.chain.light_state().header(),
             listen_port,
             network: self.cli().network,
-            instance_id: self.net.instance_id,
+            instance_id: self.net.instance_id(),
             version: VersionString::try_from_str(VERSION).unwrap_or_else(|_| {
                 panic!(
                 "Must be able to convert own version number to fixed-size string. Got {VERSION}")
