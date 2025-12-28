@@ -11,12 +11,14 @@ use clap::builder::RangedI64ValueParser;
 use clap::builder::TypedValueParser;
 use clap::Parser;
 use itertools::Itertools;
+use libp2p::Multiaddr;
 use num_traits::Zero;
 use sysinfo::System;
 use tracing::error;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
+use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::json_rpc::core::api::ops::Namespace;
@@ -377,9 +379,25 @@ pub struct Args {
     #[clap(long)]
     pub(crate) no_resume_sync: bool,
 
-    /// IPs of nodes to connect to, e.g.: --peer 8.8.8.8:9798 --peer 8.8.4.4:1337.
-    #[structopt(long = "peer")]
-    pub peers: Vec<SocketAddr>,
+    /// Multiaddrs (or IPs) of nodes to connect to, e.g.:
+    /// ```
+    /// --peer /ip4/8.8.8.8 \
+    /// --peer /ip4/8.8.4.4/udp/1337/quic-v1 \
+    /// --peer 139.162.193.206:9798 \
+    /// --peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798
+    /// ```
+    ///
+    /// It's easier to connect without `/p2p/...` in the end of the address.
+    ///
+    /// The trust assumptions are interpreted in spirit of multiaddress.
+    ///
+    /// - without `/p2p/...` it will be adding any peer found on the endpoint
+    /// - with `/p2p/...` connections to the given endpoint will fail if the
+    ///   peer id there had changed
+    /// - with only `/p2p/...` it will be trying to reach this peer (if the node
+    ///   will ever find how to connect to the network)
+    #[structopt(long = "peer", value_parser(parse_to_multiaddr))]
+    pub peers: Vec<Multiaddr>,
 
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "main", short)]
@@ -845,6 +863,7 @@ mod tests {
     use std::ops::RangeBounds;
 
     use super::*;
+    use crate::application::config::parser::multiaddr::parse_to_multiaddr;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 
     // extra methods for tests.
@@ -992,5 +1011,27 @@ mod tests {
         assert_range_eq!(5u64..=u64::MAX, parse_range("5:").unwrap());
         assert_range_eq!(0u64..10, parse_range(":10").unwrap());
         assert_range_eq!(0u64..=u64::MAX, parse_range(":").unwrap());
+    }
+
+    #[test]
+    fn can_specify_ips_as_peers() {
+        let mut cli = Args::default();
+
+        let ipv4 = "139.162.193.206:9798".to_string();
+        let ipv6 = "[2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798".to_string();
+
+        cli.peers.push(parse_to_multiaddr(&ipv4).unwrap());
+        cli.peers.push(parse_to_multiaddr(&ipv6).unwrap());
+    }
+
+    #[test]
+    fn can_specify_multiaddrs_as_peers() {
+        let mut cli = Args::default();
+
+        let ipv4 = "/ip4/8.8.8.8".to_string();
+        let ipv4_udp_quic = "/ip4/8.8.4.4/udp/1337/quic-v1".to_string();
+
+        cli.peers.push(parse_to_multiaddr(&ipv4).unwrap());
+        cli.peers.push(parse_to_multiaddr(&ipv4_udp_quic).unwrap());
     }
 }

@@ -2,6 +2,7 @@ pub mod proof_upgrader;
 pub(crate) mod upgrade_incentive;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::process::Command;
 use std::process::Stdio;
@@ -31,6 +32,7 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
+use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::loops::channel::MainToMiner;
 use crate::application::loops::channel::MinerToMain;
 use crate::application::loops::channel::RPCServerToMain;
@@ -1022,8 +1024,13 @@ impl MainLoopHandler {
                 let all_peers = global_state.net.peer_map.iter();
 
                 // filter out CLI peers
-                let disconnect_candidates =
-                    all_peers.filter(|p| !global_state.cli().peers.contains(p.0));
+                let cli_peers = global_state
+                    .cli()
+                    .peers
+                    .iter()
+                    .filter_map(multiaddr_to_socketaddr)
+                    .collect::<HashSet<_>>();
+                let disconnect_candidates = all_peers.filter(|p| !cli_peers.contains(p.0));
 
                 // find the one with the oldest connection
                 let longest_lived_peer = disconnect_candidates.min_by(
@@ -1147,9 +1154,14 @@ impl MainLoopHandler {
         }
 
         let num_peers_to_disconnect = num_peers - max_num_peers;
+        let cli_peers = cli_args
+            .peers
+            .iter()
+            .filter_map(multiaddr_to_socketaddr)
+            .collect::<HashSet<_>>();
         let peers_to_disconnect = connected_peers
             .into_iter()
-            .filter(|peer| !cli_args.peers.contains(&peer.connected_address()))
+            .filter(|peer| !cli_peers.contains(&peer.connected_address()))
             .choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
         match peers_to_disconnect.len() {
             0 => warn!("Not disconnecting from any peer because of manual override."),
@@ -1182,6 +1194,7 @@ impl MainLoopHandler {
             .cli()
             .peers
             .iter()
+            .filter_map(multiaddr_to_socketaddr)
             .filter(|peer| !connected_peers.contains(peer));
 
         // If no connection was lost, there's nothing to do.
@@ -1195,7 +1208,7 @@ impl MainLoopHandler {
             .lock_guard()
             .await
             .get_own_handshakedata();
-        for &peer_with_lost_connection in peers_with_lost_connection {
+        for peer_with_lost_connection in peers_with_lost_connection {
             // Disallow reconnection if peer is in bad standing
             let peer_standing = self
                 .global_state_lock

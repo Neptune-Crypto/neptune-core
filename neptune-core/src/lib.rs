@@ -71,6 +71,7 @@ use tracing::info;
 use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::data_directory::DataDirectory;
+use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::locks::tokio as sync_tokio;
 use crate::application::loops::channel::MainToMiner;
@@ -203,7 +204,12 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         own_handshake_data.tip_header.height
     );
     let mut task_join_handles = vec![];
-    for peer_address in global_state_lock.cli().peers.clone() {
+    for peer_address in global_state_lock
+        .cli()
+        .peers
+        .iter()
+        .filter_map(multiaddr_to_socketaddr)
+    {
         let peer_state_var = global_state_lock.clone(); // bump arc refcount
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
             main_to_peer_broadcast_tx.subscribe();
