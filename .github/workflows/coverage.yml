@@ -102,12 +102,11 @@ jobs:
           set -x
 
           # Run the coverage collection with a wall-clock timeout (adjust 300m if needed)
-          # NOTE: --skip flags are passed to nextest (they must appear before "--" which we remove here).
           timeout --preserve-status 300m bash -c \
             'cargo +nightly llvm-cov nextest \
               --lib --bins --tests --examples \
               --lcov --output-path lcov.info \
-              --skip mine_20_blocks_in_40_seconds \
+              -- --skip mine_20_blocks_in_40_seconds \
               --skip hash_rate_independent_of_tx_size \
               --skip blocks_with_0_to_10_inputs_and_successors_are_valid \
               --skip can_cancel_preprocess_within_one_second \
