@@ -63,7 +63,7 @@ use crate::BFieldElement;
 pub(crate) const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub(crate) const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
 pub(crate) const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
-pub(crate) const ARCHIVAL_ANNOUNCEMENT_INDEX_DIRECTORY_NAME: &str = "announcement_index";
+pub(crate) const UTXO_INDEX_DIRECTORY_NAME: &str = "utxo_index";
 
 /// Provides interface to historic blockchain data which consists of
 ///  * block-data stored in individual files (append-only)
@@ -199,24 +199,23 @@ impl ArchivalState {
     }
 
     async fn initialize_utxo_index(data_dir: &DataDirectory) -> Result<RustyUtxoIndex> {
-        let announcement_dir_path = data_dir.archival_announcement_index_dir_path();
-        DataDirectory::create_dir_if_not_exists(&announcement_dir_path).await?;
+        let utxo_index_dir = data_dir.utxo_index_dir_path();
+        DataDirectory::create_dir_if_not_exists(&utxo_index_dir).await?;
 
-        let path = announcement_dir_path.clone();
-        let result = NeptuneLevelDb::new(&path, &create_db_if_missing()).await;
+        let result = NeptuneLevelDb::new(&utxo_index_dir, &create_db_if_missing()).await;
 
         let db = match result {
             Ok(db) => db,
             Err(e) => {
                 tracing::error!(
-                    "Could not open archival MMR database at {}: {e}",
-                    announcement_dir_path.display()
+                    "Could not open UTXO index database at {}: {e}",
+                    utxo_index_dir.display()
                 );
                 panic!(
                     "Could not open database; do not know how to proceed. Panicking.\n\
                     If you suspect the database may be corrupted, consider renaming the directory {}\
                      or removing it altogether. Or perhaps a node is already running?",
-                     announcement_dir_path.display()
+                     utxo_index_dir.display()
                 );
             }
         };
@@ -354,7 +353,7 @@ impl ArchivalState {
         // though.
         let mut utxo_index = ArchivalState::initialize_utxo_index(&data_dir)
             .await
-            .expect("Must be able to initialize announcement index database");
+            .expect("Must be able to initialize utxo index database");
 
         if utxo_index.sync_label() == Digest::default() {
             utxo_index.index_block(&genesis_block).await;
@@ -1109,15 +1108,15 @@ impl ArchivalState {
     ) -> Option<(HashMap<AdditionRecord, Vec<u64>>, Digest)> {
         let (aocl_leaf_indices, block_hash) = if block_height == BlockHeight::genesis().value() {
             // Special-case for genesis block since it has no block record.
-            let range = 0u64..=(self
+            let num_outputs_in_genesis: u64 = self
                 .genesis_block()
                 .body()
                 .transaction_kernel()
                 .outputs
                 .len()
-                - 1)
-            .try_into()
-            .expect("Can always convert usize to u64");
+                .try_into()
+                .expect("Can always convert usize to u64");
+            let range = 0u64..=(num_outputs_in_genesis - 1);
             (range, self.genesis_block().hash())
         } else {
             let Some(block_hash) = self

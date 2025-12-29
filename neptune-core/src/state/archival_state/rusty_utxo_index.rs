@@ -42,28 +42,28 @@ impl TryFrom<&Announcement> for AnnouncementFlags {
     type Error = ();
 
     fn try_from(value: &Announcement) -> Result<Self, Self::Error> {
-        if value.message.len() >= 2 {
-            Ok(AnnouncementFlags {
-                flag: value.message[0],
-                receiver_id: value.message[1],
-            })
-        } else {
-            Err(())
+        if value.message.len() < 2 {
+            return Err(());
         }
+
+        Ok(AnnouncementFlags {
+            flag: value.message[0],
+            receiver_id: value.message[1],
+        })
     }
 }
 
-/// The tables of the UTXO index database. Does not include the addition records
-/// in the block since those are included in the [`ArchivalMutatorSet`] which is
-/// assumed to be part of the state of all nodes that also maintain a UTXO
-/// index.
-///
 /// The purpose of the UTXO index is to speed up the rescanning of historical
 /// blocks, and to serve 3rd parties with information required to detect
 /// incoming and outgoing UTXOs as quickly as possible. It assumes the presence
 /// of an [`ArchivalState`]. Any decision about tables in the UTXO index should
 /// be made in the light of allowing clients or 3rd parties to discover balance-
 /// affecting input or output UTXOs in historical blocks as quickly as possible.
+///
+/// The tables of the UTXO index database. Does not include the addition records
+/// in the block since those are included in the [`ArchivalMutatorSet`] which is
+/// assumed to be part of the state of all nodes that also maintain a UTXO
+/// index.
 ///
 /// [`ArchivalMutatorSet`]: crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet
 /// [`ArchivalState`]: crate::state::archival_state::ArchivalState
@@ -74,13 +74,16 @@ struct UtxoIndexTables {
     /// be migrated or recreated.
     pub(super) schema_version: DbtSingleton<u16>,
 
-    /// Mapping from block hash to the list of announcement keys contained in
-    /// the block. The order of the announcements in the block matches the order
-    /// of the announcement flags in the value of this mapping.
+    /// Mapping from block hash to the list of announcement flags contained in
+    /// the block.
+    ///
+    /// Can be used to speed up the scanning for incoming, announced UTXOs.
     pub(super) announcements: DbtMap<Digest, Vec<AnnouncementFlags>>,
 
-    /// Mapping from block hash to the list of digests of the aboslute indices
+    /// Mapping from block hash to the list of digests of the absolute indices
     /// being set in the block.
+    ///
+    /// Can be used to speed up the scanning for used UTXOs, i.e. expenditures.
     pub(super) index_set_digests: DbtMap<Digest, Vec<Digest>>,
 
     /// Latest block handled by this database
@@ -97,7 +100,7 @@ impl RustyUtxoIndex {
     pub(super) async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
         let mut storage = SimpleRustyStorage::new_with_callback(
             db,
-            "RustyAnnouncementIndex-Schema",
+            "RustyUtxoIndex-Schema",
             crate::LOG_TOKIO_LOCK_EVENT_CB,
         );
 
@@ -128,8 +131,7 @@ impl RustyUtxoIndex {
     }
 
     /// Return the digests of all absolute index sets of the removal records in
-    /// this block. Returns `None` if the block was never processed by the UTXO
-    /// index.
+    /// this block. Returns `None` if the block is not known to this index.
     pub(crate) async fn index_set_digests(&self, block_hash: Digest) -> Option<Vec<Digest>> {
         self.tables.index_set_digests.get(&block_hash).await
     }
@@ -138,7 +140,8 @@ impl RustyUtxoIndex {
     /// index set digests to the UTXO index.
     ///
     /// This method is idempotent, meaning that it does not alter the index if
-    /// the same block is indexed twice.
+    /// the same block is indexed twice. The [`Self::sync_label`] always points
+    /// to the latest blocks that was indexed.
     pub(crate) async fn index_block(&mut self, block: &Block) {
         let hash = block.hash();
 

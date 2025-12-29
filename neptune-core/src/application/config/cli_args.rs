@@ -545,9 +545,9 @@ pub struct Args {
 
     /// Construct an maintain a UTXO index
     ///
-    /// If set, all announcements, inputs, and outputs in all processed blocks
-    /// will be indexed in a database that enables a fast rescan for the
-    /// discovery of all balance-affecting inputs and outputs of all blocks.
+    /// If set, all announcements and outputs in all processed blocks will be
+    /// indexed in a database that enables a fast rescan for the discovery of
+    /// all balance-affecting inputs and outputs of blocks.
     #[clap(long)]
     pub(crate) utxo_index: bool,
 

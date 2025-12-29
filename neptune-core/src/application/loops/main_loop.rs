@@ -1962,7 +1962,7 @@ impl MainLoopHandler {
 
                 // Holds a write-lock over global state, so problematic if it
                 // takes too long.
-                log_slow_scope!(fn_name!() + "::RPCServerToMain::NewBlRescanExpectedockFound");
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::RescanExpected");
 
                 let mut global_state_lock = self.global_state_lock.clone();
                 tokio::task::spawn(async move {
