@@ -2171,6 +2171,8 @@ impl GlobalState {
             .persist()
             .await;
 
+        self.chain.archival_state_mut().utxo_index.persist().await;
+
         // flush peer_standings
         self.net.peer_databases.peer_standings.flush().await;
 

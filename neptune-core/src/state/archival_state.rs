@@ -685,6 +685,11 @@ impl ArchivalState {
         // processing, and an effcient "catchup" behavior where the UTXO index
         // is many block behind the rest of the archival state.
         let (_, _, missing_blocks) = self.find_path(current_sync, new_block_hash).await;
+
+        debug!(
+            "Applying {} missing blocks to UTXO index",
+            missing_blocks.len()
+        );
         for missing in missing_blocks {
             // This optimization means that we don't have to read the full
             // blocks from disk in case it was already processed.
@@ -705,6 +710,8 @@ impl ArchivalState {
                 self.utxo_index.index_block(&missing).await;
             }
         }
+
+        debug!("Done updating UTXO index");
     }
 
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
