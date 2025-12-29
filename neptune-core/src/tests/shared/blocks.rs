@@ -10,6 +10,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
+use crate::api::export::Announcement;
 use crate::api::export::GenerationSpendingKey;
 use crate::api::export::GlobalStateLock;
 use crate::api::export::Network;
@@ -443,6 +444,28 @@ pub(crate) fn invalid_empty_blocks_with_proof_size(
     }
 
     blocks
+}
+
+pub(crate) fn invalid_empty_block_with_announcements(
+    predecessor: &Block,
+    network: Network,
+    announcements: Vec<Announcement>,
+) -> Block {
+    let tx = crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash(
+        vec![],
+        vec![],
+        predecessor.mutator_set_accumulator_after().unwrap().hash(),
+    );
+    let kernel = TransactionKernelModifier::default()
+        .announcements(announcements)
+        .clone_modify(&tx.kernel);
+    let tx = Transaction {
+        kernel,
+        proof: tx.proof,
+    };
+    let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    let tx = BlockTransaction::upgrade(tx);
+    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
 
 /// Return a list of `n` invalid, empty blocks.

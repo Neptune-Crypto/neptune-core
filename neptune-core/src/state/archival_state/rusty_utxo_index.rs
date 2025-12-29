@@ -186,3 +186,109 @@ impl StorageWriter for RustyUtxoIndex {
         unimplemented!("announcement index does not need it")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use macro_rules_attr::apply;
+    use tasm_lib::twenty_first::bfe_vec;
+
+    use super::*;
+    use crate::api::export::GenerationSpendingKey;
+    use crate::api::export::Network;
+    use crate::state::archival_state::ArchivalState;
+    use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
+    use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
+    use crate::tests::shared_tokio_runtime;
+    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+    use crate::util_types::mutator_set::removal_record::RemovalRecord;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
+
+    async fn test_utxo_index(network: Network) -> RustyUtxoIndex {
+        let data_dir = crate::tests::shared::files::unit_test_data_directory(network).unwrap();
+        ArchivalState::initialize_utxo_index(&data_dir)
+            .await
+            .unwrap()
+    }
+
+    fn announcements_length_0_to_3() -> Vec<Announcement> {
+        let length0 = Announcement {
+            message: bfe_vec![],
+        };
+        let length1 = Announcement {
+            message: bfe_vec![22],
+        };
+        let length2 = Announcement {
+            message: bfe_vec![22, 55],
+        };
+        let length3 = Announcement {
+            message: bfe_vec![22, 55, 668],
+        };
+        vec![length0, length1, length2, length3]
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn block_index_is_idempotent() {
+        let network = Network::Main;
+        let mut utxo_index = test_utxo_index(network).await;
+        let an_input = RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new([(1u128 << 20); NUM_TRIALS as usize]),
+            target_chunks: ChunkDictionary::default(),
+        };
+
+        let genesis = Block::genesis(network);
+        let (block1, _) = make_mock_block_with_inputs_and_outputs(
+            &genesis,
+            vec![an_input],
+            vec![],
+            None,
+            GenerationSpendingKey::derive_from_seed(Digest::default()),
+            Digest::default(),
+            network,
+        )
+        .await;
+        let announcements = announcements_length_0_to_3();
+        let block2 = invalid_empty_block_with_announcements(&block1, network, announcements);
+
+        utxo_index.index_block(&block1).await;
+        utxo_index.index_block(&block2).await;
+
+        let expected_index_set_digests = utxo_index.index_set_digests(block1.hash()).await;
+        let expected_announcement_flags = utxo_index.announcement_flags(block2.hash()).await;
+
+        utxo_index.index_block(&block1).await;
+        utxo_index.index_block(&block2).await;
+
+        assert_eq!(
+            expected_index_set_digests,
+            utxo_index.index_set_digests(block1.hash()).await
+        );
+        assert_eq!(
+            expected_announcement_flags,
+            utxo_index.announcement_flags(block2.hash()).await
+        );
+        assert_eq!(block2.hash(), utxo_index.sync_label());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn can_handle_short_announcements() {
+        let network = Network::Main;
+        let mut utxo_index = test_utxo_index(network).await;
+
+        let announcements = announcements_length_0_to_3();
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block_with_announcements(&genesis, network, announcements);
+
+        utxo_index.index_block(&block1).await;
+
+        assert_eq!(
+            2,
+            utxo_index
+                .announcement_flags(block1.hash())
+                .await
+                .unwrap()
+                .len(),
+            "Announcements of length 2 and above should be indexed"
+        );
+    }
+}
