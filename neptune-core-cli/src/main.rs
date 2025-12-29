@@ -1170,21 +1170,25 @@ async fn main() -> Result<()> {
             client
                 .rescan_announced(ctx, token, first.into(), last.into())
                 .await??;
+            println!("Rescan started. Please check application log for progress.");
         }
         Command::RescanExpected { first, last } => {
             client
                 .rescan_expected(ctx, token, first.into(), last.into())
                 .await??;
+            println!("Rescan started. Please check application log for progress.");
         }
         Command::RescanOutgoing { first, last } => {
             client
                 .rescan_outgoing(ctx, token, first.into(), last.into())
                 .await??;
+            println!("Rescan started. Please check application log for progress.");
         }
         Command::RescanGuesserRewards { first, last } => {
             client
                 .rescan_guesser_rewards(ctx, token, first.into(), last.into())
                 .await??;
+            println!("Rescan started. Please check application log for progress.");
         }
         Command::Send {
             address,

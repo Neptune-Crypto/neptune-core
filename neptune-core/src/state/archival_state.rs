@@ -16,6 +16,7 @@ use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tracing::debug;
+use tracing::info;
 use tracing::warn;
 
 pub(crate) mod import_blocks_from_files;
@@ -686,10 +687,12 @@ impl ArchivalState {
         // is many block behind the rest of the archival state.
         let (_, _, missing_blocks) = self.find_path(current_sync, new_block_hash).await;
 
-        debug!(
-            "Applying {} missing blocks to UTXO index",
-            missing_blocks.len()
-        );
+        // Inform user if this will take a long time.
+        let num_missing_blocks = missing_blocks.len();
+        debug!("Applying {num_missing_blocks} missing blocks to UTXO index.");
+        if num_missing_blocks > 10 {
+            info!("Applying {num_missing_blocks} missing blocks to UTXO index. This may take a while.")
+        }
         for missing in missing_blocks {
             // This optimization means that we don't have to read the full
             // blocks from disk in case it was already processed.

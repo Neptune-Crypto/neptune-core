@@ -1135,7 +1135,7 @@ impl GlobalState {
                 .filter(|ann| keys.contains_key(ann))
                 .collect_vec();
             if announcement_flags.is_empty() {
-                debug!("Found no announced UTXOs for us in block height {block_height}");
+                trace!("Found no announced UTXOs for us in block height {block_height}");
                 continue;
             }
 
@@ -1215,6 +1215,11 @@ impl GlobalState {
                     num_mps_per_utxo,
                 )
                 .await;
+
+            debug!(
+                "Found {} new UTXOs in block height {block_height}, from announcements.",
+                recovery_list.len()
+            );
 
             // write UTXO-recovery data to disk.
             for incoming_randomness in recovery_list {
