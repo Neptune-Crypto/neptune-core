@@ -58,7 +58,7 @@ const PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS: u128 = 90;
 /// Use this function to ensure that the same rules apply for both
 /// ingoing and outgoing connections. This limits the size of messages
 /// peers can send.
-fn get_codec_rules() -> LengthDelimitedCodec {
+pub(crate) fn get_codec_rules() -> LengthDelimitedCodec {
     let mut codec_rules = LengthDelimitedCodec::new();
     codec_rules.set_max_frame_length(MAX_PEER_FRAME_LENGTH_IN_BYTES);
     codec_rules
