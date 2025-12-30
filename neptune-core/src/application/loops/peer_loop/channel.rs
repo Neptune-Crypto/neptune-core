@@ -1,16 +1,15 @@
-use crate::application::loops::channel::BlockProposalNotification;
-use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
-use crate::protocol::peer::transaction_notification::TransactionNotification;
-
 use std::net::SocketAddr;
 
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
+use crate::application::loops::channel::BlockProposalNotification;
+use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::peer::transaction_notification::TransactionNotification;
 
 #[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MainToPeerTask {

@@ -349,7 +349,6 @@ pub(crate) enum RapidBlockDownloadError {
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::shared_tokio_runtime;
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use rand::rng;
@@ -359,6 +358,7 @@ mod tests {
     use rand::SeedableRng;
 
     use super::*;
+    use crate::tests::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
     async fn can_get_stored_block_iff_received() {

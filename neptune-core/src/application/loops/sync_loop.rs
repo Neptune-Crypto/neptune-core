@@ -850,12 +850,11 @@ mod tests {
     use rand::SeedableRng;
     use tokio::sync::Mutex;
 
+    use super::*;
     use crate::api::export::Network;
     use crate::application::loops::sync_loop::handle::SyncLoopHandle;
     use crate::protocol::consensus::block::Block;
     use crate::tests::shared_tokio_runtime;
-
-    use super::*;
 
     /// A channel for informing the [MockMainLoop] about peer (dis)connections.
     #[derive(Debug, Clone)]

@@ -1,7 +1,9 @@
-use crate::application::loops::sync_loop::sync_progress::SyncProgress;
+use std::fmt::Display;
+
 use serde::Deserialize;
 use serde::Serialize;
-use std::fmt::Display;
+
+use crate::application::loops::sync_loop::sync_progress::SyncProgress;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "mock-rpc", derive(strum::EnumCount))]

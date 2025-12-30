@@ -64,12 +64,11 @@ pub struct RpcBlockTemplate {
 mod tests {
     use tasm_lib::twenty_first::bfe_array;
 
+    use super::*;
     use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
     use crate::protocol::consensus::block::block_header::BlockPow;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::BFieldElement;
-
-    use super::*;
 
     impl RpcBlockTemplateMetadata {
         pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> RpcBlockPow {

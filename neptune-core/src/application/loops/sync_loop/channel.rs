@@ -1,9 +1,8 @@
+use super::PeerHandle;
 use crate::api::export::BlockHeight;
 use crate::application::loops::sync_loop::sync_progress::SyncProgress;
 use crate::application::loops::sync_loop::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
-
-use super::PeerHandle;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BlockRequest {
