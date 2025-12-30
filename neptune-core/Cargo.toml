@@ -68,6 +68,7 @@ bincode = "1.3"
 bytes = "1.8"
 bytesize = "1.3"
 chrono = "^0.4.34"
+ciborium = "0.2.2"
 clap = { version = "4.5", features = ["derive"] }
 console-subscriber = { version = "0.2", optional = true }
 directories = "5.0"
@@ -101,7 +102,7 @@ tasm-lib = "1.0.0"
 tiny-bip39 = "1.0"
 tokio = { version = "1.41", features = ["full", "tracing"] }
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
-tokio-util = { version = "0.7", features = ["codec", "rt"] }
+tokio-util = { version = "0.7", features = ["codec", "rt", "compat"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter", "time", "fmt"] }
 tracing-test = "0.2"
@@ -122,10 +123,10 @@ neptune-rpc-macros = { version = "0.5.0", path = "../neptune-rpc/macros" }
 axum = "0.8.4"
 serde_tuple = "1.1.3"
 hex = "0.4.3"
-whoami = "2.0.0"
-libp2p = {version = "*", features = [
+libp2p = {version = "0.56.0", features = [
     # "full"
     "autonat",
+    "cbor",
     "dcutr",
     "dns",
     "ed25519",
@@ -137,12 +138,14 @@ libp2p = {version = "*", features = [
     "ping",
     "quic",
     "relay",
+    "serde",
+    "request-response",
     "tcp",
     "tls",
     "tokio",
     "yamux",
-    "serde",
 ]}
+whoami = "2.0.0"
 
 [dev-dependencies]
 
