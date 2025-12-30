@@ -480,6 +480,16 @@ impl RustyWalletDatabase {
     pub fn schema_version(&self) -> u16 {
         self.tables.schema_version.get()
     }
+
+    #[doc(hidden)]
+    /// Delete all monitored UTXOs and associated lookup tables.
+    /// This function is required for benchmarks, but is not part of the public
+    /// API.
+    pub async fn clear_mutxos(&mut self) {
+        self.tables.monitored_utxos.clear().await;
+        self.tables.strong_key_to_mutxo.clear().await;
+        self.tables.index_set_to_mutxo.clear().await;
+    }
 }
 
 impl StorageWriter for RustyWalletDatabase {
@@ -516,9 +526,8 @@ pub(crate) mod tests {
 
     use num_traits::Zero;
 
-    use crate::application::database::storage::storage_schema::DbtMap;
-
     use super::*;
+    use crate::application::database::storage::storage_schema::DbtMap;
 
     impl RustyWalletDatabase {
         pub fn storage(&self) -> &SimpleRustyStorage {
@@ -531,13 +540,6 @@ pub(crate) mod tests {
 
         pub(crate) fn strong_keys(&self) -> &DbtMap<StrongUtxoKey, u64> {
             &self.tables.strong_key_to_mutxo
-        }
-
-        /// Delete all monitored UTXOs and associated lookup tables.
-        pub(crate) async fn clear_mutxos(&mut self) {
-            self.tables.monitored_utxos.clear().await;
-            self.tables.strong_key_to_mutxo.clear().await;
-            self.tables.index_set_to_mutxo.clear().await;
         }
 
         pub(crate) async fn assert_expected_utxo_integrity(&self) {

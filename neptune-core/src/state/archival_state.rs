@@ -1101,10 +1101,10 @@ impl ArchivalState {
     }
 
     /// Returns a [`HashMap`] of [`AdditionRecord`] to  AOCL leaf indices for
-    /// all outputs in a given block. Returns `None` if no block at the
-    /// specified height is known. Also returns the block hash. AOCL leaf
-    /// indices have list type since a block can contain the same addition
-    /// record multiple times.
+    /// all outputs in a given block.  Also returns the block hash. Returns
+    /// `None` if no block at the specified height is known. AOCL leaf indices
+    /// have list type since a block can contain the same addition record
+    /// multiple times.
     ///
     /// Never loads the entire block from disk. Only reads from the database, so
     /// performace should be good.
@@ -1148,13 +1148,15 @@ impl ArchivalState {
             (range, block_hash)
         };
 
+        // Getting all leafs in a batch-read operation was benchmarked to be
+        // faster than getting each leaf individually. So batch-reading of leafs
+        // was chosen here.
         let addition_records = self
             .archival_mutator_set
             .ams()
             .aocl
             .get_leaf_range_inclusive_async(aocl_leaf_indices.clone())
             .await;
-
         let mut ret = HashMap::new();
         for (ar, leaf_index) in addition_records.into_iter().zip_eq(aocl_leaf_indices) {
             let addition_record = AdditionRecord::new(ar);

@@ -756,11 +756,7 @@ impl GlobalState {
     ///
     /// # Panics
     /// - If start block height is greater than end block height
-    pub(crate) async fn rescan_outgoing(
-        &mut self,
-        first: BlockHeight,
-        last: BlockHeight,
-    ) -> Result<()> {
+    pub async fn rescan_outgoing(&mut self, first: BlockHeight, last: BlockHeight) -> Result<()> {
         let first: u64 = first.into();
         let last: u64 = last.into();
         assert!(
@@ -966,7 +962,7 @@ impl GlobalState {
     ///
     /// # Panics
     /// - If start block height is greater than end block height
-    pub(crate) async fn rescan_expected_incoming(&mut self, first: BlockHeight, last: BlockHeight) {
+    pub async fn rescan_expected_incoming(&mut self, first: BlockHeight, last: BlockHeight) {
         let first: u64 = first.into();
         let last: u64 = last.into();
         assert!(
@@ -1083,7 +1079,7 @@ impl GlobalState {
     ///
     /// # Panics
     /// - If start block height is greater than end block height
-    pub(crate) async fn rescan_announced_incoming(
+    pub async fn rescan_announced_incoming(
         &mut self,
         keys: Vec<SpendingKey>,
         first: BlockHeight,

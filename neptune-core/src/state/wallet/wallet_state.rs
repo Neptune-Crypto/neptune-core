@@ -689,7 +689,7 @@ impl WalletState {
     // synchronize them after the Tx is confirmed.
     //
     // Discussion: https://github.com/Neptune-Crypto/neptune-core/pull/136
-    pub(crate) async fn add_expected_utxos(
+    pub async fn add_expected_utxos(
         &mut self,
         expected_utxos: impl IntoIterator<Item = ExpectedUtxo>,
     ) {
@@ -1045,7 +1045,7 @@ impl WalletState {
         }
     }
 
-    pub(crate) async fn bump_derivation_counter(&mut self, key_type: KeyType, max_used_index: u64) {
+    pub async fn bump_derivation_counter(&mut self, key_type: KeyType, max_used_index: u64) {
         let new_counter = max_used_index + 1;
         let current_counter = self.spending_key_counter(key_type);
 

@@ -549,7 +549,7 @@ pub struct Args {
     /// indexed in a database that enables a fast rescan for the discovery of
     /// all balance-affecting inputs and outputs of blocks.
     #[clap(long)]
-    pub(crate) utxo_index: bool,
+    pub utxo_index: bool,
 
     /// Enable JSON/HTTP RPC.
     /// You can optionally specify an address and port (default: 127.0.0.1:9797).
@@ -664,6 +664,13 @@ fn parse_range(unparsed_range: &str) -> Result<RangeInclusive<u64>, String> {
 }
 
 impl Args {
+    pub fn default_with_network(network: Network) -> Self {
+        Self {
+            network,
+            ..Default::default()
+        }
+    }
+
     /// Indicates if all incoming peer connections are disallowed.
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
         self.max_num_peers.is_zero()
@@ -837,13 +844,6 @@ mod tests {
 
     // extra methods for tests.
     impl Args {
-        pub(crate) fn default_with_network(network: Network) -> Self {
-            Self {
-                network,
-                ..Default::default()
-            }
-        }
-
         pub(crate) fn proof_job_options_prooftype(
             &self,
             proof_type: TransactionProofType,
