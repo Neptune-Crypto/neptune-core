@@ -1,4 +1,3 @@
-use arc_swap::ArcSwap;
 use futures::prelude::*;
 use libp2p::swarm::SwarmEvent;
 use libp2p::Multiaddr;
@@ -12,7 +11,6 @@ use tracing::warn;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV4;
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
@@ -70,11 +68,6 @@ pub(crate) struct Actor {
     // Channels for the Actor's own life
     command_rx: mpsc::Receiver<NetworkActorCommand>,
     event_tx: mpsc::Sender<NetworkEvent>,
-
-    /// Smart pointer to the local (*i.e.*, this peer's) handshake. The smart
-    /// pointer allows the owner (the main loop) to update its value atomically
-    /// while reading happens without locks.
-    local_handshake: Arc<ArcSwap<HandshakeData>>,
 }
 
 impl Actor {
@@ -85,7 +78,6 @@ impl Actor {
     /// for handing off control over bidirectional streams to peer loops.
     pub fn new(
         local_key: libp2p::identity::Keypair,
-        local_handshake: Arc<ArcSwap<HandshakeData>>,
         peer_to_main_loop_tx: mpsc::Sender<PeerTaskToMain>,
         main_to_peer_broadcast: tokio::sync::broadcast::Sender<MainToPeerTask>,
         command_rx: mpsc::Receiver<NetworkActorCommand>,
@@ -110,7 +102,7 @@ impl Actor {
                 let local_peer_id = key.public().to_peer_id();
 
                 NetworkStack {
-                    gateway: StreamGateway::new(local_handshake.clone()),
+                    gateway: StreamGateway::new(global_state_lock.clone()),
                     identify: libp2p::identify::Behaviour::new(identify_config),
                     relay: relay_behaviour,
                     dcutr: libp2p::dcutr::Behaviour::new(local_peer_id),
@@ -121,7 +113,6 @@ impl Actor {
 
         Ok(Self {
             swarm,
-            local_handshake,
             peer_to_main_loop_tx,
             main_to_peer_broadcast,
             command_rx,
@@ -168,7 +159,7 @@ impl Actor {
     async fn handle_swarm_event(&mut self, event: SwarmEvent<NetworkStackEvent>) {
         match event {
             // StreamGateway successfully hijacked a stream.
-            SwarmEvent::Behaviour(NetworkStackEvent::PeerHandlerGateway(gateway_event)) => {
+            SwarmEvent::Behaviour(NetworkStackEvent::StreamGateway(gateway_event)) => {
                 let GatewayEvent::HandshakeReceived {
                     peer_id,
                     handshake,
@@ -258,9 +249,8 @@ impl Actor {
     /// 3. Upgrades the raw [`libp2p::Stream`] into a [`Framed`]
     ///    [`PeerMessage`](crate::protocol::peer::PeerMessage) stream using the
     ///    same codec bridge already in use for the legacy TCP stack.
-    /// 4. Calls the legacy [`PeerLoopHandler::run_wrapper`] method verbatim,
-    ///    handing over control of the connection to the established protocol
-    ///    logic.
+    /// 4. Calls the legacy [`PeerLoopHandler::run_wrapper`] method, handing
+    ///    over control of the connection to the established protocol logic.
     ///
     /// The task terminates automatically if the stream is closed or a shutdown
     /// signal is received from the main loop.

@@ -166,15 +166,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arc-swap"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51d03449bb8ca2cc2ef70869af31463d1ae5ccc8fa3e334b307203fbf815207e"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3313,7 +3304,6 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "arbitrary",
- "arc-swap",
  "arraystring",
  "assert2",
  "async-stream",

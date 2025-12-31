@@ -1,9 +1,7 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
-use arc_swap::ArcSwap;
 use libp2p::core::transport::PortUse;
 use libp2p::swarm::handler::ConnectionEvent;
 use libp2p::swarm::handler::ConnectionHandlerEvent;
@@ -19,9 +17,10 @@ use libp2p::swarm::ToSwarm;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 
-use crate::application::network::handshake_upgrade::HandshakeResult;
-use crate::application::network::handshake_upgrade::HandshakeUpgrade;
+use crate::application::network::handshake::HandshakeResult;
+use crate::application::network::handshake::HandshakeUpgrade;
 use crate::protocol::peer::handshake_data::HandshakeData;
+use crate::state::GlobalStateLock;
 
 /// Manages the lifecycle of one specific connection.
 ///
@@ -216,18 +215,27 @@ pub(crate) enum GatewayEvent {
 /// [`NetworkBehaviour`](libp2p::swarm::NetworkBehaviour), allowing it to be
 /// plugged directly into a libp2p [`Swarm`](libp2p::Swarm).
 pub(crate) struct StreamGateway {
-    /// Our node's identity to share during handshakes
-    local_handshake: Arc<ArcSwap<HandshakeData>>,
+    // Used for getting the handshake data
+    global_state: GlobalStateLock,
 
     events: VecDeque<ToSwarm<GatewayEvent, ()>>,
 }
 
 impl StreamGateway {
-    pub fn new(local_handshake: Arc<ArcSwap<HandshakeData>>) -> Self {
+    pub fn new(global_state: GlobalStateLock) -> Self {
         Self {
-            local_handshake,
+            global_state,
             events: VecDeque::new(),
         }
+    }
+
+    /// Get the handshake data for authentication a peer connection.
+    ///
+    /// Fetch the handshake data from the global state, and wrap async logic
+    /// in `spawn_blocking` so that this function can be called form synchronous
+    /// code (such as the implementation of NetworkBehaviour below).
+    fn handshake_data(&self) -> HandshakeData {
+        self.global_state.get_own_handshakedata_sync()
     }
 }
 
@@ -249,7 +257,7 @@ impl NetworkBehaviour for StreamGateway {
         _remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         Ok(GatewayHandler {
-            local_handshake: **self.local_handshake.load(),
+            local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
         })
     }
@@ -268,7 +276,7 @@ impl NetworkBehaviour for StreamGateway {
         _port_use: PortUse,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         Ok(GatewayHandler {
-            local_handshake: **self.local_handshake.load(),
+            local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
         })
     }
