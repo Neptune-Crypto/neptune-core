@@ -1,5 +1,7 @@
+use arc_swap::ArcSwap;
 use futures::prelude::*;
 use libp2p::swarm::SwarmEvent;
+use libp2p::Multiaddr;
 use libp2p::PeerId;
 use rand::Rng;
 use tokio::sync::mpsc;
@@ -10,6 +12,8 @@ use tracing::warn;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV4;
+use std::sync::Arc;
+use std::time::Duration;
 
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
@@ -18,6 +22,7 @@ use crate::application::network::bridge::bridge_libp2p_stream;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
 use crate::application::network::gateway::GatewayEvent;
+use crate::application::network::gateway::StreamGateway;
 use crate::application::network::stack::NetworkStack;
 use crate::application::network::stack::NetworkStackEvent;
 use crate::protocol::peer::handshake_data::HandshakeData;
@@ -65,9 +70,80 @@ pub(crate) struct Actor {
     // Channels for the Actor's own life
     command_rx: mpsc::Receiver<NetworkActorCommand>,
     event_tx: mpsc::Sender<NetworkEvent>,
+
+    /// Smart pointer to the local (*i.e.*, this peer's) handshake. The smart
+    /// pointer allows the owner (the main loop) to update its value atomically
+    /// while reading happens without locks.
+    local_handshake: Arc<ArcSwap<HandshakeData>>,
 }
 
 impl Actor {
+    /// Initialize a new libp2p Actor.
+    ///
+    /// This constructor sets up the underlying libp2p Swarm with TCP transport,
+    /// Noise encryption, and Yamux multiplexing, alongside the StreamGateway
+    /// for handing off control over bidirectional streams to peer loops.
+    pub fn new(
+        local_key: libp2p::identity::Keypair,
+        local_handshake: Arc<ArcSwap<HandshakeData>>,
+        peer_to_main_loop_tx: mpsc::Sender<PeerTaskToMain>,
+        main_to_peer_broadcast: tokio::sync::broadcast::Sender<MainToPeerTask>,
+        command_rx: mpsc::Receiver<NetworkActorCommand>,
+        event_tx: mpsc::Sender<NetworkEvent>,
+        global_state_lock: GlobalStateLock,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        // Create the Identify config (required for the NetworkStack)
+        let identify_config = libp2p::identify::Config::new(
+            "/neptune/identify/1.0".into(), // Protocol version
+            local_key.public(),
+        );
+
+        let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
+            .with_tokio()
+            .with_tcp(
+                libp2p::tcp::Config::default(),
+                libp2p::noise::Config::new,
+                libp2p::yamux::Config::default,
+            )?
+            .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)?
+            .with_behaviour(|key, relay_behaviour| {
+                let local_peer_id = key.public().to_peer_id();
+
+                NetworkStack {
+                    gateway: StreamGateway::new(local_handshake.clone()),
+                    identify: libp2p::identify::Behaviour::new(identify_config),
+                    relay: relay_behaviour,
+                    dcutr: libp2p::dcutr::Behaviour::new(local_peer_id),
+                }
+            })?
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
+            .build();
+
+        Ok(Self {
+            swarm,
+            local_handshake,
+            peer_to_main_loop_tx,
+            main_to_peer_broadcast,
+            command_rx,
+            event_tx,
+            global_state_lock,
+        })
+    }
+
+    /// Start listening for incoming libp2p connections.
+    ///
+    /// This informs the underlying Swarm to bind to the provided [`Multiaddr`].
+    /// Incoming connections will automatically undergo the handshake defined in
+    /// the [`StreamGateway`].
+    fn listen(&mut self, addr: Multiaddr) -> Result<(), libp2p::TransportError<std::io::Error>> {
+        let listener_id = self.swarm.listen_on(addr.clone())?;
+
+        // Log or trace the listen event for debugging the bridge
+        tracing::info!(%addr, %listener_id, "libp2p stack listening");
+
+        Ok(())
+    }
+
     /// The event loop for the Network Actor.
     ///
     /// Drives the libp2p Swarm and handles incoming connection handshakes.
@@ -148,6 +224,16 @@ impl Actor {
                 // TCP/transport logic.
                 if let Err(e) = self.swarm.dial(addr.clone()) {
                     warn!("Failed to dial {}: {:?}", addr, e);
+                }
+            }
+
+            NetworkActorCommand::Listen(addr) => {
+                tracing::info!(%addr, "Received command to listen");
+                if let Err(e) = self.listen(addr.clone()) {
+                    tracing::error!(%addr, error = %e, "Failed to start listening");
+                    // Optional: notify main loop of failure via event_tx
+                } else {
+                    tracing::info!(%addr, "Successfully bound to address");
                 }
             }
 

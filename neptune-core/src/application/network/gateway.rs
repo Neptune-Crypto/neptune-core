@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
+use arc_swap::ArcSwap;
 use libp2p::core::transport::PortUse;
 use libp2p::swarm::handler::ConnectionEvent;
 use libp2p::swarm::handler::ConnectionHandlerEvent;
@@ -215,15 +217,15 @@ pub(crate) enum GatewayEvent {
 /// plugged directly into a libp2p [`Swarm`](libp2p::Swarm).
 pub(crate) struct StreamGateway {
     /// Our node's identity to share during handshakes
-    local_handshake: HandshakeData,
+    local_handshake: Arc<ArcSwap<HandshakeData>>,
 
     events: VecDeque<ToSwarm<GatewayEvent, ()>>,
 }
 
 impl StreamGateway {
-    pub fn new(own_handshake: HandshakeData) -> Self {
+    pub fn new(local_handshake: Arc<ArcSwap<HandshakeData>>) -> Self {
         Self {
-            local_handshake: own_handshake,
+            local_handshake,
             events: VecDeque::new(),
         }
     }
@@ -247,7 +249,7 @@ impl NetworkBehaviour for StreamGateway {
         _remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         Ok(GatewayHandler {
-            local_handshake: self.local_handshake,
+            local_handshake: **self.local_handshake.load(),
             pending_events: VecDeque::new(),
         })
     }
@@ -266,7 +268,7 @@ impl NetworkBehaviour for StreamGateway {
         _port_use: PortUse,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         Ok(GatewayHandler {
-            local_handshake: self.local_handshake,
+            local_handshake: **self.local_handshake.load(),
             pending_events: VecDeque::new(),
         })
     }

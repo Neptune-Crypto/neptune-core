@@ -4,8 +4,12 @@ use libp2p::PeerId;
 
 /// Commands from Application -> Network
 pub enum NetworkActorCommand {
-    /// Instructs the libp2p swarm to dial a specific multiaddress.
+    /// Instructs the libp2p swarm to dial a specific [`Multiaddr`].
     Dial(Multiaddr),
+
+    /// Instructs the Actor to open dialing endpoint on the given [`Multiaddr`]
+    /// for incoming connections.
+    Listen(Multiaddr),
 
     /// Signals the Actor to begin a graceful shutdown of all network tasks.
     Shutdown,
