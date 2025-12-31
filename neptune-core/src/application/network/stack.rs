@@ -53,7 +53,7 @@ pub(crate) struct NetworkStack {
     pub(crate) dcutr: libp2p::dcutr::Behaviour,
 
     /// Custom "Hijacker" that handles the handshake and turns it into a stream.
-    pub peer_handler_gateway: StreamGateway,
+    pub(crate) gateway: StreamGateway,
 }
 
 /// Unified event type for all protocols running within the libp2p stack.
