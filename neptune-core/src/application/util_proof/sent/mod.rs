@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 use tasm_lib::{
     field as rustfield,
-    memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
+    memory::{FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS, encode_to_memory},
     prelude::{Digest, Library, TasmObject, TasmStruct},
     triton_vm::{
         isa::triton_asm,
@@ -25,12 +25,12 @@ use tasm_lib::{
         proof::Claim,
         vm::{NonDeterminism, PublicInput},
     },
-    twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator,
+    twenty_first::{prelude::MmrMembershipProof, util_types::mmr::mmr_accumulator::MmrAccumulator},
 };
 
 use crate::{
     api::export::{NativeCurrencyAmount, Utxo},
-    protocol::proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
+    protocol::proof_abstractions::{SecretWitness, tasm::program::ConsensusProgram},
     util_types::mutator_set::ms_membership_proof::MsMembershipProof,
 };
 
@@ -38,8 +38,7 @@ use crate::{
 struct WitnessMemory {
     /// AOCL for the block
     aocl: MmrAccumulator,
-    // another difference from <../reserves>
-    // membership_proof: MsMembershipProof,
+    membership_proof: MmrMembershipProof,
     sender_randomness: Digest,
     aocl_leaf_index: u64,
     utxo: Utxo,
@@ -110,7 +109,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
     let rustfield_utxodigest = rustfield!(WitnessMemory::utxo_digest);
     let rustfield_aoclleafindex = rustfield!(MsMembershipProof::aocl_leaf_index);
 
-    let payload = triton_asm! {
+    let main = triton_asm! {
         /* pasted from <../reserves>
         ============== */
         // _
@@ -146,7 +145,6 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
         /* fill `Claim::output` with `sender_randomness_digest`
-
         ## this segment diverges from the pasted code
         *it only affects the output sequence* */
         push 0
@@ -166,10 +164,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // _ *w
         {&rustfield_utxo}
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
-    };
 
-    let main = triton_asm! {
-        // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
         read_mem 1
         addi 2
         // _ utxo_size *utxo+1
@@ -210,8 +205,8 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        {&WitnessMemory::get_field("auth_path_aocl")}
-        {&WitnessMemory::get_field("authentication_path")}
+        {&WitnessMemory::get_field("membership_proof")}
+        {&MmrMembershipProof::get_field("authentication_path")}
         // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment] *auth_path
 
         call {lib_mmr_verify}
@@ -239,26 +234,28 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // _ *coins
         read_mem 1 addi 2
         // _ SI_coins *coins[0]
-        push 0 swap
+        push 0 swap 1
         // _ SI_coins 0 *coins[0]
+        push 0 push 0 push 0 push 0
+        // _ SI_coins 0 *coins[0] [amount]
+        push 0 push 0 push 0 push 0
+        // _ SI_coins 0 *coins[0] [amount] [timelocked_amount]
+        push 0 push 0 push 0 push 0
+        // _ SI_coins 0 *coins[0] [amount] [timelocked_amount] [utxo_amount]
         push 0
-        push 0
-        push 0
-        push 0
-        // _ SI_coins 0 *coins[0] amount timelocked_amount utxo_amount utxo_is_timelocked
+        // _ SI_coins 0 *coins[0] [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked
         call {lib_add_all_amounts_and_check_time_lock}
-        // _ num_coins num_coins *eof amount timelocked_amount utxo_amount' utxo_is_timelocked'
+        // _ num_coins num_coins *eof [amount] [timelocked_amount] [utxo_amount'] utxo_is_timelocked'
 
         /* ____________________________
         finish of the code pasted from <reserves.rs> */
 
         pop 1 write_io 4
-        // num_coins num_coins *eof amount timelocked_amount
+        // num_coins num_coins *eof [amount] [timelocked_amount]
     };
 
     let imports = library.all_imports();
     let code = triton_asm!(
-        {&payload}
         {&main}
         {&imports}
     );
@@ -281,6 +278,7 @@ pub fn new(
     witness_aoclleafindex: u64,
     witness_utxo: Utxo,
     witness_utxodigest: Digest,
+    witness_membershipproof: MmrMembershipProof,
 ) -> The {
     The(
         WitnessMemory {
@@ -290,6 +288,7 @@ pub fn new(
             utxo_digest: witness_utxodigest,
             sender_randomness: witness_senderrandomness,
             aocl_leaf_index: witness_aoclleafindex,
+            membership_proof: witness_membershipproof,
         },
         c,
     )
