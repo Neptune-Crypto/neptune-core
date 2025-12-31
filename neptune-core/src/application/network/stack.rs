@@ -67,7 +67,7 @@ pub enum NetworkStackEvent {
     ///
     /// This is the primary event used to "hijack" a connection and
     /// transition it into a peer loop.
-    PeerHandlerGateway(Box<GatewayEvent>),
+    StreamGateway(Box<GatewayEvent>),
 
     /// Signals an update from the libp2p Identify protocol.
     ///
@@ -90,10 +90,10 @@ pub enum NetworkStackEvent {
 }
 
 // These `From` impls are required by the derive macro `NetworkBehaviour` to map
-// child events into the `NetworkStackEvent`` enum.
+// child events into the `NetworkStackEvent` enum.
 impl From<GatewayEvent> for NetworkStackEvent {
     fn from(event: GatewayEvent) -> Self {
-        Self::PeerHandlerGateway(Box::new(event))
+        Self::StreamGateway(Box::new(event))
     }
 }
 

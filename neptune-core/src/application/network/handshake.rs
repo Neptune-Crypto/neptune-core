@@ -147,7 +147,10 @@ pub(crate) enum HandshakeResult {
     ///
     /// This variant carries both the peer's handshake and the communication
     /// channel itself, ensuring they are never separated.
-    Success(HandshakeData, Stream),
+    Success {
+        handshake: HandshakeData,
+        stream: Stream,
+    },
 }
 
 #[cfg(test)]

@@ -173,6 +173,10 @@ pub struct GlobalStateLock {
     // for broadcasting Tx as well as the RPC API.
     // (we might consider renaming the channel.)
     rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
+
+    /// A cache for the synchronous handshake getter, used as a fallback when
+    /// syncly acquiring the read lock on `global_state_lock` fails.
+    handshake_cache: Arc<std::sync::RwLock<HandshakeData>>,
 }
 
 impl GlobalStateLock {
@@ -181,6 +185,8 @@ impl GlobalStateLock {
         rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
     ) -> Self {
         let cli = global_state.cli.clone();
+        let initial_handshake_cache = global_state.get_own_handshakedata();
+        let handshake_cache = Arc::new(std::sync::RwLock::new(initial_handshake_cache));
         let global_state_lock = sync_tokio::AtomicRw::from((
             global_state,
             Some("GlobalState"),
@@ -191,7 +197,44 @@ impl GlobalStateLock {
             global_state_lock,
             cli,
             rpc_server_to_main_tx,
+            handshake_cache,
         }
+    }
+
+    /// Fetches handshake data synchronously.
+    ///
+    /// Tries to update the cache from the async mutex via `try_lock`. If
+    /// successful, update the cache. If busy, returns the cached version
+    /// immediately.
+    pub fn get_own_handshakedata_sync(&self) -> HandshakeData {
+        // Happy path: we obtain the read lock on global state.
+        if let Ok(global_state) = self.global_state_lock.try_lock_guard() {
+            let mut handshake_data = global_state.get_own_handshakedata();
+
+            // Update the cache.
+            // Note about concurrency: `write()` only blocks if another thread
+            // is currently writing (which should be rare).
+            if let Ok(mut cache) = self.handshake_cache.write() {
+                *cache = handshake_data.clone();
+            }
+
+            handshake_data.timestamp = SystemTime::now();
+            return handshake_data;
+        }
+
+        // Fallback: Read from cache.
+        // Note about concurrency: `read()` allows multiple concurrent readers.
+        // However, `read()` blocks if the write lock is currently being held.
+        // Besides being rare, this event implies that some other thread also
+        // executing `get_own_handshakedata_sync` simultaneously *did* manage to
+        // get the `global_state` read lock. Doubly rare. In this event, the
+        // lock is released (and `read()` allowed to continue) as soon as the
+        // new `handshake_data` is stored in the cache -- a matter of
+        // microseconds at most.
+        let mut handshake_data = self.handshake_cache.read().expect("Lock poisoned").clone();
+
+        handshake_data.timestamp = SystemTime::now();
+        handshake_data
     }
 
     // check if mining

@@ -272,6 +272,23 @@ impl<T> AtomicRw<T> {
         ))
     }
 
+    /// Attempt to acquire the read lock immediately,
+    ///
+    /// If the lock cannot be acquired without waiting, an error is returned.
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
+    pub fn try_lock_guard(&self) -> Result<AtomicRwReadGuard<'_, T>, TryLockError> {
+        self.try_acquire_read_cb();
+
+        let try_acquire_at = now();
+        let guard = self.inner.try_read()?;
+
+        Ok(AtomicRwReadGuard::new(
+            guard,
+            &self.lock_callback_info,
+            try_acquire_at,
+        ))
+    }
+
     /// Immutably access the data of type `T` in a closure and possibly return a result of type `R`
     ///
     /// # Examples
