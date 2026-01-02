@@ -36,7 +36,7 @@ use crate::{
 
 #[derive(TasmObject, tasm_lib::triton_vm::prelude::BFieldCodec, Debug)]
 struct WitnessMemory {
-    /// AOCL for the block
+    /// AOCL accumulator of the block
     aocl: MmrAccumulator,
     membership_proof: MmrMembershipProof,
     sender_randomness: Digest,
@@ -53,8 +53,8 @@ pub fn claim_inputs(
 ) -> Claim {
     c.with_input(
         [
-            [release_date.0].as_slice(),
             receiver_digest.reversed().values().as_slice(),
+            [release_date.0].as_slice(),
         ]
         .concat(),
     )
@@ -81,6 +81,10 @@ pub fn claim_outputs(
 
 fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
     let u64_stack_size: u32 = tasm_lib::prelude::DataType::U64
+        .stack_size()
+        .try_into()
+        .unwrap();
+    let u128_stack_size: u32 = tasm_lib::prelude::DataType::U128
         .stack_size()
         .try_into()
         .unwrap();
@@ -116,8 +120,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxo}
         {&Utxo::get_field("lock_script_hash")}
-        read_mem 5
-        pop 1
+        addi 4 read_mem 5 pop 1
         // _ [lock_script_digest]
         write_io 5
         // _
@@ -139,9 +142,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         // _ *w
         {&rustfield_senderrandomness} // omits `{&rustfield_membershipproof}` from <../reserves>
-        addi {Digest::LEN - 1}
-        read_mem {Digest::LEN}
-        pop 1
+        addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
         /* fill `Claim::output` with `sender_randomness_digest`
@@ -165,18 +166,17 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         {&rustfield_utxo}
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
 
-        read_mem 1
-        addi 2
-        // _ utxo_size *utxo+1
+        addi 0 read_mem 1 addi 1
+        // _ utxo_size *utxo
         swap 1
-        // _ *utxo+1 utxo_size
+        // _ *utxo utxo_size
         call {lib_hash_varlen}
         hint utxo_hash = stack[0..5]
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxodigest}
-        read_mem 5 pop 1
+        addi 4 read_mem 5 pop 1
         assert_vector
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
@@ -187,14 +187,12 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         dup 6 {&MmrAccumulator::get_field("leaf_count")}
         // _ *aocl *aocl_peaks [canonical_commitment] *num_leafs
 
-        read_mem {u64_stack_size - 1} pop 1
+        addi {u64_stack_size - 1} read_mem {u64_stack_size} pop 1
         // _ *aocl *aocl_peaks [canonical_commitment] [num_leafs]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_aoclleafindex} // omits `{&rustfield_membershipproof}` from <../reserves>
-        addi {u64_stack_size - 1}
-        read_mem {u64_stack_size}
-        pop 1
+        addi {u64_stack_size - 1} read_mem {u64_stack_size} pop 1
         // _ *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
 
         pick {u64_stack_size * 2 + 5}
@@ -220,6 +218,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         ============== */
         call {lib_bagpeaks}
         write_io 5
+        // _ 
 
         read_io 1
         // _ release_date
@@ -227,23 +226,25 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         push {release_date.write_address()}
         write_mem 1
         pop 1
+        // _
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxo}
         {&Utxo::get_field("coins")}
         // _ *coins
-        read_mem 1 addi 2
-        // _ SI_coins *coins[0]
+        addi 0 read_mem 1 addi 1
+        addi 1
+        // _ SI_coins *coins[0]_si
         push 0 swap 1
-        // _ SI_coins 0 *coins[0]
+        // _ SI_coins 0 *coins[0]_si
         push 0 push 0 push 0 push 0
-        // _ SI_coins 0 *coins[0] [amount]
+        // _ SI_coins 0 *coins[0]_si [amount]
         push 0 push 0 push 0 push 0
-        // _ SI_coins 0 *coins[0] [amount] [timelocked_amount]
+        // _ SI_coins 0 *coins[0]_si [amount] [timelocked_amount]
         push 0 push 0 push 0 push 0
-        // _ SI_coins 0 *coins[0] [amount] [timelocked_amount] [utxo_amount]
+        // _ SI_coins 0 *coins[0]_si [amount] [timelocked_amount] [utxo_amount]
         push 0
-        // _ SI_coins 0 *coins[0] [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked
+        // _ SI_coins 0 *coins[0]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked
         call {lib_add_all_amounts_and_check_time_lock}
         // _ num_coins num_coins *eof [amount] [timelocked_amount] [utxo_amount'] utxo_is_timelocked'
 

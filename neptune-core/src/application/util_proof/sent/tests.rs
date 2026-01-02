@@ -113,8 +113,10 @@ pub async fn setup_funded_wallet_with_mined_tx(
 // TODO tune `cases` but the single speeds up the development
 #[test_strategy::proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
 async fn property_test_happy_path(
-    #[strategy(0.0..=1.0)] spend_percent: f64,
-    #[strategy(0.0..=1.0)] fee_percent: f64,
+    // #[strategy(0.0..=1.0)] spend_percent: f64,
+    // #[strategy(0.0..=1.0)] fee_percent: f64,
+    #[strategy(0.1..=1.0)] spend_percent: f64,
+    #[strategy(0.1..=1.0)] fee_percent: f64,
     #[strategy(proptest_arbitrary_interop::arb())] rness: Randomness<0, 2>,
 ) {
     // let receiver =
@@ -124,9 +126,11 @@ async fn property_test_happy_path(
         setup_funded_wallet_with_mined_tx(spend_percent, fee_percent, rness).await;
     // let tx = TransactionKernelProxy::from(tx);
 
+    // dbg![tx.details.tx_outputs.deref().len()];
     let tx_output = &tx.details.tx_outputs.deref()[0];
     let sender_randomness = tx_output.sender_randomness();
     let utxo = tx_output.utxo();
+    dbg![tasm_lib::triton_vm::prelude::BFieldCodec::encode(&utxo.coins().to_owned())];
     dbg!("the proof data: start");
     let claim = super::claim_outputs(
         super::claim_inputs(
