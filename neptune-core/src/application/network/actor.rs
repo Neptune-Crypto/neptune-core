@@ -4,13 +4,9 @@ use libp2p::Multiaddr;
 use libp2p::PeerId;
 use rand::Rng;
 use tokio::sync::mpsc;
-use tracing::error;
-use tracing::info;
-use tracing::warn;
+use tokio::task::JoinHandle;
 
-use std::net::Ipv4Addr;
-use std::net::SocketAddr;
-use std::net::SocketAddrV4;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
@@ -54,7 +50,7 @@ use crate::state::GlobalStateLock;
 /// be bypassed or run in parallel with legacy network components. It acts as a
 /// "feeder" that produces verified peer connections for the main loop to track
 /// or for dedicated tasks to manage.
-pub(crate) struct Actor {
+pub(crate) struct NetworkActor {
     /// The [`Swarm`](libp2p::Swarm) driving the [`NetworkStack`], configured
     /// with the Neptune [`StreamGateway`](super::gateway::StreamGateway).
     swarm: libp2p::Swarm<NetworkStack>,
@@ -68,9 +64,16 @@ pub(crate) struct Actor {
     // Channels for the Actor's own life
     command_rx: mpsc::Receiver<NetworkActorCommand>,
     event_tx: mpsc::Sender<NetworkEvent>,
+
+    // Lookup table to find the addresses of peers
+    address_map: HashMap<PeerId, Multiaddr>,
 }
 
-impl Actor {
+impl NetworkActor {
+    /// Whether to keep the Actor's event loop running (true) or to shut it down
+    /// gracefully (false).
+    const KEEP_ALIVE: bool = true;
+
     /// Initialize a new libp2p Actor.
     ///
     /// This constructor sets up the underlying libp2p Swarm with TCP transport,
@@ -118,6 +121,7 @@ impl Actor {
             command_rx,
             event_tx,
             global_state_lock,
+            address_map: HashMap::new(),
         })
     }
 
@@ -138,25 +142,41 @@ impl Actor {
     /// The event loop for the Network Actor.
     ///
     /// Drives the libp2p Swarm and handles incoming connection handshakes.
-    pub(crate) async fn run(mut self) {
+    pub(crate) async fn run(mut self) -> Result<(), ActorError> {
         loop {
             tokio::select! {
                 // Handle libp2p Swarm Events.
                 event = self.swarm.select_next_some() => {
-                    self.handle_swarm_event(event).await;
+                    self.handle_swarm_event(event).await?;
                 }
 
                 // Handle Commands from the Main Loop destined for the Actor (so
                 // not for peer loops), such as dialing a Multiaddress.
-                Some(command) = self.command_rx.recv() => {
-                    self.handle_command(command);
+                maybe_cmd = self.command_rx.recv() => {
+                    match maybe_cmd {
+                        Some(cmd) => {
+                            if self.handle_command(cmd)? != Self::KEEP_ALIVE {
+                                break;
+                            }
+                        },
+                        None => {
+                            // The sender was dropped. Shutdown time!
+                            tracing::warn!("Sender (controlled by main loop) was dropped; initiating irregular shut down of NetworkActor.");
+                            return Err(ActorError::ChannelClosed);
+                        }
+                    }
                 }
             }
         }
+
+        Ok(())
     }
 
     /// Handle an event coming from the libp2p Swarm.
-    async fn handle_swarm_event(&mut self, event: SwarmEvent<NetworkStackEvent>) {
+    async fn handle_swarm_event(
+        &mut self,
+        event: SwarmEvent<NetworkStackEvent>,
+    ) -> Result<(), ActorError> {
         match event {
             // StreamGateway successfully hijacked a stream.
             SwarmEvent::Behaviour(NetworkStackEvent::StreamGateway(gateway_event)) => {
@@ -166,10 +186,19 @@ impl Actor {
                     stream,
                 } = *gateway_event;
 
-                info!(peer = %peer_id, "New peer stream hijacked via StreamGateway");
+                tracing::info!(peer = %peer_id, "New peer stream hijacked via StreamGateway");
 
                 // Generate a new the receiver channel for this specific peer.
                 let from_main_rx = self.main_to_peer_broadcast.subscribe();
+
+                // Fetch address from carefully maintained address map.
+                let Some(address) = self.address_map.get(&peer_id).cloned() else {
+                    return Err(ActorError::NoAddressForPeer(peer_id));
+                };
+
+                // Spawn the legacy loop with the hijacked stream.
+                let loop_handle =
+                    self.spawn_peer_loop(peer_id, address.clone(), handshake, stream, from_main_rx);
 
                 // Notify the rest of the application that a peer is ready.
                 let _ = self
@@ -177,44 +206,69 @@ impl Actor {
                     .send(NetworkEvent::PeerConnected {
                         peer_id,
                         handshake: Box::new(handshake),
+                        address,
+                        loop_handle,
                     })
                     .await;
-
-                // Spawn the legacy loop with the hijacked stream.
-                self.spawn_peer_loop(peer_id, handshake, stream, from_main_rx);
             }
 
             SwarmEvent::NewListenAddr { address, .. } => {
-                info!("Node is listening on {:?}", address);
+                tracing::info!("Node is listening on {:?}", address);
             }
 
             SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-                warn!(peer = %peer_id, "Connection closed: {:?}", cause);
+                if let Some(address) = self.address_map.remove(&peer_id) {
+                    tracing::info!("Connection to peer {peer_id} at {address} closed.");
+                } else {
+                    tracing::warn!(peer = %peer_id, "Connection closed abruptly: {:?}", cause);
+                }
             }
 
             // Explicitly handle Dial failures to clean up state
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                warn!(peer = ?peer_id, "Failed to connect: {:?}", error);
+                tracing::warn!(peer = ?peer_id, "Failed to connect: {:?}", error);
             }
 
             // Handle listener errors to prevent the node from failing silently
             SwarmEvent::ListenerError { listener_id, error } => {
-                error!(?listener_id, "Listener failed: {:?}", error);
+                tracing::error!(?listener_id, "Listener failed: {:?}", error);
+            }
+
+            // Handle new connection
+            SwarmEvent::ConnectionEstablished {
+                peer_id, endpoint, ..
+            } => {
+                let address = endpoint.get_remote_address().clone();
+                tracing::info!("Established new connection with {peer_id} at {address}.");
+                self.address_map.insert(peer_id, address.clone());
             }
 
             _ => {}
         }
+
+        Ok(())
     }
 
-    /// Handle messages from the Main Loop.
-    fn handle_command(&mut self, command: NetworkActorCommand) {
+    /// Handle messages (commands) from the Main Loop.
+    ///
+    /// # Return Value
+    ///
+    ///  - Err(_) if something went wrong badly enough to warrant the
+    ///    application (or at least the libp2p Actor) to shut down immediately.
+    ///  - Ok(Self::KEEP_ALIVE) to keep the event loop running.
+    ///  - Ok(!Self::KEEP_ALIVE) to gracefully shut down the event loop.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "function signature anticipates more complex, fallible commands"
+    )]
+    fn handle_command(&mut self, command: NetworkActorCommand) -> Result<bool, ActorError> {
         match command {
             NetworkActorCommand::Dial(addr) => {
-                info!("Manual dial requested for address: {}", addr);
+                tracing::info!("Manual dial requested for address: {}", addr);
                 // We use the swarm's dial method. libp2p handles the underlying
                 // TCP/transport logic.
                 if let Err(e) = self.swarm.dial(addr.clone()) {
-                    warn!("Failed to dial {}: {:?}", addr, e);
+                    tracing::warn!("Failed to dial {}: {:?}", addr, e);
                 }
             }
 
@@ -229,13 +283,14 @@ impl Actor {
             }
 
             NetworkActorCommand::Shutdown => {
-                info!("Network Actor shutting down Swarm...");
+                tracing::info!("Network Actor shutting down Swarm...");
                 // Do not touch the peer loops here, just stop the Actor's own
                 // loop.
-                // Consequently, we cannot return or set a flag here; that will
-                // drop the Swarm, which closes all underlying sockets.
+                return Ok(!Self::KEEP_ALIVE);
             }
         }
+
+        Ok(Self::KEEP_ALIVE)
     }
 
     /// Spawns a long-lived Tokio task to manage the lifecycle of a single peer
@@ -257,24 +312,14 @@ impl Actor {
     fn spawn_peer_loop(
         &self,
         peer_id: PeerId,
+        peer_address: Multiaddr,
         handshake: HandshakeData,
         raw_stream: libp2p::Stream,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
-    ) {
+    ) -> JoinHandle<()> {
         // Counts the number of hops between the node and peers it is connected
         // to. We probably don't need this for the libp2p wrapper.
         const DISTANCE_TO_CONNECTED_PEER: u8 = 1u8;
-
-        // We need a `SocketAddr` identify the peer with as far as
-        // `PeerLoopHandler` goes. The proper way to fix this is to modify that
-        // to take `PeerId` or `Multiaddress` instead, but for now we want to
-        // write a clean wrapper that isolates all changes to one new module.
-        let mut bytes = [0u8; 4];
-        bytes.copy_from_slice(&peer_id.to_bytes()[2..6]);
-        let peer_address = SocketAddr::V4(SocketAddrV4::new(
-            Ipv4Addr::from(bytes),
-            0, // Port doesn't matter for identification
-        ));
 
         // Create immutable (across the lifetime of the connection) peer state.
         // This variable needs to be mutable because of efficient pointer reuse
@@ -282,6 +327,7 @@ impl Actor {
         let mut peer_loop_handler = PeerLoopHandler::new(
             self.peer_to_main_loop_tx.clone(),
             self.global_state_lock.clone(),
+            peer_id,
             peer_address,
             handshake,
             rand::rng().random_bool(0.5f64),
@@ -293,12 +339,21 @@ impl Actor {
         tokio::spawn(async move {
             // Because 'peer_stream' implements Sink + Stream + Unpin,
             // and we have the broadcast receiver, this just works.
-            if let Err(e) = peer_loop_handler
+            peer_loop_handler
                 .run_wrapper(peer_stream, from_main_rx)
                 .await
-            {
-                tracing::warn!(peer = %peer_id, "Peer loop exited with error: {:?}", e);
-            }
-        });
+                .unwrap_or_else(|e| {
+                    tracing::warn!(peer = %peer_id, "Peer loop exited with error: {:?}", e);
+                })
+        })
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ActorError {
+    #[error("Network channel closed unexpectedly")]
+    ChannelClosed,
+
+    #[error("No address found for peer {0} in address map")]
+    NoAddressForPeer(PeerId),
 }

@@ -131,7 +131,7 @@ impl ConnectionHandler for GatewayHandler {
                 // We move the result into the queue so 'poll' can find it.
                 self.pending_events
                     .push_back(ConnectionHandlerEvent::NotifyBehaviour(
-                        HandshakeResult::Success(handshake, stream),
+                        HandshakeResult::Success { handshake, stream },
                     ));
             }
 
@@ -144,7 +144,7 @@ impl ConnectionHandler for GatewayHandler {
                 // We move the result into the queue so 'poll' can find it.
                 self.pending_events
                     .push_back(ConnectionHandlerEvent::NotifyBehaviour(
-                        HandshakeResult::Success(handshake, stream),
+                        HandshakeResult::Success { handshake, stream },
                     ));
             }
 
@@ -272,7 +272,7 @@ impl NetworkBehaviour for StreamGateway {
         _connection_id: ConnectionId,
         _peer: PeerId,
         _addr: &Multiaddr,
-        _role_override: libp2p::core::Endpoint,
+        _endpoint: libp2p::core::Endpoint,
         _port_use: PortUse,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         Ok(GatewayHandler {
@@ -305,7 +305,7 @@ impl NetworkBehaviour for StreamGateway {
         // variant so we might as well use if-let; but when someone adds new
         // variants we want to force them to add a case here.
         match event {
-            HandshakeResult::Success(handshake, stream) => {
+            HandshakeResult::Success { handshake, stream } => {
                 // This is the "Hijack" point.
                 self.events
                     .push_back(ToSwarm::GenerateEvent(GatewayEvent::HandshakeReceived {

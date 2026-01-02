@@ -1,4 +1,6 @@
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::num::NonZero;
 use std::ops::RangeInclusive;
@@ -11,6 +13,7 @@ use clap::builder::RangedI64ValueParser;
 use clap::builder::TypedValueParser;
 use clap::Parser;
 use itertools::Itertools;
+use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use num_traits::Zero;
 use sysinfo::System;
@@ -345,7 +348,7 @@ pub struct Args {
     #[clap(long, default_value = "1G", value_name = "SIZE")]
     pub(crate) max_mempool_size: ByteSize,
 
-    /// Port on which to listen for peer connections.
+    /// Port on which to listen for standard (AKA. legacy) TCP peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
     pub peer_port: u16,
 
@@ -353,7 +356,16 @@ pub struct Args {
     #[clap(long, default_value = "9799", value_name = "PORT")]
     pub rpc_port: u16,
 
-    /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
+    /// Port on which to listen for libp2p QUIC peer connections.
+    #[clap(long, default_value = "9800", value_name = "PORT")]
+    pub libp2p_quic: u16,
+
+    /// Port on which to listen for libp2p TCP peer connections.
+    #[clap(long, default_value = "9801", value_name = "PORT")]
+    pub libp2p_tcp: u16,
+
+    /// IP on which to listen for peer connections. Will default to all network
+    /// interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
     pub peer_listen_addr: IpAddr,
 
@@ -742,11 +754,23 @@ impl Args {
     /// Check if block proposal should be accepted from this IP address.
     pub(crate) fn accept_block_proposal_from(
         &self,
-        ip_address: IpAddr,
+        address: &Multiaddr,
     ) -> Result<(), BlockProposalRejectError> {
         if self.ignore_foreign_compositions {
             return Err(BlockProposalRejectError::IgnoreAllForeign);
         }
+        if self.whitelisted_composers.is_empty() {
+            return Ok(());
+        }
+
+        let ip_address = address
+            .iter()
+            .find_map(|proto| match proto {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .ok_or(BlockProposalRejectError::NotWhiteListed)?;
 
         let ip_address = match ip_address {
             IpAddr::V4(_) => ip_address,
@@ -755,9 +779,7 @@ impl Args {
                 None => ip_address,
             },
         };
-        if !self.whitelisted_composers.is_empty()
-            && !self.whitelisted_composers.contains(&ip_address)
-        {
+        if !self.whitelisted_composers.contains(&ip_address) {
             return Err(BlockProposalRejectError::NotWhiteListed);
         }
 
@@ -830,6 +852,58 @@ impl Args {
             // could be set here too though.
             TransactionProofQuality::SingleProof => true,
         }
+    }
+
+    /// Generates the set of local addresses the node should bind to.
+    ///
+    /// This method expands [`Self::peer_listen_addr`] into a list of
+    /// [`Multiaddr`] strings covering both TCP and QUIC transports.
+    ///
+    /// ### Protocol Expansion
+    ///
+    /// - If [`Self::peer_listen_addr`] is set to the unspecified address
+    ///   (`::` or `0.0.0.0`), this returns addresses for **both** IPv4 and IPv6
+    ///   interfaces to ensure maximum reachability.
+    /// - For each IP, it generates a TCP multiaddr on
+    ///   [`libp2p_tcp`](libp2p::tcp) and a QUIC-v1 multiaddr on
+    ///   [`libp2p_quic`](libp2p::quic).
+    ///
+    /// This list specifically excludes [`Self::peer_port`] (Legacy TCP), as
+    /// that port is managed by the legacy networking stack and should not be
+    /// bound by the libp2p [`Swarm`](libp2p::Swarm).
+    ///
+    /// # Return Value
+    ///
+    /// A `Vec<Multiaddr>` in the format:
+    /// - `/ip4/<addr>/tcp/<port>`
+    /// - `/ip4/<addr>/udp/<port>/quic-v1`
+    pub fn own_listen_addresses(&self) -> Vec<Multiaddr> {
+        let mut addrs = Vec::new();
+
+        // Determine if we need to expand "::" into both 0.0.0.0 and ::
+        let ips = if self.peer_listen_addr.is_unspecified() {
+            vec![
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            ]
+        } else {
+            vec![self.peer_listen_addr]
+        };
+
+        for ip in ips {
+            // Add TCP Multiaddr
+            let mut tcp_addr = Multiaddr::from(ip);
+            tcp_addr.push(Protocol::Tcp(self.libp2p_tcp));
+            addrs.push(tcp_addr);
+
+            // Add QUIC Multiaddr (QUIC runs over UDP)
+            let mut quic_addr = Multiaddr::from(ip);
+            quic_addr.push(Protocol::Udp(self.libp2p_quic));
+            quic_addr.push(Protocol::QuicV1);
+            addrs.push(quic_addr);
+        }
+
+        addrs
     }
 }
 

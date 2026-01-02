@@ -1,5 +1,7 @@
 use std::net::SocketAddr;
 
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
@@ -16,13 +18,13 @@ pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
     BlockProposalNotification(BlockProposalNotification),
     RequestBlockByHeight {
-        peer_addr_target: SocketAddr,
+        target_peer: PeerId,
         height: BlockHeight,
     },
     RequestBlockNotification,
 
     /// sanction a peer for failing to respond to sync request
-    PeerSynchronizationTimeout(SocketAddr),
+    PeerSynchronizationTimeout(PeerId),
 
     /// Request peer list from connected peers
     MakePeerDiscoveryRequest,
@@ -34,7 +36,7 @@ pub(crate) enum MainToPeerTask {
     TransactionNotification(TransactionNotification),
 
     /// Disconnect from a specific peer
-    Disconnect(SocketAddr),
+    Disconnect(PeerId),
 
     /// Disconnect from all peers
     DisconnectAll(),
@@ -42,14 +44,14 @@ pub(crate) enum MainToPeerTask {
     /// Informs the peer which blocks we have while syncing.
     SyncCoverage {
         coverage: SynchronizationBitMask,
-        peer_handle: SocketAddr,
+        peer_handle: PeerId,
     },
 
     /// Sends a syncing peer a block we have downloaded already but not
     /// processed.
     SyncBlock {
         block: Box<Block>,
-        peer_handle: SocketAddr,
+        peer_handle: PeerId,
     },
 }
 
@@ -98,7 +100,8 @@ impl MainToPeerTask {
 pub(crate) enum PeerTaskToMain {
     NewBlocks(Vec<Block>),
     AddPeerMaxBlockHeight {
-        peer_address: SocketAddr,
+        peer_id: PeerId,
+        peer_address: Multiaddr,
         claimed_height: BlockHeight,
         claimed_cumulative_pow: ProofOfWork,
 
@@ -109,17 +112,20 @@ pub(crate) enum PeerTaskToMain {
     },
 
     /// (\[(peer_listen_address)\], reported_by, distance)
-    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)),
+    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, PeerId, u8)),
 
     Transaction(Box<PeerTaskToMainTransaction>),
     BlockProposal(Box<Block>),
     DisconnectFromLongestLivedPeer,
     NewSyncTarget(Box<Block>),
-    NewSyncBlock(Box<Block>, SocketAddr),
-    NewPeer(SocketAddr),
-    DroppedPeer(SocketAddr),
-    SyncCoverage(SynchronizationBitMask, SocketAddr),
-    PeerWantsSyncBlock(SocketAddr, BlockHeight),
+    NewSyncBlock(Box<Block>, PeerId),
+    NewPeer {
+        peer_id: PeerId,
+        address: SocketAddr,
+    },
+    DroppedPeer(PeerId),
+    SyncCoverage(SynchronizationBitMask, PeerId),
+    PeerWantsSyncBlock(PeerId, BlockHeight),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,7 +145,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
             PeerTaskToMain::NewSyncTarget(_block) => "new sync target",
             PeerTaskToMain::NewSyncBlock(_block, _socket_addr) => "new sync block",
-            PeerTaskToMain::NewPeer(_) => "new peer",
+            PeerTaskToMain::NewPeer { .. } => "new peer",
             PeerTaskToMain::DroppedPeer(_) => "dropped peer",
             PeerTaskToMain::SyncCoverage(_, _) => "sync coverage",
             PeerTaskToMain::PeerWantsSyncBlock(_, _) => "peer wants sync block",

@@ -13,7 +13,6 @@ pub mod wallet;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::path::Path;
@@ -26,6 +25,7 @@ use anyhow::Result;
 use blockchain_state::BlockchainArchivalState;
 use blockchain_state::BlockchainState;
 use itertools::Itertools;
+use libp2p::PeerId;
 use light_state::LightState;
 use mempool::Mempool;
 use mining::block_proposal::BlockProposal;
@@ -716,11 +716,12 @@ impl GlobalState {
         // Get latest block. Use hardcoded genesis block if nothing is in database.
         let latest_block: Block = archival_state.get_tip().await;
 
-        let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
+        let peer_map: HashMap<_, PeerInfo> = HashMap::new();
         let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;
         debug!("Got peer databases");
 
-        let net = NetworkingState::new(peer_map, peer_databases);
+        let peer_id = PeerId::random();
+        let net = NetworkingState::new(peer_id, peer_map, peer_databases);
 
         let light_state: LightState = LightState::from(latest_block);
         let chain = BlockchainArchivalState {
@@ -2255,7 +2256,7 @@ impl GlobalState {
         }
 
         // flush peer_standings
-        self.net.peer_databases.peer_standings.flush().await;
+        self.net.peer_databases.peer_standings_by_ip.flush().await;
 
         debug!("Flushed all databases");
 

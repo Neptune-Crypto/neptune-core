@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -48,7 +47,7 @@ const PEER_RESPONSE_PUNISHMENT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Time between successive ticks of the event loop's internal clock.
 const TICK_PERIOD: Duration = Duration::from_micros(100);
 
-type PeerHandle = SocketAddr;
+type PeerHandle = libp2p::PeerId;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PeerSyncState {
@@ -841,7 +840,6 @@ impl SyncLoop {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
     use std::sync::Arc;
 
     use macro_rules_attr::apply;
@@ -1183,10 +1181,7 @@ mod tests {
     }
 
     fn random_peer_handle() -> PeerHandle {
-        PeerHandle::new(
-            std::net::IpAddr::V6(Ipv6Addr::from_bits(rng().random())),
-            rng().random(),
-        )
+        libp2p::PeerId::random()
     }
 
     #[tracing_test::traced_test]

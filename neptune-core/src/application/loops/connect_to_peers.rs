@@ -15,6 +15,8 @@ use chrono::Utc;
 use futures::FutureExt;
 use futures::SinkExt;
 use futures::TryStreamExt;
+use libp2p::multiaddr::Protocol;
+use libp2p::Multiaddr;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
@@ -32,9 +34,11 @@ use tracing::warn;
 
 use crate::application::config::cli_args;
 use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
+use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
+use crate::protocol::peer::peer_info::pseudorandom_peer_id;
 use crate::protocol::peer::ConnectionRefusedReason;
 use crate::protocol::peer::InternalConnectionStatus;
 use crate::protocol::peer::NegativePeerSanction;
@@ -166,7 +170,11 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
 
 /// Check if connection is allowed. Used for both ingoing and outgoing connections.
 ///
-/// Locking:
+/// Note: this function is part of the legacy peer-to-peer stack. Therefore it
+/// is okay to use [`SocketAddr`] and
+/// [`pseudorandom_peer_id`](crate::protocol::peer::peer_info::pseudorandom_peer_id).
+///
+/// # Locking
 ///   * acquires `global_state_lock` for read
 async fn check_if_connection_is_allowed(
     global_state_lock: GlobalStateLock,
@@ -253,7 +261,7 @@ async fn check_if_connection_is_allowed(
     // Disallow connection to already connected peer.
     if global_state.net.peer_map.values().any(|peer| {
         peer.instance_id() == other_handshake.instance_id
-            || *peer_address == peer.connected_address()
+            || multiaddr_to_socketaddr(&peer.address()).is_some_and(|sa| sa == *peer_address)
     }) {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
     }
@@ -264,9 +272,9 @@ async fn check_if_connection_is_allowed(
         let num_connections_to_this_ip = global_state
             .net
             .peer_map
-            .keys()
-            .map(|x| x.ip())
-            .filter(|ip| *ip == peer_ip)
+            .values()
+            .filter_map(|info| multiaddr_to_socketaddr(&info.address()))
+            .filter(|sa| sa.ip() == peer_ip)
             .count();
         if num_connections_to_this_ip >= max_connections_per_ip {
             return InternalConnectionStatus::Refused(
@@ -344,9 +352,10 @@ where
         Ok(_) => (),
         Err(_err) => {
             error!("Peer task (incoming) for {peer_address} panicked. Invoking close connection callback");
+            let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
             close_peer_connected_callback(
                 state_lock.clone(),
-                peer_address,
+                peer_multiaddr,
                 &peer_task_to_main_tx_clone,
             )
             .await;
@@ -356,8 +365,7 @@ where
     inner_ret
 }
 
-/// Handles all incoming connections. Returns when the connection is closed.
-///
+/// Handles all* incoming connections. Returns when the connection is closed.
 ///
 /// A returned `Result::Error` always indicates that the connection was closed
 /// through some networking error, either in this function or in the peer loop
@@ -370,6 +378,13 @@ where
 ///
 /// The `handshake_permit` is dropped after handshake completes to release the
 /// semaphore slot for new incoming connection attempts.
+///
+/// *: This function belongs to the legacy peer-to-peer stack, meaning in
+/// particular that it is okay to use [`SocketAddr`]. However, this function
+/// does not handle *all* incoming connections: connections coming in over the
+/// libp2p network stack are handled by the
+/// [`Actor`](crate::application::network::actor::Actor) and the
+/// [`StreamGateway`](crate::application::network::gateway::StreamGateway).
 async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -470,20 +485,26 @@ where
     }
 
     // If we are syncing, notify the peer loop that we have a new peer.
+    let peer_id = pseudorandom_peer_id(&peer_address);
     if state.lock_guard().await.net.sync_anchor.is_some() {
         debug!(
             "We are syncing, so sending information about new peer {peer_address} to sync loop."
         );
         peer_task_to_main_tx
-            .send(PeerTaskToMain::NewPeer(peer_address))
+            .send(PeerTaskToMain::NewPeer {
+                peer_id,
+                address: peer_address,
+            })
             .await?;
     }
+    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
 
     let peer_distance = 1; // All incoming connections have distance 1
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state,
-        peer_address,
+        peer_id,
+        peer_multiaddr,
         *peer_handshake,
         true,
         peer_distance,
@@ -500,7 +521,13 @@ where
 /// Perform handshake and establish connection to a new peer while handling any
 /// panics in the peer task gracefully.
 ///
-/// All outgoing connections to peers must go through this function.
+/// All* outgoing connections to peers must go through this function.
+///
+/// *: This function belongs to the legacy peer-to-peer stack, which is in the
+/// process of being deprecated. Since it is part of the legacy stack, it is
+/// okay to use [`SocketAddr`]. However, the new libp2p network stack offers an
+/// alternative way to call new peers, see
+/// [`NetworkActorCommand::Dial`](crate::application::network::channel::NetworkActorCommand::Dial).
 pub(crate) async fn call_peer(
     peer_address: std::net::SocketAddr,
     state: GlobalStateLock,
@@ -509,7 +536,7 @@ pub(crate) async fn call_peer(
     own_handshake_data: HandshakeData,
     peer_distance: u8,
 ) {
-    let state_clone = state.clone();
+    let state_clone: GlobalStateLock = state.clone();
     let peer_task_to_main_tx_clone = peer_task_to_main_tx.clone();
     let panic_result = std::panic::AssertUnwindSafe(async {
         debug!("Attempting to initiate connection to {peer_address}");
@@ -562,12 +589,18 @@ pub(crate) async fn call_peer(
         Ok(_) => (),
         Err(_) => {
             error!("Peer task (outgoing) for {peer_address} panicked. Invoking close connection callback");
-            close_peer_connected_callback(state_clone, peer_address, &peer_task_to_main_tx_clone)
-                .await;
+            let peer_multiaddress = socketaddr_to_multiaddr(peer_address);
+            close_peer_connected_callback(
+                state_clone,
+                peer_multiaddress,
+                &peer_task_to_main_tx_clone,
+            )
+            .await;
         }
     }
 }
 
+/// Legacy peer-to-peer stack.
 async fn call_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -647,10 +680,15 @@ where
     }
 
     // If in sync mode, tell sync loop about new peer.
+    let peer_id = pseudorandom_peer_id(&peer_address);
+    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
     if state.lock_guard().await.net.sync_anchor.is_some() {
         debug!("We are syncing, so tell the sync loop about the new peer.");
         peer_task_to_main_tx
-            .send(PeerTaskToMain::NewPeer(peer_address))
+            .send(PeerTaskToMain::NewPeer {
+                peer_id,
+                address: peer_address,
+            })
             .await?;
     }
 
@@ -663,7 +701,8 @@ where
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state.clone(),
-        peer_address,
+        peer_id,
+        peer_multiaddr,
         *other_handshake,
         false,
         peer_distance,
@@ -683,18 +722,34 @@ where
 /// a peer is disconnected. Whether this happens through a panic
 /// in the peer task or through a regular disconnect.
 ///
+/// This function is shared between the legacy peer-to-peer stack and the libp2p
+/// network stack.
+///
 /// Locking:
 ///   * acquires `global_state_lock` for write
 pub(crate) async fn close_peer_connected_callback(
     mut global_state_lock: GlobalStateLock,
-    peer_address: SocketAddr,
+    peer_address: Multiaddr,
     to_main_tx: &mpsc::Sender<PeerTaskToMain>,
 ) {
     let cli_arguments = global_state_lock.cli().clone();
     let mut global_state_mut = global_state_lock.lock_guard_mut().await;
 
+    // Find the matching peer id
+    let Some(peer_id) = global_state_mut
+        .net
+        .peer_map
+        .iter()
+        .find(|(_peer_id, peer_info)| peer_info.address() == peer_address)
+        .map(|(peer_id, _)| peer_id)
+        .copied()
+    else {
+        error!("Could not find peer id for {peer_address}");
+        return;
+    };
+
     // Store any new peer-standing to database
-    let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_address);
+    let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_id);
     let new_standing = if let Some(new) = peer_info_writeback {
         new.standing()
     } else {
@@ -711,10 +766,18 @@ pub(crate) async fn close_peer_connected_callback(
     };
     debug!("Fetched peer info standing {new_standing} for peer {peer_address}");
 
-    global_state_mut
-        .net
-        .write_peer_standing_on_decrease(peer_address.ip(), new_standing)
-        .await;
+    let maybe_ip = peer_address.iter().find_map(|p| match p {
+        Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+        Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+        _ => None,
+    });
+    if let Some(ip) = maybe_ip {
+        global_state_mut
+            .net
+            .write_peer_standing_on_decrease(ip, new_standing)
+            .await;
+    }
+
     let sync_mode_is_active = global_state_mut.net.sync_anchor.is_some();
     drop(global_state_mut); // avoid holding across mpsc::Sender::send()
     debug!("Stored peer info standing {new_standing} for peer {peer_address}");
@@ -722,7 +785,7 @@ pub(crate) async fn close_peer_connected_callback(
     // If in sync mode, tell sync loop about dropped peer.
     if sync_mode_is_active {
         to_main_tx
-            .send(PeerTaskToMain::DroppedPeer(peer_address))
+            .send(PeerTaskToMain::DroppedPeer(peer_id))
             .await
             .expect("channel to main should exist");
     }
@@ -737,6 +800,7 @@ mod tests {
 
     use anyhow::bail;
     use anyhow::Result;
+    use libp2p::PeerId;
     use macro_rules_attr::apply;
     use tasm_lib::twenty_first::tip5::digest::Digest;
     use test_strategy::proptest;
@@ -797,7 +861,7 @@ mod tests {
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         call_peer_inner(
             mock,
@@ -886,7 +950,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Main;
-        let (_, _, _, _, mut state_lock, own_handshake) =
+        let (_, _, _, _, _, _, mut state_lock, own_handshake) =
             get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
 
         // Get an address for a peer that's not already connected
@@ -1020,7 +1084,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn refuse_connection_bad_timestamp() {
         let network = Network::Main;
-        let (_, _, _, _, state_lock, own_handshake) =
+        let (_, _, _, _, _, _, state_lock, own_handshake) =
             get_test_genesis_setup(network, 1, cli_args::Args::default())
                 .await
                 .unwrap();
@@ -1069,7 +1133,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (broadcast_tx, _broadcast_rx, to_main_tx, _to_main_rx, mut state_lock, handshake) =
+        let (broadcast_tx, _broadcast_rx, to_main_tx, _to_main_rx, _, _, mut state_lock, handshake) =
             get_test_genesis_setup(network, 0, args).await?;
 
         // fake a graceful disconnect
@@ -1161,8 +1225,16 @@ mod tests {
             ))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            _,
+            _,
+            state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         answer_peer_inner(
             mock,
             state_lock.clone(),
@@ -1196,7 +1268,7 @@ mod tests {
             })?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
 
         let answer = answer_peer_inner(
@@ -1230,7 +1302,7 @@ mod tests {
             })?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
             get_test_genesis_setup(Network::Testnet(1), 0, cli_args::Args::default()).await?;
 
         let answer = answer_peer_inner(
@@ -1252,10 +1324,18 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn test_incoming_connection_fail_bad_version() {
         let mut other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet(0));
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Main, 0, cli_args::Args::default())
-                .await
-                .unwrap();
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            _,
+            _,
+            state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(Network::Main, 0, cli_args::Args::default())
+            .await
+            .unwrap();
         let state = state_lock.lock_guard().await;
         let mut own_handshake = state.get_own_handshakedata();
 
@@ -1348,6 +1428,8 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             _to_main_rx1,
+            _,
+            _,
             mut state_lock,
             _hsd,
         ) = get_test_genesis_setup(network, 2, cli_args::Args::default()).await?;
@@ -1383,6 +1465,8 @@ mod tests {
             _from_main_rx_clone,
             _to_main_tx,
             _to_main_rx1,
+            _,
+            _,
             mut state_lock,
             _hsd,
         ) = get_test_genesis_setup(Network::Main, 0, allow_5_connections_from_same_ip)
@@ -1413,7 +1497,7 @@ mod tests {
                 .await
                 .net
                 .peer_map
-                .insert(peer_address, peer_info.clone());
+                .insert(pseudorandom_peer_id(&peer_address), peer_info.clone());
         }
 
         // The next connection from the same IP is rejected, as the limit per
@@ -1482,6 +1566,8 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             _to_main_rx1,
+            _,
+            _,
             mut state_lock,
             _hsd,
         ) = get_test_genesis_setup(

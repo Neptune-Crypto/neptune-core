@@ -59,6 +59,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
+use libp2p::multiaddr::Protocol;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -2794,9 +2795,19 @@ impl RPC for NeptuneRPCServer {
         let global_state = self.state.lock_guard().await;
 
         // Get all connected peers
-        for (socket_address, peer_info) in &global_state.net.peer_map {
+        for peer_info in global_state.net.peer_map.values() {
             if peer_info.standing().is_negative() {
-                sanctions_in_memory.insert(socket_address.ip(), peer_info.standing());
+                let maybe_ip = peer_info
+                    .address()
+                    .iter()
+                    .find_map(|component| match component {
+                        Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                        Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                        _ => None,
+                    });
+                if let Some(ip) = maybe_ip {
+                    sanctions_in_memory.insert(ip, peer_info.standing());
+                }
             }
         }
 
@@ -3221,8 +3232,16 @@ impl RPC for NeptuneRPCServer {
             .net
             .peer_map
             .iter_mut()
-            .for_each(|(socketaddr, peerinfo)| {
-                if socketaddr.ip() == ip {
+            .for_each(|(_peer_id, peerinfo)| {
+                let maybe_ip = peerinfo
+                    .address()
+                    .iter()
+                    .find_map(|component| match component {
+                        libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                        libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                        _ => None,
+                    });
+                if maybe_ip.is_some_and(|peer_ip| ip == peer_ip) {
                     peerinfo.standing.clear_standing();
                 }
             });
@@ -5127,12 +5146,15 @@ mod tests {
         .await;
         let token = cookie_token(&rpc_server).await;
         let rpc_request_context = context::current();
-        let (peer_address0, peer_address1) = {
+        let (peer_id0, peer_address0, peer_id1, peer_address1) = {
             let global_state = rpc_server.state.lock_guard().await;
 
+            let entries = global_state.net.peer_map.iter().collect::<Vec<_>>();
             (
-                global_state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address(),
-                global_state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address(),
+                *entries[0].0,
+                entries[0].1.address(),
+                *entries[1].0,
+                entries[1].1.address(),
             )
         };
 
@@ -5153,7 +5175,7 @@ mod tests {
             global_state_mut
                 .net
                 .peer_map
-                .entry(peer_address0)
+                .entry(peer_id0)
                 .and_modify(|p| {
                     p.standing
                         .sanction(PeerSanction::Negative(
@@ -5164,7 +5186,7 @@ mod tests {
             global_state_mut
                 .net
                 .peer_map
-                .entry(peer_address1)
+                .entry(peer_id1)
                 .and_modify(|p| {
                     p.standing
                         .sanction(PeerSanction::Negative(
@@ -5172,8 +5194,8 @@ mod tests {
                         ))
                         .unwrap_err();
                 });
-            let standing_0 = global_state_mut.net.peer_map[&peer_address0].standing;
-            let standing_1 = global_state_mut.net.peer_map[&peer_address1].standing;
+            let standing_0 = global_state_mut.net.peer_map[&peer_id0].standing;
+            let standing_1 = global_state_mut.net.peer_map[&peer_id1].standing;
             (standing_0, standing_1)
         };
 
@@ -5188,16 +5210,33 @@ mod tests {
             "Punished list must have two elements after sanctionings"
         );
 
+        let ip0 = peer_address0
+            .iter()
+            .find_map(|component| match component {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .unwrap();
+        let ip1 = peer_address1
+            .iter()
+            .find_map(|component| match component {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .unwrap();
+
         {
             let mut global_state_mut = rpc_server.state.lock_guard_mut().await;
 
             global_state_mut
                 .net
-                .write_peer_standing_on_decrease(peer_address0.ip(), standing0)
+                .write_peer_standing_on_decrease(ip0, standing0)
                 .await;
             global_state_mut
                 .net
-                .write_peer_standing_on_decrease(peer_address1.ip(), standing1)
+                .write_peer_standing_on_decrease(ip1, standing1)
                 .await;
         }
 
@@ -5215,16 +5254,10 @@ mod tests {
         // Verify expected initial conditions
         {
             let global_state = rpc_server.state.lock_guard().await;
-            let standing0 = global_state
-                .net
-                .get_peer_standing_from_database(peer_address0.ip())
-                .await;
+            let standing0 = global_state.net.get_peer_standing_from_database(ip0).await;
             assert_ne!(0, standing0.unwrap().standing);
             assert_ne!(None, standing0.unwrap().latest_punishment);
-            let peer_standing_1 = global_state
-                .net
-                .get_peer_standing_from_database(peer_address1.ip())
-                .await;
+            let peer_standing_1 = global_state.net.get_peer_standing_from_database(ip1).await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
             assert_ne!(None, peer_standing_1.unwrap().latest_punishment);
             drop(global_state);
@@ -5232,30 +5265,24 @@ mod tests {
             // Clear standing of #0
             rpc_server
                 .clone()
-                .clear_standing_by_ip(rpc_request_context, token, peer_address0.ip())
+                .clear_standing_by_ip(rpc_request_context, token, ip0)
                 .await?;
         }
 
         // Verify expected resulting conditions in database
         {
             let global_state = rpc_server.state.lock_guard().await;
-            let standing0 = global_state
-                .net
-                .get_peer_standing_from_database(peer_address0.ip())
-                .await;
+            let standing0 = global_state.net.get_peer_standing_from_database(ip0).await;
             assert_eq!(0, standing0.unwrap().standing);
             assert_eq!(None, standing0.unwrap().latest_punishment);
-            let standing1 = global_state
-                .net
-                .get_peer_standing_from_database(peer_address1.ip())
-                .await;
+            let standing1 = global_state.net.get_peer_standing_from_database(ip1).await;
             assert_ne!(0, standing1.unwrap().standing);
             assert_ne!(None, standing1.unwrap().latest_punishment);
 
             // Verify expected resulting conditions in peer map
-            let standing0_from_memory = global_state.net.peer_map[&peer_address0].clone();
+            let standing0_from_memory = global_state.net.peer_map[&peer_id0].clone();
             assert_eq!(0, standing0_from_memory.standing.standing);
-            let standing1_from_memory = global_state.net.peer_map[&peer_address1].clone();
+            let standing1_from_memory = global_state.net.peer_map[&peer_id1].clone();
             assert_ne!(0, standing1_from_memory.standing.standing);
         }
 
@@ -5285,19 +5312,44 @@ mod tests {
         .await;
         let token = cookie_token(&rpc_server).await;
         let mut state = rpc_server.state.lock_guard_mut().await;
-        let peer_address0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address();
-        let peer_address1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address();
+
+        let (peer_id0, peer_address0, peer_id1, peer_address1) = {
+            let entries = state.net.peer_map.iter().collect::<Vec<_>>();
+            (
+                *entries[0].0,
+                entries[0].1.address(),
+                *entries[1].0,
+                entries[1].1.address(),
+            )
+        };
+
+        let ip0 = peer_address0
+            .iter()
+            .find_map(|component| match component {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .unwrap();
+        let ip1 = peer_address1
+            .iter()
+            .find_map(|component| match component {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .unwrap();
 
         // sanction both peers
         let (standing0, standing1) = {
-            state.net.peer_map.entry(peer_address0).and_modify(|p| {
+            state.net.peer_map.entry(peer_id0).and_modify(|p| {
                 p.standing
                     .sanction(PeerSanction::Negative(
                         NegativePeerSanction::DifferentGenesis,
                     ))
                     .unwrap_err();
             });
-            state.net.peer_map.entry(peer_address1).and_modify(|p| {
+            state.net.peer_map.entry(peer_id1).and_modify(|p| {
                 p.standing
                     .sanction(PeerSanction::Negative(
                         NegativePeerSanction::DifferentGenesis,
@@ -5305,18 +5357,18 @@ mod tests {
                     .unwrap_err();
             });
             (
-                state.net.peer_map[&peer_address0].standing,
-                state.net.peer_map[&peer_address1].standing,
+                state.net.peer_map[&peer_id0].standing,
+                state.net.peer_map[&peer_id1].standing,
             )
         };
 
         state
             .net
-            .write_peer_standing_on_decrease(peer_address0.ip(), standing0)
+            .write_peer_standing_on_decrease(ip0, standing0)
             .await;
         state
             .net
-            .write_peer_standing_on_decrease(peer_address1.ip(), standing1)
+            .write_peer_standing_on_decrease(ip1, standing1)
             .await;
 
         drop(state);
@@ -5328,7 +5380,7 @@ mod tests {
                 .lock_guard_mut()
                 .await
                 .net
-                .get_peer_standing_from_database(peer_address0.ip())
+                .get_peer_standing_from_database(ip0)
                 .await;
             assert_ne!(0, peer_standing0.unwrap().standing);
             assert_ne!(None, peer_standing0.unwrap().latest_punishment);
@@ -5340,7 +5392,7 @@ mod tests {
                 .lock_guard_mut()
                 .await
                 .net
-                .get_peer_standing_from_database(peer_address1.ip())
+                .get_peer_standing_from_database(ip1)
                 .await;
             assert_ne!(0, peer_standing1.unwrap().standing);
             assert_ne!(None, peer_standing1.unwrap().latest_punishment);
@@ -5364,31 +5416,25 @@ mod tests {
 
         // Verify expected resulting conditions in database
         {
-            let peer_standing_0 = state
-                .net
-                .get_peer_standing_from_database(peer_address0.ip())
-                .await;
+            let peer_standing_0 = state.net.get_peer_standing_from_database(ip0).await;
             assert_eq!(0, peer_standing_0.unwrap().standing);
             assert_eq!(None, peer_standing_0.unwrap().latest_punishment);
         }
 
         {
-            let peer_still_standing_1 = state
-                .net
-                .get_peer_standing_from_database(peer_address1.ip())
-                .await;
+            let peer_still_standing_1 = state.net.get_peer_standing_from_database(ip1).await;
             assert_eq!(0, peer_still_standing_1.unwrap().standing);
             assert_eq!(None, peer_still_standing_1.unwrap().latest_punishment);
         }
 
         // Verify expected resulting conditions in peer map
         {
-            let peer_standing_0_from_memory = state.net.peer_map[&peer_address0].clone();
+            let peer_standing_0_from_memory = state.net.peer_map[&peer_id0].clone();
             assert_eq!(0, peer_standing_0_from_memory.standing.standing);
         }
 
         {
-            let peer_still_standing_1_from_memory = state.net.peer_map[&peer_address1].clone();
+            let peer_still_standing_1_from_memory = state.net.peer_map[&peer_id1].clone();
             assert_eq!(0, peer_still_standing_1_from_memory.standing.standing);
         }
 
