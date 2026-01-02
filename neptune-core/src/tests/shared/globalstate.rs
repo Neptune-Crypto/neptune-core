@@ -3,15 +3,21 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::time::SystemTime;
 
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
 use crate::api::export::Network;
 use crate::application::config::cli_args;
+use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::network::channel::NetworkActorCommand;
+use crate::application::network::channel::NetworkEvent;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::peer::handshake_data::VersionString;
+use crate::protocol::peer::peer_info::pseudorandom_peer_id;
 use crate::protocol::peer::peer_info::PeerConnectionInfo;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::state::blockchain_state::BlockchainState;
@@ -51,9 +57,11 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     for i in 0..peer_count {
         let peer_address =
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
-        peer_map.insert(peer_address, get_dummy_peer_outgoing(peer_address));
+        let peer_id = pseudorandom_peer_id(&peer_address);
+        peer_map.insert(peer_id, get_dummy_peer_outgoing(peer_address));
     }
-    let net = NetworkingState::new(peer_map, peer_db);
+    let peer_id = PeerId::random();
+    let net = NetworkingState::new(peer_id, peer_map, peer_db);
 
     // Sanity check
     assert_eq!(archival_state.genesis_block().hash(), genesis_block.hash());
@@ -162,6 +170,8 @@ pub(crate) async fn get_test_genesis_setup(
     broadcast::Receiver<MainToPeerTask>,
     mpsc::Sender<PeerTaskToMain>,
     mpsc::Receiver<PeerTaskToMain>,
+    mpsc::Sender<NetworkActorCommand>,
+    mpsc::Receiver<NetworkEvent>,
     GlobalStateLock,
     HandshakeData,
 )> {
@@ -179,12 +189,18 @@ pub(crate) async fn test_setup_custom_genesis_block(
     broadcast::Receiver<MainToPeerTask>,
     mpsc::Sender<PeerTaskToMain>,
     mpsc::Receiver<PeerTaskToMain>,
+    mpsc::Sender<NetworkActorCommand>,
+    mpsc::Receiver<NetworkEvent>,
     GlobalStateLock,
     HandshakeData,
 )> {
     let (peer_broadcast_tx, from_main_rx) =
         broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
     let (to_main_tx, to_main_rx) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
+    let (network_command_tx, _network_command_rx) =
+        mpsc::channel::<NetworkActorCommand>(PEER_CHANNEL_CAPACITY);
+    let (_network_event_tx, network_event_rx) =
+        mpsc::channel::<NetworkEvent>(PEER_CHANNEL_CAPACITY);
 
     let wallet = WalletEntropy::devnet_wallet();
     let state = mock_genesis_global_state_with_block(peer_count, wallet, cli, custom_genesis).await;
@@ -193,13 +209,15 @@ pub(crate) async fn test_setup_custom_genesis_block(
         from_main_rx,
         to_main_tx,
         to_main_rx,
+        network_command_tx,
+        network_event_rx,
         state,
         get_dummy_handshake_data_for_genesis(network),
     ))
 }
 
 /// Return an empty peer map
-pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
+pub fn get_peer_map() -> HashMap<PeerId, PeerInfo> {
     HashMap::new()
 }
 
@@ -207,9 +225,14 @@ pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
     std::net::SocketAddr::from_str(&format!("113.151.22.{}:8080", count)).unwrap()
 }
 
+pub(crate) fn get_dummy_multiaddr(count: u8) -> Multiaddr {
+    socketaddr_to_multiaddr(get_dummy_socket_address(count))
+}
+
 /// Get a dummy-peer representing an incoming connection.
 pub(crate) fn get_dummy_peer_incoming(address: SocketAddr) -> PeerInfo {
-    let peer_connection_info = PeerConnectionInfo::new(Some(8080), address, true);
+    let multiaddr = socketaddr_to_multiaddr(address);
+    let peer_connection_info = PeerConnectionInfo::new(Some(8080), multiaddr, true);
     let peer_handshake = get_dummy_handshake_data_for_genesis(Network::Main);
     PeerInfo::new(
         peer_connection_info,
@@ -221,7 +244,8 @@ pub(crate) fn get_dummy_peer_incoming(address: SocketAddr) -> PeerInfo {
 
 /// Get a dummy-peer representing an outgoing connection.
 pub(crate) fn get_dummy_peer_outgoing(address: SocketAddr) -> PeerInfo {
-    let peer_connection_info = PeerConnectionInfo::new(Some(8080), address, false);
+    let multiaddr = socketaddr_to_multiaddr(address);
+    let peer_connection_info = PeerConnectionInfo::new(Some(8080), multiaddr, false);
     let peer_handshake = get_dummy_handshake_data_for_genesis(Network::Main);
     PeerInfo::new(
         peer_connection_info,

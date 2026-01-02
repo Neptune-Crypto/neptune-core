@@ -159,7 +159,7 @@ impl BlockIndexValue {
 
 #[derive(Clone)]
 pub struct PeerDatabases {
-    pub peer_standings: NeptuneLevelDb<IpAddr, PeerStanding>,
+    pub peer_standings_by_ip: NeptuneLevelDb<IpAddr, PeerStanding>,
 }
 
 impl fmt::Debug for PeerDatabases {

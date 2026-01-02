@@ -67,7 +67,9 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::debug;
+use tracing::error;
 use tracing::info;
+use tracing::warn;
 use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::data_directory::DataDirectory;
@@ -81,6 +83,8 @@ use crate::application::loops::connect_to_peers::call_peer;
 use crate::application::loops::main_loop::MainLoopHandler;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::network::actor::NetworkActor;
+use crate::application::network::channel::NetworkActorCommand;
 use crate::application::rpc::server::RPC;
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_state::WalletState;
@@ -184,6 +188,39 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         .await?;
     info!("UTXO restoration check complete");
 
+    // Set up the libp2p network Actor
+    let ephemeral_identity = libp2p::identity::Keypair::generate_ed25519(); // TODO: persist me
+    let (network_command_tx, network_command_rx) = mpsc::channel(100);
+    let (network_event_tx, network_event_rx) = mpsc::channel(100);
+    let actor = NetworkActor::new(
+        ephemeral_identity,
+        peer_task_to_main_tx.clone(),
+        main_to_peer_broadcast_tx.clone(),
+        network_command_rx,
+        network_event_tx,
+        global_state_lock.clone(),
+    )
+    .unwrap_or_else(|e| {
+        panic!("Failed to set up network actor: {e}.");
+    });
+    let mut task_join_handles = vec![];
+    let actor_handle = tokio::spawn(async move {
+        if let Err(e) = actor.run().await {
+            error!("Network Actor crashed: {:?}", e);
+        }
+    });
+    task_join_handles.push(actor_handle);
+
+    // Tell libp2p network Actor to listen up.
+    for own_listen_address in cli_args.own_listen_addresses() {
+        if let Err(e) = network_command_tx
+            .send(NetworkActorCommand::Listen(own_listen_address))
+            .await
+        {
+            warn!("Could not send Listen message to Network Actor: {e}.");
+        }
+    }
+
     // Bind socket to port on this machine, to handle incoming connections from peers
     let incoming_peer_listener = if let Some(incoming_peer_listener) = cli_args.own_listen_port() {
         let ret = TcpListener::bind((cli_args.peer_listen_addr, incoming_peer_listener))
@@ -203,29 +240,30 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         "Most known canonical block has height {}",
         own_handshake_data.tip_header.height
     );
-    let mut task_join_handles = vec![];
-    for peer_address in global_state_lock
-        .cli()
-        .peers
-        .iter()
-        .filter_map(multiaddr_to_socketaddr)
-    {
-        let peer_state_var = global_state_lock.clone(); // bump arc refcount
-        let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
-            main_to_peer_broadcast_tx.subscribe();
-        let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = peer_task_to_main_tx.clone();
-        let peer_join_handle = tokio::task::spawn(async move {
-            call_peer(
-                peer_address,
-                peer_state_var.clone(),
-                main_to_peer_broadcast_rx_clone,
-                peer_task_to_main_tx_clone,
-                own_handshake_data,
-                1, // All outgoing connections have distance 1
-            )
-            .await;
-        });
-        task_join_handles.push(peer_join_handle);
+    for multiaddress in &global_state_lock.cli().peers {
+        if let Some(peer_address) = multiaddr_to_socketaddr(multiaddress) {
+            let peer_state_var = global_state_lock.clone(); // bump arc refcount
+            let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
+                main_to_peer_broadcast_tx.subscribe();
+            let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> =
+                peer_task_to_main_tx.clone();
+            let peer_join_handle = tokio::task::spawn(async move {
+                call_peer(
+                    peer_address,
+                    peer_state_var.clone(),
+                    main_to_peer_broadcast_rx_clone,
+                    peer_task_to_main_tx_clone,
+                    own_handshake_data,
+                    1, // All outgoing connections have distance 1
+                )
+                .await;
+            });
+            task_join_handles.push(peer_join_handle);
+        } else {
+            network_command_tx
+                .send(NetworkActorCommand::Dial(multiaddress.clone()))
+                .await?;
+        }
     }
     debug!("Made outgoing connections to peers");
 
@@ -312,9 +350,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         main_to_peer_broadcast_tx,
         peer_task_to_main_tx,
         main_to_miner_tx,
+        network_command_tx,
         peer_task_to_main_rx,
         miner_to_main_rx,
         rpc_server_to_main_rx,
+        network_event_rx,
         task_join_handles,
     ))
 }

@@ -1,3 +1,4 @@
+pub(crate) mod network_event_handler;
 pub mod proof_upgrader;
 pub(crate) mod upgrade_incentive;
 
@@ -12,6 +13,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use itertools::Itertools;
+use libp2p::PeerId;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
@@ -48,6 +50,8 @@ use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::handle::SyncLoopHandle;
 use crate::application::loops::sync_loop::SYNC_LOOP_CHANNEL_CAPACITY;
+use crate::application::network::channel::NetworkActorCommand;
+use crate::application::network::channel::NetworkEvent;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
@@ -122,9 +126,12 @@ pub struct MainLoopHandler {
     // note: MainToMinerChannel::send() does not block.  might log error.
     main_to_miner_tx: MainToMinerChannel,
 
+    network_command_tx: mpsc::Sender<NetworkActorCommand>,
+
     peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
     miner_to_main_rx: mpsc::Receiver<MinerToMain>,
     rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+    network_event_rx: mpsc::Receiver<NetworkEvent>,
     task_handles: Vec<JoinHandle<()>>,
 
     #[cfg(test)]
@@ -173,13 +180,13 @@ impl MutableMainLoopState {
 /// holds information about a potential peer in the process of peer discovery
 struct PotentialPeerInfo {
     _reported: SystemTime,
-    _reported_by: SocketAddr,
+    _reported_by: PeerId,
     instance_id: u128,
     distance: u8,
 }
 
 impl PotentialPeerInfo {
-    fn new(reported_by: SocketAddr, instance_id: u128, distance: u8, now: SystemTime) -> Self {
+    fn new(reported_by: PeerId, instance_id: u128, distance: u8, now: SystemTime) -> Self {
         Self {
             _reported: now,
             _reported_by: reported_by,
@@ -203,7 +210,7 @@ impl PotentialPeersState {
 
     fn add(
         &mut self,
-        reported_by: SocketAddr,
+        reported_by: PeerId,
         potential_peer: (SocketAddr, u128),
         max_peers: usize,
         distance: u8,
@@ -248,6 +255,8 @@ impl PotentialPeersState {
     /// connected to.
     ///
     /// Returns (socket address, peer distance)
+    ///
+    /// This function is part of the legacy peer-to-peer stack.
     fn get_candidate(
         &self,
         connected_clients: &[PeerInfo],
@@ -260,6 +269,7 @@ impl PotentialPeersState {
         let peers_listen_addresses: Vec<SocketAddr> = connected_clients
             .iter()
             .filter_map(|x| x.listen_address())
+            .filter_map(|ma| multiaddr_to_socketaddr(&ma))
             .collect();
 
         // Find the appropriate candidates
@@ -313,10 +323,12 @@ impl MainLoopHandler {
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
         main_to_miner_tx: mpsc::Sender<MainToMiner>,
+        network_command_tx: mpsc::Sender<NetworkActorCommand>,
 
         peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
         miner_to_main_rx: mpsc::Receiver<MinerToMain>,
         rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+        network_event_rx: mpsc::Receiver<NetworkEvent>,
         task_handles: Vec<JoinHandle<()>>,
     ) -> Self {
         let maybe_main_to_miner_tx = if global_state_lock.cli().mine() {
@@ -330,10 +342,13 @@ impl MainLoopHandler {
             main_to_miner_tx: MainToMinerChannel(maybe_main_to_miner_tx),
             main_to_peer_broadcast_tx,
             peer_task_to_main_tx,
+            network_command_tx,
 
             peer_task_to_main_rx,
             miner_to_main_rx,
             rpc_server_to_main_rx,
+            network_event_rx,
+
             task_handles,
 
             #[cfg(test)]
@@ -828,6 +843,7 @@ impl MainLoopHandler {
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);
             }
             PeerTaskToMain::AddPeerMaxBlockHeight {
+                peer_id,
                 peer_address,
                 claimed_height,
                 claimed_cumulative_pow,
@@ -877,9 +893,9 @@ impl MainLoopHandler {
                     sync_loop.start();
 
                     // Tell sync loop about all known peers.
-                    sync_loop.send_add_peer(peer_address).await;
+                    sync_loop.send_add_peer(peer_id).await;
                     for (peer, _) in peer_map.iter().take(SYNC_LOOP_CHANNEL_CAPACITY) {
-                        if *peer != peer_address {
+                        if *peer != peer_id {
                             sync_loop.send_add_peer(*peer).await;
                         }
                     }
@@ -901,7 +917,7 @@ impl MainLoopHandler {
                     // sync loop querying random blocks. When those random
                     // blocks come in, we fast-forward if we can.
                     self.main_to_peer_broadcast(MainToPeerTask::RequestBlockByHeight {
-                        peer_addr_target: peer_address,
+                        target_peer: peer_id,
                         height: current_tip.header().height,
                     });
                 }
@@ -920,14 +936,17 @@ impl MainLoopHandler {
                     );
                 }
             }
-            PeerTaskToMain::NewPeer(peer) => {
+            PeerTaskToMain::NewPeer {
+                peer_id,
+                address: _,
+            } => {
                 if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
-                    sync_loop.send_add_peer(peer).await;
+                    sync_loop.send_add_peer(peer_id).await;
                 }
             }
-            PeerTaskToMain::DroppedPeer(peer) => {
+            PeerTaskToMain::DroppedPeer(peer_id) => {
                 if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
-                    sync_loop.send_remove_peer(peer).await;
+                    sync_loop.send_remove_peer(peer_id).await;
                 }
             }
             PeerTaskToMain::Transaction(pt2m_transaction) => {
@@ -1024,27 +1043,22 @@ impl MainLoopHandler {
                 let all_peers = global_state.net.peer_map.iter();
 
                 // filter out CLI peers
-                let cli_peers = global_state
-                    .cli()
-                    .peers
-                    .iter()
-                    .filter_map(multiaddr_to_socketaddr)
-                    .collect::<HashSet<_>>();
-                let disconnect_candidates = all_peers.filter(|p| !cli_peers.contains(p.0));
+                let cli_peers = global_state.cli().peers.iter().collect::<HashSet<_>>();
+                let disconnect_candidates = all_peers
+                    .filter(|(_id, info)| !cli_peers.contains(&info.address()))
+                    .filter(|p| multiaddr_to_socketaddr(&p.1.address()).is_some());
 
                 // find the one with the oldest connection
-                let longest_lived_peer = disconnect_candidates.min_by(
-                    |(_socket_address_left, peer_info_left),
-                     (_socket_address_right, peer_info_right)| {
+                let longest_lived_peer =
+                    disconnect_candidates.min_by(|(_, peer_info_left), (_, peer_info_right)| {
                         peer_info_left
                             .connection_established()
                             .cmp(&peer_info_right.connection_established())
-                    },
-                );
+                    });
 
                 // tell to disconnect
-                if let Some((peer_socket, _peer_info)) = longest_lived_peer {
-                    let pmsg = MainToPeerTask::Disconnect(peer_socket.to_owned());
+                if let Some((peer_id, _peer_info)) = longest_lived_peer {
+                    let pmsg = MainToPeerTask::Disconnect(*peer_id);
                     self.main_to_peer_broadcast(pmsg);
                 }
             }
@@ -1129,15 +1143,14 @@ impl MainLoopHandler {
     async fn prune_peers(&self) -> Result<()> {
         // fetch all relevant info from global state; don't hold the lock
         let cli_args = self.global_state_lock.cli();
-        let connected_peers = self
-            .global_state_lock
-            .lock_guard()
-            .await
+        let global_state = self.global_state_lock.lock_guard().await;
+        let connected_peers = global_state
             .net
             .peer_map
-            .values()
-            .cloned()
+            .iter()
+            .map(|(peer_id, peer_info)| (*peer_id, peer_info.clone()))
             .collect_vec();
+        drop(global_state);
 
         let num_peers = connected_peers.len();
         let max_num_peers = cli_args.max_num_peers;
@@ -1148,27 +1161,26 @@ impl MainLoopHandler {
         warn!("Connected to {num_peers} peers, which exceeds the maximum ({max_num_peers}).");
 
         // If all connections are outbound, it's OK to exceed the max.
-        if connected_peers.iter().all(|p| p.connection_is_outbound()) {
+        if connected_peers
+            .iter()
+            .all(|(_, p)| p.connection_is_outbound())
+        {
             warn!("Not disconnecting from any peer because all connections are outbound.");
             return Ok(());
         }
 
         let num_peers_to_disconnect = num_peers - max_num_peers;
-        let cli_peers = cli_args
-            .peers
-            .iter()
-            .filter_map(multiaddr_to_socketaddr)
-            .collect::<HashSet<_>>();
+        let cli_peers = cli_args.peers.iter().collect::<HashSet<_>>();
         let peers_to_disconnect = connected_peers
             .into_iter()
-            .filter(|peer| !cli_peers.contains(&peer.connected_address()))
+            .filter(|(_, peer)| !cli_peers.contains(&peer.address()))
             .choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
         match peers_to_disconnect.len() {
             0 => warn!("Not disconnecting from any peer because of manual override."),
             i => info!("Disconnecting from {i} peers."),
         }
-        for peer in peers_to_disconnect {
-            let pmsg = MainToPeerTask::Disconnect(peer.connected_address());
+        for (peer_id, _) in peers_to_disconnect {
+            let pmsg = MainToPeerTask::Disconnect(peer_id);
             self.main_to_peer_broadcast(pmsg);
         }
 
@@ -1186,16 +1198,19 @@ impl MainLoopHandler {
             .await
             .net
             .peer_map
-            .keys()
-            .copied()
+            .iter()
+            .map(|(peer_id, peer_info)| (*peer_id, peer_info.clone()))
+            .collect_vec();
+        let connected_peers_addresses = connected_peers
+            .iter()
+            .map(|(_peer_id, peer_info)| peer_info.address().clone())
             .collect_vec();
         let peers_with_lost_connection = self
             .global_state_lock
             .cli()
             .peers
             .iter()
-            .filter_map(multiaddr_to_socketaddr)
-            .filter(|peer| !connected_peers.contains(peer));
+            .filter(|peer| !connected_peers_addresses.contains(peer));
 
         // If no connection was lost, there's nothing to do.
         if peers_with_lost_connection.clone().count() == 0 {
@@ -1209,35 +1224,43 @@ impl MainLoopHandler {
             .await
             .get_own_handshakedata();
         for peer_with_lost_connection in peers_with_lost_connection {
-            // Disallow reconnection if peer is in bad standing
-            let peer_standing = self
-                .global_state_lock
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_with_lost_connection.ip())
-                .await;
-            if peer_standing.is_some_and(|standing| standing.is_bad()) {
-                debug!("Not reconnecting to peer in bad standing: {peer_with_lost_connection}");
-                continue;
-            }
+            if let Some(socketaddr) = multiaddr_to_socketaddr(peer_with_lost_connection) {
+                // Disallow reconnection if peer is in bad standing
+                let peer_standing = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .get_peer_standing_from_database(socketaddr.ip())
+                    .await;
+                if peer_standing.is_some_and(|standing| standing.is_bad()) {
+                    debug!("Not reconnecting to peer in bad standing: {socketaddr}");
+                    continue;
+                }
 
-            debug!("Attempting to reconnect to peer: {peer_with_lost_connection}");
-            let global_state_lock = self.global_state_lock.clone();
-            let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
-            let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
-            let outgoing_connection_task = tokio::task::spawn(async move {
-                call_peer(
-                    peer_with_lost_connection,
-                    global_state_lock,
-                    main_to_peer_broadcast_rx,
-                    peer_task_to_main_tx,
-                    own_handshake_data,
-                    1, // All CLI-specified peers have distance 1
-                )
-                .await;
-            });
-            main_loop_state.task_handles.push(outgoing_connection_task);
+                debug!("Attempting to reconnect to peer: {socketaddr}");
+                let global_state_lock = self.global_state_lock.clone();
+                let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
+                let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
+                let outgoing_connection_task = tokio::task::spawn(async move {
+                    call_peer(
+                        socketaddr,
+                        global_state_lock,
+                        main_to_peer_broadcast_rx,
+                        peer_task_to_main_tx,
+                        own_handshake_data,
+                        1, // All CLI-specified peers have distance 1
+                    )
+                    .await;
+                });
+                main_loop_state.task_handles.push(outgoing_connection_task);
+            } else if let Err(e) = self
+                .network_command_tx
+                .send(NetworkActorCommand::Dial(peer_with_lost_connection.clone()))
+                .await
+            {
+                warn!("Failed to reconnect to peer {peer_with_lost_connection}: {e}.");
+            }
             main_loop_state.task_handles.retain(|th| !th.is_finished());
         }
 
@@ -1553,7 +1576,7 @@ impl MainLoopHandler {
                     }
 
                     // Is this IP banned through database entry?
-                    let peer_banned = self.global_state_lock.lock_guard().await.net.peer_databases.peer_standings.get(ip).await.is_some_and(|x| x.is_bad());
+                    let peer_banned = self.global_state_lock.lock_guard().await.net.peer_databases.peer_standings_by_ip.get(ip).await.is_some_and(|x| x.is_bad());
                     if peer_banned {
                         debug!("Banned peer {ip} attempted incoming connection. Hanging up.");
                         continue;
@@ -1615,6 +1638,12 @@ impl MainLoopHandler {
                         break exit_code;
                     }
 
+                }
+
+                // Handle messages from the network actor
+                Some(network_event) = self.network_event_rx.recv() => {
+                    debug!("Received message from network actor.");
+                    self.handle_network_event(network_event, &mut main_loop_state).await?;
                 }
 
                 // Handle the completion of mempool tx-update jobs after new block.
@@ -2127,7 +2156,7 @@ impl MainLoopHandler {
                 } in block_requests
                 {
                     self.main_to_peer_broadcast(MainToPeerTask::RequestBlockByHeight {
-                        peer_addr_target: peer_handle,
+                        target_peer: peer_handle,
                         height,
                     });
                 }
@@ -2183,6 +2212,15 @@ impl MainLoopHandler {
         self.main_to_peer_broadcast(pmsg);
         debug!("sent bye");
 
+        // Tell network actor to shut down swarm.
+        if let Err(e) = self
+            .network_command_tx
+            .send(NetworkActorCommand::Shutdown)
+            .await
+        {
+            error!("Could not send Shutdown command to Network Actor: {e}.");
+        };
+
         // Flush all databases
         self.global_state_lock.flush_databases().await?;
 
@@ -2229,6 +2267,7 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
+    use crate::protocol::peer::peer_info::pseudorandom_peer_id;
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
@@ -2261,6 +2300,8 @@ mod tests {
             main_to_peer_rx,
             peer_to_main_tx,
             peer_to_main_rx,
+            network_command_tx,
+            network_event_rx,
             mut state,
             _own_handshake_data,
         ) = get_test_genesis_setup(network, num_init_peers_outgoing, cli)
@@ -2279,12 +2320,13 @@ mod tests {
 
         for i in 0..num_peers_incoming {
             let peer_address = SocketAddr::from_str(&format!("255.254.253.{i}:8080")).unwrap();
+            let peer_id = pseudorandom_peer_id(&peer_address);
             state
                 .lock_guard_mut()
                 .await
                 .net
                 .peer_map
-                .insert(peer_address, get_dummy_peer_incoming(peer_address));
+                .insert(peer_id, get_dummy_peer_incoming(peer_address));
         }
 
         let incoming_peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2304,9 +2346,11 @@ mod tests {
             main_to_peer_tx,
             peer_to_main_tx,
             main_to_miner_tx,
+            network_command_tx,
             peer_to_main_rx,
             miner_to_main_rx,
             rpc_server_to_main_rx,
+            network_event_rx,
             task_join_handles,
         );
         TestSetup {
