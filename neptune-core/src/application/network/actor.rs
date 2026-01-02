@@ -24,9 +24,9 @@ use crate::state::GlobalStateLock;
 
 /// The libp2p adapter for the Neptune network stack.
 ///
-/// The [`Actor`] serves as a specialized interface between the libp2p network
-/// stack and the application's main loop. Unlike typical actor models, this
-/// struct does not own the primary event loop; instead, it facilitates the
+/// The [`NetworkActor`] serves as a specialized interface between the libp2p
+/// network stack and the application's main loop. Unlike typical actor models,
+/// this struct does not own the primary event loop; instead, it facilitates the
 /// transition of libp2p-negotiated connections into the standard Neptune
 /// protocol ecosystem. Specifically, it mediates establishment of a libp2p
 /// stream which it then hijacks and passes to a freshly spawned peer loop.
@@ -35,8 +35,8 @@ use crate::state::GlobalStateLock;
 ///
 /// 1. **Stack Interfacing**: It encapsulates the libp2p
 ///    [`Swarm`](libp2p::Swarm) and the
-///    [`StreamGateway`](super::gateway::StreamGateway) behaviour, shielding the
-///    rest of the application from libp2p-specific complexities.
+///    [`StreamGateway`] behaviour, shielding the rest of the application from
+///    libp2p-specific complexities.
 /// 2. **Stream Handoff**: Upon a successful [`GatewayEvent`], it extracts
 ///    the validated [`Stream`](libp2p::Stream) and passes it into a concrete
 ///    protocol handler.
@@ -46,13 +46,13 @@ use crate::state::GlobalStateLock;
 ///
 /// ### Integration:
 ///
-/// Because the main loop manages the lifecycle of the node, the [`Actor`] can
-/// be bypassed or run in parallel with legacy network components. It acts as a
-/// "feeder" that produces verified peer connections for the main loop to track
-/// or for dedicated tasks to manage.
+/// Because the main loop manages the lifecycle of the node, the
+/// [`NetworkActor`] can be bypassed or run in parallel with legacy network
+/// components. It acts as a "feeder" that produces verified peer connections
+/// for the main loop to track or for dedicated tasks to manage.
 pub(crate) struct NetworkActor {
     /// The [`Swarm`](libp2p::Swarm) driving the [`NetworkStack`], configured
-    /// with the Neptune [`StreamGateway`](super::gateway::StreamGateway).
+    /// with the Neptune [`StreamGateway`].
     swarm: libp2p::Swarm<NetworkStack>,
 
     global_state_lock: GlobalStateLock,
@@ -301,7 +301,8 @@ impl NetworkActor {
     /// 1. Derives a deterministic `SocketAddr` from the `PeerId` to maintain
     ///    compatibility with legacy state tracking (the "Pseudo-IP").
     /// 2. Subscribes to the global `MainToPeerTask` broadcast channel.
-    /// 3. Upgrades the raw [`libp2p::Stream`] into a [`Framed`]
+    /// 3. Upgrades the raw [`libp2p::Stream`] into a
+    ///    `tokio_util::codec::framed::Framed`
     ///    [`PeerMessage`](crate::protocol::peer::PeerMessage) stream using the
     ///    same codec bridge already in use for the legacy TCP stack.
     /// 4. Calls the legacy [`PeerLoopHandler::run_wrapper`] method, handing

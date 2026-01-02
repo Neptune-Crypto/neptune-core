@@ -183,8 +183,8 @@ impl PeerInfo {
         &self.version
     }
 
-    /// Return the [`Multiaddr`](libp2p::Multiaddr) that the peer is expected to
-    /// listen on. Returns `None` if peer does not accept incoming connections.
+    /// Return the [`Multiaddr`] that the peer is expected to listen on. Returns
+    /// `None` if peer does not accept incoming connections.
     pub fn listen_address(&self) -> Option<Multiaddr> {
         let listen_port = self.peer_connection_info.listen_port?;
         let mut new_multiaddr = Multiaddr::empty();

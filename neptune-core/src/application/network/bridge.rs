@@ -24,8 +24,8 @@ use tokio_util::compat::FuturesAsyncReadCompatExt;
 /// `handle_peer_message<S>`, specifically requiring:
 /// - Bidirectional communication ([`Sink`] + [`Stream`]).
 /// - Serialization of [`PeerMessage`] using `io::Error` for transport failures.
-/// - Thread-safety ([`Send`][std::marker::Send]) and stack-stability
-///   ([`Unpin`][std::marker::Unpin]) for asynchronous execution.
+/// - Thread-safety ([`Send`]) and stack-stability ([`Unpin`]) for asynchronous
+///   execution.
 pub(crate) trait PeerStream:
     Stream<Item = Result<PeerMessage, io::Error>> + Sink<PeerMessage, Error = io::Error> + Unpin + Send
 {

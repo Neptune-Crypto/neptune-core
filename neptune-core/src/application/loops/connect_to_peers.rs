@@ -172,7 +172,7 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
 ///
 /// Note: this function is part of the legacy peer-to-peer stack. Therefore it
 /// is okay to use [`SocketAddr`] and
-/// [`pseudorandom_peer_id`](crate::protocol::peer::peer_info::pseudorandom_peer_id).
+/// [`pseudorandom_peer_id`].
 ///
 /// # Locking
 ///   * acquires `global_state_lock` for read
@@ -383,7 +383,7 @@ where
 /// particular that it is okay to use [`SocketAddr`]. However, this function
 /// does not handle *all* incoming connections: connections coming in over the
 /// libp2p network stack are handled by the
-/// [`Actor`](crate::application::network::actor::Actor) and the
+/// [`NetworkActor`](crate::application::network::actor::NetworkActor) and the
 /// [`StreamGateway`](crate::application::network::gateway::StreamGateway).
 async fn answer_peer_inner<S>(
     stream: S,

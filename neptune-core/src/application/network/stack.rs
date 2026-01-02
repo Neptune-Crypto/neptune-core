@@ -1,7 +1,8 @@
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::StreamProtocol;
 
-use crate::application::network::gateway::{GatewayEvent, StreamGateway};
+use crate::application::network::gateway::GatewayEvent;
+use crate::application::network::gateway::StreamGateway;
 
 /// The protocol ID string, dynamically generated from the crate version, e.g.,
 /// "/neptune/0.6.0"
@@ -14,10 +15,9 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 /// interacts with the p2p network at the transport and discovery level.
 ///
 /// This struct implements
-/// [`NetworkBehaviour`](libp2p::swarm::NetworkBehaviour), allowing it to be
-/// driven by the libp2p [`Swarm`](libp2p::Swarm). It specifically aggregates
-/// behaviors required for successful peer communication in restrictive network
-/// environments (NATs).
+/// [`NetworkBehaviour`], allowing it to be driven by the libp2p
+/// [`Swarm`](libp2p::Swarm). It specifically aggregates behaviors required for
+/// successful peer communication in restrictive network environments (NATs).
 ///
 /// ### Component Roles:
 ///
@@ -32,9 +32,8 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 ///   This behavior monitors relayed connections and attempts to perform a "Hole
 ///   Punch" to upgrade the connection to a direct, high-performance peer-to-
 ///   peer link, bypassing the relay once the path is established.
-/// * **[`peer_handler_gateway`](Self::peer_handler_gateway)**: A "stream
-///   factory" that uses the [`request_response`](libp2p::request_response)
-///   protocol in streaming mode. It negotiates the initial handshake via CBOR
+/// * **[`gateway`](Self::gateway)**: A "stream factory" that uses a raw stream
+///   and hijacks it. It negotiates the initial handshake via CBOR
 ///   and provides the raw [`libp2p::Stream`] which is then upgraded into a
 ///   long-lived bidirectional communication channel by the peer message
 ///   handler.
@@ -59,9 +58,9 @@ pub(crate) struct NetworkStack {
 /// Unified event type for all protocols running within the libp2p stack.
 ///
 /// This enum aggregates events from various libp2p sub-protocols. It allows
-/// the [`Actor`] to handle diverse network signaling—from high-level
-/// Neptune handshakes to low-level NAT traversal updates—through a
-/// single event stream.
+/// the [`NetworkActor`](super::actor::NetworkActor) to handle diverse network
+/// signaling—from high-level Neptune handshakes to low-level NAT traversal
+/// updates—through a single event stream.
 pub enum NetworkStackEvent {
     /// Signals a successful Neptune-specific handshake.
     ///

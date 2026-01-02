@@ -15,8 +15,8 @@ impl MainLoopHandler {
         match event {
             NetworkEvent::PeerConnected {
                 peer_id,
-                handshake,
-                address,
+                handshake: _,
+                address: _,
                 loop_handle,
             } => {
                 main_loop_state.task_handles.push(loop_handle);

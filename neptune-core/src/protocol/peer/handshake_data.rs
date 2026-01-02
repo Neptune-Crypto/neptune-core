@@ -9,13 +9,13 @@ use serde::Serialize;
 use crate::application::config::network::Network;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 
-pub(crate) type VersionString = ArrayString<U30>;
-pub(crate) type ExtraDataString = ArrayString<U255>;
+pub type VersionString = ArrayString<U30>;
+pub type ExtraDataString = ArrayString<U255>;
 
 /// Datastruct defining the handshake peers exchange when establishing a new
 /// connection.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct HandshakeData {
+pub struct HandshakeData {
     pub tip_header: BlockHeader,
     pub listen_port: Option<u16>,
     pub network: Network,
