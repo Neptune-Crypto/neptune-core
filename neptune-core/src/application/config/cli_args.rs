@@ -392,7 +392,7 @@ pub struct Args {
     pub(crate) no_resume_sync: bool,
 
     /// Multiaddrs (or IPs) of nodes to connect to, e.g.:
-    /// ```
+    /// ```text
     /// --peer /ip4/8.8.8.8 \
     /// --peer /ip4/8.8.4.4/udp/1337/quic-v1 \
     /// --peer 139.162.193.206:9798 \

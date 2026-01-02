@@ -212,8 +212,8 @@ pub(crate) enum GatewayEvent {
 ///    every peer that connects.
 ///
 /// This struct implements
-/// [`NetworkBehaviour`](libp2p::swarm::NetworkBehaviour), allowing it to be
-/// plugged directly into a libp2p [`Swarm`](libp2p::Swarm).
+/// [`NetworkBehaviour`], allowing it to be plugged directly into a libp2p
+/// [`Swarm`](libp2p::Swarm).
 pub(crate) struct StreamGateway {
     // Used for getting the handshake data
     global_state: GlobalStateLock,
