@@ -1832,6 +1832,8 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
         use crate::application::loops::mine_loop::TxMergeOrigin;
         use crate::application::triton_vm_job_queue::vm_job_queue;
+        use crate::protocol::proof_abstractions::verifier::disable_true_claims_cache;
+        use crate::protocol::proof_abstractions::verifier::enable_true_claims_cache;
         use crate::state::transaction::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
@@ -1900,6 +1902,14 @@ pub(crate) mod tests {
             let index = rng.random_range(0..proof_length);
             block_proof.0.get_mut(index).unwrap().increment();
 
+            // Since the block is deterministic, it may have been validated
+            // already. In a test environment, its verified-to-be-true claim
+            // would have been absorbed into the true claims cache. In this
+            // case, even the false proof will validate. So in order to make the
+            // test meaningful, we first have to clear or disable the true
+            // claims cache.
+            disable_true_claims_cache().await;
+
             assert_eq!(
                 BlockValidationError::ProofValidity,
                 block
@@ -1907,6 +1917,8 @@ pub(crate) mod tests {
                     .await
                     .unwrap_err()
             );
+
+            enable_true_claims_cache().await;
         }
 
         #[traced_test]

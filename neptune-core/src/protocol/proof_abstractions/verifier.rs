@@ -34,6 +34,10 @@ use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::HashSet<Claim>>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashSet::new()));
 
+#[cfg(test)]
+static CLAIMS_CACHE_ENABLED: std::sync::LazyLock<tokio::sync::Mutex<bool>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(true));
+
 /// Verify a Triton VM (claim, proof) pair for default STARK parameters.
 ///
 /// When the test flag is set, this function checks whether the claim is present
@@ -50,8 +54,11 @@ pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool
 
     // presently this is used by certain unit tests.
     #[cfg(test)]
-    if CLAIMS_CACHE.lock().await.contains(&claim) {
-        return true;
+    {
+        let is_enabled = *CLAIMS_CACHE_ENABLED.lock().await;
+        if is_enabled == true && CLAIMS_CACHE.lock().await.contains(&claim) {
+            return true;
+        }
     }
 
     #[cfg(test)]
@@ -78,6 +85,18 @@ pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool
 #[cfg(test)]
 pub(crate) async fn cache_true_claim(claim: Claim) {
     CLAIMS_CACHE.lock().await.insert(claim);
+}
+
+/// Disable the true [`CLAIMS_CACHE`].
+#[cfg(test)]
+pub(crate) async fn disable_true_claims_cache() {
+    *CLAIMS_CACHE_ENABLED.lock().await = false;
+}
+
+/// Enable the true [`CLAIMS_CACHE`].
+#[cfg(test)]
+pub(crate) async fn enable_true_claims_cache() {
+    *CLAIMS_CACHE_ENABLED.lock().await = true;
 }
 
 #[cfg(test)]
