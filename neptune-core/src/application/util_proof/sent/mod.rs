@@ -108,9 +108,9 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
     }));
 
     // let rustfield_membershipproof = rustfield!(WitnessMemory::membership_proof);
-    let rustfield_senderrandomness = rustfield!(MsMembershipProof::sender_randomness);
+    // let rustfield_senderrandomness = rustfield!(MmrMembershipProof::sender_randomness);
     let rustfield_utxo = rustfield!(WitnessMemory::utxo);
-    let rustfield_utxodigest = rustfield!(WitnessMemory::utxo_digest);
+    let rustfield_utxo_digest = rustfield!(WitnessMemory::utxo_digest);
     let rustfield_aoclleafindex = rustfield!(MsMembershipProof::aocl_leaf_index);
 
     let main = triton_asm! {
@@ -141,7 +141,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         // _ *w
-        {&rustfield_senderrandomness} // omits `{&rustfield_membershipproof}` from <../reserves>
+        {&WitnessMemory::get_field("sender_randomness")}
         addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
@@ -166,16 +166,16 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         {&rustfield_utxo}
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
 
-        addi 0 read_mem 1 addi 1
-        // _ utxo_size *utxo
+        addi 0 read_mem 1 addi 2
+        // _ utxo_size *utxo_internal
         swap 1
-        // _ *utxo utxo_size
+        // _ *utxo_internal utxo_size
         call {lib_hash_varlen}
         hint utxo_hash = stack[0..5]
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        {&rustfield_utxodigest}
+        {&rustfield_utxo_digest}
         addi 4 read_mem 5 pop 1
         assert_vector
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
@@ -278,18 +278,24 @@ pub fn new(
     witness_senderrandomness: Digest,
     witness_aoclleafindex: u64,
     witness_utxo: Utxo,
-    witness_utxodigest: Digest,
     witness_membershipproof: MmrMembershipProof,
 ) -> The {
+    let coins = witness_utxo.coins();
     The(
         WitnessMemory {
             aocl: witness_aocl,
-            // membership_proof: witness_membershipproof,
+            membership_proof: witness_membershipproof,
+            utxo_digest: dbg![
+                // tasm_lib::prelude::Tip5::hash_varlen({
+                //     let mut v = tasm_lib::triton_vm::prelude::BFieldCodec::encode(&coins.to_vec());
+                //     v.reverse();
+                //     v
+                // }.as_slice())
+                tasm_lib::prelude::Tip5::hash(&witness_utxo)
+            ],
             utxo: witness_utxo,
-            utxo_digest: witness_utxodigest,
             sender_randomness: witness_senderrandomness,
             aocl_leaf_index: witness_aoclleafindex,
-            membership_proof: witness_membershipproof,
         },
         c,
     )
