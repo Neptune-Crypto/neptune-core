@@ -56,7 +56,7 @@ pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool
     #[cfg(test)]
     {
         let is_enabled = *CLAIMS_CACHE_ENABLED.lock().await;
-        if is_enabled == true && CLAIMS_CACHE.lock().await.contains(&claim) {
+        if is_enabled && CLAIMS_CACHE.lock().await.contains(&claim) {
             return true;
         }
     }
