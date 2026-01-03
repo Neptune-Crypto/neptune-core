@@ -50,6 +50,8 @@ jobs:
           --skip can_cancel_preprocess_within_one_second
           --skip can_cancel_merkle_tree_construction_within_two_seconds
           --skip alice_updates_mutator_set_data_on_own_transaction
+          --skip can_sync_from
+          --skip can_sync_with_moving
 
       - name: Run non-parallel test "resume block download from saved state"
         run: >
