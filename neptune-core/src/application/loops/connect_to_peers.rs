@@ -800,7 +800,6 @@ mod tests {
 
     use anyhow::bail;
     use anyhow::Result;
-    use libp2p::PeerId;
     use macro_rules_attr::apply;
     use tasm_lib::twenty_first::tip5::digest::Digest;
     use test_strategy::proptest;

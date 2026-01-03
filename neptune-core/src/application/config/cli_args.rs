@@ -411,6 +411,20 @@ pub struct Args {
     #[structopt(long = "peer", value_parser(parse_to_multiaddr))]
     pub peers: Vec<Multiaddr>,
 
+    /// Generate a fresh identity for this session only.
+    #[clap(long)]
+    pub(crate) incognito: bool,
+
+    /// Generate a new identity to use going forward.
+    ///
+    /// Back up the old identity file.
+    #[clap(long)]
+    pub(crate) new_identity: bool,
+
+    /// Use the identity contained in the given file.
+    #[clap(long)]
+    pub(crate) identity_file: Option<String>,
+
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "main", short)]
     pub network: Network,
