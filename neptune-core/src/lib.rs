@@ -73,6 +73,7 @@ use tracing::warn;
 use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::data_directory::DataDirectory;
+use crate::application::config::identity::resolve_identity;
 use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::locks::tokio as sync_tokio;
@@ -189,11 +190,16 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     info!("UTXO restoration check complete");
 
     // Set up the libp2p network Actor
-    let ephemeral_identity = libp2p::identity::Keypair::generate_ed25519(); // TODO: persist me
+    let identity = resolve_identity(
+        data_directory.root_dir_path(),
+        cli_args.identity_file.clone(),
+        cli_args.incognito,
+        cli_args.new_identity,
+    )?;
     let (network_command_tx, network_command_rx) = mpsc::channel(100);
     let (network_event_tx, network_event_rx) = mpsc::channel(100);
     let actor = NetworkActor::new(
-        ephemeral_identity,
+        identity,
         peer_task_to_main_tx.clone(),
         main_to_peer_broadcast_tx.clone(),
         network_command_rx,
