@@ -7,11 +7,14 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
+use crate::application::network::address_book::AddressBook;
+use crate::application::network::address_book::ADDRESS_BOOK_MAX_SIZE;
 use crate::application::network::bridge::bridge_libp2p_stream;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
@@ -19,6 +22,8 @@ use crate::application::network::gateway::GatewayEvent;
 use crate::application::network::gateway::StreamGateway;
 use crate::application::network::stack::NetworkStack;
 use crate::application::network::stack::NetworkStackEvent;
+use crate::application::network::stack::NEPTUNE_PROTOCOL;
+use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::state::GlobalStateLock;
 
@@ -65,8 +70,14 @@ pub(crate) struct NetworkActor {
     command_rx: mpsc::Receiver<NetworkActorCommand>,
     event_tx: mpsc::Sender<NetworkEvent>,
 
-    // Lookup table to find the addresses of peers
-    address_map: HashMap<PeerId, Multiaddr>,
+    /// Lookup table to find the current addresses of connected peers.
+    active_connections: HashMap<PeerId, Multiaddr>,
+
+    /// Dictionary to find peer metadata, connected or not.
+    address_book: AddressBook,
+
+    /// File to store the address book, if any.
+    address_book_file: Option<PathBuf>,
 }
 
 impl NetworkActor {
@@ -86,12 +97,12 @@ impl NetworkActor {
         command_rx: mpsc::Receiver<NetworkActorCommand>,
         event_tx: mpsc::Sender<NetworkEvent>,
         global_state_lock: GlobalStateLock,
+        maybe_address_book_file: Option<PathBuf>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         // Create the Identify config (required for the NetworkStack)
-        let identify_config = libp2p::identify::Config::new(
-            "/neptune/identify/1.0".into(), // Protocol version
-            local_key.public(),
-        );
+        let identify_config =
+            libp2p::identify::Config::new(NEPTUNE_PROTOCOL_STR.to_owned(), local_key.public())
+                .with_agent_version(format!("neptune-cash/{}", env!("CARGO_PKG_VERSION")));
 
         let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
             .with_tokio()
@@ -124,6 +135,23 @@ impl NetworkActor {
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
 
+        let mut address_book = AddressBook::new();
+        let mut address_book_file = None;
+        if let Some(file_name) = maybe_address_book_file {
+            if let Err(e) = address_book.load_from_disk(&file_name) {
+                tracing::warn!(
+                    "Failed to load address book from '{}': {e}.",
+                    file_name.to_string_lossy()
+                );
+            } else {
+                tracing::info!(
+                    "Loaded address book from '{}'.",
+                    file_name.to_string_lossy()
+                );
+                address_book_file = Some(file_name);
+            }
+        }
+
         Ok(Self {
             swarm,
             peer_to_main_loop_tx,
@@ -131,7 +159,9 @@ impl NetworkActor {
             command_rx,
             event_tx,
             global_state_lock,
-            address_map: HashMap::new(),
+            active_connections: HashMap::new(),
+            address_book,
+            address_book_file,
         })
     }
 
@@ -191,7 +221,9 @@ impl NetworkActor {
             // An event from our own network stack bubbles up.
             SwarmEvent::Behaviour(network_stack_event) => {
                 match network_stack_event {
-                    NetworkStackEvent::Identify(_event) => {}
+                    NetworkStackEvent::Identify(identify_event) => {
+                        self.handle_identify_event(*identify_event);
+                    }
                     NetworkStackEvent::AutoNat(auto_nat_event) => {
                         self.handle_autonat_event(*auto_nat_event);
                     }
@@ -210,7 +242,7 @@ impl NetworkActor {
             }
 
             SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-                if let Some(address) = self.address_map.remove(&peer_id) {
+                if let Some(address) = self.active_connections.remove(&peer_id) {
                     tracing::info!("Connection to peer {peer_id} at {address} closed.");
                 } else {
                     tracing::warn!(peer = %peer_id, "Connection closed abruptly: {:?}", cause);
@@ -238,13 +270,76 @@ impl NetworkActor {
                     "Inbound"
                 };
                 tracing::info!("{direction} connection established with {peer_id} at {address}.");
-                self.address_map.insert(peer_id, address.clone());
+                self.active_connections.insert(peer_id, address.clone());
             }
 
             _ => {}
         }
 
         Ok(())
+    }
+
+    /// Handles Identify protocol events to synchronize protocol versions and
+    /// external address observations.
+    fn handle_identify_event(&mut self, event: libp2p::identify::Event) {
+        match event {
+            // We received Identify info from a remote peer.
+            libp2p::identify::Event::Received { peer_id, info, .. } => {
+                tracing::debug!(peer = %peer_id, "Received identify info");
+
+                // Check if the peer speaks the same Neptune version as us.
+                if !info.protocols.contains(&NEPTUNE_PROTOCOL) {
+                    tracing::warn!(
+                        peer = %peer_id,
+                        version = %info.protocol_version,
+                        "Peer is running an incompatible protocol version. Expected: {}",
+                        NEPTUNE_PROTOCOL_STR
+                    );
+
+                    // Trigger a disconnect; we want Neptune-only.
+                    self.swarm.disconnect_peer_id(peer_id).ok();
+                    return;
+                }
+
+                // The remote peer told us what our IP/port looks like from
+                // their perspective. This is useful for AutoNAT and for our own
+                // reachability logic.
+                tracing::info!(
+                    peer = %peer_id,
+                    observed_addr = %info.observed_addr,
+                    "Remote peer observed us at a specific address."
+                );
+
+                // Keep a record of this peer in our address book, or update it.
+                self.address_book.insert_or_update(
+                    peer_id,
+                    info.listen_addrs,
+                    info.agent_version,
+                    info.protocol_version,
+                    info.protocols,
+                );
+
+                // Prune if necessary, to avoid state bloat.
+                self.address_book.prune_to_length(ADDRESS_BOOK_MAX_SIZE);
+            }
+
+            // We successfully sent our Identify info to a peer in response to
+            // a request.
+            libp2p::identify::Event::Sent { peer_id, .. } => {
+                tracing::debug!(peer = %peer_id, "Sent identify info to peer");
+            }
+
+            // We successfully sent our Identify info to a peer at our own
+            // behest.
+            libp2p::identify::Event::Pushed { peer_id, .. } => {
+                tracing::debug!(peer = %peer_id, "Pushed identify info to peer");
+            }
+
+            // An error occurred during the Identify exchange.
+            libp2p::identify::Event::Error { peer_id, error, .. } => {
+                tracing::warn!(peer = %peer_id, "Identify error: {:?}", error);
+            }
+        }
     }
 
     /// Process events from the `StreamGateway` subprotocol to transform a raw
@@ -285,7 +380,7 @@ impl NetworkActor {
         let from_main_rx = self.main_to_peer_broadcast.subscribe();
 
         // Fetch address from carefully maintained address map.
-        let Some(address) = self.address_map.get(&peer_id).cloned() else {
+        let Some(address) = self.active_connections.get(&peer_id).cloned() else {
             return Err(ActorError::NoAddressForPeer(peer_id));
         };
 
@@ -391,6 +486,16 @@ impl NetworkActor {
 
             NetworkActorCommand::Shutdown => {
                 tracing::info!("Network Actor shutting down Swarm...");
+
+                if let Some(file_name) = self.address_book_file.as_ref() {
+                    if let Err(e) = self.address_book.save_to_disk(file_name) {
+                        tracing::warn!(
+                            "Failed to persist address book at '{}': {e}.",
+                            file_name.to_string_lossy()
+                        );
+                    }
+                }
+
                 // Do not touch the peer loops here, just stop the Actor's own
                 // loop.
                 return Ok(!Self::KEEP_ALIVE);

@@ -198,6 +198,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     )?;
     let (network_command_tx, network_command_rx) = mpsc::channel(100);
     let (network_event_tx, network_event_rx) = mpsc::channel(100);
+    let address_book_file = Some(data_directory.address_book_file());
     let actor = NetworkActor::new(
         identity,
         peer_task_to_main_tx.clone(),
@@ -205,6 +206,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         network_command_rx,
         network_event_tx,
         global_state_lock.clone(),
+        address_book_file,
     )
     .unwrap_or_else(|e| {
         panic!("Failed to set up network actor: {e}.");
