@@ -199,7 +199,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     let (network_command_tx, network_command_rx) = mpsc::channel(100);
     let (network_event_tx, network_event_rx) = mpsc::channel(100);
     let address_book_file = Some(data_directory.address_book_file());
-    let actor = NetworkActor::new(
+    let mut actor = NetworkActor::new(
         identity,
         peer_task_to_main_tx.clone(),
         main_to_peer_broadcast_tx.clone(),
@@ -213,6 +213,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     });
     let mut task_join_handles = vec![];
     let actor_handle = tokio::spawn(async move {
+        actor.dial_initial_peers();
         if let Err(e) = actor.run().await {
             error!("Network Actor crashed: {:?}", e);
         }
