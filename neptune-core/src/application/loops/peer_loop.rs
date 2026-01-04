@@ -631,16 +631,13 @@ impl PeerLoopHandler {
                             peer_info.listen_address().is_some() && !peer_info.is_local_connection()
                         })
                         .take(MAX_PEER_LIST_LENGTH) // limit length of response
-                        .flat_map(|peer_info| {
-                            if let Some(socket_addr) = multiaddr_to_socketaddr(
+                        .filter_map(|peer_info| {
+                            multiaddr_to_socketaddr(
                                 &peer_info
                                     .listen_address()
                                     .expect("already filtered for some listen address"),
-                            ) {
-                                Some((socket_addr, peer_info.instance_id()))
-                            } else {
-                                None
-                            }
+                            )
+                            .map(|socket_addr| (socket_addr, peer_info.instance_id()))
                         })
                         .collect();
 
@@ -2212,6 +2209,15 @@ impl PeerLoopHandler {
             }
 
             peer_map.insert(self.peer_id, new_peer);
+
+            // If we are in sync mode, tell the main loop there is a new peer so
+            // that it can relay the message to the sync loop.
+            if global_state.net.sync_anchor.is_some() {
+                debug!("We are syncing, so tell the sync loop about the new peer.");
+                self.to_main_tx
+                    .send(PeerTaskToMain::NewPeer(self.peer_id))
+                    .await?;
+            }
         }
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
@@ -2327,7 +2333,7 @@ mod tests {
             .unwrap();
 
         let peer_address_sa = get_dummy_socket_address(2);
-        let peer_address = socketaddr_to_multiaddr(peer_address_sa.clone());
+        let peer_address = socketaddr_to_multiaddr(peer_address_sa);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
         let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
@@ -2376,7 +2382,7 @@ mod tests {
         ) = get_test_genesis_setup(Network::Main, 2, cli_args::Args::default()).await?;
 
         let peer_address_sa = get_dummy_socket_address(2);
-        let peer_address = socketaddr_to_multiaddr(peer_address_sa.clone());
+        let peer_address = socketaddr_to_multiaddr(peer_address_sa);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
         let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
@@ -2410,7 +2416,7 @@ mod tests {
             get_test_genesis_setup(network, 0, args).await?;
 
         let peer_address_sa = get_dummy_socket_address(0);
-        let peer_address = socketaddr_to_multiaddr(peer_address_sa.clone());
+        let peer_address = socketaddr_to_multiaddr(peer_address_sa);
         let peer_handshake_data = get_dummy_handshake_data_for_genesis(network);
         let peer_id = peer_handshake_data.instance_id;
         let mut peer_loop_handler = PeerLoopHandler::new(
@@ -2619,7 +2625,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(network, 2);
-            let ma2 = socketaddr_to_multiaddr(sa2.clone());
+            let ma2 = socketaddr_to_multiaddr(sa2);
             let mut expected_response = vec![
                 (
                     multiaddr_to_socketaddr(&peer_infos[0].address()).unwrap(),
@@ -5435,7 +5441,7 @@ mod tests {
                 Action::Read(PeerMessage::Bye),
             ]);
 
-            let bob_multiaddr = socketaddr_to_multiaddr(bob_socket_address.clone());
+            let bob_multiaddr = socketaddr_to_multiaddr(bob_socket_address);
             let mut alice_peer_loop_handler = PeerLoopHandler::with_mocked_time(
                 alice_peer_to_main_tx.clone(),
                 alice.clone(),

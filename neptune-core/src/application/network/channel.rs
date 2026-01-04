@@ -1,6 +1,4 @@
-use crate::protocol::peer::handshake_data::HandshakeData;
 use libp2p::Multiaddr;
-use libp2p::PeerId;
 use tokio::task::JoinHandle;
 
 /// Commands from Application -> Network
@@ -20,13 +18,5 @@ pub enum NetworkActorCommand {
 pub enum NetworkEvent {
     /// Emitted when a peer has successfully completed the handshake and the
     /// peer loop has been spawned.
-    PeerConnected {
-        peer_id: PeerId,
-        handshake: Box<HandshakeData>,
-        address: Multiaddr,
-        loop_handle: JoinHandle<()>,
-    },
-
-    /// Emitted when a peer connection is dropped or the peer loop exits.
-    PeerDisconnected(PeerId),
+    NewPeerLoop { loop_handle: JoinHandle<()> },
 }

@@ -936,10 +936,7 @@ impl MainLoopHandler {
                     );
                 }
             }
-            PeerTaskToMain::NewPeer {
-                peer_id,
-                address: _,
-            } => {
+            PeerTaskToMain::NewPeer(peer_id) => {
                 if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
                     sync_loop.send_add_peer(peer_id).await;
                 }
@@ -1643,7 +1640,7 @@ impl MainLoopHandler {
                 // Handle messages from the network actor
                 Some(network_event) = self.network_event_rx.recv() => {
                     debug!("Received message from network actor.");
-                    self.handle_network_event(network_event, &mut main_loop_state).await?;
+                    self.handle_network_event(network_event, &mut main_loop_state)?;
                 }
 
                 // Handle the completion of mempool tx-update jobs after new block.
