@@ -24,6 +24,11 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 /// * **[`identify`](libp2p::identify)**: Essential for peer discovery and
 ///   protocol negotiation. It allows peers to exchange public keys, listen
 ///   addresses, and supported protocols (like our blockchain protocol).
+/// * **[`autonat`](libp2p::autonat)**: Automatic NAT detection. This behavior
+///   periodically probes other peers to determine the node's reachability
+///   status. It identifies whether the node is publicly accessible or "private"
+///   (behind a NAT/Firewall). This status info is used to decide when to seek
+///   out a relay reservation or attempt a hole punch.
 /// * **[`relay::client`](libp2p::relay::client)**: Enables "Circuit Relay"
 ///   support. This allows the node to use a third-party relay to establish a
 ///   connection when both peers are behind symmetric NATs and cannot be reached
@@ -48,6 +53,7 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 #[behaviour(to_swarm = "NetworkStackEvent")]
 pub(crate) struct NetworkStack {
     pub(crate) identify: libp2p::identify::Behaviour,
+    pub(crate) autonat: libp2p::autonat::Behaviour,
     pub(crate) relay: libp2p::relay::client::Behaviour,
     pub(crate) dcutr: libp2p::dcutr::Behaviour,
 
@@ -62,17 +68,17 @@ pub(crate) struct NetworkStack {
 /// signaling—from high-level Neptune handshakes to low-level NAT traversal
 /// updates—through a single event stream.
 pub enum NetworkStackEvent {
-    /// Signals a successful Neptune-specific handshake.
-    ///
-    /// This is the primary event used to "hijack" a connection and
-    /// transition it into a peer loop.
-    StreamGateway(Box<GatewayEvent>),
-
     /// Signals an update from the libp2p Identify protocol.
     ///
     /// Used to discover the remote peer's public addresses, agent version,
     /// and supported protocols.
     Identify(Box<libp2p::identify::Event>),
+
+    /// Signals an update from the autoNAT mechanism.
+    ///
+    /// Used as diagnostics layer to determine whether the node is behind a NAT
+    /// or firewall.
+    AutoNat(Box<libp2p::autonat::Event>),
 
     /// Signals an event from the Relay client.
     ///
@@ -86,19 +92,23 @@ pub enum NetworkStackEvent {
     /// Facilitates "hole punching" to upgrade a relayed connection to a
     /// direct peer-to-peer connection.
     Dcutr(Box<libp2p::dcutr::Event>),
-}
 
-// These `From` impls are required by the derive macro `NetworkBehaviour` to map
-// child events into the `NetworkStackEvent` enum.
-impl From<GatewayEvent> for NetworkStackEvent {
-    fn from(event: GatewayEvent) -> Self {
-        Self::StreamGateway(Box::new(event))
-    }
+    /// Signals a successful Neptune-specific handshake.
+    ///
+    /// This is the primary event used to "hijack" a connection and
+    /// transition it into a peer loop.
+    StreamGateway(Box<GatewayEvent>),
 }
 
 impl From<libp2p::identify::Event> for NetworkStackEvent {
     fn from(event: libp2p::identify::Event) -> Self {
         Self::Identify(Box::new(event))
+    }
+}
+
+impl From<libp2p::autonat::Event> for NetworkStackEvent {
+    fn from(event: libp2p::autonat::Event) -> Self {
+        Self::AutoNat(Box::new(event))
     }
 }
 
@@ -111,5 +121,13 @@ impl From<libp2p::relay::client::Event> for NetworkStackEvent {
 impl From<libp2p::dcutr::Event> for NetworkStackEvent {
     fn from(event: libp2p::dcutr::Event) -> Self {
         Self::Dcutr(Box::new(event))
+    }
+}
+
+// These `From` impls are required by the derive macro `NetworkBehaviour` to map
+// child events into the `NetworkStackEvent` enum.
+impl From<GatewayEvent> for NetworkStackEvent {
+    fn from(event: GatewayEvent) -> Self {
+        Self::StreamGateway(Box::new(event))
     }
 }

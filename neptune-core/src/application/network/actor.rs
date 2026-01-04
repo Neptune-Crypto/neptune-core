@@ -104,9 +104,19 @@ impl NetworkActor {
             .with_behaviour(|key, relay_behaviour| {
                 let local_peer_id = key.public().to_peer_id();
 
+                // Use the default autoNAT config for now. For later reference,
+                // the fields of autonat::Config are `pub` and so can be
+                // changed. Here is a selection of fields we might consider
+                // changing to non-default values.
+                //  - `retry_interval` (default 1m)
+                //  - `refresh_interval` (default: 15m)
+                //  - `boot_delay` (default: 1s)
+                let autonat_config = libp2p::autonat::Config::default();
+
                 NetworkStack {
                     gateway: StreamGateway::new(global_state_lock.clone()),
                     identify: libp2p::identify::Behaviour::new(identify_config),
+                    autonat: libp2p::autonat::Behaviour::new(local_peer_id, autonat_config),
                     relay: relay_behaviour,
                     dcutr: libp2p::dcutr::Behaviour::new(local_peer_id),
                 }
@@ -178,38 +188,21 @@ impl NetworkActor {
         event: SwarmEvent<NetworkStackEvent>,
     ) -> Result<(), ActorError> {
         match event {
-            // StreamGateway successfully hijacked a stream.
-            SwarmEvent::Behaviour(NetworkStackEvent::StreamGateway(gateway_event)) => {
-                let GatewayEvent::HandshakeReceived {
-                    peer_id,
-                    handshake,
-                    stream,
-                } = *gateway_event;
+            // An event from our own network stack bubbles up.
+            SwarmEvent::Behaviour(network_stack_event) => {
+                match network_stack_event {
+                    NetworkStackEvent::Identify(_event) => {}
+                    NetworkStackEvent::AutoNat(auto_nat_event) => {
+                        self.handle_autonat_event(*auto_nat_event);
+                    }
+                    NetworkStackEvent::Relay(_event) => {}
+                    NetworkStackEvent::Dcutr(_event) => {}
 
-                tracing::info!(peer = %peer_id, "New peer stream hijacked via StreamGateway");
-
-                // Generate a new the receiver channel for this specific peer.
-                let from_main_rx = self.main_to_peer_broadcast.subscribe();
-
-                // Fetch address from carefully maintained address map.
-                let Some(address) = self.address_map.get(&peer_id).cloned() else {
-                    return Err(ActorError::NoAddressForPeer(peer_id));
-                };
-
-                // Spawn the legacy loop with the hijacked stream.
-                let loop_handle =
-                    self.spawn_peer_loop(peer_id, address.clone(), handshake, stream, from_main_rx);
-
-                // Notify the rest of the application that a peer is ready.
-                let _ = self
-                    .event_tx
-                    .send(NetworkEvent::PeerConnected {
-                        peer_id,
-                        handshake: Box::new(handshake),
-                        address,
-                        loop_handle,
-                    })
-                    .await;
+                    // StreamGateway successfully hijacked a stream.
+                    NetworkStackEvent::StreamGateway(gateway_event) => {
+                        self.handle_stream_gateway_event(*gateway_event).await?;
+                    }
+                }
             }
 
             SwarmEvent::NewListenAddr { address, .. } => {
@@ -239,7 +232,12 @@ impl NetworkActor {
                 peer_id, endpoint, ..
             } => {
                 let address = endpoint.get_remote_address().clone();
-                tracing::info!("Established new connection with {peer_id} at {address}.");
+                let direction = if endpoint.is_dialer() {
+                    "Outbound"
+                } else {
+                    "Inbound"
+                };
+                tracing::info!("{direction} connection established with {peer_id} at {address}.");
                 self.address_map.insert(peer_id, address.clone());
             }
 
@@ -247,6 +245,120 @@ impl NetworkActor {
         }
 
         Ok(())
+    }
+
+    /// Process events from the `StreamGateway` subprotocol to transform a raw
+    /// libp2p stream into bidirectional stream compatible with the legacy
+    /// Neptune Cash peer-loop architecture.
+    ///
+    /// This function acts as the bridge between the asynchronous `libp2p` swarm
+    /// and the dedicated actor loops managed by the `NetworkActor`. When a new
+    /// stream is successfully "hijacked" and the initial handshake is
+    /// negotiated:
+    ///
+    ///  1. **Context Recovery**: It retrieves the peer's network address from
+    ///     the internal `address_map` to maintain consistency with legacy
+    ///     expectations.
+    ///  2. **Loop Spawning**: It initializes a new peer-specific message
+    ///     handler (the legacy event loop) by providing it with the hijacked
+    ///     stream and a subscription to the global main-to-peer broadcast
+    ///     channel.
+    ///  3. **Application Notification**: It signals to the main loop that a
+    ///     new, authenticated peer is fully operational and ready for
+    ///     synchronization.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ActorError::NoAddressForPeer`] if a stream is established for
+    /// a peer whose connection metadata was not correctly tracked in the
+    /// address map.
+    async fn handle_stream_gateway_event(&mut self, event: GatewayEvent) -> Result<(), ActorError> {
+        let GatewayEvent::HandshakeReceived {
+            peer_id,
+            handshake,
+            stream,
+        } = event;
+
+        tracing::info!(peer = %peer_id, "New peer stream hijacked via StreamGateway");
+
+        // Generate a new the receiver channel for this specific peer.
+        let from_main_rx = self.main_to_peer_broadcast.subscribe();
+
+        // Fetch address from carefully maintained address map.
+        let Some(address) = self.address_map.get(&peer_id).cloned() else {
+            return Err(ActorError::NoAddressForPeer(peer_id));
+        };
+
+        // Spawn the legacy loop with the hijacked stream.
+        let loop_handle =
+            self.spawn_peer_loop(peer_id, address.clone(), handshake, stream, from_main_rx);
+
+        // Notify the rest of the application that a peer is ready.
+        let _ = self
+            .event_tx
+            .send(NetworkEvent::PeerConnected {
+                peer_id,
+                handshake: Box::new(handshake),
+                address,
+                loop_handle,
+            })
+            .await;
+
+        Ok(())
+    }
+
+    /// Handles events emitted by the AutoNAT behavior to determine the node's
+    /// network reachability.
+    ///
+    /// AutoNAT works by asking remote peers to attempt a "dial back" to our
+    /// observed addresses. This function processes the results of those probes:
+    ///
+    /// * **Inbound/Outbound Probes**: Logged at the debug level. These
+    ///   represent the active probing mechanism where we either assist others
+    ///   or request assistance to determine our own reachability. No manual
+    ///   intervention is required as the behavior handles the underlying
+    ///   protocol exchange.
+    ///
+    /// * **Status Changes**: Logged at the info level. This is the critical
+    ///   output of the behavior.
+    ///   - `Public`: Confirms the node is directly accessible from the
+    ///     internet.
+    ///   - `Private`: Indicates the node is behind a NAT or firewall and
+    ///     requires **Relay** and **DCUtR** to be reachable by others.
+    ///   - `Unknown`: The initial state before enough probes have been
+    ///     completed to form a consensus on reachability.
+    fn handle_autonat_event(&mut self, event: libp2p::autonat::Event) {
+        match event {
+            // Someone asked us "can you see me?" and we respond(ed).
+            libp2p::autonat::Event::InboundProbe(_inbound_probe_event) => {
+                tracing::debug!("Peer query for NAT reachability; delegating event for automatic handling by libp2p::auto_nat.");
+            }
+
+            // We asked someone "can you see me?" and they respond(ed).
+            libp2p::autonat::Event::OutboundProbe(_outbound_probe_event) => {
+                tracing::debug!("Queried peer for NAT reachability; delegating event for automatic handling by libp2p::auto_nat.");
+            }
+
+            // New NAT status
+            libp2p::autonat::Event::StatusChanged { old: _, new } => {
+                let status = match new {
+                    libp2p::autonat::NatStatus::Public(multiaddr) => {
+                        format!("Public({})", multiaddr)
+                    }
+                    libp2p::autonat::NatStatus::Private => {
+                        // TODO: Reachability-based Triggering.
+                        // When identified as Private, the node should initiate
+                        // a Relay reservation to ensure inbound connectivity.
+                        // Scan Kademlia/Identify for peers supporting the
+                        // '/libp2p/relay/2.0.0/stop' protocol and call
+                        // `relay.reserve(peer_id)`.
+                        "Private".to_string()
+                    }
+                    libp2p::autonat::NatStatus::Unknown => "Unknown".to_string(),
+                };
+                tracing::info!("New NAT status: {status}");
+            }
+        }
     }
 
     /// Handle messages (commands) from the Main Loop.
