@@ -296,12 +296,7 @@ impl NetworkActor {
         // Notify the rest of the application that a peer is ready.
         let _ = self
             .event_tx
-            .send(NetworkEvent::PeerConnected {
-                peer_id,
-                handshake: Box::new(handshake),
-                address,
-                loop_handle,
-            })
+            .send(NetworkEvent::NewPeerLoop { loop_handle })
             .await;
 
         Ok(())
@@ -457,7 +452,7 @@ impl NetworkActor {
                 .await
                 .unwrap_or_else(|e| {
                     tracing::warn!(peer = %peer_id, "Peer loop exited with error: {:?}", e);
-                })
+                });
         })
     }
 }

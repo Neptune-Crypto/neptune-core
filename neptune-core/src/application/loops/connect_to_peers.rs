@@ -484,22 +484,9 @@ where
             .await?;
     }
 
-    // If we are syncing, notify the peer loop that we have a new peer.
-    let peer_id = pseudorandom_peer_id(&peer_address);
-    if state.lock_guard().await.net.sync_anchor.is_some() {
-        debug!(
-            "We are syncing, so sending information about new peer {peer_address} to sync loop."
-        );
-        peer_task_to_main_tx
-            .send(PeerTaskToMain::NewPeer {
-                peer_id,
-                address: peer_address,
-            })
-            .await?;
-    }
-    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
-
     let peer_distance = 1; // All incoming connections have distance 1
+    let peer_id = pseudorandom_peer_id(&peer_address);
+    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state,
@@ -679,25 +666,14 @@ where
         bail!("Attempted to connect to peer ({peer_address}) that was not allowed. This connection attempt should not have been made.");
     }
 
-    // If in sync mode, tell sync loop about new peer.
-    let peer_id = pseudorandom_peer_id(&peer_address);
-    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
-    if state.lock_guard().await.net.sync_anchor.is_some() {
-        debug!("We are syncing, so tell the sync loop about the new peer.");
-        peer_task_to_main_tx
-            .send(PeerTaskToMain::NewPeer {
-                peer_id,
-                address: peer_address,
-            })
-            .await?;
-    }
-
     // By default, start by asking the peer for its peers. In an adversarial
     // context, we want the network topology to be as robust as possible.
     // Blockchain data can be obtained from other peers, if this connection
     // fails.
     peer.send(PeerMessage::PeerListRequest).await?;
 
+    let peer_id = pseudorandom_peer_id(&peer_address);
+    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state.clone(),

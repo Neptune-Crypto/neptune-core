@@ -119,10 +119,7 @@ pub(crate) enum PeerTaskToMain {
     DisconnectFromLongestLivedPeer,
     NewSyncTarget(Box<Block>),
     NewSyncBlock(Box<Block>, PeerId),
-    NewPeer {
-        peer_id: PeerId,
-        address: SocketAddr,
-    },
+    NewPeer(PeerId),
     DroppedPeer(PeerId),
     SyncCoverage(SynchronizationBitMask, PeerId),
     PeerWantsSyncBlock(PeerId, BlockHeight),
