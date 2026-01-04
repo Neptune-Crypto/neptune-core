@@ -179,6 +179,18 @@ impl NetworkActor {
         Ok(())
     }
 
+    /// Fetch a list of suitable peers from the address book and dial them.
+    pub(crate) fn dial_initial_peers(&mut self) {
+        let initial_peers = self.address_book.select_initial_peers(10);
+        for peer in initial_peers {
+            if let Err(e) = self.swarm.dial(peer.clone()) {
+                tracing::warn!("Failed to dial initial peer {}: {e}", peer.to_string());
+            } else {
+                tracing::info!("Dialed initial peer {}.", peer.to_string());
+            }
+        }
+    }
+
     /// The event loop for the Network Actor.
     ///
     /// Drives the libp2p Swarm and handles incoming connection handshakes.

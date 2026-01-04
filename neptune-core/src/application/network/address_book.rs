@@ -3,8 +3,12 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::BufWriter;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::ops::Deref;
 use std::path::Path;
+use std::str::FromStr;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -18,7 +22,7 @@ use serde::Serialize;
 
 use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
 
-pub(crate) const ADDRESS_BOOK_MAX_SIZE: usize = 100_usize;
+pub(crate) const ADDRESS_BOOK_MAX_SIZE: usize = 1000_usize;
 
 /// Peer metadata managed by the [`AddressBook`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -228,6 +232,52 @@ impl AddressBook {
         );
     }
 
+    /// Selects the top N peers to dial upon restart.
+    ///
+    /// Prioritizes peers matching our supported protocols and recent activity.
+    pub(crate) fn select_initial_peers(&self, limit: usize) -> Vec<Multiaddr> {
+        let mut scores: Vec<(PeerScore, &Peer)> = self
+            .0
+            .values()
+            .map(|p| (PeerScore::from_peer(p), p))
+            // Only dial peers that support Neptune Cash
+            .filter(|(score, _)| score.is_correct_protocol)
+            .collect();
+
+        // Sort by PeerScore (Protocol > Recency > Lifespan)
+        // Sort is descending so the "best" peers are at the start.
+        scores.sort_by(|(a, _), (b, _)| b.cmp(a));
+
+        // Insert bootstrap nodes if list is under-populated.
+        let hardcoded_bootstrap_nodes = [
+            (
+                IpAddr::V4(Ipv4Addr::from_str("139.162.193.206").unwrap()),
+                9800,
+            ),
+            (
+                IpAddr::V4(Ipv4Addr::from_str("51.15.139.238").unwrap()),
+                9800,
+            ),
+            (
+                IpAddr::V6(Ipv6Addr::from_str("2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9").unwrap()),
+                9800,
+            ),
+        ]
+        .into_iter()
+        .map(|(ip, port)| {
+            let mut multiaddr = Multiaddr::from(ip);
+            multiaddr.push(libp2p::multiaddr::Protocol::Tcp(port));
+            multiaddr
+        });
+
+        scores
+            .into_iter()
+            .take(limit)
+            .flat_map(|(_, peer)| peer.listen_addresses.clone())
+            .chain(hardcoded_bootstrap_nodes)
+            .collect()
+    }
+
     /// Persists the address book to a JSON file at the specified path.
     ///
     /// This allows the node to recover its address book after a restart,
@@ -358,5 +408,12 @@ mod tests {
         new_address_book.load_from_disk(&path).unwrap_err();
 
         prop_assert_eq!(address_book, new_address_book);
+    }
+
+    #[test]
+    fn can_select_bootstrap_peers() {
+        let address_book = AddressBook::new();
+        let bootstrap_peers = address_book.select_initial_peers(10); // no crash
+        assert!(!bootstrap_peers.is_empty());
     }
 }
