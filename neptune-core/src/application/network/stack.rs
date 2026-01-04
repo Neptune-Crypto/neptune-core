@@ -6,7 +6,7 @@ use crate::application::network::gateway::StreamGateway;
 
 /// The protocol ID string, dynamically generated from the crate version, e.g.,
 /// "/neptune/0.6.0"
-const NEPTUNE_PROTOCOL_STR: &str = concat!("/neptune/", env!("CARGO_PKG_VERSION"));
+pub(crate) const NEPTUNE_PROTOCOL_STR: &str = concat!("/neptune/", env!("CARGO_PKG_VERSION"));
 
 /// Defines the libp2p [`StreamProtocol`] identifier for the blockchain network.
 pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_PROTOCOL_STR);

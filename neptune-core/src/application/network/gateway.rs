@@ -215,14 +215,14 @@ pub(crate) enum GatewayEvent {
 /// [`NetworkBehaviour`], allowing it to be plugged directly into a libp2p
 /// [`Swarm`](libp2p::Swarm).
 pub(crate) struct StreamGateway {
-    // Used for getting the handshake data
+    /// Used for getting the handshake data
     global_state: GlobalStateLock,
 
     events: VecDeque<ToSwarm<GatewayEvent, ()>>,
 }
 
 impl StreamGateway {
-    pub fn new(global_state: GlobalStateLock) -> Self {
+    pub(crate) fn new(global_state: GlobalStateLock) -> Self {
         Self {
             global_state,
             events: VecDeque::new(),
