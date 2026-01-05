@@ -29,10 +29,10 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 ///   status. It identifies whether the node is publicly accessible or "private"
 ///   (behind a NAT/Firewall). This status info is used to decide when to seek
 ///   out a relay reservation or attempt a hole punch.
-/// * **[`relay::client`](libp2p::relay::client)**: Enables "Circuit Relay"
-///   support. This allows the node to use a third-party relay to establish a
-///   connection when both peers are behind symmetric NATs and cannot be reached
-///   directly.
+/// * **[`relay`](libp2p::relay)**: Requires nodes to act as a relay server for
+///   peers behind NATs, making them reachable via proxy.
+/// * **[`relay::client`](libp2p::relay::client)**: Enables nodes behind a NAT
+///   to reserve a sub-address with a relay server, thereby becoming reachable.
 /// * **[`dcutr`](libp2p::dcutr)**: *Direct Connection Upgrade through Relay*.
 ///   This behavior monitors relayed connections and attempts to perform a "Hole
 ///   Punch" to upgrade the connection to a direct, high-performance peer-to-
@@ -54,7 +54,8 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 pub(crate) struct NetworkStack {
     pub(crate) identify: libp2p::identify::Behaviour,
     pub(crate) autonat: libp2p::autonat::Behaviour,
-    pub(crate) relay: libp2p::relay::client::Behaviour,
+    pub(crate) relay_server: libp2p::relay::Behaviour,
+    pub(crate) relay_client: libp2p::relay::client::Behaviour,
     pub(crate) dcutr: libp2p::dcutr::Behaviour,
 
     /// Custom "Hijacker" that handles the handshake and turns it into a stream.
@@ -80,11 +81,16 @@ pub enum NetworkStackEvent {
     /// or firewall.
     AutoNat(Box<libp2p::autonat::Event>),
 
+    /// Signals an event from the Relay server.
+    ///
+    /// Enables the node to serve as a proxy for peers behind NATs or firewalls.
+    RelayServer(Box<libp2p::relay::Event>),
+
     /// Signals an event from the Relay client.
     ///
     /// Enables the node to communicate with peers behind firewalls by
     /// using a public relay server.
-    Relay(Box<libp2p::relay::client::Event>),
+    RelayClient(Box<libp2p::relay::client::Event>),
 
     /// Signals an event from the Direct Connection Upgrade through Relay
     /// (DCUtR).
@@ -112,9 +118,15 @@ impl From<libp2p::autonat::Event> for NetworkStackEvent {
     }
 }
 
+impl From<libp2p::relay::Event> for NetworkStackEvent {
+    fn from(event: libp2p::relay::Event) -> Self {
+        Self::RelayServer(Box::new(event))
+    }
+}
+
 impl From<libp2p::relay::client::Event> for NetworkStackEvent {
     fn from(event: libp2p::relay::client::Event) -> Self {
-        Self::Relay(Box::new(event))
+        Self::RelayClient(Box::new(event))
     }
 }
 

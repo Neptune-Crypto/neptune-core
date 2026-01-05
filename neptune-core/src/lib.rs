@@ -85,6 +85,7 @@ use crate::application::loops::main_loop::MainLoopHandler;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::network::actor::NetworkActor;
+use crate::application::network::actor::NetworkActorChannels;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::rpc::server::RPC;
 use crate::state::archival_state::ArchivalState;
@@ -196,17 +197,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         cli_args.incognito,
         cli_args.new_identity,
     )?;
-    let (network_command_tx, network_command_rx) = mpsc::channel(100);
-    let (network_event_tx, network_event_rx) = mpsc::channel(100);
     let address_book_file = Some(data_directory.address_book_file());
-    let mut actor = NetworkActor::new(
-        identity,
+    let (channels, network_command_tx, network_event_rx) = NetworkActorChannels::setup(
         peer_task_to_main_tx.clone(),
         main_to_peer_broadcast_tx.clone(),
-        network_command_rx,
-        network_event_tx,
+    );
+    let mut actor = NetworkActor::new(
+        identity,
+        channels,
         global_state_lock.clone(),
         address_book_file,
+        cli_args.network,
     )
     .unwrap_or_else(|e| {
         panic!("Failed to set up network actor: {e}.");
