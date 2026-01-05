@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 use itertools::Itertools;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
+use tracing::warn;
 
 use crate::application::database::storage::storage_schema::traits::*;
 use crate::application::database::storage::storage_schema::DbtMap;
@@ -11,6 +14,12 @@ use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::NeptuneLevelDb;
 use crate::protocol::consensus::block::Block;
 use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
+
+/// The maximum number of blocks stored for each [`AnnouncementFlag`]. Wallets
+/// with incoming UTXOs in more than this number of blocks cannot rely on the
+/// [UtxoIndexTables::announcements_by_flag] field to restore a wallet but
+/// should instead use other methods.
+pub const MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS: usize = 10_000;
 
 /// The purpose of the UTXO index is to speed up the rescanning of historical
 /// blocks, and to serve 3rd parties with information required to detect
@@ -37,7 +46,7 @@ struct UtxoIndexTables {
     /// the block.
     ///
     /// Can be used to speed up the scanning for incoming, announced UTXOs.
-    pub(super) announcements: DbtMap<Digest, Vec<AnnouncementFlag>>,
+    pub(super) announcements_by_block: DbtMap<Digest, Vec<AnnouncementFlag>>,
 
     /// Mapping from block hash to the list of digests of the absolute indices
     /// being set in the block.
@@ -47,6 +56,16 @@ struct UtxoIndexTables {
 
     /// Latest block handled by this database
     pub(super) sync_label: DbtSingleton<Digest>,
+
+    /// Mapping from announcement flag to block hash for all blocks in which
+    /// announcement with this flag are present. Length of list of block digests
+    /// may be capped in order to foil certain DOS attacks. This means that
+    /// extremely active wallets may not be able to trust this index for wallet
+    /// restoration.
+    ///
+    /// Can be used to speed up the scanning for incoming, announced UTXOs, and
+    /// to server RPC requests from external wallet programs.
+    pub(super) blocks_by_announcement_flag: DbtMap<AnnouncementFlag, Vec<Digest>>,
 }
 
 #[derive(Debug)]
@@ -64,15 +83,18 @@ impl RustyUtxoIndex {
         );
 
         let schema_version = storage.schema.new_singleton::<u16>("schema_version").await;
-        let announcements = storage.schema.new_map("announcements").await;
+        let announcements_by_block = storage.schema.new_map("announcements_by_block").await;
         let index_sets = storage.schema.new_map("index_sets").await;
         let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
+        let blocks_by_announcement_flag =
+            storage.schema.new_map("blocks_by_announcement_flag").await;
 
         let tables = UtxoIndexTables {
             schema_version,
-            announcements,
+            announcements_by_block,
             index_set_digests: index_sets,
             sync_label,
+            blocks_by_announcement_flag,
         };
 
         Self { storage, tables }
@@ -82,11 +104,40 @@ impl RustyUtxoIndex {
     /// block. Returns Some(vec![]) list if no compatible announcement (of
     /// minimum lenth 2) were mined in the block. Returns `None` if the block
     /// is not known to this index.
-    pub(crate) async fn announcement_flags(
+    pub(crate) async fn announcement_flags_by_block(
         &self,
         block_hash: Digest,
     ) -> Option<Vec<AnnouncementFlag>> {
-        self.tables.announcements.get(&block_hash).await
+        self.tables.announcements_by_block.get(&block_hash).await
+    }
+
+    /// Return the block hashes for blocks containing announcements matching the
+    /// [`AnnouncementFlag`]s. The referenced blocks are not guaranteed to be
+    /// canonical.
+    ///
+    /// # Warning
+    ///
+    /// For each announcement flag, the returned list is capped in length (for
+    /// DOS reasons) by [`MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS`] so extremely
+    /// active wallets cannot rely on this method for wallet recovery. They
+    /// should instead use [`Self::announcement_flags_by_block`] to scan through
+    /// each block.
+    pub(crate) async fn block_hashes_by_announcement_flags(
+        &self,
+        announcement_flags: &HashSet<AnnouncementFlag>,
+    ) -> HashSet<Digest> {
+        let mut block_hashes = HashSet::new();
+        for flag in announcement_flags {
+            let blocks_matching_flag = self
+                .tables
+                .blocks_by_announcement_flag
+                .get(flag)
+                .await
+                .unwrap_or_default();
+            block_hashes.extend(blocks_matching_flag);
+        }
+
+        block_hashes
     }
 
     /// Return the digests of all absolute index sets of the removal records in
@@ -106,12 +157,48 @@ impl RustyUtxoIndex {
 
         let tx_kernel = &block.body().transaction_kernel;
 
-        let announcements = tx_kernel
+        // Get flags for all announcements in block, removing duplicates
+        let announcement_flags: HashSet<AnnouncementFlag> = tx_kernel
             .announcements
             .iter()
             .filter_map(|ann| ann.try_into().ok())
-            .collect_vec();
-        self.tables.announcements.insert(hash, announcements).await;
+            .collect();
+        self.tables
+            .announcements_by_block
+            .insert(hash, announcement_flags.iter().copied().collect_vec())
+            .await;
+
+        for announcement_flag in announcement_flags {
+            let mut block_hashes = self
+                .tables
+                .blocks_by_announcement_flag
+                .get(&announcement_flag)
+                .await
+                .unwrap_or_default();
+
+            // Ensure same block is not added twice, to ensure function's
+            // idempotency.
+            if block_hashes.contains(&hash) {
+                continue;
+            }
+
+            // DOS protection: Do not allow list to grow indefinitely as list is
+            // stored in RAM during this function call.
+            if block_hashes.len() >= MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS {
+                warn!(
+                    "List of block hashes matching announcement flag exceeds max.\
+                 Not adding new block to list."
+                );
+                continue;
+            }
+
+            block_hashes.push(hash);
+
+            self.tables
+                .blocks_by_announcement_flag
+                .insert(announcement_flag, block_hashes)
+                .await;
+        }
 
         let index_set_digests = tx_kernel
             .inputs
@@ -132,7 +219,10 @@ impl RustyUtxoIndex {
 
     /// Returns true if the block was already indexed.
     pub(crate) async fn block_was_indexed(&self, block_hash: Digest) -> bool {
-        self.tables.announcements.contains_key(&block_hash).await
+        self.tables
+            .announcements_by_block
+            .contains_key(&block_hash)
+            .await
     }
 }
 
@@ -149,6 +239,7 @@ impl StorageWriter for RustyUtxoIndex {
 #[cfg(test)]
 mod tests {
     use macro_rules_attr::apply;
+    use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::bfe_vec;
 
     use super::*;
@@ -164,6 +255,23 @@ mod tests {
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::BFieldElement;
+
+    impl RustyUtxoIndex {
+        /// Return a list of block digests for each announcement in the input
+        /// list.
+        async fn block_hashes_by_announcements(
+            &self,
+            announcements: &[Announcement],
+        ) -> HashSet<Digest> {
+            let announcement_flags: HashSet<AnnouncementFlag> = announcements
+                .iter()
+                .filter_map(|ann| ann.try_into().ok())
+                .collect();
+
+            self.block_hashes_by_announcement_flags(&announcement_flags)
+                .await
+        }
+    }
 
     async fn test_utxo_index(network: Network) -> RustyUtxoIndex {
         let data_dir = crate::tests::shared::files::unit_test_data_directory(network).unwrap();
@@ -183,9 +291,85 @@ mod tests {
             message: bfe_vec![22, 55],
         };
         let length3 = Announcement {
-            message: bfe_vec![22, 55, 668],
+            message: bfe_vec![22, 878, 668],
         };
         vec![length0, length1, length2, length3]
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn announcement_flag_to_block_digests_unit_test() {
+        let network = Network::Main;
+        let mut utxo_index = test_utxo_index(network).await;
+
+        let genesis = Block::genesis(network);
+
+        let announcements1 = vec![
+            Announcement {
+                message: bfe_vec![22, 55],
+            },
+            Announcement {
+                message: bfe_vec![1, 444, 500],
+            },
+        ];
+        let announcements2 = vec![
+            Announcement {
+                message: bfe_vec![22, 55],
+            },
+            Announcement {
+                message: bfe_vec![22, 55, 200],
+            },
+            Announcement {
+                message: bfe_vec![22, 55, 500],
+            },
+            Announcement {
+                message: bfe_vec![1, 888, 500],
+            },
+        ];
+        let announcements3 = announcements1.clone();
+        let block1 = invalid_empty_block_with_announcements(&genesis, network, announcements1);
+        let block2 = invalid_empty_block_with_announcements(&block1, network, announcements2);
+        let block3 = invalid_empty_block_with_announcements(&block2, network, announcements3);
+
+        utxo_index.index_block(&block1).await;
+        utxo_index.index_block(&block2).await;
+        utxo_index.index_block(&block3).await;
+
+        assert_eq!(
+            vec![block1.hash(), block2.hash(), block3.hash()],
+            utxo_index
+                .tables
+                .blocks_by_announcement_flag
+                .get(&AnnouncementFlag {
+                    flag: bfe!(22),
+                    receiver_id: bfe!(55),
+                })
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            vec![block1.hash(), block3.hash()],
+            utxo_index
+                .tables
+                .blocks_by_announcement_flag
+                .get(&AnnouncementFlag {
+                    flag: bfe!(1),
+                    receiver_id: bfe!(444),
+                })
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            vec![block2.hash()],
+            utxo_index
+                .tables
+                .blocks_by_announcement_flag
+                .get(&AnnouncementFlag {
+                    flag: bfe!(1),
+                    receiver_id: bfe!(888),
+                })
+                .await
+                .unwrap()
+        );
     }
 
     #[apply(shared_tokio_runtime)]
@@ -209,13 +393,19 @@ mod tests {
         )
         .await;
         let announcements = announcements_length_0_to_3();
-        let block2 = invalid_empty_block_with_announcements(&block1, network, announcements);
+        let block2 =
+            invalid_empty_block_with_announcements(&block1, network, announcements.clone());
 
         utxo_index.index_block(&block1).await;
         utxo_index.index_block(&block2).await;
 
         let expected_index_set_digests = utxo_index.index_set_digests(block1.hash()).await;
-        let expected_announcement_flags = utxo_index.announcement_flags(block2.hash()).await;
+        let expected_announcement_flags =
+            utxo_index.announcement_flags_by_block(block2.hash()).await;
+
+        let expected_block_digests_by_flag = utxo_index
+            .block_hashes_by_announcements(&announcements)
+            .await;
 
         utxo_index.index_block(&block1).await;
         utxo_index.index_block(&block2).await;
@@ -226,7 +416,13 @@ mod tests {
         );
         assert_eq!(
             expected_announcement_flags,
-            utxo_index.announcement_flags(block2.hash()).await
+            utxo_index.announcement_flags_by_block(block2.hash()).await
+        );
+        assert_eq!(
+            expected_block_digests_by_flag,
+            utxo_index
+                .block_hashes_by_announcements(&announcements)
+                .await
         );
         assert_eq!(block2.hash(), utxo_index.sync_label());
     }
@@ -245,7 +441,7 @@ mod tests {
         assert_eq!(
             2,
             utxo_index
-                .announcement_flags(block1.hash())
+                .announcement_flags_by_block(block1.hash())
                 .await
                 .unwrap()
                 .len(),
