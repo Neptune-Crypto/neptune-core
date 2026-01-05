@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::time::SystemTime;
 
-use libp2p::Multiaddr;
 use libp2p::PeerId;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -223,10 +222,6 @@ pub fn get_peer_map() -> HashMap<PeerId, PeerInfo> {
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
     std::net::SocketAddr::from_str(&format!("113.151.22.{}:8080", count)).unwrap()
-}
-
-pub(crate) fn get_dummy_multiaddr(count: u8) -> Multiaddr {
-    socketaddr_to_multiaddr(get_dummy_socket_address(count))
 }
 
 /// Get a dummy-peer representing an incoming connection.

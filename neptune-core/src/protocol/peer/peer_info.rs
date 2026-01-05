@@ -287,6 +287,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use std::hint::black_box;
     use std::net::Ipv4Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV4;
@@ -339,5 +340,6 @@ mod tests {
     fn pseudorandom_peer_id_does_not_crash(c0: u8, c1: u8, c2: u8, c3: u8, port: u16) {
         let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(c0, c1, c2, c3), port));
         let peer_id = pseudorandom_peer_id(&addr); // no crash
+        black_box(peer_id);
     }
 }

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::api::export::Network;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
@@ -80,6 +81,98 @@ pub(crate) struct NetworkActor {
     address_book_file: Option<PathBuf>,
 }
 
+/// Helper struct encapsulating all channels for the [`NetworkActor`].
+///
+/// Avoids triggering #[warn(clippy::too_many_arguments)]. Also reduces
+/// boilerplate.
+pub(crate) struct NetworkActorChannels {
+    peer_to_main_loop_tx: mpsc::Sender<PeerTaskToMain>,
+    main_to_peer_broadcast: tokio::sync::broadcast::Sender<MainToPeerTask>,
+    command_rx: mpsc::Receiver<NetworkActorCommand>,
+    event_tx: mpsc::Sender<NetworkEvent>,
+}
+
+impl NetworkActorChannels {
+    /// Set up the channels for the [`NetworkActor`].
+    ///
+    /// Takes two channels that already exist: these are the channels between
+    /// the main loop and the peer loop (either direction). The [`NetworkActor`]
+    /// feeds a clone and a subscription to these to the peer loop whenever it
+    /// spawns one.
+    ///
+    /// This function also generates two more channels; these are for the main
+    /// loop and the [`NetworkActor`] to communicate between each other.
+    ///
+    /// # Parameters
+    ///
+    ///  - `mpsc::Sender<PeerTaskToMain>` -- the sender channel for the peer
+    ///    loop to send messages to the main loop.
+    ///  - `broadcast::Sender<MainToPeerTask>` -- the receiver channel for the
+    ///    peer loop to receive messages from the main loop.
+    ///
+    /// # Return Value
+    ///
+    /// A tuple consisting of:
+    ///
+    ///  - `Self` -- the [`NetworkActorChannels`] object to be passed on to the
+    ///    constructor for [`NetworkActor`].
+    ///  - `mpsc::Sender<NetworkActorCommand>` -- the sender channel for the
+    ///    main loop to send messages (commands) to the [`NetworkActor`].
+    ///  - `mpsc::Receiver<NetworkEvent>` -- the receiver channel for the
+    ///    main loop to receive notifications from the [`NetworkActor`]
+    ///    (notifications of events).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use tokio::sync::broadcast;
+    /// use tokio::sync::mpsc;
+    ///
+    /// use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+    /// use crate::application::loops::peer_loop::channel::MainToPeerTask;
+    /// use crate::application::network::actor::NetworkActorChannels;
+    ///
+    /// // Construct the broadcast channel to communicate from the main task to
+    /// // peer tasks
+    /// let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =
+    ///     broadcast::channel::<MainToPeerTask>(1000);
+    ///
+    /// // Add the MPSC (multi-producer, single consumer) channel for
+    /// // peer-task-to-main communication
+    /// let (peer_task_to_main_tx, peer_task_to_main_rx) =
+    ///     mpsc::channel::<PeerTaskToMain>(1000);
+    ///
+    /// // Construct the channels for the `NetworkActor`
+    /// let (channels, network_command_tx, network_event_rx) = NetworkActorChannels::setup(
+    ///     peer_task_to_main_tx.clone(),
+    ///     main_to_peer_broadcast_tx.clone(),
+    /// );
+    /// ```
+    ///
+    /// (Note that the doctest cannor run because message types `PeerTaskToMain`
+    /// and `MainToPeerTask`, not to mention this constructor, are private.)
+    pub(crate) fn setup(
+        peer_to_main_loop_tx: mpsc::Sender<PeerTaskToMain>,
+        main_to_peer_broadcast: tokio::sync::broadcast::Sender<MainToPeerTask>,
+    ) -> (
+        Self,
+        mpsc::Sender<NetworkActorCommand>,
+        mpsc::Receiver<NetworkEvent>,
+    ) {
+        let (network_command_tx, network_command_rx) = mpsc::channel(100);
+        let (network_event_tx, network_event_rx) = mpsc::channel(100);
+
+        let channels = Self {
+            peer_to_main_loop_tx,
+            main_to_peer_broadcast,
+            command_rx: network_command_rx,
+            event_tx: network_event_tx,
+        };
+
+        (channels, network_command_tx, network_event_rx)
+    }
+}
+
 impl NetworkActor {
     /// Whether to keep the Actor's event loop running (true) or to shut it down
     /// gracefully (false).
@@ -92,17 +185,25 @@ impl NetworkActor {
     /// for handing off control over bidirectional streams to peer loops.
     pub fn new(
         local_key: libp2p::identity::Keypair,
-        peer_to_main_loop_tx: mpsc::Sender<PeerTaskToMain>,
-        main_to_peer_broadcast: tokio::sync::broadcast::Sender<MainToPeerTask>,
-        command_rx: mpsc::Receiver<NetworkActorCommand>,
-        event_tx: mpsc::Sender<NetworkEvent>,
+        channels: NetworkActorChannels,
         global_state_lock: GlobalStateLock,
         maybe_address_book_file: Option<PathBuf>,
+        network: Network,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let NetworkActorChannels {
+            peer_to_main_loop_tx,
+            main_to_peer_broadcast,
+            command_rx,
+            event_tx,
+        } = channels;
+
         // Create the Identify config (required for the NetworkStack)
         let identify_config =
             libp2p::identify::Config::new(NEPTUNE_PROTOCOL_STR.to_owned(), local_key.public())
-                .with_agent_version(format!("neptune-cash/{}", env!("CARGO_PKG_VERSION")));
+                .with_agent_version(format!("neptune-cash/{}", env!("CARGO_PKG_VERSION")))
+                // pro-actively tell peers about new (sub-)addresses
+                .with_push_listen_addr_updates(true)
+                .with_interval(std::time::Duration::from_secs(300));
 
         let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
             .with_tokio()
@@ -112,23 +213,47 @@ impl NetworkActor {
                 libp2p::yamux::Config::default,
             )?
             .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)?
-            .with_behaviour(|key, relay_behaviour| {
+            .with_behaviour(|key, relay_client| {
                 let local_peer_id = key.public().to_peer_id();
 
-                // Use the default autoNAT config for now. For later reference,
-                // the fields of autonat::Config are `pub` and so can be
-                // changed. Here is a selection of fields we might consider
-                // changing to non-default values.
-                //  - `retry_interval` (default 1m)
-                //  - `refresh_interval` (default: 15m)
-                //  - `boot_delay` (default: 1s)
-                let autonat_config = libp2p::autonat::Config::default();
+                let relay_server = libp2p::relay::Behaviour::new(
+                    local_peer_id,
+                    libp2p::relay::Config {
+                        // # sub-addresses
+                        max_reservations: 128,
+                        // # active connections
+                        max_circuits: 16,
+                        // time for hole punch only
+                        reservation_duration: Duration::from_secs(120),
+                        ..Default::default()
+                    },
+                );
+
+                let autonat_config = if network.is_reg_test() {
+                    // Flag `only_global_ips` determines whether to ignore
+                    // addresses reported by peers when those addresses are
+                    // local, e.g., 192.168.0.15. On main net we cannot use
+                    // these addresses for anything so we might as well ignore
+                    // them.
+                    // On regtest however, the entire network is local and we
+                    // want to pretend that it's not. In other words, we still
+                    // want to trigger all usual actions and sequences for the
+                    // purpose of testing them. Therefore, on regtest we do not
+                    // ignore local IPs.
+                    libp2p::autonat::Config {
+                        only_global_ips: false,
+                        ..Default::default()
+                    }
+                } else {
+                    libp2p::autonat::Config::default()
+                };
 
                 NetworkStack {
                     gateway: StreamGateway::new(global_state_lock.clone()),
                     identify: libp2p::identify::Behaviour::new(identify_config),
                     autonat: libp2p::autonat::Behaviour::new(local_peer_id, autonat_config),
-                    relay: relay_behaviour,
+                    relay_server,
+                    relay_client,
                     dcutr: libp2p::dcutr::Behaviour::new(local_peer_id),
                 }
             })?
@@ -239,7 +364,10 @@ impl NetworkActor {
                     NetworkStackEvent::AutoNat(auto_nat_event) => {
                         self.handle_autonat_event(*auto_nat_event);
                     }
-                    NetworkStackEvent::Relay(_event) => {}
+                    NetworkStackEvent::RelayServer(relay_server_event) => {
+                        self.handle_relay_server_event(*relay_server_event);
+                    }
+                    NetworkStackEvent::RelayClient(_event) => {}
                     NetworkStackEvent::Dcutr(_event) => {}
 
                     // StreamGateway successfully hijacked a stream.
@@ -366,6 +494,68 @@ impl NetworkActor {
             libp2p::identify::Event::Error { peer_id, error, .. } => {
                 tracing::warn!(peer = %peer_id, "Identify error: {:?}", error);
             }
+        }
+    }
+
+    /// Handles events generated by the Relay Server `Behaviour`.
+    ///
+    /// The Relay Server acts as a "matchmaker" or "hop" node, allowing two
+    /// peers to communicate when both are behind restrictive NATs. This handler
+    /// primarily provides telemetry for monitoring the load and health of the
+    /// relay service. In other words, its main function is logging.
+    ///
+    /// Under a "Direct Connection Utility for Traversal" (DCUtR) strategy, this
+    /// relay should only be used briefly to coordinate a hole-punch. Long-lived
+    /// circuits or high volumes of denied requests may indicate either a surge
+    /// in private nodes or peers failing to establish direct connections.
+    fn handle_relay_server_event(&mut self, event: libp2p::relay::Event) {
+        match event {
+            // A peer successfully reserved a sub-address.
+            libp2p::relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
+                tracing::info!(peer = %src_peer_id, "Accepted relay reservation.");
+            }
+
+            // A peer tried to reserve, but hit the `max_reservations` limit.
+            libp2p::relay::Event::ReservationReqDenied { src_peer_id, .. } => {
+                tracing::warn!(peer = %src_peer_id, "Denied relay reservation (limit reached).");
+            }
+
+            // A circuit (data pipe) was actually opened between two peers.
+            libp2p::relay::Event::CircuitReqAccepted {
+                src_peer_id,
+                dst_peer_id,
+            } => {
+                tracing::info!(
+                    from = %src_peer_id,
+                    to = %dst_peer_id,
+                    "Relay circuit established."
+                );
+            }
+
+            // The data pipe was closed.
+            libp2p::relay::Event::CircuitClosed {
+                src_peer_id,
+                dst_peer_id,
+                error,
+            } => {
+                if let Some(e) = error {
+                    tracing::debug!(from = %src_peer_id, to = %dst_peer_id, "Relay circuit closed with error: {:?}.", e);
+                } else {
+                    tracing::debug!(from = %src_peer_id, to = %dst_peer_id, "Relay circuit closed gracefully.");
+                }
+            }
+
+            // Denied a circuit request (e.g., too many active pipes).
+            libp2p::relay::Event::CircuitReqDenied {
+                src_peer_id,
+                dst_peer_id,
+                ..
+            } => {
+                tracing::warn!(from = %src_peer_id, to = %dst_peer_id, "Denied relay circuit request.");
+            }
+
+            // Other events are not important enough to log.
+            _ => {}
         }
     }
 
