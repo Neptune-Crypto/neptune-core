@@ -460,15 +460,33 @@ impl NetworkActor {
             libp2p::autonat::Event::StatusChanged { old: _, new } => {
                 let status = match new {
                     libp2p::autonat::NatStatus::Public(multiaddr) => {
+                        // Tell the Swarm to announce this address in future
+                        // Identify handshakes.
+                        self.swarm.add_external_address(multiaddr.clone());
+
                         format!("Public({})", multiaddr)
                     }
                     libp2p::autonat::NatStatus::Private => {
+                        // Lost public status. Be a responsible node and clear
+                        //  external addresses so we don't lead peers into a
+                        // "dial timeout" trap.
+                        // Since we can't call 'clear_all' on an iterator, we
+                        // iterate over current external addresses.
+                        let mut to_remove = Vec::new();
+                        for addr in self.swarm.external_addresses() {
+                            to_remove.push(addr.clone());
+                        }
+                        for addr in to_remove {
+                            self.swarm.remove_external_address(&addr);
+                        }
+
                         // TODO: Reachability-based Triggering.
                         // When identified as Private, the node should initiate
                         // a Relay reservation to ensure inbound connectivity.
                         // Scan Kademlia/Identify for peers supporting the
                         // '/libp2p/relay/2.0.0/stop' protocol and call
                         // `relay.reserve(peer_id)`.
+
                         "Private".to_string()
                     }
                     libp2p::autonat::NatStatus::Unknown => "Unknown".to_string(),
