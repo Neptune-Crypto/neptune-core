@@ -74,6 +74,7 @@ use tracing::warn;
 
 use super::auth;
 use crate::api;
+use crate::api::export::AnnouncementFlag;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
@@ -531,6 +532,24 @@ pub trait RPC {
         token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<Vec<Announcement>>>;
+
+    /// Return the block digests of blocks with announcements matching the
+    /// specified flags. Returns the empty list if no blocks with these flags
+    /// are known.
+    ///
+    /// Only works on nodes that maintain a UTXO index.
+    ///
+    /// # Warning
+    ///
+    /// Will not return all block if any key in question has matching
+    /// [`AnnouncementFlag`]s in more than
+    /// [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS] blocks.
+    ///
+    /// [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS]: crate::state::archival_state::rusty_utxo_index::MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS
+    async fn block_hashes_by_announcement_flags(
+        token: auth::Token,
+        announcement_flags: Vec<AnnouncementFlag>,
+    ) -> RpcResult<Vec<Digest>>;
 
     /// Return the digests of known blocks with specified height.
     ///
@@ -2675,6 +2694,34 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn block_hashes_by_announcement_flags(
+        self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        announcement_flags: Vec<AnnouncementFlag>,
+    ) -> RpcResult<Vec<Digest>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let announcement_flags: HashSet<_> = announcement_flags.into_iter().collect();
+        let blocks = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .utxo_index
+            .block_hashes_by_announcement_flags(&announcement_flags)
+            .await;
+
+        Ok(blocks.into_iter().collect())
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn block_digests_by_height(
         self,
         _: context::Context,
@@ -4524,6 +4571,7 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
+    use tasm_lib::twenty_first::bfe;
     use tracing_test::traced_test;
 
     use super::*;
@@ -4546,6 +4594,7 @@ mod tests {
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use crate::BFieldElement;
     use crate::Block;
 
     const NUM_ANNOUNCEMENTS_BLOCK1: usize = 7;
@@ -4673,6 +4722,17 @@ mod tests {
         let _ = rpc_server
             .clone()
             .announcements_in_block(ctx, token, BlockSelector::Digest(Digest::default()))
+            .await;
+        let _ = rpc_server
+            .clone()
+            .block_hashes_by_announcement_flags(
+                ctx,
+                token,
+                vec![AnnouncementFlag {
+                    flag: bfe!(0),
+                    receiver_id: bfe!(0),
+                }],
+            )
             .await;
         let _ = rpc_server
             .clone()

@@ -2935,7 +2935,7 @@ mod tests {
         ///
         /// # Warning
         ///
-        /// Does not work if any key in question has mathing
+        /// Does not work if any key in question has matching
         /// [`AnnouncementFlag`]s in more than
         /// [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS] blocks.
         ///
