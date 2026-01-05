@@ -27,6 +27,7 @@ use super::StorageVecBase;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
 use crate::api::export::Utxo;
+use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::database::create_db_if_missing;
 use crate::application::database::storage::storage_schema::traits::*;
@@ -311,7 +312,7 @@ impl ArchivalState {
     pub(crate) async fn new(
         data_dir: DataDirectory,
         genesis_block: Block,
-        network: Network,
+        cli: &cli_args::Args,
     ) -> Self {
         let mut archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)
             .await
@@ -350,13 +351,12 @@ impl ArchivalState {
         debug!("Got block index database");
 
         // UTXO index is always initialized. But only populated with blocks if
-        // this index is activated. It's always populated with the genesis block
-        // though.
+        // this index is activated.
         let mut utxo_index = ArchivalState::initialize_utxo_index(&data_dir)
             .await
             .expect("Must be able to initialize utxo index database");
 
-        if utxo_index.sync_label() == Digest::default() {
+        if cli.utxo_index && utxo_index.sync_label() == Digest::default() {
             utxo_index.index_block(&genesis_block).await;
         }
 
@@ -367,7 +367,7 @@ impl ArchivalState {
             genesis_block,
             archival_mutator_set,
             archival_block_mmr,
-            network,
+            network: cli.network,
             utxo_index,
         }
     }
@@ -1941,7 +1941,6 @@ pub(super) mod tests {
     use crate::state::wallet::transaction_output::TxOutputList;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::archival::add_block_to_archival_state;
-    use crate::tests::shared::archival::mock_genesis_archival_state;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
@@ -1953,7 +1952,8 @@ pub(super) mod tests {
         let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();
 
         let genesis_block = Block::genesis(network);
-        ArchivalState::new(data_dir, genesis_block, network).await
+        let cli = cli_args::Args::default_with_network(network);
+        ArchivalState::new(data_dir, genesis_block, &cli).await
     }
 
     #[traced_test]
@@ -2171,8 +2171,10 @@ pub(super) mod tests {
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let (mut archival_state, _peer_db_lock, _data_dir) =
-            mock_genesis_archival_state(network).await;
+        let data_dir = unit_test_data_directory(network).unwrap();
+        let cli = cli_args::Args::default_with_network(network);
+        let mut archival_state = ArchivalState::new(data_dir, Block::genesis(network), &cli).await;
+
         let own_wallet = WalletEntropy::new_random();
         let own_key = own_wallet.nth_generation_spending_key_for_tests(0);
 
