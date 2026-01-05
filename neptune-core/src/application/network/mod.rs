@@ -6,5 +6,5 @@ pub(crate) mod gateway;
 pub(crate) mod handshake;
 pub(crate) mod stack;
 
-#[cfg(any(test, feature = "arbitrary-impls"))]
-pub mod arbitrary;
+#[cfg(test)]
+pub(crate) mod arbitrary;

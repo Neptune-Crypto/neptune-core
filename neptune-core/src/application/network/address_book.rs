@@ -48,6 +48,9 @@ pub(crate) struct Peer {
 
     /// The last time we successfully exchanged Identify info with this peer.
     pub(crate) last_seen: SystemTime,
+
+    /// The number of times a connection attempt failed since the last success.
+    pub(crate) fail_count: u32,
 }
 
 impl GetSize for Peer {
@@ -188,6 +191,7 @@ impl AddressBook {
                 supported_protocols,
                 first_seen: SystemTime::now(),
                 last_seen: SystemTime::now(),
+                fail_count: 0,
             };
             self.0.insert(peer_id, peer);
         }
@@ -204,16 +208,15 @@ impl AddressBook {
             return;
         }
 
-        // 1. Collect PeerIds and a "score" for sorting
+        // Collect scores for sorting by.
         let mut peer_scores: Vec<(PeerId, PeerScore)> = self
             .0
             .iter()
             .map(|(id, peer)| (*id, PeerScore::from_peer(peer)))
             .collect();
 
-        // 2. Sort: We want the "best" peers at the beginning.
-        // Rust's sort_by is ascending, so we use cmp().reverse()
-        // or compare (best, worst).
+        // Sort in *descending* order. Note that `sort_by` produces ascending
+        // order so `b.cmp(a)` instead of `a.cmp(b)` reverses that.
         peer_scores.sort_by(|(_, a), (_, b)| b.cmp(a));
 
         // 3. Retain only the top N PeerIds
@@ -232,7 +235,23 @@ impl AddressBook {
         );
     }
 
-    /// Selects the top N peers to dial upon restart.
+    /// Increment by one the `fail_count` variable which tracks how often a
+    /// connection attempt has failed since the last success.
+    pub(crate) fn bump_fail_count(&mut self, peer_id: PeerId) {
+        if let Some(peer) = self.0.get_mut(&peer_id) {
+            peer.fail_count = peer.fail_count.saturating_add(1);
+        }
+    }
+
+    /// Reset to 0 the `fail_count` variable, which tracks how often a
+    /// connection has failed since the last success.
+    pub(crate) fn reset_fail_count(&mut self, peer_id: PeerId) {
+        if let Some(peer) = self.0.get_mut(&peer_id) {
+            peer.fail_count = 0;
+        }
+    }
+
+    /// Select the top N peers to dial upon restart.
     ///
     /// Prioritizes peers matching our supported protocols and recent activity.
     pub(crate) fn select_initial_peers(&self, limit: usize) -> Vec<Multiaddr> {
@@ -339,6 +358,7 @@ struct PeerScore {
     // Order of fields defines sorting priority for #[derive(Ord)]
     is_correct_protocol: bool,
     recent: bool,
+    fail_count_inverse: u32,
     total_lifespan: std::time::Duration,
 }
 
@@ -349,6 +369,7 @@ impl PeerScore {
         Self {
             is_correct_protocol: peer.protocol_version == NEPTUNE_PROTOCOL_STR,
             recent: peer.last_seen.duration_since(ten_minutes_ago).is_ok(),
+            fail_count_inverse: u32::MAX - peer.fail_count,
             // duration between first discovery and last activity
             total_lifespan: peer
                 .last_seen
@@ -366,6 +387,8 @@ mod tests {
 
     use proptest::prop_assert_eq;
     use test_strategy::proptest;
+
+    use crate::application::network::stack::NEPTUNE_PROTOCOL;
 
     use super::*;
 
@@ -415,5 +438,64 @@ mod tests {
         let address_book = AddressBook::new();
         let bootstrap_peers = address_book.select_initial_peers(10); // no crash
         assert!(!bootstrap_peers.is_empty());
+    }
+
+    #[test]
+    fn test_peer_score_hierarchy_with_fail_count() {
+        let now = SystemTime::now();
+        let one_hour_ago = now - Duration::from_secs(3600);
+        let two_hours_ago = now - Duration::from_secs(2 * 3600);
+        let three_hours_ago = now - Duration::from_secs(3 * 3600);
+
+        // The baseline Peer
+        let p0 = Peer {
+            listen_addresses: vec![],
+            agent_version: "".to_string(),
+            protocol_version: NEPTUNE_PROTOCOL_STR.to_string(),
+            supported_protocols: vec![NEPTUNE_PROTOCOL],
+            first_seen: three_hours_ago,
+            last_seen: now,
+            fail_count: 0,
+        };
+
+        // P1: Worse because of total life span
+        let mut p1 = p0.clone();
+        p1.first_seen = two_hours_ago;
+
+        // P2: Worse because of fail count
+        let mut p2 = p1.clone();
+        p2.fail_count = 1;
+
+        // P3: Worse because not recent
+        let mut p3 = p2.clone();
+        p3.last_seen = one_hour_ago;
+
+        // P4: Worse because of wrong_protocol
+        let mut p4 = p3.clone();
+        p4.protocol_version = "QUICK-CACHE".to_string();
+
+        // verify pairs
+        assert!(
+            PeerScore::from_peer(&p0) > PeerScore::from_peer(&p1),
+            "failed to prefer longer-lived peers"
+        );
+        assert!(
+            PeerScore::from_peer(&p1) > PeerScore::from_peer(&p2),
+            "failed to prefer peers with lower fail counts"
+        );
+        assert!(
+            PeerScore::from_peer(&p2) > PeerScore::from_peer(&p3),
+            "failed to prefer recent peers"
+        );
+        assert!(
+            PeerScore::from_peer(&p3) > PeerScore::from_peer(&p4),
+            "failed to prefer peers with same protocol"
+        );
+
+        // verify sorting (descending order)
+        let original_list = vec![p0, p1, p2, p3];
+        let mut sorted_list = original_list.clone();
+        sorted_list.sort_by(|l, r| PeerScore::from_peer(r).cmp(&PeerScore::from_peer(l)));
+        assert_eq!(original_list, sorted_list);
     }
 }

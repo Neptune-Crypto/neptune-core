@@ -261,9 +261,23 @@ impl NetworkActor {
                 }
             }
 
-            // Explicitly handle Dial failures to clean up state
-            SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                tracing::warn!(peer = ?peer_id, "Failed to connect: {:?}", error);
+            // Dial failure
+            SwarmEvent::OutgoingConnectionError {
+                peer_id: Some(peer_id),
+                error,
+                ..
+            } => {
+                tracing::debug!(peer = %peer_id, %error, "Dial failed, updating address book.");
+                self.address_book.bump_fail_count(peer_id);
+            }
+
+            // Low-level connection failure
+            SwarmEvent::OutgoingConnectionError {
+                peer_id: None,
+                error,
+                ..
+            } => {
+                tracing::debug!(%error, "Connection failed.");
             }
 
             // Handle listener errors to prevent the node from failing silently
@@ -275,6 +289,7 @@ impl NetworkActor {
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
+                self.address_book.reset_fail_count(peer_id);
                 let address = endpoint.get_remote_address().clone();
                 let direction = if endpoint.is_dialer() {
                     "Outbound"

@@ -215,7 +215,7 @@ impl GlobalStateLock {
             // Note about concurrency: `write()` only blocks if another thread
             // is currently writing (which should be rare).
             if let Ok(mut cache) = self.handshake_cache.write() {
-                *cache = handshake_data.clone();
+                *cache = handshake_data;
             }
 
             handshake_data.timestamp = SystemTime::now();
@@ -231,7 +231,7 @@ impl GlobalStateLock {
         // lock is released (and `read()` allowed to continue) as soon as the
         // new `handshake_data` is stored in the cache -- a matter of
         // microseconds at most.
-        let mut handshake_data = self.handshake_cache.read().expect("Lock poisoned").clone();
+        let mut handshake_data = *self.handshake_cache.read().expect("Lock poisoned");
 
         handshake_data.timestamp = SystemTime::now();
         handshake_data
