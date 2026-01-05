@@ -111,7 +111,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
     // let rustfield_senderrandomness = rustfield!(MmrMembershipProof::sender_randomness);
     let rustfield_utxo = rustfield!(WitnessMemory::utxo);
     let rustfield_utxo_digest = rustfield!(WitnessMemory::utxo_digest);
-    let rustfield_aoclleafindex = rustfield!(MsMembershipProof::aocl_leaf_index);
+    let rustfield_aoclleafindex = rustfield!(WitnessMemory::aocl_leaf_index);
 
     let main = triton_asm! {
         /* pasted from <../reserves>
@@ -163,12 +163,16 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         // _ *w
-        {&rustfield_utxo}
-        // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
+        // {&rustfield_utxo}
+        {&WitnessMemory::get_field_with_size("utxo")}
+        // // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
 
-        addi 0 read_mem 1 addi 2
-        // _ utxo_size *utxo_internal
-        swap 1
+        // addi 0 read_mem 1 addi 1
+        // addi 1
+        // // _ utxo_SI *utxo_internal
+        // swap 1
+        // // _ *utxo_internal utxo_SI
+        // addi {Digest::LEN - 1}
         // _ *utxo_internal utxo_size
         call {lib_hash_varlen}
         hint utxo_hash = stack[0..5]
