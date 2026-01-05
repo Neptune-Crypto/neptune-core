@@ -389,7 +389,9 @@ impl NetworkActor {
                     NetworkStackEvent::RelayClient(relay_client_event) => {
                         self.handle_relay_client_event(*relay_client_event);
                     }
-                    NetworkStackEvent::Dcutr(_event) => {}
+                    NetworkStackEvent::Dcutr(dcutr_event) => {
+                        self.handle_dcutr_event(*dcutr_event);
+                    }
 
                     // StreamGateway successfully hijacked a stream.
                     NetworkStackEvent::StreamGateway(gateway_event) => {
@@ -653,6 +655,43 @@ impl NetworkActor {
             }
             libp2p::relay::client::Event::InboundCircuitEstablished { src_peer_id, .. } => {
                 tracing::debug!(relay = %src_peer_id, "Inbound relayed connection established.");
+            }
+        }
+    }
+
+    /// Handles events from the DCUtR (Direct Connection Upgrade through Relay)
+    /// behavior.
+    ///
+    /// DCUtR coordinates with remote peers to "upgrade" an existing relayed
+    /// connection into a direct one. It works by using the relay connection as
+    /// a signaling channel to synchronize a simultaneous outbound dial (TCP
+    /// hole punch) from both ends.
+    ///
+    /// When the result is [Ok], a new direct connection has been established.
+    /// The swarm automatically prioritizes this direct connection for future
+    /// traffic, though the relayed connection may remain open as a fallback.
+    fn handle_dcutr_event(&mut self, event: libp2p::dcutr::Event) {
+        let libp2p::dcutr::Event {
+            remote_peer_id,
+            result,
+        } = event;
+
+        match result {
+            Ok(_connection_id) => {
+                tracing::info!(
+                    peer_id = %remote_peer_id,
+                    "Hole punch succeeded \\o/ - Connection is now direct."
+                );
+            }
+            Err(e) => {
+                // Failure is logged at 'warn' or 'debug' level. In many
+                // environments, hole punching is expected to fail (e.g.,
+                // Symmetric NATs), in which case the node simply continues
+                // using the relay.
+                tracing::warn!(
+                    peer_id = %remote_peer_id,
+                    "Hole punch failed: {e}. Remaining on relayed connection."
+                );
             }
         }
     }
