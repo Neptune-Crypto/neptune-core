@@ -12,7 +12,7 @@ use proptest::prelude::Strategy;
 use crate::application::network::address_book::AddressBook;
 use crate::application::network::address_book::Peer;
 
-pub fn arb_multiaddr() -> impl Strategy<Value = Multiaddr> {
+pub(crate) fn arb_multiaddr() -> impl Strategy<Value = Multiaddr> {
     // Generate the 4 octets of an IP address
     let ip_strat = proptest::collection::vec(0..255u8, 4);
     // Generate a standard port range
@@ -29,7 +29,7 @@ pub fn arb_multiaddr() -> impl Strategy<Value = Multiaddr> {
 ///
 /// This strategy creates strings in the format "/[a-z0-9]/[semver]"
 /// to simulate realistic protocol identifiers.
-pub fn arb_stream_protocol() -> impl Strategy<Value = StreamProtocol> {
+pub(crate) fn arb_stream_protocol() -> impl Strategy<Value = StreamProtocol> {
     // Generate a name (e.g., "neptune", "kad", "ping")
     // and a version (e.g., "1.0.0", "2.1.0")
     ("[a-z]{3,10}", "[0-9]\\.[0-9]\\.[0-9]").prop_map(|(name, version)| {
@@ -41,14 +41,14 @@ pub fn arb_stream_protocol() -> impl Strategy<Value = StreamProtocol> {
     })
 }
 /// Generates a realistic agent version string (e.g., "neptune-cash/0.1.5")
-pub fn arb_agent_version() -> impl Strategy<Value = String> {
+pub(crate) fn arb_agent_version() -> impl Strategy<Value = String> {
     // Generate a client name and a semver version
     ("[a-z-]{3,12}", "[0-9]\\.[0-9]{1,2}\\.[0-9]{1,2}")
         .prop_map(|(name, version)| format!("{}/{}", name, version))
 }
 
 /// Generates a realistic protocol version string (e.g., "/neptune/1.0.0")
-pub fn arb_protocol_version() -> impl Strategy<Value = String> {
+pub(crate) fn arb_protocol_version() -> impl Strategy<Value = String> {
     // Protocols almost always start with a slash and follow a tiered naming
     ("[a-z]{3,10}", "[0-9]\\.[0-9]\\.[0-9]")
         .prop_map(|(proto, version)| format!("/{}/{}", proto, version))
@@ -56,7 +56,7 @@ pub fn arb_protocol_version() -> impl Strategy<Value = String> {
 
 /// Generates a SystemTime between Jan 1 2025 and Jan 1 2026.
 /// This range ensures the data is realistic for a modern blockchain node.
-pub fn arb_system_time() -> impl Strategy<Value = SystemTime> {
+pub(crate) fn arb_system_time() -> impl Strategy<Value = SystemTime> {
     // Approx seconds from 1970 to Jan 1 2025: 1_735_689_600
     // We generate an offset from that point.
     (0..31_536_000u64).prop_map(|offset_seconds| {
@@ -67,7 +67,7 @@ pub fn arb_system_time() -> impl Strategy<Value = SystemTime> {
 }
 
 impl Peer {
-    fn arbitrary() -> BoxedStrategy<Self> {
+    pub(crate) fn arbitrary() -> BoxedStrategy<Self> {
         let range_for_num_listen_addresses = 0..5;
         let range_for_num_protocols = 0..5;
 
@@ -82,6 +82,7 @@ impl Peer {
             arb_protocol_version(),
             strategy_for_protocols,
             [arb_system_time(), arb_system_time()],
+            0u32..u32::MAX,
         )
             .prop_map(
                 |(
@@ -90,6 +91,7 @@ impl Peer {
                     protocol_version,
                     supported_protocols,
                     timestamps,
+                    fail_count,
                 )| {
                     let first_seen = timestamps[0].min(timestamps[1]);
                     let last_seen = timestamps[0].max(timestamps[1]);
@@ -100,6 +102,7 @@ impl Peer {
                         supported_protocols,
                         first_seen,
                         last_seen,
+                        fail_count,
                     }
                 },
             )
@@ -107,7 +110,7 @@ impl Peer {
     }
 }
 
-pub fn arb_peer_id() -> impl Strategy<Value = PeerId> {
+pub(crate) fn arb_peer_id() -> impl Strategy<Value = PeerId> {
     vec(0u8..=u8::MAX, 32).prop_map(|seed| {
         let seed = std::convert::TryInto::<[u8; 32]>::try_into(seed).unwrap();
         // Create a deterministic keypair from the generated seed
@@ -118,7 +121,7 @@ pub fn arb_peer_id() -> impl Strategy<Value = PeerId> {
 }
 
 impl AddressBook {
-    pub fn arbitrary() -> BoxedStrategy<Self> {
+    pub(crate) fn arbitrary() -> BoxedStrategy<Self> {
         (0usize..20)
             .prop_flat_map(|num_entries| {
                 (
