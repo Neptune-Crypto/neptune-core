@@ -1,14 +1,18 @@
 use futures::prelude::*;
+use itertools::Itertools;
 use libp2p::swarm::SwarmEvent;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use rand::seq::SliceRandom;
 use rand::Rng;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::time::SystemTime;
 
 use crate::api::export::Network;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
@@ -79,6 +83,10 @@ pub(crate) struct NetworkActor {
 
     /// File to store the address book, if any.
     address_book_file: Option<PathBuf>,
+
+    /// Tracks which peers are holding a reservation for us, along with the
+    /// 80%-in timestamp and the listener id (which we need to stop listening).
+    relays: HashMap<PeerId, (Option<SystemTime>, libp2p::core::transport::ListenerId)>,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -178,6 +186,9 @@ impl NetworkActor {
     /// gracefully (false).
     const KEEP_ALIVE: bool = true;
 
+    /// How long relay reservations (proxy addresses) last.
+    const RELAY_RESERVATION_DURATION: Duration = Duration::from_secs(120);
+
     /// Initialize a new libp2p Actor.
     ///
     /// This constructor sets up the underlying libp2p Swarm with TCP transport,
@@ -224,7 +235,7 @@ impl NetworkActor {
                         // # active connections
                         max_circuits: 16,
                         // time for hole punch only
-                        reservation_duration: Duration::from_secs(120),
+                        reservation_duration: Self::RELAY_RESERVATION_DURATION,
                         ..Default::default()
                     },
                 );
@@ -287,6 +298,7 @@ impl NetworkActor {
             active_connections: HashMap::new(),
             address_book,
             address_book_file,
+            relays: HashMap::new(),
         })
     }
 
@@ -299,11 +311,10 @@ impl NetworkActor {
         let listener_id = self.swarm.listen_on(addr.clone())?;
 
         // Log or trace the listen event for debugging the bridge
-        tracing::info!(%addr, %listener_id, "libp2p stack listening");
+        tracing::info!(%addr, %listener_id, "libp2p stack listening.");
 
         Ok(())
     }
-
     /// Fetch a list of suitable peers from the address book and dial them.
     pub(crate) fn dial_initial_peers(&mut self) {
         let initial_peers = self.address_book.select_initial_peers(10);
@@ -320,6 +331,9 @@ impl NetworkActor {
     ///
     /// Drives the libp2p Swarm and handles incoming connection handshakes.
     pub(crate) async fn run(mut self) -> Result<(), ActorError> {
+        // Timer for renewing relays.
+        let mut check_relay_reservations = tokio::time::interval(Duration::from_secs(10));
+
         loop {
             tokio::select! {
                 // Handle libp2p Swarm Events.
@@ -342,6 +356,11 @@ impl NetworkActor {
                             return Err(ActorError::ChannelClosed);
                         }
                     }
+                }
+
+                // Renew about-to-expire relay reservations (if any).
+                _ = check_relay_reservations.tick() => {
+                    self.check_relay_renewals();
                 }
             }
         }
@@ -367,7 +386,9 @@ impl NetworkActor {
                     NetworkStackEvent::RelayServer(relay_server_event) => {
                         self.handle_relay_server_event(*relay_server_event);
                     }
-                    NetworkStackEvent::RelayClient(_event) => {}
+                    NetworkStackEvent::RelayClient(relay_client_event) => {
+                        self.handle_relay_client_event(*relay_client_event);
+                    }
                     NetworkStackEvent::Dcutr(_event) => {}
 
                     // StreamGateway successfully hijacked a stream.
@@ -408,9 +429,49 @@ impl NetworkActor {
                 tracing::debug!(%error, "Connection failed.");
             }
 
-            // Handle listener errors to prevent the node from failing silently
+            // Non-fatal error.
             SwarmEvent::ListenerError { listener_id, error } => {
-                tracing::error!(?listener_id, "Listener failed: {:?}", error);
+                tracing::debug!(?listener_id, "Listener failed: {:?}", error);
+            }
+
+            // Graceful closure.
+            SwarmEvent::ListenerClosed {
+                listener_id,
+                reason,
+                ..
+            } => {
+                // Match the listener ID against the listener IDs we are
+                // for proxy addresses.
+                let failing_relay = self
+                    .relays
+                    .iter()
+                    .find(|(_, (_, id))| *id == listener_id)
+                    .map(|(peer_id, _)| *peer_id);
+
+                // A match necessarily means an *accidental* closure, because
+                // intentional closures come after removing the entry from the
+                // map.
+                if let Some(peer_id) = failing_relay {
+                    match reason {
+                        Ok(_) => {
+                            tracing::warn!(
+                                %peer_id,
+                                "Relay listener closed gracefully, but a match \
+                                was still found! Reason: unexpected race \
+                                condition."
+                            )
+                        }
+                        Err(e) => {
+                            tracing::warn!(%peer_id, "Relay reservation failed or closed with error: {:?}", e)
+                        }
+                    }
+
+                    // Remove it from our tracking map.
+                    self.relays.remove(&peer_id);
+
+                    // Find a replacement.
+                    self.request_peer_relays(1);
+                }
             }
 
             // Handle new connection
@@ -559,6 +620,43 @@ impl NetworkActor {
         }
     }
 
+    /// Handles events emitted by the Relay Client behavior.
+    ///
+    /// This handler tracks the status of our reservations (proxy addresses) on
+    /// remote relay nodes. Successful reservations allow this node to be
+    /// reachable via a `/p2p-circuit` address, which is essential for inbound
+    /// connectivity when behind a NAT.
+    ///
+    /// Note: Failures to initiate or maintain a reservation are often reported
+    /// as `SwarmEvent::ListenerClosed` or `SwarmEvent::ListenerError` rather
+    /// than through this behavior-specific handler, as relay reservations are
+    /// managed as swarm listeners.
+    fn handle_relay_client_event(&mut self, event: libp2p::relay::client::Event) {
+        match event {
+            libp2p::relay::client::Event::ReservationReqAccepted { relay_peer_id, .. } => {
+                let eighty_percent = Self::RELAY_RESERVATION_DURATION * 8 / 10;
+                let eighty_percent_in = SystemTime::now() + eighty_percent;
+                self.relays
+                    .entry(relay_peer_id)
+                    .and_modify(|(timestamp, _listener_id)| {
+                        *timestamp = Some(eighty_percent_in);
+                    });
+
+                tracing::info!(
+                    peer = %relay_peer_id,
+                    "Relay reservation accepted; renewal scheduled in {:?}",
+                    eighty_percent_in
+                );
+            }
+            libp2p::relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. } => {
+                tracing::debug!(relay = %relay_peer_id, "Outbound relayed connection established.");
+            }
+            libp2p::relay::client::Event::InboundCircuitEstablished { src_peer_id, .. } => {
+                tracing::debug!(relay = %src_peer_id, "Inbound relayed connection established.");
+            }
+        }
+    }
+
     /// Process events from the `StreamGateway` subprotocol to transform a raw
     /// libp2p stream into bidirectional stream compatible with the legacy
     /// Neptune Cash peer-loop architecture.
@@ -648,18 +746,15 @@ impl NetworkActor {
 
             // New NAT status
             libp2p::autonat::Event::StatusChanged { old: _, new } => {
-                let status = match new {
+                let status = match new.clone() {
                     libp2p::autonat::NatStatus::Public(multiaddr) => {
-                        // Tell the Swarm to announce this address in future
-                        // Identify handshakes.
-                        self.swarm.add_external_address(multiaddr.clone());
-
                         format!("Public({})", multiaddr)
                     }
+
+                    // Lost public status.
                     libp2p::autonat::NatStatus::Private => {
-                        // Lost public status. Be a responsible node and clear
-                        //  external addresses so we don't lead peers into a
-                        // "dial timeout" trap.
+                        // Be a responsible node and clear external addresses so
+                        // we don't lead peers into a "dial timeout" trap.
                         // Since we can't call 'clear_all' on an iterator, we
                         // iterate over current external addresses.
                         let mut to_remove = Vec::new();
@@ -670,18 +765,30 @@ impl NetworkActor {
                             self.swarm.remove_external_address(&addr);
                         }
 
-                        // TODO: Reachability-based Triggering.
-                        // When identified as Private, the node should initiate
-                        // a Relay reservation to ensure inbound connectivity.
-                        // Scan Kademlia/Identify for peers supporting the
-                        // '/libp2p/relay/2.0.0/stop' protocol and call
-                        // `relay.reserve(peer_id)`.
-
                         "Private".to_string()
                     }
                     libp2p::autonat::NatStatus::Unknown => "Unknown".to_string(),
                 };
                 tracing::info!("New NAT status: {status}");
+
+                // Do something (besides logging messages).
+                // (And no we cannot integrate this match statement into the
+                // match statement above because then the order of the log
+                // messages will make no sense.)
+                match new {
+                    libp2p::autonat::NatStatus::Public(multiaddr) => {
+                        // Tell the Swarm to announce this address in future
+                        // Identify handshakes.
+                        self.swarm.add_external_address(multiaddr.clone());
+
+                        // If we were using proxy addresses, clean them up.
+                        self.cleanup_relays();
+                    }
+                    libp2p::autonat::NatStatus::Private => {
+                        self.request_peer_relays(3);
+                    }
+                    libp2p::autonat::NatStatus::Unknown => {}
+                }
             }
         }
     }
@@ -738,6 +845,115 @@ impl NetworkActor {
         }
 
         Ok(Self::KEEP_ALIVE)
+    }
+
+    /// Closes all active relay listeners and clears the relay tracking state.
+    ///
+    /// This should be called when the node's NAT status transitions to
+    /// `Public`, as maintaining relay reservations is unnecessary and consumes
+    /// resources on both this node and the remote relay servers.
+    fn cleanup_relays(&mut self) {
+        tracing::info!("Cleaning up relay reservations.");
+
+        for (_peer_id, (_expiration_date, listener_id)) in self.relays.drain() {
+            if self.swarm.remove_listener(listener_id) {
+                tracing::debug!(?listener_id, "Closed relay listener.");
+            }
+        }
+    }
+
+    /// Monitors active relay reservations and triggers renewals for those
+    /// nearing expiration.
+    ///
+    /// This function checks the '80% mark' -- a timestamp calculated at the
+    /// time the reservation is accepted -- against the current system time. If
+    /// a reservation has passed this mark, it is removed from the active relay
+    /// set, and [Self::request_peer_relays] is called to secure a replacement
+    /// reservation.
+    ///
+    /// By refreshing slightly before the actual expiration, the node remains
+    /// reachable throughout.
+    fn check_relay_renewals(&mut self) {
+        if self.relays.is_empty() {
+            return;
+        }
+
+        let now = SystemTime::now();
+        let expired_relays = self
+            .relays
+            .iter()
+            .filter_map(|(peer_id, (eighty_percent_mark, _listener_id))| {
+                eighty_percent_mark.and_then(|epm| {
+                    if now.duration_since(epm).is_ok() {
+                        Some(*peer_id)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect_vec();
+        let num_expired_relays = expired_relays.len();
+        for expiry in expired_relays {
+            // If the relay is about to expire, we remove it from the map
+            // pro-actively. As a result, when it does expire, no match is
+            // found, and no substitute is produced.
+            self.relays.remove(&expiry);
+        }
+
+        self.request_peer_relays(num_expired_relays);
+    }
+
+    /// Make a random selection of k peers from the set of active connections
+    /// that are not already serving as relays, and ask them to relay for us.
+    ///
+    /// This function may ask fewer peers than the supplied argument, for
+    /// instance if there are not enough active connections without on-going
+    /// relay commitments.
+    fn request_peer_relays(&mut self, num_relays: usize) {
+        let current_relays = self.relays.keys().collect::<HashSet<_>>();
+        let mut available_peers = self
+            .active_connections
+            .keys()
+            .filter(|p| !current_relays.contains(p))
+            .collect_vec();
+        let mut rng = rand::rng().clone();
+        available_peers.shuffle(&mut rng);
+
+        let mut counter = 0;
+        for &peer_id in available_peers {
+            let Some(addr) = self.active_connections.get(&peer_id).cloned() else {
+                continue;
+            };
+
+            tracing::info!(%peer_id, "Attempting relay reservation at {}", addr);
+
+            // Construct the circuit address.
+            // Format: /ip4/RELAY_IP/tcp/PORT/p2p/RELAY_ID/p2p-circuit
+            let circuit_addr = addr
+                .clone()
+                .with(libp2p::multiaddr::Protocol::P2p(peer_id))
+                .with(libp2p::multiaddr::Protocol::P2pCircuit);
+
+            tracing::info!(%peer_id, "Attempting relay reservation by listening on {}.", circuit_addr);
+
+            // Listen on the circuit address. This activity triggers the
+            // reservation, so catch and record the listener id. We will catch
+            // the matching success event (`ReservationReqAccepted`) to put the
+            // right 80%-to-expiry timestamp in at that time.
+            match self.swarm.listen_on(circuit_addr) {
+                Ok(listener_id) => {
+                    self.relays.insert(peer_id, (None, listener_id));
+
+                    counter += 1;
+                    if counter >= num_relays {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to initiate relay reservation: {:?}", e);
+                }
+            };
+        }
     }
 
     /// Spawns a long-lived Tokio task to manage the lifecycle of a single peer
