@@ -72,7 +72,10 @@ impl GetSize for Peer {
     }
 }
 
-/// Helper module to bridge Vec<StreamProtocol> and Vec<String>
+/// Helper module to bridge `Vec<StreamProtocol>` and `Vec<String>`.
+///
+/// Enables `serde` to encode and decode `Vec<StreamProtocol>` as though it were
+/// `Vec<String>`.
 mod protocol_vec_serde {
     use super::*;
     use serde::{Deserialize, Deserializer, Serializer};
