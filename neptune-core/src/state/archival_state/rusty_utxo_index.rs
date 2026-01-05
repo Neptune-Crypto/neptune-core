@@ -1,12 +1,7 @@
 use itertools::Itertools;
-use serde::Serialize;
-use serde_derive::Deserialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
-use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::api::export::Announcement;
-use crate::api::export::ReceivingAddress;
 use crate::application::database::storage::storage_schema::traits::*;
 use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::database::storage::storage_schema::DbtSingleton;
@@ -15,43 +10,7 @@ use crate::application::database::storage::storage_schema::RustyValue;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::NeptuneLevelDb;
 use crate::protocol::consensus::block::Block;
-
-/// Announcement meta-information, intended for use in combination with
-/// [`ReceivingAddress`]. Can be used to quickly identify if the announcement
-/// relates to a specific [`ReceivingAddress`].
-///
-/// [`ReceivingAddress`]: crate::api::export::ReceivingAddress
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub(crate) struct AnnouncementFlags {
-    pub(crate) flag: BFieldElement,
-    pub(crate) receiver_id: BFieldElement,
-}
-
-impl From<&ReceivingAddress> for AnnouncementFlags {
-    fn from(value: &ReceivingAddress) -> Self {
-        Self {
-            flag: value.flag(),
-            receiver_id: value.receiver_identifier(),
-        }
-    }
-}
-
-impl TryFrom<&Announcement> for AnnouncementFlags {
-    // Only possible converstion error is that announcement message is too
-    // short.
-    type Error = ();
-
-    fn try_from(value: &Announcement) -> Result<Self, Self::Error> {
-        if value.message.len() < 2 {
-            return Err(());
-        }
-
-        Ok(AnnouncementFlags {
-            flag: value.message[0],
-            receiver_id: value.message[1],
-        })
-    }
-}
+use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
 
 /// The purpose of the UTXO index is to speed up the rescanning of historical
 /// blocks, and to serve 3rd parties with information required to detect
@@ -78,7 +37,7 @@ struct UtxoIndexTables {
     /// the block.
     ///
     /// Can be used to speed up the scanning for incoming, announced UTXOs.
-    pub(super) announcements: DbtMap<Digest, Vec<AnnouncementFlags>>,
+    pub(super) announcements: DbtMap<Digest, Vec<AnnouncementFlag>>,
 
     /// Mapping from block hash to the list of digests of the absolute indices
     /// being set in the block.
@@ -126,7 +85,7 @@ impl RustyUtxoIndex {
     pub(crate) async fn announcement_flags(
         &self,
         block_hash: Digest,
-    ) -> Option<Vec<AnnouncementFlags>> {
+    ) -> Option<Vec<AnnouncementFlag>> {
         self.tables.announcements.get(&block_hash).await
     }
 
@@ -193,6 +152,7 @@ mod tests {
     use tasm_lib::twenty_first::bfe_vec;
 
     use super::*;
+    use crate::api::export::Announcement;
     use crate::api::export::GenerationSpendingKey;
     use crate::api::export::Network;
     use crate::state::archival_state::ArchivalState;
@@ -203,6 +163,7 @@ mod tests {
     use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use crate::BFieldElement;
 
     async fn test_utxo_index(network: Network) -> RustyUtxoIndex {
         let data_dir = crate::tests::shared::files::unit_test_data_directory(network).unwrap();

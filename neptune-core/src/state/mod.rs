@@ -86,10 +86,10 @@ use crate::protocol::peer::SyncChallenge;
 use crate::protocol::peer::SyncChallengeResponse;
 use crate::protocol::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::archival_state::rusty_utxo_index::AnnouncementFlags;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
+use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
@@ -1097,7 +1097,7 @@ impl GlobalState {
             "Node must be started with the UTXO index flag set for this function to work."
         );
 
-        let keys: HashMap<AnnouncementFlags, SpendingKey> = keys
+        let keys: HashMap<AnnouncementFlag, SpendingKey> = keys
             .into_iter()
             .map(|key| ((&key.to_address()).into(), key))
             .collect();
