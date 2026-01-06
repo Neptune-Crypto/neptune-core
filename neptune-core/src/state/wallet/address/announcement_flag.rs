@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use serde::Serialize;
 use serde_derive::Deserialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -20,6 +22,23 @@ pub struct AnnouncementFlag {
 
     /// An ID identifying the receiver.
     pub(crate) receiver_id: BFieldElement,
+}
+
+impl Ord for AnnouncementFlag {
+    // Ordering is implemented to allow for idempotent and deterministic lookup
+    // tables.
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.flag.value().cmp(&other.flag.value()) {
+            Ordering::Equal => self.receiver_id.value().cmp(&other.receiver_id.value()),
+            non_eq => non_eq,
+        }
+    }
+}
+
+impl PartialOrd for AnnouncementFlag {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl From<&ReceivingAddress> for AnnouncementFlag {

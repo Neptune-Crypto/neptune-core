@@ -166,11 +166,16 @@ impl RustyUtxoIndex {
             .iter()
             .filter_map(|ann| ann.try_into().ok())
             .collect();
+
+        // sort announcement flags to ensure idempotency
+        let mut announcement_flags = announcement_flags.iter().copied().collect_vec();
+        announcement_flags.sort_unstable();
         self.tables
             .announcements_by_block
-            .insert(hash, announcement_flags.iter().copied().collect_vec())
+            .insert(hash, announcement_flags.clone())
             .await;
 
+        // Loop over all announcement flags to maintain flag to block mapping
         for announcement_flag in announcement_flags {
             let mut block_hashes = self
                 .tables
