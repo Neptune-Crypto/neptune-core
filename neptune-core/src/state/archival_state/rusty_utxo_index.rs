@@ -164,7 +164,7 @@ impl RustyUtxoIndex {
         let announcement_flags: HashSet<AnnouncementFlag> = tx_kernel
             .announcements
             .iter()
-            .filter_map(|ann| ann.try_into().ok())
+            .filter_map(|ann| AnnouncementFlag::try_from(ann).ok())
             .collect();
 
         // sort announcement flags to ensure idempotency
@@ -273,7 +273,7 @@ mod tests {
         ) -> HashSet<Digest> {
             let announcement_flags: HashSet<AnnouncementFlag> = announcements
                 .iter()
-                .filter_map(|ann| ann.try_into().ok())
+                .filter_map(|ann| AnnouncementFlag::try_from(ann).ok())
                 .collect();
 
             self.block_hashes_by_announcement_flags(&announcement_flags)

@@ -543,11 +543,16 @@ pub struct Args {
     #[clap(long)]
     pub(crate) scan_keys: Option<usize>,
 
-    /// Construct an maintain a UTXO index
+    /// Construct and maintain a UTXO index
     ///
-    /// If set, all announcements and outputs in all processed blocks will be
+    /// If set, all announcements and inputs in all processed blocks will be
     /// indexed in a database that enables a fast rescan for the discovery of
     /// all balance-affecting inputs and outputs of blocks.
+    ///
+    /// If blocks have already been processed without this flag active, and the
+    /// flag is later activated, all blocks up to the current tip will be
+    /// indexed, when a new block is set as tip. This process might take some
+    /// time (tens of minutes).
     #[clap(long)]
     pub utxo_index: bool,
 

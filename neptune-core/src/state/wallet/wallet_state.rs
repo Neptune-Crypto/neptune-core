@@ -788,7 +788,7 @@ impl WalletState {
     /// Scan the given list of addition records for items that match with list
     /// of expected incoming UTXOs, and returns expected UTXOs that are present.
     ///
-    /// note: this algorithm is o(n) where:
+    /// note: this algorithm is O(n) where:
     ///   n = number of transaction outputs.
     ///
     /// Returns an list of [IncomingUtxo], which in turn contains a
