@@ -544,7 +544,7 @@ pub(crate) async fn create_block_transaction_from(
         .proof_type(TransactionProofType::SingleProof)
         .build();
     if transactions_to_merge.is_empty() && tx_merge_origin == TxMergeOrigin::Mempool {
-        info!("No synced single-proof tx found for merge looking for one to update");
+        info!("No synced single-proof tx found for merge. Looking for one to update.");
         let min_gobbling_fee = NativeCurrencyAmount::zero();
         let update_job = global_state_lock
             .lock_guard_mut()
