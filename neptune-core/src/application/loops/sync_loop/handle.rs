@@ -197,6 +197,12 @@ impl SyncLoopHandle {
             None
         }
     }
+
+    pub(crate) async fn abort(&self) {
+        if let Err(e) = self.sender.send(MainToSync::Abort).await {
+            tracing::error!("Could not abort sync loop: {e}.");
+        }
+    }
 }
 
 #[cfg(test)]

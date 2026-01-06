@@ -33,6 +33,7 @@ pub(crate) enum SyncToMain {
 /// Messages sent from the main loop to the sync loop.
 #[derive(Debug, Clone)]
 pub(crate) enum MainToSync {
+    Abort,
     AddPeer(PeerHandle),
     RemovePeer(PeerHandle),
     ReceiveBlock {

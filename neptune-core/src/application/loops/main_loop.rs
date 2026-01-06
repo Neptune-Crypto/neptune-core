@@ -1713,7 +1713,11 @@ impl MainLoopHandler {
             }
         };
 
-        self.graceful_shutdown(main_loop_state.task_handles).await?;
+        self.graceful_shutdown(
+            main_loop_state.task_handles,
+            main_loop_state.maybe_sync_loop,
+        )
+        .await?;
         info!("Shutdown completed.");
 
         Ok(exit_code)
@@ -2071,8 +2075,17 @@ impl MainLoopHandler {
         Some(sync_loop_handle)
     }
 
-    async fn graceful_shutdown(&mut self, join_handles: Vec<JoinHandle<()>>) -> Result<()> {
+    async fn graceful_shutdown(
+        &mut self,
+        join_handles: Vec<JoinHandle<()>>,
+        maybe_sync_loop_handle: Option<SyncLoopHandle>,
+    ) -> Result<()> {
         info!("Shutdown initiated.");
+
+        // If the sync loop is active, stop it.
+        if let Some(sync_loop_handle) = maybe_sync_loop_handle {
+            sync_loop_handle.abort().await;
+        }
 
         // Stop mining
         self.main_to_miner_tx.send(MainToMiner::Shutdown);

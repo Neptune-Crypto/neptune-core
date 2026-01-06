@@ -196,6 +196,13 @@ impl SyncLoop {
                 // event: message from sync loop
                 Some(message_from_main) = self.main_channel_receiver.recv() => {
                     match message_from_main {
+                        MainToSync::Abort => {
+                            tracing::info!("Shutting down sync loop now.");
+                            if let Some(running_task) = maybe_successors_subtask {
+                                running_task.abort();
+                            }
+                            return;
+                        }
                         MainToSync::AddPeer(peer_handle) => {
                             tracing::debug!("Sync loop got message from main: add peer");
 
