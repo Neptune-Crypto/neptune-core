@@ -1820,6 +1820,10 @@ impl MainLoopHandler {
                             .mempool
                             .get(txid)
                             .expect("Transaction from iter must exist in mempool");
+                        if tx.proof.is_witness() {
+                            debug!("Not sharing PrimitiveWitness-backed transaction; this would leak secret keys!");
+                            continue;
+                        }
                         let notification = TransactionNotification::try_from(tx);
                         match notification {
                             Ok(notification) => {
