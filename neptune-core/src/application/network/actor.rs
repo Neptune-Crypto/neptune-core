@@ -10,11 +10,9 @@ use tokio::task::JoinHandle;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::PathBuf;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use crate::api::export::Network;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
@@ -23,6 +21,7 @@ use crate::application::network::address_book::ADDRESS_BOOK_MAX_SIZE;
 use crate::application::network::bridge::bridge_libp2p_stream;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
+use crate::application::network::config::NetworkConfig;
 use crate::application::network::gateway::GatewayEvent;
 use crate::application::network::gateway::StreamGateway;
 use crate::application::network::stack::NetworkStack;
@@ -81,8 +80,8 @@ pub(crate) struct NetworkActor {
     /// Dictionary to find peer metadata, connected or not.
     address_book: AddressBook,
 
-    /// File to store the address book, if any.
-    address_book_file: Option<PathBuf>,
+    /// [`NetworkConfig`] options for the [`NetworkActor`]
+    config: NetworkConfig,
 
     /// Tracks which peers are holding a reservation for us, along with the
     /// 80%-in timestamp and the listener id (which we need to stop listening).
@@ -198,8 +197,7 @@ impl NetworkActor {
         local_key: libp2p::identity::Keypair,
         channels: NetworkActorChannels,
         global_state_lock: GlobalStateLock,
-        maybe_address_book_file: Option<PathBuf>,
-        network: Network,
+        mut config: NetworkConfig,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let NetworkActorChannels {
             peer_to_main_loop_tx,
@@ -216,6 +214,49 @@ impl NetworkActor {
                 .with_push_listen_addr_updates(true)
                 .with_interval(std::time::Duration::from_secs(300));
 
+        // Configure connection limits
+        let max_num_peers = u32::try_from(config.max_num_peers).unwrap_or(10);
+        let limits = libp2p_connection_limits::ConnectionLimits::default()
+            .with_max_established_incoming(Some(max_num_peers / 2))
+            .with_max_established_outgoing(Some(max_num_peers / 2))
+            .with_max_established(Some(max_num_peers))
+            .with_max_established_per_peer(Some(1));
+
+        // Configure autoNAT
+        let autonat_config = if config.network.is_reg_test() {
+            // Flag `only_global_ips` determines whether to ignore
+            // addresses reported by peers when those addresses are
+            // local, e.g., 192.168.0.15. On main net we cannot use
+            // these addresses for anything so we might as well ignore
+            // them.
+            // On regtest however, the entire network is local and we
+            // want to pretend that it's not. In other words, we still
+            // want to trigger all usual actions and sequences for the
+            // purpose of testing them. Therefore, on regtest we do not
+            // ignore local IPs.
+            libp2p::autonat::Config {
+                only_global_ips: false,
+                ..Default::default()
+            }
+        } else {
+            libp2p::autonat::Config::default()
+        };
+
+        // Configure relay server
+        let relay_server_config = libp2p::relay::Config {
+            // # sub-addresses
+            max_reservations: 128,
+            // # active connections
+            max_circuits: 16,
+            // time for hole punch only
+            reservation_duration: Self::RELAY_RESERVATION_DURATION,
+            ..Default::default()
+        };
+
+        // Configure Kademlia
+        let kad_config = libp2p::kad::Config::new(NEPTUNE_PROTOCOL);
+
+        // Build Swarm
         let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
             .with_tokio()
             .with_tcp(
@@ -227,54 +268,30 @@ impl NetworkActor {
             .with_behaviour(|key, relay_client| {
                 let local_peer_id = key.public().to_peer_id();
 
-                let relay_server = libp2p::relay::Behaviour::new(
-                    local_peer_id,
-                    libp2p::relay::Config {
-                        // # sub-addresses
-                        max_reservations: 128,
-                        // # active connections
-                        max_circuits: 16,
-                        // time for hole punch only
-                        reservation_duration: Self::RELAY_RESERVATION_DURATION,
-                        ..Default::default()
-                    },
-                );
+                let relay_server =
+                    libp2p::relay::Behaviour::new(local_peer_id, relay_server_config);
 
-                let autonat_config = if network.is_reg_test() {
-                    // Flag `only_global_ips` determines whether to ignore
-                    // addresses reported by peers when those addresses are
-                    // local, e.g., 192.168.0.15. On main net we cannot use
-                    // these addresses for anything so we might as well ignore
-                    // them.
-                    // On regtest however, the entire network is local and we
-                    // want to pretend that it's not. In other words, we still
-                    // want to trigger all usual actions and sequences for the
-                    // purpose of testing them. Therefore, on regtest we do not
-                    // ignore local IPs.
-                    libp2p::autonat::Config {
-                        only_global_ips: false,
-                        ..Default::default()
-                    }
-                } else {
-                    libp2p::autonat::Config::default()
-                };
+                let store = libp2p::kad::store::MemoryStore::new(local_peer_id);
+                let kademlia =
+                    libp2p::kad::Behaviour::with_config(local_peer_id, store, kad_config);
 
                 NetworkStack {
-                    gateway: StreamGateway::new(global_state_lock.clone()),
                     identify: libp2p::identify::Behaviour::new(identify_config),
                     autonat: libp2p::autonat::Behaviour::new(local_peer_id, autonat_config),
                     relay_server,
                     relay_client,
                     dcutr: libp2p::dcutr::Behaviour::new(local_peer_id),
+                    kademlia,
+                    limits: libp2p_connection_limits::Behaviour::new(limits),
+                    gateway: StreamGateway::new(global_state_lock.clone()),
                 }
             })?
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
 
         let mut address_book = AddressBook::new();
-        let mut address_book_file = None;
-        if let Some(file_name) = maybe_address_book_file {
-            if let Err(e) = address_book.load_from_disk(&file_name) {
+        if let Some(file_name) = config.address_book.as_ref() {
+            if let Err(e) = address_book.load_from_disk(file_name.clone()) {
                 tracing::warn!(
                     "Failed to load address book from '{}': {e}.",
                     file_name.to_string_lossy()
@@ -284,7 +301,7 @@ impl NetworkActor {
                     "Loaded address book from '{}'.",
                     file_name.to_string_lossy()
                 );
-                address_book_file = Some(file_name);
+                config.address_book = Some(file_name.clone());
             }
         }
 
@@ -297,7 +314,7 @@ impl NetworkActor {
             global_state_lock,
             active_connections: HashMap::new(),
             address_book,
-            address_book_file,
+            config,
             relays: HashMap::new(),
         })
     }
@@ -330,9 +347,25 @@ impl NetworkActor {
     /// The event loop for the Network Actor.
     ///
     /// Drives the libp2p Swarm and handles incoming connection handshakes.
+    ///
+    /// Includes a 10-second 'Check Relay Reservations' heartbeat. NATted nodes
+    /// continuously ask their peers to reserve a relay slot in order to be
+    /// reachable. (After establishing the relayed connection, that connection
+    /// will automatically upgrade through DCUtR or "hole punching"; the relay
+    /// reservation merely serves to enable this coordination.) These slots are
+    /// short-lived. To remain reachable, NATted nodes must pro-actively reserve
+    /// new slots before the old ones expire.
+    ///
+    /// Includes a 10-minute 'Crawl Refresh' heartbeat. This heartbeat ensures
+    /// that even if we become isolated, we proactively reach out to re-verify
+    /// our  'one-hop' neighbors and discover new nodes that have joined the
+    /// network since our last update.
     pub(crate) async fn run(mut self) -> Result<(), ActorError> {
         // Timer for renewing relays.
         let mut check_relay_reservations = tokio::time::interval(Duration::from_secs(10));
+
+        // Timer for refreshing the Kademlia crawl.
+        let mut refresh_kademlia_crawl = tokio::time::interval(Duration::from_mins(10));
 
         loop {
             tokio::select! {
@@ -361,6 +394,17 @@ impl NetworkActor {
                 // Renew about-to-expire relay reservations (if any).
                 _ = check_relay_reservations.tick() => {
                     self.check_relay_renewals();
+                }
+
+                // Re-launch a crawl with Kademlia
+                _ = refresh_kademlia_crawl.tick() => {
+                    // Trigger the "One-Hop" crawl we documented earlier.
+                    // Asks our current neighbors: "Who is new in the network?"
+                    if let Err(e) = self.swarm.behaviour_mut().kademlia.bootstrap() {
+                        tracing::warn!("Crawl refresh skipped: No known peers to ask. {:?}", e);
+                    } else {
+                        tracing::info!("Starting periodic network crawl to maintain connectivity ...");
+                    }
                 }
             }
         }
@@ -392,6 +436,9 @@ impl NetworkActor {
                     NetworkStackEvent::Dcutr(dcutr_event) => {
                         self.handle_dcutr_event(*dcutr_event);
                     }
+                    NetworkStackEvent::Kademlia(kademlia_event) => {
+                        self.handle_kademlia_event(*kademlia_event);
+                    }
 
                     // StreamGateway successfully hijacked a stream.
                     NetworkStackEvent::StreamGateway(gateway_event) => {
@@ -412,14 +459,57 @@ impl NetworkActor {
                 }
             }
 
-            // Dial failure
+            // Handle failed outgoing dials.
+            //
+            // 1. If the dial was `Denied`, it's just our Diversity Policy
+            //    preventing redundant connections.
+            // 2. If it's a real error, we mark the peer as unreliable, ensuring
+            //    that future 'one-hop' searches are only using high-quality
+            //    leads, keeping the Neptune Cash network healthy and fast.
             SwarmEvent::OutgoingConnectionError {
                 peer_id: Some(peer_id),
                 error,
                 ..
             } => {
-                tracing::debug!(peer = %peer_id, %error, "Dial failed, updating address book.");
-                self.address_book.bump_fail_count(peer_id);
+                match error {
+                    // Bouncer says, "We're already talking to this PeerID!"
+                    libp2p::swarm::DialError::Denied { .. } => {
+                        tracing::info!(peer = %peer_id, "Dial vetoed: Already have a diverse connection to this peer.");
+                    }
+                    // Actual network/transport failures
+                    _ => {
+                        tracing::debug!(peer = %peer_id, %error, "Dial failed, updating address book.");
+                        self.address_book.bump_fail_count(peer_id);
+
+                        // Help Kademlia realize this peer is unreliable
+                        self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+                    }
+                }
+            }
+
+            // Failed incoming connections.
+            //
+            // We specifically watch for `ListenError::Denied`. This isn't a
+            // failure in the traditional sense; it's our ConnectionLimits
+            // behavior enforcing the bouncer's (`limits`'s) rules.
+            //
+            // Seeing this log confirms that our 'Diversity Policy' is active,
+            // protecting our 50 slots for unique one-hop neighbors.
+            SwarmEvent::IncomingConnectionError { peer_id, error, .. } => {
+                match error {
+                    // This is the bouncer (Connection Limits) doing its job.
+                    libp2p::swarm::ListenError::Denied { cause } => {
+                        tracing::info!(
+                            peer = ?peer_id.map(|p| p.to_string()).unwrap_or_else(|| "Unknown".to_string()),
+                            %cause,
+                            "Incoming connection bounced: Diversity or Capacity limit reached."
+                        );
+                    }
+                    // Other errors (Transport noise, TLS fails, timeouts)
+                    _ => {
+                        tracing::trace!(peer = ?peer_id, "Incoming connection failed during handshake: {:?}", error);
+                    }
+                }
             }
 
             // Low-level connection failure
@@ -476,7 +566,7 @@ impl NetworkActor {
                 }
             }
 
-            // Handle new connection
+            // Handle successful connections.
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
@@ -489,6 +579,22 @@ impl NetworkActor {
                 };
                 tracing::info!("{direction} connection established with {peer_id} at {address}.");
                 self.active_connections.insert(peer_id, address.clone());
+
+                // Note: Identify and Kademlia will now automatically start
+                // their handshakes over this new "open line."
+
+                // If the peer does not run Kademlia, then the Kademlia
+                // will fail, and Kademlia will handle that failure eventually.
+                // However, if we dialed them, then we already know they are a
+                // Neptune Cash peer, so we might as well tell Kademlia directly
+                // that we are connected to a compatible node -- without waiting
+                // for Kademlia to figure that out on its own.
+                if endpoint.is_dialer() {
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .add_address(&peer_id, address);
+                }
             }
 
             _ => {}
@@ -531,7 +637,7 @@ impl NetworkActor {
                 // Keep a record of this peer in our address book, or update it.
                 self.address_book.insert_or_update(
                     peer_id,
-                    info.listen_addrs,
+                    info.listen_addrs.clone(),
                     info.agent_version,
                     info.protocol_version,
                     info.protocols,
@@ -539,6 +645,17 @@ impl NetworkActor {
 
                 // Prune if necessary, to avoid state bloat.
                 self.address_book.prune_to_length(ADDRESS_BOOK_MAX_SIZE);
+
+                // Activate the Kademlia "Bridge": feed the address to Kademlia.
+                for addr in info.listen_addrs {
+                    // No risk of over-connecting: the `limits` behavior in the
+                    // `NetworkStack` automatically bounces peers once we've
+                    // crosse the limit.
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .add_address(&peer_id, addr);
+                }
             }
 
             // We successfully sent our Identify info to a peer in response to
@@ -693,6 +810,66 @@ impl NetworkActor {
                     "Hole punch failed: {e}. Remaining on relayed connection."
                 );
             }
+        }
+    }
+
+    /// Handles events from the Kademlia Distributed Hash Table (DHT).
+    ///
+    /// Kademlia is the "proactive" discovery engine that allows the network to
+    /// scale. It operates on a "one-hop-removed" logic: instead of knowing
+    /// every peer, our node knows a few neighbors who act as leads to find
+    /// others.
+    ///
+    /// ## Mechanics
+    ///
+    /// ### 1. The Pulse (Network Visibility)
+    ///
+    /// Instead of looking for a specific node, we monitor these events to
+    /// ensure we are successfully "plugged in" to the global network map.
+    ///
+    /// * **The Pulse**: Every `RoutingUpdated` event is a sign that our node is
+    ///   becoming a "well-connected hub." The more peers we have in our
+    ///   k-buckets, the better we can help *other* nodes find what they are
+    ///   looking for.
+    ///
+    /// ### 2. The Bridge (Contributing to Health)
+    ///
+    /// We contribute to network health by sharing what we know.
+    ///
+    /// By adding peers from `Identify` into Kademlia, we aren't just helping
+    /// ourselves; we are making those peers discoverable to the rest of the
+    /// Neptune Cash network through our own routing table.
+    ///
+    /// ### 3. The One-Hop Crawl (Proactive Discovery)
+    ///
+    /// Since we aren't looking for a specific node, the "Bootstrap" query acts
+    /// as a **Network Crawl**.
+    ///
+    /// As the crawl progresses, our node "bubbles up" in the routing tables of
+    /// others, increasing our own connectivity.
+    fn handle_kademlia_event(&mut self, event: libp2p::kad::Event) {
+        match event {
+            // The pulse: routing table grows.
+            libp2p::kad::Event::RoutingUpdated {
+                peer, is_new_peer, ..
+            } => {
+                if is_new_peer {
+                    tracing::info!(peer_id = %peer, "DHT: New peer discovered and added to buckets.");
+                }
+            }
+
+            // The crawl: this event fires as the "one-hop" recursive search
+            // progresses. Each triggered event corresponds to one hop.
+            libp2p::kad::Event::OutboundQueryProgressed {
+                result: libp2p::kad::QueryResult::Bootstrap(Ok(status)),
+                ..
+            } => {
+                tracing::info!(
+                    remaining = status.num_remaining,
+                    "DHT: Bootstrap in progress..."
+                );
+            }
+            _ => {}
         }
     }
 
@@ -868,7 +1045,7 @@ impl NetworkActor {
             NetworkActorCommand::Shutdown => {
                 tracing::info!("Network Actor shutting down Swarm...");
 
-                if let Some(file_name) = self.address_book_file.as_ref() {
+                if let Some(file_name) = self.config.address_book.as_ref() {
                     if let Err(e) = self.address_book.save_to_disk(file_name) {
                         tracing::warn!(
                             "Failed to persist address book at '{}': {e}.",
