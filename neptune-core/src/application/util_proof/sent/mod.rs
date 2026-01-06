@@ -199,11 +199,11 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         addi {u64_stack_size - 1} read_mem {u64_stack_size} pop 1
         // _ *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
 
-        pick {u64_stack_size * 2 + 5}
-        pick {u64_stack_size * 2 + 5}
-        pick {u64_stack_size * 2 + 5}
-        pick {u64_stack_size * 2 + 5}
-        pick {u64_stack_size * 2 + 5}
+        pick {u64_stack_size * 2 + 5 - 1}
+        pick {u64_stack_size * 2 + 5 - 1}
+        pick {u64_stack_size * 2 + 5 - 1}
+        pick {u64_stack_size * 2 + 5 - 1}
+        pick {u64_stack_size * 2 + 5 - 1}
         // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
@@ -257,6 +257,8 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
 
         pop 1 write_io 4
         // num_coins num_coins *eof [amount] [timelocked_amount]
+
+        halt
     };
 
     let imports = library.all_imports();
@@ -284,7 +286,7 @@ pub fn new(
     witness_utxo: Utxo,
     witness_membershipproof: MmrMembershipProof,
 ) -> The {
-    let coins = witness_utxo.coins();
+    // let coins = witness_utxo.coins();
     The(
         WitnessMemory {
             aocl: witness_aocl,

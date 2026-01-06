@@ -132,7 +132,14 @@ async fn property_test_happy_path(
     let utxo = tx_output.utxo();
     // dbg![tasm_lib::triton_vm::prelude::BFieldCodec::encode(&utxo.coins().to_owned())];
     // dbg![tasm_lib::triton_vm::prelude::BFieldCodec::encode(&utxo).len()];
-    dbg![tasm_lib::triton_vm::prelude::BFieldCodec::encode(&utxo)];
+    // dbg![tasm_lib::triton_vm::prelude::BFieldCodec::encode(&utxo)];
+    let additionr = tx_output.addition_record();
+    assert![aocl_mp.verify(
+        aocl_leaf_index, additionr.canonical_commitment, &aocl.peaks(), aocl.num_leafs()
+    )];
+    dbg![
+        aocl.num_leafs(), aocl_leaf_index, additionr, &aocl_mp.authentication_path
+    ];
     dbg!("the proof data: start");
     let claim = super::claim_outputs(
         super::claim_inputs(
