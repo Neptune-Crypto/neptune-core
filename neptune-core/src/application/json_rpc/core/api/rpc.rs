@@ -5,6 +5,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
+use crate::api::export::AnnouncementFlag;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
@@ -420,4 +421,19 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: SubmitBlockRequest,
     ) -> RpcResult<SubmitBlockResponse>;
+
+    /* Utxo Index */
+
+    async fn block_hashes_by_flags(
+        &self,
+        announcement_flags: Vec<AnnouncementFlag>,
+    ) -> RpcResult<BlockHashesByFlagsResponse> {
+        self.block_hashes_by_flags_call(BlockHashesByFlagsRequest { announcement_flags })
+            .await
+    }
+
+    async fn block_hashes_by_flags_call(
+        &self,
+        request: BlockHashesByFlagsRequest,
+    ) -> RpcResult<BlockHashesByFlagsResponse>;
 }

@@ -25,6 +25,7 @@ pub enum Namespace {
     Archival,
     Mempool,
     Wallet,
+    UtxoIndex,
 }
 
 #[derive(Router, Routes, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -131,6 +132,11 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Mining)]
     SubmitBlock,
+
+    /// Return block hashes for blocks containing announcements with specified
+    /// announcement flags.
+    #[namespace(Namespace::UtxoIndex)]
+    BlockHashesByFlags,
 }
 
 #[cfg(test)]
