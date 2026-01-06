@@ -1044,7 +1044,7 @@ pub(crate) mod tests {
             let (root, index, path, element) =
                 valid_root_index_path_element_tuple(height, rng.random());
 
-            let translation = rng.random_range(0..((1 << height) - 1));
+            let translation = rng.random_range(1..((1 << height) - 1));
             let index = (index + translation) % (1 << height);
 
             assert!(!MTree::verify(root, index, &path, element));
