@@ -87,6 +87,7 @@ use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::network::actor::NetworkActor;
 use crate::application::network::actor::NetworkActorChannels;
 use crate::application::network::channel::NetworkActorCommand;
+use crate::application::network::config::NetworkConfig;
 use crate::application::rpc::server::RPC;
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_state::WalletState;
@@ -197,17 +198,19 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         cli_args.incognito,
         cli_args.new_identity,
     )?;
-    let address_book_file = Some(data_directory.address_book_file());
     let (channels, network_command_tx, network_event_rx) = NetworkActorChannels::setup(
         peer_task_to_main_tx.clone(),
         main_to_peer_broadcast_tx.clone(),
     );
+    let network_config = NetworkConfig::default()
+        .with_address_book(data_directory.address_book_file())
+        .with_network(cli_args.network)
+        .with_max_num_peers(cli_args.max_num_peers);
     let mut actor = NetworkActor::new(
         identity,
         channels,
         global_state_lock.clone(),
-        address_book_file,
-        cli_args.network,
+        network_config,
     )
     .unwrap_or_else(|e| {
         panic!("Failed to set up network actor: {e}.");
