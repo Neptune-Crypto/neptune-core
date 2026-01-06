@@ -258,6 +258,12 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         pop 1 write_io 4
         // num_coins num_coins *eof [amount] [timelocked_amount]
 
+        // wipe the op stack to 
+        pop 5
+        pop 5
+        pop 1
+        // [program digest] [0; 11] .
+        
         halt
     };
 
@@ -291,14 +297,7 @@ pub fn new(
         WitnessMemory {
             aocl: witness_aocl,
             membership_proof: witness_membershipproof,
-            utxo_digest: dbg![
-                // tasm_lib::prelude::Tip5::hash_varlen({
-                //     let mut v = tasm_lib::triton_vm::prelude::BFieldCodec::encode(&coins.to_vec());
-                //     v.reverse();
-                //     v
-                // }.as_slice())
-                tasm_lib::prelude::Tip5::hash(&witness_utxo)
-            ],
+            utxo_digest: tasm_lib::prelude::Tip5::hash(&witness_utxo),
             utxo: witness_utxo,
             sender_randomness: witness_senderrandomness,
             aocl_leaf_index: witness_aoclleafindex,
