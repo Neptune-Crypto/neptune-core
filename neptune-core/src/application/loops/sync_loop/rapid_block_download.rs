@@ -26,7 +26,10 @@ pub(crate) struct RapidBlockDownload {
 
 impl RapidBlockDownload {
     fn temp_dir_base() -> PathBuf {
-        let suffix = "rapid-block-download/";
+        let suffix = format!(
+            "rapid-block-download-{}/",
+            whoami::username().unwrap_or("".to_string())
+        );
         std::env::temp_dir().join(suffix)
     }
 
