@@ -17,8 +17,8 @@ use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
 
 /// The maximum number of blocks stored for each [`AnnouncementFlag`]. Wallets
 /// with incoming UTXOs in more than this number of blocks cannot rely on the
-/// [UtxoIndexTables::announcements_by_flag] field to restore a wallet but
-/// should instead use other methods.
+/// mapping from announcement flags to block hashes to restore a wallet. They
+/// must instead use other methods.
 pub const MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS: usize = 10_000;
 
 /// The purpose of the UTXO index is to speed up the rescanning of historical
@@ -58,10 +58,13 @@ struct UtxoIndexTables {
     pub(super) sync_label: DbtSingleton<Digest>,
 
     /// Mapping from announcement flag to block hash for all blocks in which
-    /// announcement with this flag are present. Length of list of block digests
-    /// may be capped in order to foil certain DOS attacks. This means that
-    /// extremely active wallets may not be able to trust this index for wallet
-    /// restoration.
+    /// announcements with this flag are present. Length of list of block digests
+    /// is capped by [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS] in order to foil
+    /// certain DOS attacks. This means that extremely active wallets or smart
+    /// contracts, wallets/smart contracts that have received announced UTXOs
+    /// in more than [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS] blocks, cannot use
+    /// this index to fully restore a wallet. But with that many blocks that
+    /// they'd have to scan anyway, they might as well scan all blocks.
     ///
     /// Can be used to speed up the scanning for incoming, announced UTXOs, and
     /// to server RPC requests from external wallet programs.

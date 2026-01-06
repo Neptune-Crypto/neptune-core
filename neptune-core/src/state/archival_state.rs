@@ -20,7 +20,7 @@ use tracing::info;
 use tracing::warn;
 
 pub(crate) mod import_blocks_from_files;
-pub(crate) mod rusty_utxo_index;
+pub mod rusty_utxo_index;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
