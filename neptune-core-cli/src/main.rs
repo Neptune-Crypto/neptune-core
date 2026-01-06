@@ -259,6 +259,38 @@ enum Command {
         max_search_depth: Option<u64>,
     },
 
+    /// Rescan the selected (inclusive) range of blocks for announced, incoming
+    /// UTXOs to all addresses registered by the client's wallet. Requires the
+    /// client to be launched with the UTXO index activated.
+    RescanAnnounced {
+        first: u64,
+        last: u64,
+    },
+
+    /// Rescan the selected (inclusive) range of blocks for UTXOs that were
+    /// registered as expected. Works regardless of UTXO index status.
+    RescanExpected {
+        first: u64,
+        last: u64,
+    },
+
+    /// Rescan the selected (inclusive) range of blocks for spent UTXOs. Useful
+    /// to rebuild transaction history. Requires the client to be launched with
+    /// the UTXO index activated.
+    RescanOutgoing {
+        first: u64,
+        last: u64,
+    },
+
+    /// Rescan the selected (inclusive) range of blocks for guesser rewards.
+    /// Useful if the client's seed has been used to guess on correct proof-of-
+    /// work solutions in the past but wallet state was somehow lost. Works
+    /// regardless of UTXO index status.
+    RescanGuesserRewards {
+        first: u64,
+        last: u64,
+    },
+
     /// send a payment to a single recipient
     Send {
         /// recipient's address
@@ -1133,6 +1165,30 @@ async fn main() -> Result<()> {
             } else {
                 println!("This claim has already been registered.");
             }
+        }
+        Command::RescanAnnounced { first, last } => {
+            client
+                .rescan_announced(ctx, token, first.into(), last.into())
+                .await??;
+            println!("Rescan started. Please check application log for progress.");
+        }
+        Command::RescanExpected { first, last } => {
+            client
+                .rescan_expected(ctx, token, first.into(), last.into())
+                .await??;
+            println!("Rescan started. Please check application log for progress.");
+        }
+        Command::RescanOutgoing { first, last } => {
+            client
+                .rescan_outgoing(ctx, token, first.into(), last.into())
+                .await??;
+            println!("Rescan started. Please check application log for progress.");
+        }
+        Command::RescanGuesserRewards { first, last } => {
+            client
+                .rescan_guesser_rewards(ctx, token, first.into(), last.into())
+                .await??;
+            println!("Rescan started. Please check application log for progress.");
         }
         Command::Send {
             address,

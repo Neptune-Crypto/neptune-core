@@ -5,6 +5,7 @@ use serde_tuple::Serialize_tuple;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
+use crate::api::export::AnnouncementFlag;
 use crate::application::json_rpc::core::model::block::body::*;
 use crate::application::json_rpc::core::model::block::header::*;
 use crate::application::json_rpc::core::model::block::transaction_kernel::*;
@@ -329,6 +330,50 @@ pub struct SubmitTransactionResponse {
     pub success: bool,
 }
 
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanAnnouncedRequest {
+    pub first: RpcBlockHeight,
+    pub last: RpcBlockHeight,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanAnnouncedResponse {}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanExpectedRequest {
+    pub first: RpcBlockHeight,
+    pub last: RpcBlockHeight,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanExpectedResponse {}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanOutgoingRequest {
+    pub first: RpcBlockHeight,
+    pub last: RpcBlockHeight,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanOutgoingResponse {}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanGuesserRewardsRequest {
+    pub first: RpcBlockHeight,
+    pub last: RpcBlockHeight,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RescanGuesserRewardsResponse {}
+
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct GetBlockTemplateRequest {
@@ -352,4 +397,16 @@ pub struct SubmitBlockRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SubmitBlockResponse {
     pub success: bool,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockHashesByFlagsRequest {
+    pub announcement_flags: Vec<AnnouncementFlag>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockHashesByFlagsResponse {
+    pub block_hashes: Vec<Digest>,
 }

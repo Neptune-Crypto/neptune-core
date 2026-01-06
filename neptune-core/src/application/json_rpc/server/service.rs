@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use async_trait::async_trait;
+use itertools::Itertools;
 use tracing::debug;
 
 use crate::api::export::ReceivingAddress;
@@ -527,6 +530,99 @@ impl RpcApi for RpcServer {
         })
     }
 
+    async fn rescan_announced_call(
+        &self,
+        request: RescanAnnouncedRequest,
+    ) -> RpcResult<RescanAnnouncedResponse> {
+        if request.first > request.last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let all_keys = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_all_known_spending_keys()
+            .collect_vec();
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::RescanAnnounced {
+                first: request.first,
+                last: request.last,
+                keys: all_keys,
+            })
+            .await;
+
+        Ok(RescanAnnouncedResponse {})
+    }
+
+    async fn rescan_expected_call(
+        &self,
+        request: RescanExpectedRequest,
+    ) -> RpcResult<RescanExpectedResponse> {
+        if request.first > request.last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::RescanExpected {
+                first: request.first,
+                last: request.last,
+            })
+            .await;
+
+        Ok(RescanExpectedResponse {})
+    }
+
+    async fn rescan_outgoing_call(
+        &self,
+        request: RescanOutgoingRequest,
+    ) -> RpcResult<RescanOutgoingResponse> {
+        if request.first > request.last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::RescanOutgoing {
+                first: request.first,
+                last: request.last,
+            })
+            .await;
+
+        Ok(RescanOutgoingResponse {})
+    }
+
+    async fn rescan_guesser_rewards_call(
+        &self,
+        request: RescanGuesserRewardsRequest,
+    ) -> RpcResult<RescanGuesserRewardsResponse> {
+        if request.first > request.last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::RescanGuesserRewards {
+                first: request.first,
+                last: request.last,
+            })
+            .await;
+
+        Ok(RescanGuesserRewardsResponse {})
+    }
+
     async fn get_block_template_call(
         &self,
         request: GetBlockTemplateRequest,
@@ -589,6 +685,28 @@ impl RpcApi for RpcServer {
 
         Ok(SubmitBlockResponse { success })
     }
+
+    async fn block_hashes_by_flags_call(
+        &self,
+        request: BlockHashesByFlagsRequest,
+    ) -> RpcResult<BlockHashesByFlagsResponse> {
+        let announcement_flags: HashSet<_> = request.announcement_flags.into_iter().collect();
+        let block_hashes = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .utxo_index
+            .block_hashes_by_announcement_flags(&announcement_flags)
+            .await;
+
+        let block_hashes = BlockHashesByFlagsResponse {
+            block_hashes: block_hashes.into_iter().collect(),
+        };
+
+        Ok(block_hashes)
+    }
 }
 
 #[cfg(test)]
@@ -600,8 +718,11 @@ pub mod tests {
     use num_traits::Zero;
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
+    use tasm_lib::twenty_first::bfe;
+    use tasm_lib::twenty_first::bfe_vec;
 
     use crate::api::export::Announcement;
+    use crate::api::export::AnnouncementFlag;
     use crate::api::export::KeyType;
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::Network;
@@ -612,6 +733,7 @@ pub mod tests {
     use crate::application::json_rpc::core::api::rpc::RpcApi;
     use crate::application::json_rpc::core::api::rpc::RpcError;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
+    use crate::application::json_rpc::core::model::message::BlockHashesByFlagsRequest;
     use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -626,18 +748,24 @@ pub mod tests {
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
+    use crate::BFieldElement;
     use crate::Block;
 
-    pub async fn test_rpc_server() -> RpcServer {
-        let mut cli = cli_args::Args::default_with_network(Network::Main);
-        cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
+    async fn test_rpc_server_with_cli_args(cli: cli_args::Args) -> RpcServer {
         let global_state_lock =
             mock_genesis_global_state(2, WalletEntropy::new_random(), cli).await;
 
         RpcServer::new(global_state_lock, None)
+    }
+
+    pub async fn test_rpc_server() -> RpcServer {
+        let mut cli = cli_args::Args::default_with_network(Network::Main);
+        cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
+        test_rpc_server_with_cli_args(cli).await
     }
 
     #[apply(shared_tokio_runtime)]
@@ -1077,5 +1205,69 @@ pub mod tests {
         assert!(NativeCurrencyAmount::coins(42_000_000) >= max_supply.amount.into());
 
         assert_eq!(NativeCurrencyAmount::zero(), burned_supply.amount.into());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn block_hashes_by_flag_empty() {
+        let rpc_server = test_rpc_server().await;
+        let request = BlockHashesByFlagsRequest {
+            announcement_flags: vec![],
+        };
+        let resp = rpc_server
+            .block_hashes_by_flags_call(request)
+            .await
+            .unwrap();
+        assert!(resp.block_hashes.is_empty());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn block_hashes_by_flag_with_match() {
+        let cli_args = cli_args::Args {
+            utxo_index: true,
+            network: Network::Main,
+            ..Default::default()
+        };
+        let mut rpc_server = test_rpc_server_with_cli_args(cli_args).await;
+        let network = rpc_server.state.cli().network;
+        let genesis = Block::genesis(network);
+        let some_announcements = vec![
+            Announcement::new(bfe_vec![4, 6, 7, 2]),
+            Announcement::new(bfe_vec![4446, 4447, 7, 2]),
+            Announcement::new(bfe_vec![1, 6, 7, 2]),
+        ];
+        let block1 = invalid_empty_block_with_announcements(&genesis, network, some_announcements);
+
+        let with_match = vec![AnnouncementFlag {
+            flag: bfe!(4446),
+            receiver_id: bfe!(4447),
+        }];
+        assert!(rpc_server
+            .block_hashes_by_flags(with_match.clone())
+            .await
+            .unwrap()
+            .block_hashes
+            .is_empty());
+
+        rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
+
+        assert_eq!(
+            vec![block1.hash()],
+            rpc_server
+                .block_hashes_by_flags(with_match)
+                .await
+                .unwrap()
+                .block_hashes
+        );
+
+        let no_match = vec![AnnouncementFlag {
+            flag: bfe!(4446),
+            receiver_id: bfe!(1_001),
+        }];
+        assert!(rpc_server
+            .block_hashes_by_flags(no_match)
+            .await
+            .unwrap()
+            .block_hashes
+            .is_empty());
     }
 }

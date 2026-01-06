@@ -543,6 +543,19 @@ pub struct Args {
     #[clap(long)]
     pub(crate) scan_keys: Option<usize>,
 
+    /// Construct and maintain a UTXO index
+    ///
+    /// If set, all announcements and inputs in all processed blocks will be
+    /// indexed in a database that enables a fast rescan for the discovery of
+    /// all balance-affecting inputs and outputs of blocks.
+    ///
+    /// If blocks have already been processed without this flag active, and the
+    /// flag is later activated, all blocks up to the current tip will be
+    /// indexed, when a new block is set as tip. This process might take some
+    /// time (tens of minutes).
+    #[clap(long)]
+    pub utxo_index: bool,
+
     /// Enable JSON/HTTP RPC.
     /// You can optionally specify an address and port (default: 127.0.0.1:9797).
     /// If not given, RPC is disabled.
@@ -656,6 +669,13 @@ fn parse_range(unparsed_range: &str) -> Result<RangeInclusive<u64>, String> {
 }
 
 impl Args {
+    pub fn default_with_network(network: Network) -> Self {
+        Self {
+            network,
+            ..Default::default()
+        }
+    }
+
     /// Indicates if all incoming peer connections are disallowed.
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
         self.max_num_peers.is_zero()
@@ -829,13 +849,6 @@ mod tests {
 
     // extra methods for tests.
     impl Args {
-        pub(crate) fn default_with_network(network: Network) -> Self {
-            Self {
-                network,
-                ..Default::default()
-            }
-        }
-
         pub(crate) fn proof_job_options_prooftype(
             &self,
             proof_type: TransactionProofType,

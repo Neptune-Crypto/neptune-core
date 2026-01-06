@@ -41,6 +41,15 @@ impl RpcServer {
             }
         }
 
+        if namespaces.contains(&Namespace::UtxoIndex) {
+            let has_utxo_index = state.cli().utxo_index;
+
+            if !has_utxo_index {
+                namespaces.remove(&Namespace::UtxoIndex);
+                warn!("Node does not maintain a UTXO index, cannot enable UTXO Index namespace.");
+            }
+        }
+
         if !self.unrestricted && namespaces.contains(&Namespace::Networking) {
             warn!("Networking module is enabled without unsafe mode - this may expose sensitive data.")
         }

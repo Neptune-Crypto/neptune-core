@@ -5,6 +5,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
+use crate::api::export::AnnouncementFlag;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
@@ -65,6 +66,12 @@ pub enum RpcError {
 
     #[error("Failed to submit block: {0}")]
     SubmitBlock(SubmitBlockError),
+
+    #[error("Invalid block range")]
+    BlockRangeError,
+
+    #[error("Endpoint requires UTXO index which is not present")]
+    UtxoIndexNotPresent,
 
     // Common case errors
     #[error("Invalid address provided in arguments")]
@@ -332,6 +339,62 @@ pub trait RpcApi: Sync + Send {
         request: SubmitTransactionRequest,
     ) -> RpcResult<SubmitTransactionResponse>;
 
+    async fn rescan_announced(
+        &self,
+        first: RpcBlockHeight,
+        last: RpcBlockHeight,
+    ) -> RpcResult<RescanAnnouncedResponse> {
+        self.rescan_announced_call(RescanAnnouncedRequest { first, last })
+            .await
+    }
+
+    async fn rescan_announced_call(
+        &self,
+        request: RescanAnnouncedRequest,
+    ) -> RpcResult<RescanAnnouncedResponse>;
+
+    async fn rescan_expected(
+        &self,
+        first: RpcBlockHeight,
+        last: RpcBlockHeight,
+    ) -> RpcResult<RescanExpectedResponse> {
+        self.rescan_expected_call(RescanExpectedRequest { first, last })
+            .await
+    }
+
+    async fn rescan_expected_call(
+        &self,
+        request: RescanExpectedRequest,
+    ) -> RpcResult<RescanExpectedResponse>;
+
+    async fn rescan_outgoing(
+        &self,
+        first: RpcBlockHeight,
+        last: RpcBlockHeight,
+    ) -> RpcResult<RescanOutgoingResponse> {
+        self.rescan_outgoing_call(RescanOutgoingRequest { first, last })
+            .await
+    }
+
+    async fn rescan_outgoing_call(
+        &self,
+        request: RescanOutgoingRequest,
+    ) -> RpcResult<RescanOutgoingResponse>;
+
+    async fn rescan_guesser_rewards(
+        &self,
+        first: RpcBlockHeight,
+        last: RpcBlockHeight,
+    ) -> RpcResult<RescanGuesserRewardsResponse> {
+        self.rescan_guesser_rewards_call(RescanGuesserRewardsRequest { first, last })
+            .await
+    }
+
+    async fn rescan_guesser_rewards_call(
+        &self,
+        request: RescanGuesserRewardsRequest,
+    ) -> RpcResult<RescanGuesserRewardsResponse>;
+
     /* Mining */
 
     async fn get_block_template(
@@ -358,4 +421,19 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: SubmitBlockRequest,
     ) -> RpcResult<SubmitBlockResponse>;
+
+    /* Utxo Index */
+
+    async fn block_hashes_by_flags(
+        &self,
+        announcement_flags: Vec<AnnouncementFlag>,
+    ) -> RpcResult<BlockHashesByFlagsResponse> {
+        self.block_hashes_by_flags_call(BlockHashesByFlagsRequest { announcement_flags })
+            .await
+    }
+
+    async fn block_hashes_by_flags_call(
+        &self,
+        request: BlockHashesByFlagsRequest,
+    ) -> RpcResult<BlockHashesByFlagsResponse>;
 }

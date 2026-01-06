@@ -1,6 +1,7 @@
+use std::fmt::Display;
+
 use serde::Deserialize;
 use serde::Serialize;
-use std::fmt::Display;
 
 /// An object quantifying how far we are in the sync process.
 ///
@@ -65,11 +66,12 @@ impl rand::distr::Distribution<SyncProgress> for rand::distr::StandardUniform {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::prop_assume;
     use test_strategy::proptest;
+
+    use super::*;
 
     #[proptest]
     fn can_display(num_blocks_downloaded: u64, total_span: u64) {

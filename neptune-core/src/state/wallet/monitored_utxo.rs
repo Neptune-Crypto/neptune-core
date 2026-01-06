@@ -121,7 +121,7 @@ impl MonitoredUtxo {
         }
     }
 
-    pub(crate) fn new_from_block_hash(
+    pub(crate) fn new_from_block_info(
         utxo: Utxo,
         max_number_of_mps_stored: usize,
         aocl_leaf_index: u64,
@@ -212,12 +212,13 @@ impl MonitoredUtxo {
             .map(|x| x.1.clone())
     }
 
-    pub(crate) fn mark_as_spent(&mut self, spending_block: &Block) {
-        self.spent_in_block = Some((
-            spending_block.hash(),
-            spending_block.kernel.header.timestamp,
-            spending_block.kernel.header.height,
-        ));
+    pub(crate) fn mark_as_spent(
+        &mut self,
+        spending_block: Digest,
+        block_timestamp: Timestamp,
+        block_height: BlockHeight,
+    ) {
+        self.spent_in_block = Some((spending_block, block_timestamp, block_height));
     }
 
     /// Get the most recent (block hash, membership proof) entry in the database,

@@ -434,7 +434,7 @@ impl SynchronizationBitMask {
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
+    use std::hint::black_box;
 
     use proptest::collection::vec;
     use proptest::prelude::Just;
@@ -443,8 +443,9 @@ pub mod test {
     use proptest_arbitrary_interop::arb;
     use rand::rng;
     use rand::RngCore;
-    use std::hint::black_box;
     use test_strategy::proptest;
+
+    use super::*;
 
     impl SynchronizationBitMask {
         pub(crate) fn random(lower_bound: u64, upper_bound: u64) -> Self {

@@ -74,6 +74,7 @@ use tracing::warn;
 
 use super::auth;
 use crate::api;
+use crate::api::export::AnnouncementFlag;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
@@ -531,6 +532,24 @@ pub trait RPC {
         token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<Vec<Announcement>>>;
+
+    /// Return the block digests of blocks with announcements matching the
+    /// specified flags. Returns the empty list if no blocks with these flags
+    /// are known.
+    ///
+    /// Only works on nodes that maintain a UTXO index.
+    ///
+    /// # Warning
+    ///
+    /// Will not return all block if any key in question has matching
+    /// [`AnnouncementFlag`]s in more than
+    /// [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS] blocks.
+    ///
+    /// [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS]: crate::state::archival_state::rusty_utxo_index::MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS
+    async fn block_hashes_by_announcement_flags(
+        token: auth::Token,
+        announcement_flags: Vec<AnnouncementFlag>,
+    ) -> RpcResult<Vec<Digest>>;
 
     /// Return the digests of known blocks with specified height.
     ///
@@ -1628,6 +1647,39 @@ pub trait RPC {
         tx_artifacts: TxCreationArtifacts,
     ) -> RpcResult<()>;
 
+    /// Rescan the specified inclusive range for incoming UTXOS that were sent
+    /// with associated on-chain announements.
+    async fn rescan_announced(
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()>;
+
+    /// Rescan the specified inclusive range for incoming UTXOS that were have
+    /// been added as expected UTXOs to the node's wallet.
+    async fn rescan_expected(
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()>;
+
+    /// Rescan the specified inclusive range for outgoing UTXOs, i.e. the
+    /// spending of UTXOs by the node's wallet. Can be used to recreate a
+    /// transaction history.
+    async fn rescan_outgoing(
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()>;
+
+    /// Rescan the specified inclusive range for blocks that were successfully
+    /// guessed by this node.
+    async fn rescan_guesser_rewards(
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()>;
+
     /// Send coins to one or more recipients
     ///
     /// note: sending is rate-limited to 2 sends per block until block
@@ -2201,12 +2253,16 @@ impl NeptuneRPCServer {
                         )
                         .await
                     {
+                        let block_hash = spending_block.hash();
+                        let block_height = spending_block.header().height;
                         warn!(
-                            "Claimed UTXO was spent in block {:x}; which has height {}",
-                            spending_block.hash(),
-                            spending_block.header().height
+                            "Claimed UTXO was spent in block {block_hash:x}; which has height {block_height}",
                         );
-                        monitored_utxo.mark_as_spent(&spending_block);
+                        monitored_utxo.mark_as_spent(
+                            spending_block.hash(),
+                            spending_block.header().timestamp,
+                            spending_block.header().height,
+                        );
                     } else {
                         error!("Claimed UTXO's mutator set membership proof was invalid but we could not find the block in which it was spent. This is most likely a bug in the software.");
                     }
@@ -2635,6 +2691,34 @@ impl RPC for NeptuneRPCServer {
         };
 
         Ok(Some(block.body().transaction_kernel.announcements.clone()))
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn block_hashes_by_announcement_flags(
+        self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        announcement_flags: Vec<AnnouncementFlag>,
+    ) -> RpcResult<Vec<Digest>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let announcement_flags: HashSet<_> = announcement_flags.into_iter().collect();
+        let blocks = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .utxo_index
+            .block_hashes_by_announcement_flags(&announcement_flags)
+            .await;
+
+        Ok(blocks.into_iter().collect())
     }
 
     // documented in trait. do not add doc-comment.
@@ -3163,6 +3247,118 @@ impl RPC for NeptuneRPCServer {
             .tx_initiator_mut()
             .record_and_broadcast_transaction(&tx_artifacts)
             .await?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn rescan_announced(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if first > last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let all_keys = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_all_known_spending_keys()
+            .collect_vec();
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::RescanAnnounced {
+                first,
+                last,
+                keys: all_keys,
+            })
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn rescan_expected(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if first > last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::RescanExpected { first, last })
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn rescan_outgoing(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if first > last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        if !self.state.cli().utxo_index {
+            return Err(RpcError::UtxoIndexNotPresent);
+        }
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::RescanOutgoing { first, last })
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn rescan_guesser_rewards(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if first > last {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::RescanGuesserRewards { first, last })
+            .await;
+
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.
@@ -4267,6 +4463,12 @@ pub mod error {
         #[error("regtest error: {0}")]
         RegTestError(String),
 
+        #[error("invalid block range")]
+        BlockRangeError,
+
+        #[error("node not started with UTXO index")]
+        UtxoIndexNotPresent,
+
         #[error("wallet error: {0}")]
         WalletError(String),
 
@@ -4369,6 +4571,7 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
+    use tasm_lib::twenty_first::bfe;
     use tracing_test::traced_test;
 
     use super::*;
@@ -4391,6 +4594,7 @@ mod tests {
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use crate::BFieldElement;
     use crate::Block;
 
     const NUM_ANNOUNCEMENTS_BLOCK1: usize = 7;
@@ -4521,6 +4725,17 @@ mod tests {
             .await;
         let _ = rpc_server
             .clone()
+            .block_hashes_by_announcement_flags(
+                ctx,
+                token,
+                vec![AnnouncementFlag {
+                    flag: bfe!(0),
+                    receiver_id: bfe!(0),
+                }],
+            )
+            .await;
+        let _ = rpc_server
+            .clone()
             .block_digest(ctx, token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server.clone().utxo_digest(ctx, token, 0).await;
@@ -4643,6 +4858,22 @@ mod tests {
             NativeCurrencyAmount::one_nau(),
         )
             .into();
+        let _ = rpc_server
+            .clone()
+            .rescan_announced(ctx, token, 0u64.into(), 14u64.into())
+            .await;
+        let _ = rpc_server
+            .clone()
+            .rescan_expected(ctx, token, 0u64.into(), 14u64.into())
+            .await;
+        let _ = rpc_server
+            .clone()
+            .rescan_outgoing(ctx, token, 0u64.into(), 14u64.into())
+            .await;
+        let _ = rpc_server
+            .clone()
+            .rescan_guesser_rewards(ctx, token, 0u64.into(), 14u64.into())
+            .await;
         let _ = rpc_server
             .clone()
             .send(

@@ -423,6 +423,10 @@ impl GenerationReceivingAddress {
     pub fn spending_lock(&self) -> Digest {
         self.lock_postimage
     }
+
+    pub(super) fn flag(&self) -> BFieldElement {
+        GENERATION_FLAG
+    }
 }
 
 #[cfg(test)]

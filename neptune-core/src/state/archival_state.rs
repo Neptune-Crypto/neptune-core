@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::bail;
 use anyhow::Result;
+use itertools::Itertools;
 use memmap2::MmapOptions;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -15,15 +16,18 @@ use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tracing::debug;
+use tracing::info;
 use tracing::warn;
 
 pub(crate) mod import_blocks_from_files;
+pub mod rusty_utxo_index;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
 use crate::api::export::Utxo;
+use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::database::create_db_if_missing;
 use crate::application::database::storage::storage_schema::traits::*;
@@ -41,12 +45,14 @@ use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
 use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
+use crate::state::archival_state::rusty_utxo_index::RustyUtxoIndex;
 use crate::state::database::BlockFileLocation;
 use crate::state::database::BlockIndexKey;
 use crate::state::database::BlockIndexValue;
 use crate::state::database::BlockRecord;
 use crate::state::database::FileRecord;
 use crate::state::database::LastFileRecord;
+use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -59,6 +65,7 @@ use crate::BFieldElement;
 pub(crate) const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub(crate) const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
 pub(crate) const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
+pub(crate) const UTXO_INDEX_DIRECTORY_NAME: &str = "utxo_index";
 
 /// Provides interface to historic blockchain data which consists of
 ///  * block-data stored in individual files (append-only)
@@ -92,6 +99,11 @@ pub struct ArchivalState {
 
     /// Archival-MMR of the block digests belonging to the canonical chain.
     pub(crate) archival_block_mmr: RustyArchivalBlockMmr,
+
+    /// Mapping from block digest to a list of (flag, receiver_id) pairs for all
+    /// announcement in the block. This index is only maintained if the node has
+    /// been started with the CLI flag `--utxo-index`.
+    pub(crate) utxo_index: RustyUtxoIndex,
 
     /// The network that this node is on. Used to simplify method interfaces.
     network: Network,
@@ -188,6 +200,33 @@ impl ArchivalState {
         Ok(archival_bmmr)
     }
 
+    async fn initialize_utxo_index(data_dir: &DataDirectory) -> Result<RustyUtxoIndex> {
+        let utxo_index_dir = data_dir.utxo_index_dir_path();
+        DataDirectory::create_dir_if_not_exists(&utxo_index_dir).await?;
+
+        let result = NeptuneLevelDb::new(&utxo_index_dir, &create_db_if_missing()).await;
+
+        let db = match result {
+            Ok(db) => db,
+            Err(e) => {
+                tracing::error!(
+                    "Could not open UTXO index database at {}: {e}",
+                    utxo_index_dir.display()
+                );
+                panic!(
+                    "Could not open database; do not know how to proceed. Panicking.\n\
+                    If you suspect the database may be corrupted, consider renaming the directory {}\
+                     or removing it altogether. Or perhaps a node is already running?",
+                     utxo_index_dir.display()
+                );
+            }
+        };
+
+        let utxo_index = RustyUtxoIndex::connect(db).await;
+
+        Ok(utxo_index)
+    }
+
     /// Find the path connecting two blocks. Every path involves going down some
     /// number of steps and then going up some number of steps. So this function
     /// returns two lists: the list of down steps and the list of up steps. It
@@ -273,7 +312,7 @@ impl ArchivalState {
     pub(crate) async fn new(
         data_dir: DataDirectory,
         genesis_block: Block,
-        network: Network,
+        cli: &cli_args::Args,
     ) -> Self {
         let mut archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)
             .await
@@ -310,6 +349,17 @@ impl ArchivalState {
             .await
             .expect("Must be able to initialize block index database");
         debug!("Got block index database");
+
+        // UTXO index is always initialized. But only populated with blocks if
+        // this index is activated.
+        let mut utxo_index = ArchivalState::initialize_utxo_index(&data_dir)
+            .await
+            .expect("Must be able to initialize utxo index database");
+
+        if cli.utxo_index && utxo_index.sync_label() == Digest::default() {
+            utxo_index.index_block(&genesis_block).await;
+        }
+
         let genesis_block = Box::new(genesis_block);
         Self {
             data_dir,
@@ -317,7 +367,8 @@ impl ArchivalState {
             genesis_block,
             archival_mutator_set,
             archival_block_mmr,
-            network,
+            network: cli.network,
+            utxo_index,
         }
     }
 
@@ -614,6 +665,56 @@ impl ArchivalState {
             .ammr_mut()
             .append(new_block.hash())
             .await;
+    }
+
+    /// Apply a new block to the UTXO index.
+    ///
+    /// This method handles reorganizations, but all predecessors of this block
+    /// must be known and stored in the block index database for it to work.
+    ///
+    /// # Panics
+    /// - If any of the predecessor blocks have not been applied to the block
+    ///   index database.
+    pub(crate) async fn update_utxo_index(&mut self, new_block: &Block) {
+        let current_sync = self.utxo_index.sync_label();
+        let new_block_hash = new_block.hash();
+
+        // Index all not-yet-indexed blocks preceding the new block. In the
+        // common case, where the new block is the direct descendant of the
+        // block that was previously applied, only one block will be processed
+        // here. This path-finding logic allows for an efficient common-case
+        // processing, and an effcient "catchup" behavior where the UTXO index
+        // is many block behind the rest of the archival state.
+        let (_, _, missing_blocks) = self.find_path(current_sync, new_block_hash).await;
+
+        // Inform user if this will take a long time.
+        let num_missing_blocks = missing_blocks.len();
+        debug!("Applying {num_missing_blocks} missing blocks to UTXO index.");
+        if num_missing_blocks > 10 {
+            info!("Applying {num_missing_blocks} missing blocks to UTXO index. This may take a while.")
+        }
+        for missing in missing_blocks {
+            // This optimization means that we don't have to read the full
+            // blocks from disk in case it was already processed.
+            if self.utxo_index.block_was_indexed(missing).await {
+                continue;
+            }
+
+            if missing == new_block_hash {
+                // Avoid reading the new block from disk if it's already in
+                // memory.
+                self.utxo_index.index_block(new_block).await;
+            } else {
+                let missing = self
+                    .get_block(missing)
+                    .await
+                    .expect("Fetching block must succeed")
+                    .expect("missing block must exist before processed by UTXO index");
+                self.utxo_index.index_block(&missing).await;
+            }
+        }
+
+        debug!("Done updating UTXO index");
     }
 
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
@@ -934,11 +1035,147 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
+    /// Return the list of `[StrongUtxoKey]` of the guesser rewards for the
+    /// specified block belonging to the canonical chain. Can be used to check
+    /// if a wallet has already registered guesser reward UTXOs.
+    ///
+    /// Returns none if no block of the specified height belonging to the
+    /// canonical chain is known.
+    ///
+    /// Perf: Does not read block from disk.
+    ///
+    /// # Panics
+    ///
+    ///  - If the database is corrupted.
+    pub(crate) async fn guesser_reward_strong_keys_for_block(
+        &self,
+        block_height: u64,
+    ) -> Option<Vec<StrongUtxoKey>> {
+        if block_height == BlockHeight::genesis().value() {
+            return Some(vec![]);
+        }
+
+        let Some(block_hash) = self
+            .archival_block_mmr
+            .ammr()
+            .try_get_leaf(block_height)
+            .await
+        else {
+            warn!("Attempted to get addition records for block height {block_height} which is not known.");
+            return None;
+        };
+
+        let block_record = self
+            .get_block_record(block_hash)
+            .await
+            .expect("Must know block record of canonical and non-genesis block");
+
+        // The protocol dictates that the timelocked UTXO comes first, then the
+        // liquid.
+        let leaf_index_timelocked = block_record.max_aocl_index() - 1;
+        let addition_record_timelocked = self
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .get_leaf_async(leaf_index_timelocked)
+            .await;
+
+        let leaf_index_liquid = block_record.max_aocl_index();
+        let addition_record_liquid = self
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .get_leaf_async(leaf_index_liquid)
+            .await;
+
+        Some(vec![
+            StrongUtxoKey::new(
+                AdditionRecord::new(addition_record_timelocked),
+                leaf_index_timelocked,
+            ),
+            StrongUtxoKey::new(
+                AdditionRecord::new(addition_record_liquid),
+                leaf_index_liquid,
+            ),
+        ])
+    }
+
+    /// Returns a [`HashMap`] of [`AdditionRecord`] to  AOCL leaf indices for
+    /// all outputs in a given block.  Also returns the block hash. Returns
+    /// `None` if no block at the specified height is known. AOCL leaf indices
+    /// have list type since a block can contain the same addition record
+    /// multiple times.
+    ///
+    /// Never loads the entire block from disk. Only reads from the database, so
+    /// performace should be good.
+    ///
+    /// # Panics
+    ///
+    ///  - If the database is corrupted.
+    pub(crate) async fn addition_record_indices_for_block_by_height(
+        &self,
+        block_height: u64,
+    ) -> Option<(HashMap<AdditionRecord, Vec<u64>>, Digest)> {
+        let (aocl_leaf_indices, block_hash) = if block_height == BlockHeight::genesis().value() {
+            // Special-case for genesis block since it has no block record.
+            let num_outputs_in_genesis: u64 = self
+                .genesis_block()
+                .body()
+                .transaction_kernel()
+                .outputs
+                .len()
+                .try_into()
+                .expect("Can always convert usize to u64");
+            let range = 0u64..=(num_outputs_in_genesis - 1);
+            (range, self.genesis_block().hash())
+        } else {
+            let Some(block_hash) = self
+                .archival_block_mmr
+                .ammr()
+                .try_get_leaf(block_height)
+                .await
+            else {
+                warn!("Attempted to get addition records for block height {block_height} which is not known.");
+                return None;
+            };
+
+            let block_record = self
+                .get_block_record(block_hash)
+                .await
+                .expect("Must know block record of canonical and non-genesis block");
+
+            let range = block_record.min_aocl_index..=block_record.max_aocl_index();
+            (range, block_hash)
+        };
+
+        // Getting all leafs in a batch-read operation was benchmarked to be
+        // faster than getting each leaf individually. So batch-reading of leafs
+        // was chosen here.
+        let addition_records = self
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .get_leaf_range_inclusive_async(aocl_leaf_indices.clone())
+            .await;
+        let mut ret = HashMap::new();
+        for (ar, leaf_index) in addition_records.into_iter().zip_eq(aocl_leaf_indices) {
+            let addition_record = AdditionRecord::new(ar);
+            ret.entry(addition_record)
+                .and_modify(|e: &mut Vec<u64>| e.push(leaf_index))
+                .or_insert(vec![leaf_index]);
+        }
+
+        Some((ret, block_hash))
+    }
+
     /// Returns a [`HashMap`] of [`AdditionRecord`] to [`Option`] of AOCL leaf
     /// index (`u64`) for all outputs in a given block. If the block is not
     /// canonical, the indices are all `None`, and conversely, if the block is
     /// canonical then the indices point into the current mutator set AOCL.
     /// If the block does not live in the archival state, return `None`.
+    ///
+    /// If the block is canonical this method never loads the entire blocks from
+    /// disk. So in that case, it is guaranteed to perform well.
     ///
     /// # Panics
     ///
@@ -1704,7 +1941,6 @@ pub(super) mod tests {
     use crate::state::wallet::transaction_output::TxOutputList;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::archival::add_block_to_archival_state;
-    use crate::tests::shared::archival::mock_genesis_archival_state;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
@@ -1716,7 +1952,8 @@ pub(super) mod tests {
         let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();
 
         let genesis_block = Block::genesis(network);
-        ArchivalState::new(data_dir, genesis_block, network).await
+        let cli = cli_args::Args::default_with_network(network);
+        ArchivalState::new(data_dir, genesis_block, &cli).await
     }
 
     #[traced_test]
@@ -1934,8 +2171,10 @@ pub(super) mod tests {
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let (mut archival_state, _peer_db_lock, _data_dir) =
-            mock_genesis_archival_state(network).await;
+        let data_dir = unit_test_data_directory(network).unwrap();
+        let cli = cli_args::Args::default_with_network(network);
+        let mut archival_state = ArchivalState::new(data_dir, Block::genesis(network), &cli).await;
+
         let own_wallet = WalletEntropy::new_random();
         let own_key = own_wallet.nth_generation_spending_key_for_tests(0);
 

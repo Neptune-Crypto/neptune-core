@@ -2,9 +2,11 @@ use divan::Bencher;
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::Timestamp;
+use neptune_cash::application::config::cli_args;
 use neptune_cash::bench_helpers::devops_global_state_genesis;
 use neptune_cash::bench_helpers::next_block_incoming_utxos;
 use neptune_cash::protocol::consensus::block::Block;
+use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
 
 fn main() {
     divan::main();
@@ -15,6 +17,8 @@ mod resync_membership_proofs {
 
     mod sync_200_msmps_over_10_blocks {
 
+        use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+
         use super::*;
 
         fn resync_msmps(bencher: Bencher) {
@@ -24,7 +28,8 @@ mod resync_membership_proofs {
             // set membership proofs from the tip of one fork to the other.
             let rt = tokio::runtime::Runtime::new().unwrap();
             let network = Network::Main;
-            let mut global_state_lock = rt.block_on(devops_global_state_genesis(Network::Main));
+            let cli_args = cli_args::Args::default_with_network(network);
+            let mut global_state_lock = rt.block_on(devops_global_state_genesis(cli_args));
 
             let genesis = Block::genesis(network);
             let own_address = rt
@@ -36,13 +41,14 @@ mod resync_membership_proofs {
                 .to_address();
 
             let block1_timestamp = genesis.header().timestamp + Timestamp::months(7);
-            let block1 = rt.block_on(next_block_incoming_utxos(
+            let (block1, _) = rt.block_on(next_block_incoming_utxos(
                 &genesis,
                 own_address.clone(),
                 10,
                 &rt.block_on(global_state_lock.lock_guard()).wallet_state,
                 block1_timestamp,
                 network,
+                UtxoNotificationMedium::OnChain,
             ));
             rt.block_on(global_state_lock.set_new_tip(block1.clone()))
                 .unwrap();
@@ -69,13 +75,14 @@ mod resync_membership_proofs {
                     // Different block times on each fork to ensure the forks
                     // contain distinct blocks.
                     let block_time = block.header().timestamp + Timestamp::hours(1 + j);
-                    let next_block = rt.block_on(next_block_incoming_utxos(
+                    let (next_block, _) = rt.block_on(next_block_incoming_utxos(
                         &block,
                         own_address.clone(),
                         10,
                         &rt.block_on(global_state_lock.lock_guard()).wallet_state,
                         block_time,
                         network,
+                        UtxoNotificationMedium::OnChain,
                     ));
                     rt.block_on(global_state_lock.set_new_tip(next_block.clone()))
                         .unwrap();
@@ -108,6 +115,7 @@ mod maintain_membership_proofs {
 
     /// Maintain membership proofs, while receiving additional UTXOs.
     mod maintain_msmps {
+
         use super::*;
 
         fn update_wallet_with_block2<
@@ -120,7 +128,8 @@ mod maintain_membership_proofs {
         ) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let network = Network::Main;
-            let mut global_state_lock = rt.block_on(devops_global_state_genesis(Network::Main));
+            let cli_args = cli_args::Args::default_with_network(network);
+            let mut global_state_lock = rt.block_on(devops_global_state_genesis(cli_args));
             let mut global_state = rt.block_on(global_state_lock.lock_guard_mut());
 
             let genesis = Block::genesis(network);
@@ -132,26 +141,28 @@ mod maintain_membership_proofs {
                 )
                 .to_address();
             let block1_time = Network::Main.launch_date() + Timestamp::months(7);
-            let block1 = rt.block_on(next_block_incoming_utxos(
+            let (block1, _) = rt.block_on(next_block_incoming_utxos(
                 &genesis,
                 own_address.clone(),
                 NUM_UTXOS_MAINTAINED,
                 &global_state.wallet_state,
                 block1_time,
                 network,
+                UtxoNotificationMedium::OnChain,
             ));
 
             rt.block_on(global_state.set_new_tip(block1.clone()))
                 .unwrap();
 
             let block2_time = block1_time + Timestamp::hours(1);
-            let block2 = rt.block_on(next_block_incoming_utxos(
+            let (block2, _) = rt.block_on(next_block_incoming_utxos(
                 &block1,
                 own_address,
                 NUM_NEW_UTXOS,
                 &global_state.wallet_state,
                 block2_time,
                 network,
+                UtxoNotificationMedium::OnChain,
             ));
 
             // update the mutator set with the UTXOs from this block

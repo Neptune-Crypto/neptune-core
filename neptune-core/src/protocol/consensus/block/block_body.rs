@@ -218,7 +218,10 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
 impl rand::distr::Distribution<BlockBody> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockBody {
         let random_mmr_accumulator = |seed| {
-            use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+            use rand::rngs::StdRng;
+            use rand::Rng;
+            use rand::RngCore;
+            use rand::SeedableRng;
 
             let mut inner_rng = StdRng::from_seed(seed);
             let leaf_count = inner_rng.next_u64();

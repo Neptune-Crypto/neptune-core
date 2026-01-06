@@ -190,6 +190,11 @@ path = "benchmark/benches/set_new_tip.rs"
 harness = false
 
 [[bench]]
+name = "wallet_rescan"
+path = "benchmark/benches/wallet_rescan.rs"
+harness = false
+
+[[bench]]
 name = "wallet_state"
 path = "benchmark/benches/wallet_state.rs"
 harness = false

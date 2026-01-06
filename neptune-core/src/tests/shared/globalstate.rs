@@ -40,7 +40,7 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     let archival_state = crate::state::archival_state::ArchivalState::new(
         data_dir.clone(),
         genesis_block.clone(),
-        cli.network,
+        &cli,
     )
     .await;
 
