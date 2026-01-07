@@ -16,18 +16,15 @@ pub(crate) struct NetworkConfig {
 
 impl Default for NetworkConfig {
     fn default() -> Self {
-        Self::new()
+        Self {
+            network: Network::default(),
+            address_book: None,
+            max_num_peers: 10,
+        }
     }
 }
 
 impl NetworkConfig {
-    pub(crate) fn new() -> Self {
-        Self {
-            max_num_peers: 10,
-            ..Default::default()
-        }
-    }
-
     pub(crate) fn with_network(mut self, network: Network) -> Self {
         self.network = network;
         self
