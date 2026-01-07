@@ -86,6 +86,10 @@ pub(crate) struct NetworkActor {
     /// Tracks which peers are holding a reservation for us, along with the
     /// 80%-in timestamp and the listener id (which we need to stop listening).
     relays: HashMap<PeerId, (Option<SystemTime>, libp2p::core::transport::ListenerId)>,
+
+    /// Tracks active local listeners (open ports). These IDs represent local
+    /// sockets bound to the NIC.
+    active_listeners: Vec<libp2p::core::transport::ListenerId>,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -275,8 +279,11 @@ impl NetworkActor {
                 let kademlia =
                     libp2p::kad::Behaviour::with_config(local_peer_id, store, kad_config);
 
+                let upnp = libp2p::upnp::tokio::Behaviour::default();
+
                 NetworkStack {
                     identify: libp2p::identify::Behaviour::new(identify_config),
+                    upnp,
                     autonat: libp2p::autonat::Behaviour::new(local_peer_id, autonat_config),
                     relay_server,
                     relay_client,
@@ -316,6 +323,7 @@ impl NetworkActor {
             address_book,
             config,
             relays: HashMap::new(),
+            active_listeners: vec![],
         })
     }
 
@@ -325,12 +333,21 @@ impl NetworkActor {
     /// Incoming connections will automatically undergo the handshake defined in
     /// the [`StreamGateway`].
     fn listen(&mut self, addr: Multiaddr) -> Result<(), libp2p::TransportError<std::io::Error>> {
-        let listener_id = self.swarm.listen_on(addr.clone())?;
-
-        // Log or trace the listen event for debugging the bridge
-        tracing::info!(%addr, %listener_id, "libp2p stack listening.");
-
-        Ok(())
+        match self.swarm.listen_on(addr.clone()) {
+            Ok(listener_id) => {
+                tracing::info!(%addr, %listener_id, "libp2p stack listening.");
+                // Keeping track of listeners allows for a graceful shutdown: by
+                // explicitly removing them at shutdown time, we trigger the
+                // UPnP behavior to send 'DeletePortMapping' requests to
+                // politely ask for those port mappings to be closed.
+                self.active_listeners.push(listener_id);
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Failed to listen on {}: {}", addr, e);
+                Err(e)
+            }
+        }
     }
     /// Fetch a list of suitable peers from the address book and dial them.
     pub(crate) fn dial_initial_peers(&mut self) {
@@ -423,6 +440,9 @@ impl NetworkActor {
                 match network_stack_event {
                     NetworkStackEvent::Identify(identify_event) => {
                         self.handle_identify_event(*identify_event);
+                    }
+                    NetworkStackEvent::Upnp(upnp_event) => {
+                        self.handle_upnp_event(*upnp_event);
                     }
                     NetworkStackEvent::AutoNat(auto_nat_event) => {
                         self.handle_autonat_event(*auto_nat_event);
@@ -999,12 +1019,58 @@ impl NetworkActor {
 
                         // If we were using proxy addresses, clean them up.
                         self.cleanup_relays();
+
+                        // Set Kademlia mode to server.
+                        self.swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .set_mode(Some(libp2p::kad::Mode::Server));
                     }
                     libp2p::autonat::NatStatus::Private => {
                         self.request_peer_relays(3);
+
+                        // Set Kademlia mode to client.
+                        self.swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .set_mode(Some(libp2p::kad::Mode::Client));
                     }
                     libp2p::autonat::NatStatus::Unknown => {}
                 }
+            }
+        }
+    }
+
+    /// Handle events from the UPnP (Universal Plug and Play) behavior.
+    ///
+    /// UPnP proactively attempts to map local ports to external ones on the
+    /// gateway (router). This is a "best-effort" protocol; success allows the
+    /// node to become publicly reachable, while failure simply leaves the node
+    /// in a 'Private' state, in which case it falls back to DCUtR (Hole
+    /// Punching).
+    ///
+    /// # Protocol Interactions
+    ///
+    /// - **Identify**: New external addresses are automatically added to the
+    ///   Swarm's address list and shared with peers via Identify.
+    /// - **AutoNAT**: Will eventually dial these external addresses to verify
+    ///   if the mapping actually allows inbound traffic.
+    fn handle_upnp_event(&mut self, event: libp2p::upnp::Event) {
+        match event {
+            libp2p::upnp::Event::NewExternalAddr(addr) => {
+                tracing::info!("UPnP: Successfully mapped a new external address: {addr}");
+            }
+
+            libp2p::upnp::Event::ExpiredExternalAddr(addr) => {
+                tracing::debug!("UPnP: External mapping for {addr} has expired or was removed.");
+            }
+
+            libp2p::upnp::Event::GatewayNotFound => {
+                tracing::debug!("UPnP: No UPnP-enabled gateway found on the local network.");
+            }
+
+            libp2p::upnp::Event::NonRoutableGateway => {
+                tracing::warn!("UPnP: The gateway is not exposed to the public network.");
             }
         }
     }
@@ -1044,6 +1110,19 @@ impl NetworkActor {
 
             NetworkActorCommand::Shutdown => {
                 tracing::info!("Network Actor shutting down Swarm...");
+
+                // Trigger UPnP DeletePortMapping
+                // By explicitly removing these listeners, we trigger the UPnP
+                // behavior to send 'DeletePortMapping' requests to
+                // gateways/routers, ensuring ports don't remain "ghosted" after
+                // exit.
+                for id in &self.active_listeners {
+                    let _ = self.swarm.remove_listener(*id);
+                }
+
+                // Give the UPnP behavior one 'tick' to process the removal
+                // and send the network packets.
+                tokio::task::yield_now().await;
 
                 // Disable peer discovery: put Kademlia into client mode.
                 self.swarm
