@@ -1457,6 +1457,7 @@ pub(crate) mod tests {
                     index_picker_preimage,
                     rng.random(),
                     target,
+                    consensus_rule_set,
                 ) {
                     break valid_pow;
                 }

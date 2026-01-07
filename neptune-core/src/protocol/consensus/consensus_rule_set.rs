@@ -9,9 +9,17 @@ use crate::BFieldElement;
 pub const BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET: BlockHeight =
     BlockHeight::new(BFieldElement::new(15_000u64));
 
+/// Height of 1st block that follows the alpha consensus ruleset, for main net.
+pub const BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(25_000u64));
+
 /// Height of 1st block that follows the alpha consensus ruleset, for test net.
 pub const BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(120u64));
+    BlockHeight::new(BFieldElement::new(12064));
+
+/// Height of 1st block that follows the beta consensus ruleset, for test net.
+pub const BLOCK_HEIGHT_HARDFORK_BETA_TESTNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(3500u64));
 
 /// Enumerates all possible sets of consensus rules.
 ///
@@ -28,13 +36,16 @@ pub enum ConsensusRuleSet {
     #[default]
     Reboot,
     HardforkAlpha,
+    HardforkBeta,
 }
 
 impl ConsensusRuleSet {
     /// Maximum block size in number of BFieldElements
     pub(crate) const fn max_block_size(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::HardforkBeta => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -52,17 +63,21 @@ impl ConsensusRuleSet {
             Network::Main => {
                 if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET {
                     ConsensusRuleSet::Reboot
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET {
                     ConsensusRuleSet::HardforkAlpha
+                } else {
+                    ConsensusRuleSet::HardforkBeta
                 }
             }
-            Network::TestnetMock => ConsensusRuleSet::HardforkAlpha,
-            Network::RegTest => ConsensusRuleSet::HardforkAlpha,
+            Network::TestnetMock => ConsensusRuleSet::HardforkBeta,
+            Network::RegTest => ConsensusRuleSet::HardforkBeta,
             Network::Testnet(_) => {
                 if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET {
                     ConsensusRuleSet::Reboot
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_BETA_TESTNET {
                     ConsensusRuleSet::HardforkAlpha
+                } else {
+                    ConsensusRuleSet::HardforkBeta
                 }
             }
         }
@@ -70,23 +85,23 @@ impl ConsensusRuleSet {
 
     pub(crate) fn max_num_inputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
-                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
-            }
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::HardforkBeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_outputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
-                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
-            }
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::HardforkBeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_announcements(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
-                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
-            }
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::HardforkBeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 }

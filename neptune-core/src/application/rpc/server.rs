@@ -6273,6 +6273,7 @@ mod tests {
                         index_picker_preimage,
                         random(),
                         target,
+                        consensus_rule_set,
                     ) {
                         break valid_pow;
                     }

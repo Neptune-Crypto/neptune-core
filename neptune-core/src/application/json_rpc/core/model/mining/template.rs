@@ -91,6 +91,7 @@ mod tests {
                         index_picker_preimage,
                         nonce,
                         self.threshold,
+                        consensus_rule_set,
                     )
                 })
                 .find_map(|x| x)

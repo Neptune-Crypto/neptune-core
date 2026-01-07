@@ -368,14 +368,22 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         consensus_rule_set: ConsensusRuleSet,
         prev_block_digest: Digest,
     ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
-        let bud_prefix = if consensus_rule_set == ConsensusRuleSet::Reboot {
-            // Commitment to all the fields in the block that are not pow
-            mast_auth_paths.commit()
-        } else {
-            // Commitment only to previous block hash such that preprocessing
-            // can be reused across different block proposals with the same
-            // parent.
-            prev_block_digest
+        let bud_prefix = match consensus_rule_set {
+            ConsensusRuleSet::Reboot => {
+                // Commitment to all the fields in the block that are not pow
+                mast_auth_paths.commit()
+            }
+            ConsensusRuleSet::HardforkAlpha => {
+                // Commitment only to previous block hash such that preprocessing
+                // can be reused across different block proposals with the same
+                // parent.
+                prev_block_digest
+            }
+            ConsensusRuleSet::HardforkBeta => {
+                // Hardfork beta removes memory hardness. So no preprocessing
+                // is needed.
+                return GuesserBuffer::default();
+            }
         };
 
         // number steps between checking channel cancellation
@@ -474,28 +482,39 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         index_picker_preimage: Digest,
         nonce: Digest,
         target: Digest,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> Option<Self> {
-        let root = buffer.merkle_tree.root();
+        let pow = match consensus_rule_set {
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                let root = buffer.merkle_tree.root();
 
-        let (index_a, index_b) = Self::indices(index_picker_preimage, nonce);
+                let (index_a, index_b) = Self::indices(index_picker_preimage, nonce);
 
-        let path_a = buffer
-            .merkle_tree
-            .path(index_a as usize)
-            .try_into()
-            .unwrap();
+                let path_a = buffer
+                    .merkle_tree
+                    .path(index_a as usize)
+                    .try_into()
+                    .unwrap();
 
-        let path_b = buffer
-            .merkle_tree
-            .path(index_b as usize)
-            .try_into()
-            .unwrap();
+                let path_b = buffer
+                    .merkle_tree
+                    .path(index_b as usize)
+                    .try_into()
+                    .unwrap();
 
-        let pow = Pow {
-            nonce,
-            root,
-            path_a,
-            path_b,
+                Pow {
+                    nonce,
+                    root,
+                    path_a,
+                    path_b,
+                }
+            }
+            ConsensusRuleSet::HardforkBeta => Pow {
+                root: Digest::default(),
+                path_a: [Digest::default(); MERKLE_TREE_HEIGHT],
+                path_b: [Digest::default(); MERKLE_TREE_HEIGHT],
+                nonce,
+            },
         };
 
         let pow_digest = mast_auth_paths.fast_mast_hash(pow);
@@ -513,10 +532,22 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         consensus_rule_set: ConsensusRuleSet,
         parent_digest: Digest,
     ) -> Result<(), PowValidationError> {
+        let pow_digest = auth_paths.fast_mast_hash(self);
+        let meets_threshold = pow_digest <= target;
+        if !meets_threshold {
+            return Err(PowValidationError::ThresholdNotMet);
+        }
+
         let leaf_prefix = match consensus_rule_set {
             ConsensusRuleSet::Reboot => auth_paths.commit(),
             ConsensusRuleSet::HardforkAlpha => parent_digest,
+
+            // Hardfork beta removes memory hardness. So meeting threshold is
+            // sufficient. And this was already checked.
+            ConsensusRuleSet::HardforkBeta => return Ok(()),
         };
+
+        // Verify authentication paths in PoW field
         let index_picker_preimage = Tip5::hash_pair(self.root, auth_paths.commit());
         let (index_a, index_b) = Self::indices(index_picker_preimage, self.nonce);
 
@@ -545,12 +576,6 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         }
         if !MTree::verify(self.root, index_b as usize, &self.path_b, leaf_b) {
             return Err(PowValidationError::PathBInvalid);
-        }
-
-        let pow_digest = auth_paths.fast_mast_hash(self);
-        let meets_threshold = pow_digest <= target;
-        if !meets_threshold {
-            return Err(PowValidationError::ThresholdNotMet);
         }
 
         Ok(())
@@ -735,7 +760,7 @@ pub(crate) mod tests {
 
             for difficulty in [2_u32, 4] {
                 let difficulty = Difficulty::from(difficulty);
-                let successful_guess = solve(&buffer, &auth_paths, difficulty);
+                let successful_guess = solve(&buffer, &auth_paths, difficulty, consensus_rule_set);
                 assert!(successful_guess
                     .validate(
                         auth_paths,
@@ -779,26 +804,18 @@ pub(crate) mod tests {
     ) {
         const MERKLE_TREE_HEIGHT: usize = 10;
 
-        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
-            auth_paths_1,
-            None,
-            ConsensusRuleSet::HardforkAlpha,
-            prev_block_digest,
-        );
+        let rules = ConsensusRuleSet::HardforkAlpha;
+        let buffer =
+            Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths_1, None, rules, prev_block_digest);
         assert_eq!(
             buffer,
-            Pow::<MERKLE_TREE_HEIGHT>::preprocess(
-                auth_paths_2,
-                None,
-                ConsensusRuleSet::HardforkAlpha,
-                prev_block_digest,
-            ),
+            Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths_2, None, rules, prev_block_digest,),
             "After hardfork, buffer must only depend on previous block hash"
         );
 
         // Verify that 1st block proposal can be solved
         let difficulty = Difficulty::from(2u32);
-        let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty);
+        let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty, rules);
         assert!(correct_guess_1
             .validate(
                 auth_paths_1,
@@ -812,12 +829,7 @@ pub(crate) mod tests {
         assert_eq!(
             PowValidationError::PathAInvalid,
             correct_guess_1
-                .validate(
-                    auth_paths_2,
-                    difficulty.target(),
-                    ConsensusRuleSet::HardforkAlpha,
-                    prev_block_digest
-                )
+                .validate(auth_paths_2, difficulty.target(), rules, prev_block_digest)
                 .unwrap_err(),
             "2nd set of auth paths must make 1st PoW solution invalid, as pow's\
             Merkle authentication path becomes invalid"
@@ -826,7 +838,7 @@ pub(crate) mod tests {
         // Verify that a 2nd proposal can use the same `buffer` value to create
         // a successful guess, and that only the `auth_paths` value needs to
         // change.
-        let correct_guess_2 = solve(&buffer, &auth_paths_2, difficulty);
+        let correct_guess_2 = solve(&buffer, &auth_paths_2, difficulty, rules);
         assert!(correct_guess_2
             .validate(
                 auth_paths_2,
@@ -841,6 +853,7 @@ pub(crate) mod tests {
         buffer: &GuesserBuffer<N>,
         auth_paths: &PowMastPaths,
         difficulty: Difficulty,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> Pow<N> {
         assert!(
             difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
@@ -852,9 +865,14 @@ pub(crate) mod tests {
         let index_picker_preimage = buffer.index_picker_preimage(auth_paths);
         loop {
             let nonce = rng.random();
-            if let Some(solution) =
-                Pow::guess(buffer, auth_paths, index_picker_preimage, nonce, target)
-            {
+            if let Some(solution) = Pow::guess(
+                buffer,
+                auth_paths,
+                index_picker_preimage,
+                nonce,
+                target,
+                consensus_rule_set,
+            ) {
                 break solution;
             }
         }

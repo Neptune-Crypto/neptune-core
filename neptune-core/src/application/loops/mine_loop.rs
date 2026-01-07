@@ -268,6 +268,7 @@ fn guess_worker(
                         threshold,
                         rng,
                         &sender,
+                        consensus_rule_set,
                     )
                 },
             )
@@ -337,6 +338,7 @@ fn guess_nonce_iteration(
     threshold: Digest,
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
+    consensus_rule_set: ConsensusRuleSet,
 ) -> GuessNonceResult {
     let nonce: Digest = rng.random();
 
@@ -352,6 +354,7 @@ fn guess_nonce_iteration(
         index_picker_preimage,
         nonce,
         threshold,
+        consensus_rule_set,
     );
 
     match result {
@@ -1112,8 +1115,8 @@ pub(crate) mod tests {
         let tick = std::time::SystemTime::now();
 
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
-        let guesser_buffer =
-            block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
+        let rule_set = ConsensusRuleSet::default();
+        let guesser_buffer = block.guess_preprocess(Some(&worker_task_tx), None, rule_set);
         let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
@@ -1125,6 +1128,7 @@ pub(crate) mod tests {
                         threshold,
                         prng,
                         &worker_task_tx,
+                        rule_set,
                     );
                 })
                 .count();
@@ -2189,8 +2193,8 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let guesser_buffer =
-            successor_block.guess_preprocess(None, None, ConsensusRuleSet::default());
+        let rule_set = ConsensusRuleSet::default();
+        let guesser_buffer = successor_block.guess_preprocess(None, None, rule_set);
         let mast_auth_paths = successor_block.pow_mast_paths();
         let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
         let target = predecessor_block.header().difficulty.target();
@@ -2201,6 +2205,7 @@ pub(crate) mod tests {
                 index_picker_preimage,
                 rng.random(),
                 target,
+                rule_set,
             )
             .is_some()
             {
