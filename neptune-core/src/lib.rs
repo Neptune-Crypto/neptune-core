@@ -192,6 +192,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     info!("UTXO restoration check complete");
 
     // Set up the libp2p network Actor
+    info!("Setting up Network Actor");
     let identity = resolve_identity(
         data_directory.root_dir_path(),
         cli_args.identity_file.clone(),
