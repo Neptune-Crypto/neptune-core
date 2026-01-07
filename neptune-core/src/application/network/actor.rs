@@ -251,6 +251,13 @@ impl NetworkActor {
             libp2p::autonat::Config::default()
         };
 
+        // Configure yamux (stream multiplexer)
+        let yamux_tuner = || {
+            let mut cfg = libp2p::yamux::Config::default();
+            cfg.set_max_num_streams(256); // reduced from 8192; still plenty
+            cfg
+        };
+
         // Configure relay server
         let relay_server_config = libp2p::relay::Config {
             // # sub-addresses
@@ -271,9 +278,9 @@ impl NetworkActor {
             .with_tcp(
                 libp2p::tcp::Config::default(),
                 libp2p::noise::Config::new,
-                libp2p::yamux::Config::default,
+                yamux_tuner,
             )?
-            .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)?
+            .with_relay_client(libp2p::noise::Config::new, yamux_tuner)?
             .with_behaviour(|key, relay_client| {
                 let local_peer_id = key.public().to_peer_id();
 
