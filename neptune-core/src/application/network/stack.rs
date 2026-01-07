@@ -24,6 +24,8 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 /// * **[`identify`](libp2p::identify)**: Essential for peer discovery and
 ///   protocol negotiation. It allows peers to exchange public keys, listen
 ///   addresses, and supported protocols (like our blockchain protocol).
+/// * **[`upnp`](libp2p::upnp)** Asks the router politely to open up ports for
+///   communications.
 /// * **[`autonat`](libp2p::autonat)**: Automatic NAT detection. This behavior
 ///   periodically probes other peers to determine the node's reachability
 ///   status. It identifies whether the node is publicly accessible or "private"
@@ -58,6 +60,7 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 #[behaviour(to_swarm = "NetworkStackEvent")]
 pub(crate) struct NetworkStack {
     pub(crate) identify: libp2p::identify::Behaviour,
+    pub(crate) upnp: libp2p::upnp::tokio::Behaviour,
     pub(crate) autonat: libp2p::autonat::Behaviour,
     pub(crate) relay_server: libp2p::relay::Behaviour,
     pub(crate) relay_client: libp2p::relay::client::Behaviour,
@@ -81,6 +84,13 @@ pub enum NetworkStackEvent {
     /// Used to discover the remote peer's public addresses, agent version,
     /// and supported protocols.
     Identify(Box<libp2p::identify::Event>),
+
+    /// Signals an update from the UPnP mechanism.
+    ///
+    /// If the router is configured right, it will open a port in response to
+    /// the UPnP request. As a result, the node will become public and no hole
+    /// punching will be necessary.
+    Upnp(Box<libp2p::upnp::Event>),
 
     /// Signals an update from the autoNAT mechanism.
     ///
@@ -126,6 +136,11 @@ impl From<libp2p::identify::Event> for NetworkStackEvent {
     }
 }
 
+impl From<libp2p::upnp::Event> for NetworkStackEvent {
+    fn from(event: libp2p::upnp::Event) -> Self {
+        Self::Upnp(Box::new(event))
+    }
+}
 impl From<libp2p::autonat::Event> for NetworkStackEvent {
     fn from(event: libp2p::autonat::Event) -> Self {
         Self::AutoNat(Box::new(event))

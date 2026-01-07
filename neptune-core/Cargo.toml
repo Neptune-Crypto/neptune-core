@@ -144,6 +144,7 @@ libp2p = {version = "0.56.0", features = [
     "tcp",
     "tls",
     "tokio",
+    "upnp",
     "yamux",
 ]}
 libp2p-connection-limits = "0.6.0"
