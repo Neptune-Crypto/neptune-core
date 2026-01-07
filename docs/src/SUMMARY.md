@@ -17,6 +17,7 @@
   - [Keys and Addresses](./neptune-core/keys.md)
   - [Utxo Notification](./neptune-core/utxo_notification.md)
   - [RPC](./neptune-core/rpc.md)
+  - [Network Stack](./neptune-core/network_stack.md)
 - [User Guides](./user-guides.md)
   - [Installation](./user-guides/installation.md)
   - [Managing Secret Seeds](./user-guides/managing-secret-seeds.md)
