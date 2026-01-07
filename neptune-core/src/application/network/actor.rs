@@ -379,7 +379,7 @@ impl NetworkActor {
                 maybe_cmd = self.command_rx.recv() => {
                     match maybe_cmd {
                         Some(cmd) => {
-                            if self.handle_command(cmd)? != Self::KEEP_ALIVE {
+                            if self.handle_command(cmd).await? != Self::KEEP_ALIVE {
                                 break;
                             }
                         },
@@ -1021,7 +1021,7 @@ impl NetworkActor {
         clippy::unnecessary_wraps,
         reason = "function signature anticipates more complex, fallible commands"
     )]
-    fn handle_command(&mut self, command: NetworkActorCommand) -> Result<bool, ActorError> {
+    async fn handle_command(&mut self, command: NetworkActorCommand) -> Result<bool, ActorError> {
         match command {
             NetworkActorCommand::Dial(addr) => {
                 tracing::info!("Manual dial requested for address: {}", addr);
@@ -1045,6 +1045,22 @@ impl NetworkActor {
             NetworkActorCommand::Shutdown => {
                 tracing::info!("Network Actor shutting down Swarm...");
 
+                // Disable peer discovery: put Kademlia into client mode.
+                self.swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .set_mode(Some(libp2p::kad::Mode::Client));
+
+                // Set limits to zero. Any incoming OR outgoing dial attempts
+                // will now be 'Denied'.
+                let zero_limits = libp2p::connection_limits::ConnectionLimits::default()
+                    .with_max_established(Some(0))
+                    .with_max_established_per_peer(Some(0))
+                    .with_max_pending_incoming(Some(0))
+                    .with_max_pending_outgoing(Some(0));
+                *self.swarm.behaviour_mut().limits.limits_mut() = zero_limits;
+
+                // Save the address book, if any.
                 if let Some(file_name) = self.config.address_book.as_ref() {
                     if let Err(e) = self.address_book.save_to_disk(file_name) {
                         tracing::warn!(
@@ -1053,6 +1069,18 @@ impl NetworkActor {
                         );
                     }
                 }
+
+                // Break connections.
+                let peers = self.swarm.connected_peers().copied().collect_vec();
+                for peer_id in peers {
+                    // Send 'FIN' or 'CLOSE_FRAME': "I'm leaving, don't try to
+                    // dial me back."
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                }
+
+                // Wait 2 seconds to flush frames, clear buffers, update
+                // counters, etc.
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
                 // Do not touch the peer loops here, just stop the Actor's own
                 // loop.
