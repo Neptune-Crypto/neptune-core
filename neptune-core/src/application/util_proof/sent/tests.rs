@@ -20,6 +20,8 @@ use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
+use super::ERROR_UTXO_DIGEST_NEQ;
+
 /// Helper function to set up a wallet with funds, create an outgoing transaction, and mine it in a block.
 /// Returns (transaction, wallet_with_funds, spending_key, [genesis_block, block_with_tx, block_after_tx]).
 /// spend is the percentage of `INITIAL_BLOCK_SUBSIDY` to send, `fee` is how that spend `amount` is split.
@@ -132,10 +134,10 @@ async fn property_test_happy_path(
     let utxo = tx_output.utxo();
     // dbg![tasm_lib::triton_vm::prelude::BFieldCodec::encode(&utxo.coins().to_owned())];
     // dbg![tasm_lib::triton_vm::prelude::BFieldCodec::encode(&utxo).len()];
-    dbg![
-        &utxo,
-        tasm_lib::triton_vm::prelude::BFieldCodec::encode(&utxo)
-    ];
+    // dbg![
+    //     &utxo,
+    //     tasm_lib::triton_vm::prelude::BFieldCodec::encode(&utxo)
+    // ];
     // let additionr = tx_output.addition_record();
     // assert![aocl_mp.verify(
     //     aocl_leaf_index, additionr.canonical_commitment, &aocl.peaks(), aocl.num_leafs()
@@ -143,7 +145,7 @@ async fn property_test_happy_path(
     // dbg![
     //     aocl.num_leafs(), aocl_leaf_index, additionr, &aocl_mp.authentication_path
     // ];
-    dbg!("the proof data: start");
+    // dbg!("the proof data: start");
     let claim = super::claim_outputs(
         super::claim_inputs(
             tasm_lib::triton_vm::proof::Claim::new(super::hash()),
@@ -163,8 +165,8 @@ async fn property_test_happy_path(
         utxo.clone(),
         aocl_mp,
     );
-    dbg!("the proof data: finish");
-    // No Rust shadow for a lib used.
+    // dbg!("the proof data: finish");
+    // A lib used doesn't have a Rust shadow.
     // sent.assert_both_rust_tasm_returns_the_output(&sent);
     let t = &sent
         .run_tasm(&sent.standard_input(), sent.nondeterminism())
@@ -181,6 +183,117 @@ async fn property_test_happy_path(
         "Triton output was different\n{t:?}|run output\n{:?}|claim output",
         claim.output
     )
+}
+
+#[test_strategy::proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+async fn utxo_digest_mismatch(
+    #[strategy(0.0..=1.0)] spend_percent: f64,
+    #[strategy(0.0..=1.0)] fee_percent: f64,
+    #[strategy(proptest_arbitrary_interop::arb())] rness: Randomness<0, 2>,
+    #[strategy(proptest_arbitrary_interop::arb())] digest_bad: tasm_lib::prelude::Digest,
+) {
+    // Reuse happy-path setup to get valid witness/claim data (deterministic via proptest seed).
+    let (tx, _wallet, _key, [_, _bl, _], aocl, aocl_mp, aocl_leaf_index) =
+        setup_funded_wallet_with_mined_tx(spend_percent, fee_percent, rness).await;
+    let tx_output = &tx.details.tx_outputs.deref()[0];
+    let sender_randomness = tx_output.sender_randomness();
+    let utxo = tx_output.utxo();
+
+    let claim = super::claim_outputs(
+        super::claim_inputs(
+            tasm_lib::triton_vm::proof::Claim::new(super::hash()),
+            tx_output.receiver_digest(),
+            Default::default(),
+        ),
+        sender_randomness.hash(),
+        Mmr::bag_peaks(&aocl),
+        utxo.lock_script_hash(),
+        tx_output.native_currency_amount(),
+    );
+
+    // Ensure the generated digest actually differs from the correct one.
+    let correct_utxo_digest = tasm_lib::prelude::Tip5::hash(&utxo);
+    proptest::prop_assume!(digest_bad != correct_utxo_digest);
+
+    let mut sent = super::new(
+        claim.clone(),
+        aocl.clone(),
+        sender_randomness,
+        aocl_leaf_index,
+        utxo.clone(),
+        aocl_mp,
+    );
+
+    // Replace correct `utxo_digest` in the witness with the bad one.
+    // let mut witness_memory = sent.0.clone();
+    // witness_memory.utxo_digest = 
+    // let sent_bad = super::The(witness_memory, sent.1.clone());
+    sent.0.utxo_digest = digest_bad;
+
+    // Run the program and expect a Triton VM panic at `assert_vector`.
+    match sent.run_tasm(&sent.standard_input(), sent.nondeterminism()) {
+        Ok(_) => panic!("Expected Triton VM panic, but program succeeded"),
+        Err(ConsensusError::TritonVMPanic(err, instruction_error)) => {
+            // Replace the string below with the newly added error id (decimal, no underscores).
+            assert!(
+                format!("{instruction_error:?}").contains(ERROR_UTXO_DIGEST_NEQ.to_string().as_str()),
+                "Expected Triton VM error id {ERROR_UTXO_DIGEST_NEQ}, got: {instruction_error}; err: {err}"
+            );
+        }
+        Err(other) => panic!("Expected TritonVMPanic, got: {other:?}"),
+    }
+}
+
+// Consolidated negative test: AOCL proof verification failure.
+#[test_strategy::proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+async fn aocl_proof_verification_failed(
+    #[strategy(0.0..=1.0)] spend_percent: f64,
+    #[strategy(0.0..=1.0)] fee_percent: f64,
+    #[strategy(proptest_arbitrary_interop::arb())] rness: Randomness<0, 2>,
+    #[strategy(proptest_arbitrary_interop::arb())] aocl_mp_bad: MmrMembershipProof,
+) {
+    // Set up a valid witness/claim using the same helper as the happy path.
+    let (tx, _wallet, _key, [_, _bl, _], aocl, aocl_mp, aocl_leaf_index) =
+        setup_funded_wallet_with_mined_tx(spend_percent, fee_percent, rness).await;
+
+    let tx_output = &tx.details.tx_outputs.deref()[0];
+    let sender_randomness = tx_output.sender_randomness();
+    let utxo = tx_output.utxo();
+
+    let claim = super::claim_outputs(
+        super::claim_inputs(
+            tasm_lib::triton_vm::proof::Claim::new(super::hash()),
+            tx_output.receiver_digest(),
+            Default::default(),
+        ),
+        sender_randomness.hash(),
+        Mmr::bag_peaks(&aocl),
+        utxo.lock_script_hash(),
+        tx_output.native_currency_amount(),
+    );
+
+    let mut sent = super::new(
+        claim.clone(),
+        aocl.clone(),
+        sender_randomness,
+        aocl_leaf_index,
+        utxo.clone(),
+        aocl_mp,
+    );
+
+    sent.0.membership_proof = aocl_mp_bad;
+
+    // Run the program and expect a Triton VM panic with AOCL proof verification error id.
+    match sent.run_tasm(&sent.standard_input(), sent.nondeterminism()) {
+        Ok(_) => panic!("Expected Triton VM panic, but program succeeded"),
+        Err(ConsensusError::TritonVMPanic(err, instruction_error)) => {
+            assert!(
+                format!("{instruction_error:?}").contains(super::ERROR_AOCL_PROOF_VERIFICATION_FAILED.to_string().as_str()),
+                "Expected Triton VM error id {super::ERROR_AOCL_PROOF_VERIFICATION_FAILED}, got: {instruction_error}; err: {err}"
+            );
+        }
+        Err(other) => panic!("Expected TritonVMPanic, got: {other:?}"),
+    }
 }
 
 // impl rand::distr::Distribution<PercentageDecimal> for rand::distr::StandardUniform

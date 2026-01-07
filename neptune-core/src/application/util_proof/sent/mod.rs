@@ -34,6 +34,9 @@ use crate::{
     util_types::mutator_set::ms_membership_proof::MsMembershipProof,
 };
 
+const ERROR_UTXO_DIGEST_NEQ: i128 = 1_000_520;
+const ERROR_AOCL_PROOF_VERIFICATION_FAILED: i128 = 1_000_521;
+
 #[derive(TasmObject, tasm_lib::triton_vm::prelude::BFieldCodec, Debug)]
 struct WitnessMemory {
     /// AOCL accumulator of the block
@@ -181,7 +184,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxo_digest}
         addi 4 read_mem 5 pop 1
-        assert_vector
+        assert_vector error_id {ERROR_UTXO_DIGEST_NEQ}
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
         call {lib_ms_commit}
@@ -212,7 +215,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment] *auth_path
 
         call {lib_mmr_verify}
-        assert
+        assert error_id {ERROR_AOCL_PROOF_VERIFICATION_FAILED}
         // _ *aocl
 
         /* finish of the code pasted from the beginning <reserves.rs>
