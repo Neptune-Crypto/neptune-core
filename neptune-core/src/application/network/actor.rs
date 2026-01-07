@@ -218,6 +218,11 @@ impl NetworkActor {
                 .with_push_listen_addr_updates(true)
                 .with_interval(std::time::Duration::from_secs(300));
 
+        // Configure Ping.
+        let ping_config = libp2p::ping::Config::new()
+            .with_interval(std::time::Duration::from_secs(30)) // Ping every 30s
+            .with_timeout(std::time::Duration::from_secs(20)); // 20s until we give up
+
         // Configure connection limits
         let max_num_peers = u32::try_from(config.max_num_peers).unwrap_or(10);
         let limits = libp2p_connection_limits::ConnectionLimits::default()
@@ -282,6 +287,7 @@ impl NetworkActor {
                 let upnp = libp2p::upnp::tokio::Behaviour::default();
 
                 NetworkStack {
+                    ping: libp2p::ping::Behaviour::new(ping_config),
                     identify: libp2p::identify::Behaviour::new(identify_config),
                     upnp,
                     autonat: libp2p::autonat::Behaviour::new(local_peer_id, autonat_config),
@@ -438,6 +444,9 @@ impl NetworkActor {
             // An event from our own network stack bubbles up.
             SwarmEvent::Behaviour(network_stack_event) => {
                 match network_stack_event {
+                    NetworkStackEvent::Ping(ping_event) => {
+                        self.handle_ping_event(*ping_event);
+                    }
                     NetworkStackEvent::Identify(identify_event) => {
                         self.handle_identify_event(*identify_event);
                     }
@@ -1071,6 +1080,22 @@ impl NetworkActor {
 
             libp2p::upnp::Event::NonRoutableGateway => {
                 tracing::warn!("UPnP: The gateway is not exposed to the public network.");
+            }
+        }
+    }
+
+    /// Handle events from the Ping behavior.
+    ///
+    /// Log round-trip time at debug level and failures at warn level.
+    fn handle_ping_event(&mut self, event: libp2p::ping::Event) {
+        match event.result {
+            Ok(duration) => {
+                tracing::debug!("Ping: RTT to {} is {:?}", event.peer, duration);
+            }
+            Err(e) => {
+                tracing::warn!("Ping: Failure with peer {}: {:?}", event.peer, e);
+                // libp2p-ping automatically handles connection closure if
+                // 'max_failures' is reached.
             }
         }
     }

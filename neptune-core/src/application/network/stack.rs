@@ -21,6 +21,9 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 ///
 /// ### Component Roles:
 ///
+/// * **[`ping`](libp2p::ping)**: Keep track of which peers are still alive.
+///   Pro-actively disengage from peers that are unresponsive. As an important
+///   side-effect, the ping traffic will keep NAT ports open.
 /// * **[`identify`](libp2p::identify)**: Essential for peer discovery and
 ///   protocol negotiation. It allows peers to exchange public keys, listen
 ///   addresses, and supported protocols (like our blockchain protocol).
@@ -59,6 +62,7 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "NetworkStackEvent")]
 pub(crate) struct NetworkStack {
+    pub(crate) ping: libp2p::ping::Behaviour,
     pub(crate) identify: libp2p::identify::Behaviour,
     pub(crate) upnp: libp2p::upnp::tokio::Behaviour,
     pub(crate) autonat: libp2p::autonat::Behaviour,
@@ -79,6 +83,9 @@ pub(crate) struct NetworkStack {
 /// signaling—from high-level Neptune handshakes to low-level NAT traversal
 /// updates—through a single event stream.
 pub enum NetworkStackEvent {
+    /// Signals an update from the Ping protocol.
+    Ping(Box<libp2p::ping::Event>),
+
     /// Signals an update from the libp2p Identify protocol.
     ///
     /// Used to discover the remote peer's public addresses, agent version,
@@ -128,6 +135,12 @@ pub enum NetworkStackEvent {
     /// This is the primary event used to "hijack" a connection and
     /// transition it into a peer loop.
     StreamGateway(Box<GatewayEvent>),
+}
+
+impl From<libp2p::ping::Event> for NetworkStackEvent {
+    fn from(event: libp2p::ping::Event) -> Self {
+        Self::Ping(Box::new(event))
+    }
 }
 
 impl From<libp2p::identify::Event> for NetworkStackEvent {
