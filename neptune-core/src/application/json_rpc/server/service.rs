@@ -1253,8 +1253,8 @@ pub mod tests {
         // Create some witness txs to be added into mempool.
         let mut txs = make_plenty_mock_transaction_supported_by_primitive_witness(tx_count);
         // Make some of txs SP-backed so we can test proof extraction.
-        for index in 0..sp_count {
-            txs[index].proof = TransactionProof::invalid();
+        for txi in txs.iter_mut().take(sp_count) {
+            txi.proof = TransactionProof::invalid();
         }
 
         // Insert transactions to mempool.
