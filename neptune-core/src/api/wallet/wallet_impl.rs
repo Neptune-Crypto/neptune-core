@@ -1,5 +1,3 @@
-// private module.  no need for module docs.
-
 use super::error::WalletError;
 use super::wallet_balances::WalletBalances;
 use crate::api::export::NeptuneProof;
@@ -19,7 +17,7 @@ use crate::GlobalStateLock;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-/// provides an API for interacting with the neptune-core wallet.
+/// Provides an API for interacting with the `neptune-core` wallet.
 ///
 /// This type is built from a [StateLock] which means it can
 /// use a [GlobalStateLock] or an already-acquired lock guard.
@@ -71,22 +69,22 @@ impl<'a> From<Wallet<'a>> for StateLock<'a> {
     }
 }
 
-// these methods just call a worker method, so the public API
-// is easy to read and digest.  Please keep it that way.
+// These methods just call a worker method, so the public API
+// is easy to read and digest.
 impl<'a> Wallet<'a> {
     /// convert into inner `StateLock`
     ///
-    /// this is useful if the `StateLock` holds a lock guard and one wishes to
+    /// This is useful if the `StateLock` holds a lock guard and one wishes to
     /// continue using the guard.
     ///
-    /// note: this is a convienence fn as `into()` also exists.
+    /// Note: this is a convienence `fn` as `into()` also exists.
     pub fn into_inner(self) -> StateLock<'a> {
         self.state_lock
     }
 
     /// generate a new spending key of the specified type
     ///
-    /// note: for receiving payments use [Wallet::next_receiving_address()].
+    /// Note: for receiving payments use [Wallet::next_receiving_address()].
     ///
     /// # important! read or risk losing funds!!!
     ///
@@ -160,24 +158,24 @@ impl<'a> Wallet<'a> {
 
     /// get wallet balances as of timestamp
     ///
-    /// timestamp can be a date in the future in order to see what the balances
+    /// Timestamp can be a date in the future in order to see what the balances
     /// would be at that time, with respect to time-locked utxos.
     ///
-    /// if timestamp is in the past the result will be the same as if the
+    /// If timestamp is in the past the result will be the same as if the
     /// present.
     pub async fn balances(&self, timestamp: Timestamp) -> WalletBalances {
         state_lock_call_async!(&self.state_lock, worker::balances, timestamp).await
     }
 
-    /// returns all spendable inputs in the wallet at provided time.
+    /// Returns all spendable inputs in the wallet at provided time.
     ///
-    /// timestamp can be a date in the future in order to see what spendable
+    /// Timestamp can be a date in the future in order to see what spendable
     /// inputs would be at that time, with respect to time-locked utxos.
     ///
-    /// if timestamp is in the past the result will be the same as if the
+    /// If timestamp is in the past the result will be the same as if the
     /// present.
     ///
-    /// the order of returned inputs is undefined.
+    /// The order of returned inputs is undefined.
     pub async fn spendable_inputs(&self, timestamp: Timestamp) -> TxInputList {
         state_lock_call_async!(&self.state_lock, worker::spendable_inputs, timestamp).await
     }
@@ -193,8 +191,11 @@ impl<'a> Wallet<'a> {
     /// The `block` is needed to prove the UTXO was mined. It's determined by its [`Digest`], the relevant data
     /// is taken from this node DB. During verification the same data will be pulled from the same block.
     ///
+    /// A verifier should use [`super::super::super::protocol::proof_abstractions::verifier::verify`] exposed on his API/RPC, or use the [TUI](https://github.com/TritonVM/triton-tui).
+    ///
     /// # Panics
-    /// The implementation detail is when `tx_ix` is out of its bound it crashes the node until <https://github.com/Neptune-Crypto/neptune-core/issues/816> is done.
+    /// The implementation detail is when `tx_ix` is out of its bound it crashes the node until
+    /// <https://github.com/Neptune-Crypto/neptune-core/issues/816> is done.
     pub async fn prove_transfer(
         &self,
         tx_ix: u64,
@@ -234,7 +235,7 @@ mod worker {
     }
 
     pub async fn spendable_inputs(gs: &GlobalState, timestamp: Timestamp) -> TxInputList {
-        // sadly we have to collect here because we can't hold ref after lock guard is dropped.
+        // Sadly we have to collect here because we can't hold ref after lock guard is dropped.
         gs.wallet_spendable_inputs(timestamp)
             .await
             .into_iter()
