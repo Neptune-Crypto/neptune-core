@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 use tasm_lib::{
     field as rustfield,
-    memory::{FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS, encode_to_memory},
+    memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
     prelude::{Digest, Library, TasmObject, TasmStruct},
     triton_vm::{
         isa::triton_asm,
@@ -30,11 +30,10 @@ use tasm_lib::{
 
 use crate::{
     api::export::{NativeCurrencyAmount, Utxo},
-    protocol::proof_abstractions::{SecretWitness, tasm::program::ConsensusProgram},
-    util_types::mutator_set::ms_membership_proof::MsMembershipProof,
+    protocol::proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
 };
 
-const ERROR_UTXO_DIGEST_NEQ: i128 = 1_000_520;
+// const ERROR_UTXO_DIGEST_NEQ: i128 = 1_000_520;
 const ERROR_AOCL_PROOF_VERIFICATION_FAILED: i128 = 1_000_521;
 
 #[derive(TasmObject, tasm_lib::triton_vm::prelude::BFieldCodec, Debug)]
@@ -45,8 +44,7 @@ struct WitnessMemory {
     sender_randomness: Digest,
     aocl_leaf_index: u64,
     utxo: Utxo,
-    // lock_script_and_witness: LockScriptAndWitness,
-    utxo_digest: Digest,
+    // utxo_digest: Digest,
 }
 
 pub fn claim_inputs(
@@ -65,18 +63,16 @@ pub fn claim_inputs(
 pub fn claim_outputs(
     c: Claim,
     sender_randomness_digest: Digest,
-    aocl_digest: Digest,
+    // aocl_digest: Digest,
     lock_postimage: Digest,
     amount: NativeCurrencyAmount,
-    // amount_timelocked: NativeCurrencyAmount,
 ) -> Claim {
     c.with_output(
         [
             lock_postimage.values().into(),
             sender_randomness_digest.values().to_vec(),
-            aocl_digest.values().into(),
+            // aocl_digest.values().into(),
             amount.encode(),
-            // amount_timelocked.encode(),
         ]
         .concat(),
     )
@@ -117,8 +113,6 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
     let rustfield_aoclleafindex = rustfield!(WitnessMemory::aocl_leaf_index);
 
     let main = triton_asm! {
-        /* pasted from <../reserves>
-        ============== */
         // _
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxo}
@@ -128,12 +122,13 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         write_io 5
         // _
 
+        // the AOCL will end up hashed and outputted to check the used block
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         // _ *w
         {&WitnessMemory::get_field("aocl")}
         // _ *aocl
 
-        // prepare the value for '7.'
+        // the peaks will be needed for the membership verification
         dup 0
         {&MmrAccumulator::get_field("peaks")}
         // _ *aocl *aocl_peaks
@@ -148,9 +143,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
-        /* fill `Claim::output` with `sender_randomness_digest`
-        ## this segment diverges from the pasted code
-        *it only affects the output sequence* */
+        // hash `sender_randomness_digest` and output the digest
         push 0
         push 0
         push 0
@@ -163,42 +156,31 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         dup 9
         hash
         write_io 5
+        // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
+        // hash varlen the UTXO from the witness
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        // _ *w
-        // {&rustfield_utxo}
         {&WitnessMemory::get_field_with_size("utxo")}
-        // // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] *utxo
-
-        // addi 0 read_mem 1 addi 1
-        // addi 1
-        // // _ utxo_SI *utxo_internal
-        // swap 1
-        // // _ *utxo_internal utxo_SI
-        // addi {Digest::LEN - 1}
-        // _ *utxo_internal utxo_size
         call {lib_hash_varlen}
         hint utxo_hash = stack[0..5]
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
-        push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        {&rustfield_utxo_digest}
-        addi 4 read_mem 5 pop 1
-        assert_vector error_id {ERROR_UTXO_DIGEST_NEQ}
-        // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
+        // push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+        // {&rustfield_utxo_digest}
+        // addi 4 read_mem 5 pop 1
+        // assert_vector error_id {ERROR_UTXO_DIGEST_NEQ}
+        // // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
         call {lib_ms_commit}
         // _ *aocl *aocl_peaks [canonical_commitment]
 
-        /* 7. */
         dup 6 {&MmrAccumulator::get_field("leaf_count")}
         // _ *aocl *aocl_peaks [canonical_commitment] *num_leafs
-
         addi {u64_stack_size - 1} read_mem {u64_stack_size} pop 1
         // _ *aocl *aocl_peaks [canonical_commitment] [num_leafs]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        {&rustfield_aoclleafindex} // omits `{&rustfield_membershipproof}` from <../reserves>
+        {&rustfield_aoclleafindex}
         addi {u64_stack_size - 1} read_mem {u64_stack_size} pop 1
         // _ *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
 
@@ -218,15 +200,14 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         assert error_id {ERROR_AOCL_PROOF_VERIFICATION_FAILED}
         // _ *aocl
 
-        /* finish of the code pasted from the beginning <reserves.rs>
-        ____________________________ */
-
-        /* the final part is pasted from <reserves.rs> too
-        ============== */
+        // output the AOCL digest
         call {lib_bagpeaks}
         write_io 5
-        // _ 
+        // _
 
+        /* Put `release_date` into the memory for
+        `type_scripts::amount::add_all_amounts_and_check_time_lock::AddAllAmountsAndCheckTimeLock`
+        to find it. And output the value.  */
         read_io 1
         // _ release_date
         // https://github.com/Neptune-Crypto/neptune-core/blob/5c1c6ef2ca1e282a05c7dc5300e742c92758fbfb/neptune-core/src/protocol/consensus/type_scripts/native_currency.rs#L133C13-L135C18
@@ -235,6 +216,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         pop 1
         // _
 
+        // prepare the stack and call the `BasicSnippet` to get the UTXO amount
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxo}
         {&Utxo::get_field("coins")}
@@ -255,18 +237,16 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         call {lib_add_all_amounts_and_check_time_lock}
         // _ num_coins num_coins *eof [amount] [timelocked_amount] [utxo_amount'] utxo_is_timelocked'
 
-        /* ____________________________
-        finish of the code pasted from <reserves.rs> */
-
+        // output the UTXO amount
         pop 1 write_io 4
         // num_coins num_coins *eof [amount] [timelocked_amount]
 
-        // wipe the op stack to 
+        // wipe the op stack back
         pop 5
         pop 5
         pop 1
         // [program digest] [0; 11] .
-        
+
         halt
     };
 
@@ -289,7 +269,6 @@ pub struct The(WitnessMemory, Claim);
 pub fn new(
     c: Claim,
     witness_aocl: MmrAccumulator,
-    // witness_membershipproof: MsMembershipProof,
     witness_senderrandomness: Digest,
     witness_aoclleafindex: u64,
     witness_utxo: Utxo,
@@ -300,7 +279,7 @@ pub fn new(
         WitnessMemory {
             aocl: witness_aocl,
             membership_proof: witness_membershipproof,
-            utxo_digest: tasm_lib::prelude::Tip5::hash(&witness_utxo),
+            // utxo_digest: tasm_lib::prelude::Tip5::hash(&witness_utxo),
             utxo: witness_utxo,
             sender_randomness: witness_senderrandomness,
             aocl_leaf_index: witness_aoclleafindex,

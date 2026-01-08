@@ -47,7 +47,7 @@ impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgram
         let utxo_digest = Tip5::hash_varlen(ram.utxo.encode().as_slice());
 
         // constraint consistency for two parts of the witness
-        assert_eq!(ram.utxo_digest, utxo_digest);
+        // assert_eq!(ram.utxo_digest, utxo_digest);
 
         // constraint the UTXO addition record is in the AOCL
         assert!(
@@ -59,7 +59,8 @@ impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgram
                     utxo_digest,
                     ram.sender_randomness,
                     publicinput_receiverdigest
-                ).canonical_commitment
+                )
+                .canonical_commitment
             )
         );
 

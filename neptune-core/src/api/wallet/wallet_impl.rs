@@ -2,6 +2,10 @@
 
 use super::error::WalletError;
 use super::wallet_balances::WalletBalances;
+use crate::api::export::NeptuneProof;
+use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
+use crate::application::triton_vm_job_queue::vm_job_queue;
+use crate::application::util_proof::sent;
 use crate::macros::state_lock_call_async;
 use crate::macros::state_lock_call_mut_async;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
@@ -14,10 +18,6 @@ use crate::state::StateLock;
 use crate::GlobalStateLock;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::tip5::digest::Digest;
-use crate::application::triton_vm_job_queue::vm_job_queue;
-use crate::api::export::NeptuneProof;
-use crate::application::util_proof::sent;
-use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 
 /// provides an API for interacting with the neptune-core wallet.
 ///
@@ -201,7 +201,14 @@ impl<'a> Wallet<'a> {
         utxo_ix: usize,
         block: Digest,
     ) -> Result<(Claim, NeptuneProof), WalletError> {
-        state_lock_call_async!(&self.state_lock, worker::prove_transfer, tx_ix, utxo_ix, block).await
+        state_lock_call_async!(
+            &self.state_lock,
+            worker::prove_transfer,
+            tx_ix,
+            utxo_ix,
+            block
+        )
+        .await
     }
 }
 
@@ -248,36 +255,41 @@ mod worker {
             .map_err(|e| WalletError::Failed(e.to_string()))?
             .ok_or_else(|| WalletError::Failed("`block` not found".to_string()))?;
 
-        let tx_sent = &crate::application::database::storage::storage_vec::traits::StorageVecBase::get(gs.wallet_state
-        .wallet_db
-        .sent_transactions(), tx_ix).await;
-        let tx_output = tx_sent
-        //.map_err(|e| WalletError::Failed(e.to_string()))?
-        .tx_outputs
-        .get(utxo_ix)
-        .ok_or_else(|| WalletError::Failed("sent tx output index is out of bounds".to_string()))?;
+        let tx_sent =
+            &crate::application::database::storage::storage_vec::traits::StorageVecBase::get(
+                gs.wallet_state.wallet_db.sent_transactions(),
+                tx_ix,
+            )
+            .await;
+        let tx_output = tx_sent.tx_outputs.get(utxo_ix).ok_or_else(|| {
+            WalletError::Failed("sent tx output index is out of bounds".to_string())
+        })?;
 
         let utxo = tx_output.utxo();
         let sender_randomness = tx_output.sender_randomness();
-        let additionr = tx_output.addition_record();
+        let additionrec = tx_output.addition_record();
 
-        let block_aocl = block.body().mutator_set_accumulator_without_guesser_fees().aocl;
+        let block_aocl = block
+            .body()
+            .mutator_set_accumulator_without_guesser_fees()
+            .aocl;
         let block_aocl_numleafs = block_aocl.num_leafs();
 
-        let aocl_digest = block_aocl.bag_peaks();
+        // let aocl_digest = block_aocl.bag_peaks();
 
         let aocl_archival_ref = &gs.chain.archival_state().archival_mutator_set.ams().aocl;
         let aocl_leaf_ix = aocl_archival_ref
-        .get_leaf_range_inclusive_async(0..=(block_aocl_numleafs - 1))
-        .await
-        .iter()
-        .position(|leaf| *leaf == additionr.canonical_commitment)
-        .ok_or_else(|| WalletError::Failed("the addition record was not found in the AOCL".to_string()))?
-        as u64;
+            .get_leaf_range_inclusive_async(0..=(block_aocl_numleafs - 1))
+            .await
+            .iter()
+            .position(|leaf| *leaf == additionrec.canonical_commitment)
+            .ok_or_else(|| {
+                WalletError::Failed("the addition record was not found in the AOCL".to_string())
+            })? as u64;
 
         let aocl_membership_proof = aocl_archival_ref
-        .prove_membership_relative_to_smaller_mmr(aocl_leaf_ix, block_aocl_numleafs)
-        .await;
+            .prove_membership_relative_to_smaller_mmr(aocl_leaf_ix, block_aocl_numleafs)
+            .await;
 
         let sent = sent::new(
             sent::claim_outputs(
@@ -288,7 +300,7 @@ mod worker {
                     utxo.release_date().unwrap_or_default(),
                 ),
                 sender_randomness.hash(),
-                aocl_digest,
+                // aocl_digest,
                 utxo.lock_script_hash(),
                 tx_output.native_currency_amount(),
             ),

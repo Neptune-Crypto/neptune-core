@@ -1998,7 +1998,6 @@ pub trait RPC {
     /// # }
     async fn shutdown(token: auth::Token) -> RpcResult<bool>;
 
-    
     /// Wraps [`Wallet::prove_transfer()`].
     /// # Example
     /// TODO
