@@ -289,7 +289,7 @@ async fn aocl_proof_verification_failed(
         Err(ConsensusError::TritonVMPanic(err, instruction_error)) => {
             assert!(
                 format!("{instruction_error:?}").contains(super::ERROR_AOCL_PROOF_VERIFICATION_FAILED.to_string().as_str()),
-                "Expected Triton VM error id {super::ERROR_AOCL_PROOF_VERIFICATION_FAILED}, got: {instruction_error}; err: {err}"
+                "Expected Triton VM error id {}, got: {instruction_error}; err: {err}", super::ERROR_AOCL_PROOF_VERIFICATION_FAILED
             );
         }
         Err(other) => panic!("Expected TritonVMPanic, got: {other:?}"),

@@ -12,6 +12,12 @@ use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::GlobalState;
 use crate::state::StateLock;
 use crate::GlobalStateLock;
+use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::twenty_first::tip5::digest::Digest;
+use crate::application::triton_vm_job_queue::vm_job_queue;
+use crate::api::export::NeptuneProof;
+use crate::application::util_proof::sent;
+use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 
 /// provides an API for interacting with the neptune-core wallet.
 ///
@@ -175,9 +181,33 @@ impl<'a> Wallet<'a> {
     pub async fn spendable_inputs(&self, timestamp: Timestamp) -> TxInputList {
         state_lock_call_async!(&self.state_lock, worker::spendable_inputs, timestamp).await
     }
+
+    /// A [`NeptuneProof`] will argument that the tx UTXO (determined by the indices, see below) transferred
+    /// the `amount` (it discloses) of [`NativeCurrency`] to the address with the components it discloses
+    /// (`receiver_digest` & `lock_postimange`). The UTXO is binded by hashing `sender_randomness` which serves for
+    /// identification between the similar transfers.
+    ///
+    /// The data is taken from the wallet of this node. `tx_ix` & `utxo_ix` are indicies for getting the UTXO you
+    /// want to prove from the wallet.
+    ///
+    /// The `block` is needed to prove the UTXO was mined. It's determined by its [`Digest`], the relevant data
+    /// is taken from this node DB. During verification the same data will be pulled from the same block.
+    ///
+    /// # Panics
+    /// The implementation detail is when `tx_ix` is out of its bound it crashes the node until <https://github.com/Neptune-Crypto/neptune-core/issues/816> is done.
+    pub async fn prove_transfer(
+        &self,
+        tx_ix: u64,
+        utxo_ix: usize,
+        block: Digest,
+    ) -> Result<(Claim, NeptuneProof), WalletError> {
+        state_lock_call_async!(&self.state_lock, worker::prove_transfer, tx_ix, utxo_ix, block).await
+    }
 }
 
 mod worker {
+    use tasm_lib::twenty_first::prelude::Mmr;
+
     use super::*;
 
     pub async fn next_unused_spending_key(
@@ -202,5 +232,87 @@ mod worker {
             .await
             .into_iter()
             .into()
+    }
+
+    pub async fn prove_transfer(
+        gs: &GlobalState,
+        tx_ix: u64,
+        utxo_ix: usize,
+        block: Digest,
+    ) -> Result<(Claim, NeptuneProof), WalletError> {
+        let block = gs
+            .chain
+            .archival_state()
+            .get_block(block)
+            .await
+            .map_err(|e| WalletError::Failed(e.to_string()))?
+            .ok_or_else(|| WalletError::Failed("`block` not found".to_string()))?;
+
+        let tx_sent = &crate::application::database::storage::storage_vec::traits::StorageVecBase::get(gs.wallet_state
+        .wallet_db
+        .sent_transactions(), tx_ix).await;
+        let tx_output = tx_sent
+        //.map_err(|e| WalletError::Failed(e.to_string()))?
+        .tx_outputs
+        .get(utxo_ix)
+        .ok_or_else(|| WalletError::Failed("sent tx output index is out of bounds".to_string()))?;
+
+        let utxo = tx_output.utxo();
+        let sender_randomness = tx_output.sender_randomness();
+        let additionr = tx_output.addition_record();
+
+        let block_aocl = block.body().mutator_set_accumulator_without_guesser_fees().aocl;
+        let block_aocl_numleafs = block_aocl.num_leafs();
+
+        let aocl_digest = block_aocl.bag_peaks();
+
+        let aocl_archival_ref = &gs.chain.archival_state().archival_mutator_set.ams().aocl;
+        let aocl_leaf_ix = aocl_archival_ref
+        .get_leaf_range_inclusive_async(0..=(block_aocl_numleafs - 1))
+        .await
+        .iter()
+        .position(|leaf| *leaf == additionr.canonical_commitment)
+        .ok_or_else(|| WalletError::Failed("the addition record was not found in the AOCL".to_string()))?
+        as u64;
+
+        let aocl_membership_proof = aocl_archival_ref
+        .prove_membership_relative_to_smaller_mmr(aocl_leaf_ix, block_aocl_numleafs)
+        .await;
+
+        let sent = sent::new(
+            sent::claim_outputs(
+                sent::claim_inputs(
+                    tasm_lib::triton_vm::proof::Claim::new(sent::hash()),
+                    tx_output.receiver_digest(),
+                    // TODO this can be developed further
+                    utxo.release_date().unwrap_or_default(),
+                ),
+                sender_randomness.hash(),
+                aocl_digest,
+                utxo.lock_script_hash(),
+                tx_output.native_currency_amount(),
+            ),
+            block_aocl,
+            sender_randomness,
+            aocl_leaf_ix,
+            utxo,
+            aocl_membership_proof,
+        );
+
+        let claim = crate::protocol::proof_abstractions::SecretWitness::claim(&sent);
+
+        let proof = crate::protocol::proof_abstractions::tasm::program::ConsensusProgram::prove(
+            &sent,
+            claim.clone(),
+            crate::protocol::proof_abstractions::SecretWitness::nondeterminism(&sent),
+            vm_job_queue(),
+            TritonVmProofJobOptionsBuilder::new()
+                .job_priority(crate::api::export::TritonVmJobPriority::Lowest)
+                .build(),
+        )
+        .await
+        .map_err(|e| WalletError::Failed(e.to_string()))?;
+
+        Ok((claim, proof))
     }
 }

@@ -1998,19 +1998,10 @@ pub trait RPC {
     /// # }
     async fn shutdown(token: auth::Token) -> RpcResult<bool>;
 
-    /// A [`NeptuneProof`] will argument that the tx UTXO (determined by the indices, see below) transferred 
-    /// the `amount` (it discloses) of [`NativeCurrency`] to the address with the components it discloses 
-    /// (`receiver_digest` & `lock_postimange`). The UTXO is binded by hashing `sender_randomness` which serves for 
-    /// identification between the similar transfers.
-    /// 
-    /// The data is taken from the wallet of this node. `tx_ix` & `utxo_ix` are indicies for getting the UTXO you
-    /// want to prove from the wallet.
-    /// 
-    /// The `block` is needed to prove the UTXO was mined. It's determined by its [`Digest`], the relevant data 
-    /// is taken from this node DB. During verification the same data will be pulled from the same block.
-    /// 
-    /// # Panics
-    /// The implementation detail is when `tx_ix` is out of its bound it crashes the node until <https://github.com/Neptune-Crypto/neptune-core/issues/816> is done.
+    
+    /// Wraps [`Wallet::prove_transfer()`].
+    /// # Example
+    /// TODO
     async fn prove_transfer(
         token: auth::Token,
         tx_ix: u64,
@@ -4203,74 +4194,12 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        let block = self
+        Ok(self
             .state
-            .lock_async(|s| Box::pin(s.chain.archival_state().get_block(block)))
-            .await?.ok_or::<error::RpcError>(todo![])?;
-        
-        // .block_index_db.get(
-        //     crate::state::database::BlockIndexKey::Block(
-        //         // s.chain.blockchain_archival_state().archival_state.block_height_to_block_digests(block_height).await
-        //         b
-        //     )
-        // )
-        let tx_output = self
-            .state
-            .lock_async(|s| s.wallet_state.wallet_db.sent_transactions().get(tx_ix))
-            .await
-            .tx_outputs
-            .get(utxo_ix).ok_or::<error::RpcError>(todo![])?;
-        
-        // let utxo = tx.tx_outputs.utxos_iter().into_iter().skip(utxo_ix).next()?;//.map_err(todo![])?;
-        let utxo = tx_output.utxo();
-        let aocl = block.body().block_mmr_accumulator;
-        let sender_randomness = tx_output.sender_randomness();
-        let sent = sent::new(
-            sent::claim_outputs(
-                sent::claim_inputs(
-                    tasm_lib::triton_vm::proof::Claim::new(sent::hash()),
-                    tx_output.receiver_digest(),
-                    utxo.release_date().unwrap_or_default(),
-                ),
-                sender_randomness.hash(),
-                aocl.bag_peaks(),
-                utxo.lock_script_hash(),
-                tx_output.native_currency_amount(),
-                // todo!("makes sense just to ditch this part")
-            ),
-            aocl,
-            sender_randomness,
-            {
-                let additionr = tx_output.addition_record();
-                block
-                .merkle_tree()
-                .leafs()
-                .position(|additioncommitment| {
-                    *additioncommitment == additionr.canonical_commitment
-                })
-                // .enumerate().find()
-                .ok_or::<error::RpcError>(todo![])
-            }? as u64,
-            utxo,
-            Tip5::hash_varlen(utxo.encode().as_slice()),
-        );
-        // ProofBuilder::new().program(sent::The.program()).claim(claim);
-        let claim = sent.claim();
-        Ok((
-            claim,
-            sent.prove(
-                claim,
-                sent.nondeterminism(),
-                vm_job_queue(),
-                TritonVmProofJobOptionsBuilder::new()
-                    .job_priority(
-                        // @skaunov guess we don't want to interfere with anything.
-                        api::export::TritonVmJobPriority::Lowest,
-                    )
-                    .build(),
-            )
-            .await?,
-        ))
+            .api()
+            .wallet()
+            .prove_transfer(tx_ix, utxo_ix, block)
+            .await?)
     }
 }
 
