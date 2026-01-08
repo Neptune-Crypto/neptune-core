@@ -203,3 +203,5 @@ A custom protocol that acts as the handoff point between libp2p and the legacy c
 
 * **Function:** It negotiates a stream, validates the `HandshakeData`, and then "hijacks" the underlying stream to feed it into the `PeerLoopHandler`.
 * **Neptune Use:** The "glue" that allows modern libp2p transports to power our existing consensus and synchronization loops.
+
+***Serialization:*** Uses Bincode with a length-prefixed framing. Bincode was selected over CBOR to ensure robust handling of fixed-capacity `ArrayString` types and to minimize serialization overhead in the high-frequency handshake phase.

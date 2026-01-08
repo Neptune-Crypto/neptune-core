@@ -49,51 +49,47 @@ impl HandshakeUpgrade {
         Ok((remote_handshake, socket))
     }
 
-    /// Serializes handshake to CBOR and writes it with a 4-byte length prefix.
+    /// Serializes handshake using Bincode with a 4-byte length prefix.
     async fn encode_handshake<S>(socket: &mut S, data: &HandshakeData) -> std::io::Result<()>
     where
         S: AsyncWrite + Unpin,
     {
-        let mut buffer = Vec::new();
-        ciborium::into_writer(data, &mut buffer)
+        // Bincode serialization
+        let buffer = bincode::serialize(data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         // Write length prefix (Big Endian)
         let len = buffer.len() as u32;
         socket.write_all(&len.to_be_bytes()).await?;
 
-        // Write actual CBOR bytes
+        // Write actual bytes
         socket.write_all(&buffer).await?;
         socket.flush().await?;
         Ok(())
     }
 
-    /// Reads a 4-byte length prefix and then deserializes the following CBOR
-    /// bytes.
+    /// Reads length prefix and deserializes Bincode bytes.
     async fn decode_handshake<S>(socket: &mut S) -> std::io::Result<HandshakeData>
     where
         S: AsyncRead + Unpin,
     {
-        // Read the 4-byte length
         let mut len_bytes = [0u8; 4];
         socket.read_exact(&mut len_bytes).await?;
         let len = u32::from_be_bytes(len_bytes) as usize;
 
-        // Constrain length to prevent OOM attacks (e.g., max 512 KB for a
-        // handshake)
-        if len > 512 * 1_024 {
+        // OOM Protection
+        if len > 512 * 1024 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Handshake too large",
             ));
         }
 
-        // Read exactly 'len' bytes into a buffer
         let mut buffer = vec![0u8; len];
         socket.read_exact(&mut buffer).await?;
 
-        // Deserialize from the slice using ciborium
-        ciborium::from_reader(&buffer[..])
+        // Bincode deserialization
+        bincode::deserialize(&buffer)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 }
@@ -103,7 +99,7 @@ impl UpgradeInfo for HandshakeUpgrade {
     type InfoIter = std::iter::Once<Self::Info>;
 
     fn protocol_info(&self) -> Self::InfoIter {
-        std::iter::once(StreamProtocol::new("/id/cbor/1.0"))
+        std::iter::once(StreamProtocol::new("/id/stream-gateway-handshake/1.0"))
     }
 }
 
@@ -155,43 +151,64 @@ pub(crate) enum HandshakeResult {
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
-    // use futures::executor::block_on;
-    // use futures::io::Cursor;
-    // use proptest::prelude::*;
+    use super::*;
+    use futures::io::Cursor;
+    use proptest::collection::vec;
+    use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
 
-    // #[test]
-    // fn test_handshake_default_roundtrip() {
-    //     block_on(async {
-    //         // Create the default data we expect to see on the other side.
-    //         let expected_data = HandshakeData::default();
+    #[proptest]
+    fn handshake_encoding_roundtrip(
+        #[strategy(HandshakeData::arbitrary())] handshake: HandshakeData,
+    ) {
+        let decoded = tokio_test::block_on(async {
+            // 1. Prepare an in-memory "socket" (a buffer).
+            let mut buffer = Vec::new();
+            let mut write_cursor = Cursor::new(&mut buffer);
 
-    //         // 1. Prepare an in-memory "socket" (a buffer).
-    //         let mut buffer = Vec::new();
-    //         let mut write_cursor = Cursor::new(&mut buffer);
+            // 2. Encode the data into the buffer.
+            HandshakeUpgrade::encode_handshake(&mut write_cursor, &handshake)
+                .await
+                .expect("Failed to encode default handshake");
 
-    //         // 2. Encode the data into the buffer.
-    //         HandshakeUpgrade::encode(&mut write_cursor, &expected_data)
-    //             .await
-    //             .expect("Failed to encode default handshake");
+            // 3. Prepare to read from the same buffer.
+            let mut read_cursor = Cursor::new(buffer);
 
-    //         // 3. Prepare to read from the same buffer.
-    //         let mut read_cursor = Cursor::new(buffer);
+            // 4. Decode the data back out.
+            HandshakeUpgrade::decode_handshake(&mut read_cursor)
+                .await
+                .expect("Failed to decode handshake from buffer")
+        });
 
-    //         // 4. Decode the data back out.
-    //         let actual_data = HandshakeUpgrade::decode(&mut read_cursor)
-    //             .await
-    //             .expect("Failed to decode handshake from buffer");
+        // 5. Verify the data is identical.
+        prop_assert_eq!(
+            handshake,
+            decoded,
+            "The decoded data must match the default data sent."
+        );
+    }
 
-    //         // 5. Verify the data is identical.
-    //         assert_eq!(
-    //             expected_data, actual_data,
-    //             "The decoded data must match the default data sent."
-    //         );
-    //     });
-    // }
+    #[proptest]
+    fn handshake_encoding_cannot_crash(
+        #[strategy(HandshakeData::arbitrary())] handshake: HandshakeData,
+    ) {
+        tokio_test::block_on(async {
+            let mut buffer = Vec::new();
+            let mut write_cursor = Cursor::new(&mut buffer);
 
-    //     #[proptest]
-    //     fn test_handshake_encoding_roundtrip(handshake) {
-    //     }
+            HandshakeUpgrade::encode_handshake(&mut write_cursor, &handshake)
+                .await
+                .expect("not only is encoding guaranteed to not crash, it must be successful too");
+        })
+    }
+
+    #[proptest]
+    fn handshake_decoding_cannot_crash(#[strategy(vec(arb::<u8>(), 0..4096))] buffer: Vec<u8>) {
+        let _result = tokio_test::block_on(async {
+            let mut read_cursor = Cursor::new(buffer);
+
+            HandshakeUpgrade::decode_handshake(&mut read_cursor).await // just not crash
+        });
+    }
 }
