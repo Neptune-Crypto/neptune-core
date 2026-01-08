@@ -68,7 +68,6 @@ bincode = "1.3"
 bytes = "1.8"
 bytesize = "1.3"
 chrono = "^0.4.34"
-ciborium = "0.2.2"
 clap = { version = "4.5", features = ["derive"] }
 console-subscriber = { version = "0.2", optional = true }
 directories = "5.0"
@@ -127,7 +126,6 @@ hex = "0.4.3"
 libp2p = {version = "0.56.0", features = [
     # "full"
     "autonat",
-    "cbor",
     "dcutr",
     "dns",
     "ed25519",
