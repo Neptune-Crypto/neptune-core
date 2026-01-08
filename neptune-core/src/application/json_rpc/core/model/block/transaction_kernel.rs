@@ -7,6 +7,7 @@ use tasm_lib::prelude::Digest;
 use crate::api::export::AdditionRecord;
 use crate::api::export::Announcement;
 use crate::api::export::Timestamp;
+use crate::api::export::TransactionKernelId;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMmrMembershipProof;
@@ -172,3 +173,5 @@ impl From<RpcTransactionKernel> for TransactionKernel {
         kernel_proxy.into_kernel()
     }
 }
+
+pub type RpcTransactionKernelId = TransactionKernelId;

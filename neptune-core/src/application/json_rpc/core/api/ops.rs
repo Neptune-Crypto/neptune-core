@@ -137,6 +137,14 @@ pub enum RpcMethods {
     /// announcement flags.
     #[namespace(Namespace::UtxoIndex)]
     BlockHashesByFlags,
+    #[namespace(Namespace::Mempool)]
+    Transactions,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionKernel,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionProof,
 }
 
 #[cfg(test)]
