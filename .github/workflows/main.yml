@@ -36,6 +36,17 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Ensure clang is available and set toolchain for C/C++
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
+          # fallback: disable clang thread-safety detection in leveldb cmake if present
+          echo "LEVELDB_HAVE_CLANG_THREAD_SAFETY=OFF" >> $GITHUB_ENV
+
+
       - name: Build benches
         run: cargo build --benches
 
