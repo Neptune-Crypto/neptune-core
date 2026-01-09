@@ -230,7 +230,7 @@ pub(crate) enum GatewayEvent {
 /// connections, specifically enabling the "Direct-Only" policy where handshakes
 /// are suppressed on relayed transports.
 #[derive(Debug)]
-enum Command {
+pub(crate) enum Command {
     /// Signals the handler to proceed with the protocol handshake.
     ///
     /// By default, handlers are initialized in a paused state to prevent
