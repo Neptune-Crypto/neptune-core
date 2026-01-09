@@ -154,15 +154,6 @@ jobs:
       - name: Install dependencies
         run: |
           ${{ matrix.packages_install }}
-      - name: Install Clang (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update sudo apt-get install -y clang
-      - name: Set CC/CXX and CMake compilers to clang
-        if: runner.os == 'Linux'
-        run: |
-          echo "CC=clang" >> "$GITHUB_ENV" echo "CXX=clang++" >> "$GITHUB_ENV" echo "CMAKE_C_COMPILER=clang" >> "$GITHUB_ENV" echo "CMAKE_CXX_COMPILER=clang++" >> "$GITHUB_ENV"
-
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
