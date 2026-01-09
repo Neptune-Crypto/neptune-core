@@ -614,7 +614,17 @@ impl NetworkActor {
                     "Inbound"
                 };
                 tracing::info!("{direction} connection established with {peer_id} at {address}.");
-                self.active_connections.insert(peer_id, address.clone());
+
+                // Store the new connection. If the new connection is a direct
+                // one and the old connection was relayed, then the relayed
+                // address will be overwritten in favor of the direct one.
+                if let Some(old_address) = self.active_connections.insert(peer_id, address.clone())
+                {
+                    tracing::debug!("Overwriting old address {} in favor of new address {address} in active connections map.", old_address);
+                    if !Self::is_direct(&old_address) && Self::is_direct(&address) {
+                        tracing::info!("New address is direct whereas old address was not. Good!");
+                    }
+                }
 
                 // Note: Identify and Kademlia will now automatically start
                 // their handshakes over this new "open line."
@@ -1365,6 +1375,40 @@ impl NetworkActor {
                     tracing::warn!(peer = %peer_id, "Peer loop exited with error: {:?}", e);
                 });
         })
+    }
+
+    /// Determines if a connection is direct or proxied via a relay.
+    ///
+    /// Neptune Cash disallows application-level protocol negotiation (the
+    /// `StreamGateway`) over relayed connections for three reasons:
+    ///  1. to prevent resource exhaustion on relay nodes;
+    ///  2. to ensure optimal synchronization latency;
+    ///  3. to ban malicious peers directly rather than banning their proxies.
+    ///
+    /// # Arguments
+    ///
+    ///  * `address` - The [`Multiaddr`](libp2p::swarm) of the peer.
+    ///
+    /// # Return Value
+    ///
+    ///  * `true` if the connection is direct (e.g., `/ip4/.../tcp/...` or `/udp/.../quic-v1`).
+    ///  * `false` if the connection is relayed (contains `/p2p-circuit`).
+    ///
+    /// ### Why this is used instead of raw `!is_relayed()`:
+    ///
+    /// Neptune-Cash has a strict policy of disallowing application-level protocol
+    /// negotiation (the `StreamGateway`) over relayed connections. This prevents
+    /// high-bandwidth consensus and synchronization traffic from burdening public
+    /// relay nodes and ensures optimal peer latency.
+    ///
+    /// By using this named helper, we make the intent of the "Direct-Only"
+    /// policy explicit in the call site logic.
+    pub(crate) fn is_direct(address: &libp2p::Multiaddr) -> bool {
+        // A connection is relayed if any part of its address path
+        // includes the 'p2p-circuit' protocol.
+        !address
+            .iter()
+            .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
     }
 }
 

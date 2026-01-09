@@ -15,9 +15,22 @@ At the heart of Neptune Cash's communication is the **Peer Loop** (`PeerLoopHand
 
 To allow `libp2p` to interface with this existing loop, we implemented a custom subprotocol called **`StreamGateway`**.
 
-1. **Handshake Validation:** When two `libp2p` peers connect, the `StreamGateway` subprotocol is negotiated. It exchanges and validates the standard Neptune `HandshakeData` (the same data structure used by the legacy stack).
+1. **Handshake Validation:** When two `libp2p` peers connect, the `StreamGateway` subprotocol is negotiated. If the connection is determined to be direct (*i.e.*, not through a relay), the `StreamGateway` exchanges and validates the standard Neptune `HandshakeData` (the same data structure used by the legacy stack).
 2. **Stream Hijacking:** Once the handshake is verified, `libp2p` "hijacks" the substream. Instead of using standard `libp2p` message framing, the raw substream is fed directly into a spawned `run_wrapper` task.
 3. **Protocol Evolution:** This architecture allows the `PeerMessage` enum—which defines our consensus and state replication protocol—to remain unchanged. While some messages (specifically those for legacy peer discovery) are redundant in the `libp2p` stack, the core consensus logic remains untouched.
+
+**Direct-Only Policy -- Motivation.**
+
+ 1. Relays are a precious resource with the specific purpose of coordinating hole-punches, whereas participating in the consensus protocol is a resource-intensive activity. Doing so through a relay duplicates resource usage in a non-constructive way.
+ 2. Lots of exchanges in the consensus protocol are sensitive to round-trip time (RTT), which is significantly better on a direct connection than through a relay.
+ 3. The policy ensures that the identity of a peer (their IP) is transparent. This prevents malicious peers from hiding behind a relay's IP and ensures that blacklisting targets the perpetrator rather than the infrastructure.
+
+**Direct-Only Policy -- Enforcement.**
+
+ - When a connection is established, a `GatewayHandler` is created. If the transport is identified as relayed (containing `/p2p-circuit`), the handler is initialized in a `paused` state.
+ - While paused, the handler's `poll` loop returns `Poll::Pending`. It will not initiate outbound substream requests or respond to inbound protocol negotiations.
+ - If a *direct* connection is established (either initially or subsequently via DCUtR hole-punching), the `StreamGateway` behaviour sends a `Command::Activate` signal to the handler.
+ - Upon receiving the activation signal, the handler clears the pause flag, allowing the `poll` loop to signal `Ready` and begin the Neptune Cash handshake.
 
 #### Modern Identity and Addressing
 

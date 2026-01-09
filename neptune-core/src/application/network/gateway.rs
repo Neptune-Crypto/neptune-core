@@ -11,12 +11,12 @@ use libp2p::swarm::ConnectionId;
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::swarm::SubstreamProtocol;
 use libp2p::swarm::THandler;
-use libp2p::swarm::THandlerInEvent;
 use libp2p::swarm::THandlerOutEvent;
 use libp2p::swarm::ToSwarm;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 
+use crate::application::network::actor::NetworkActor;
 use crate::application::network::handshake::HandshakeResult;
 use crate::application::network::handshake::HandshakeUpgrade;
 use crate::protocol::peer::handshake_data::HandshakeData;
@@ -58,14 +58,17 @@ pub(crate) struct GatewayHandler {
 
     /// Queue of events to send up to the Behaviour.
     pending_events: VecDeque<ConnectionHandlerEvent<HandshakeUpgrade, (), HandshakeResult>>,
+
+    /// The activity is paused until we verify that the connection is direct.
+    pause: bool,
 }
 
 impl ConnectionHandler for GatewayHandler {
-    // Not relevant for a 'one-shot' handshake that requires no external
-    // commands, no state tracking for multiple streams, and no extra metadata.
-    type FromBehaviour = ();
     type InboundOpenInfo = ();
     type OutboundOpenInfo = ();
+
+    // Passes the "Activate" signal.
+    type FromBehaviour = Command;
 
     /// The "Package" we send up the stack (Handshake + Stream).
     type ToBehaviour = HandshakeResult;
@@ -94,16 +97,25 @@ impl ConnectionHandler for GatewayHandler {
         )
     }
 
-    /// Handle commands sent from the NetworkBehaviour to this connection
-    /// handler.
+    /// Process control signals from the [`StreamGateway`].
     ///
-    /// This method is currently a no-op because the StreamGateway does not
-    /// send control signals to established connections. Once a stream is
-    /// hijacked, all communication happens within the inner event loop,
-    /// bypassing the libp2p handler entirely. Phrased succinctly: the event
-    /// loop does not take orders from libp2p.
-    fn on_behaviour_event(&mut self, _event: Self::FromBehaviour) {
-        // No action required.
+    /// This method is the primary switch for the "Direct-Only" enforcement
+    /// policy. Because Neptune Cash handshakes are resource-intensive and
+    /// require IP-level accountability, handlers start in a paused state.
+    ///
+    /// When the behavior confirms the underlying transport is not a relay, it
+    /// dispatches a [`Command::Activate`], which triggers this method to flip
+    /// the internal `pause` flag, allowing [`poll`](Self::poll) to initiate
+    /// the protocol handshake.
+    fn on_behaviour_event(&mut self, event: Self::FromBehaviour) {
+        match event {
+            Command::Activate => {
+                if self.pause {
+                    tracing::info!("GatewayHandler activated. Unpausing handshake logic. Proceeding with stream hijack.");
+                    self.pause = false;
+                }
+            }
+        }
     }
 
     /// Handle successful protocol negotiations or connection failures.
@@ -157,18 +169,30 @@ impl ConnectionHandler for GatewayHandler {
         }
     }
 
-    /// Check if the protocol upgrade has finished and return the result.
+    /// Orchestrates the protocol lifecycle for this specific connection.
     ///
-    /// This method is called repeatedly by the Swarm. It doesn't perform the
-    /// handshake itself; instead, it checks the `pending_events` queue to see
-    /// if the background "Worker" (the HandshakeUpgrade) has finished.
-    /// If a result is ready, it passes it up to the NetworkBehaviour.
+    /// This method is invoked by the Swarm's executor. Its behavior is governed
+    /// by the `pause` state, which is used to enforce the "Direct-Only"
+    /// transport policy:
+    ///
+    /// 1. **Dormancy**: If `pause` is true (the default for new connections),
+    ///    this method returns [`Poll::Pending`], which halts progress.
+    /// 2. **Activation**: Once the [`NetworkBehaviour`] verifies a direct path
+    ///   (e.g., via DCUtR), it sends a [`Command::Activate`] signal. This
+    ///   method then resumes execution.
+    /// 3. **Event Propagation**: It drains the `pending_events` queue, passing
+    ///    completed handshake results (successful "hijacks") up to the
+    ///    Behaviour's `on_connection_handler_event`.
     fn poll(
         &mut self,
         _cx: &mut Context<'_>,
     ) -> Poll<
         ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>,
     > {
+        if self.pause {
+            return Poll::Pending;
+        }
+
         // We check our queue of events related to handshakes
         if let Some(event) = self.pending_events.pop_front() {
             // Poll::Ready(event) tells libp2p to deliver this
@@ -199,6 +223,24 @@ pub(crate) enum GatewayEvent {
     },
 }
 
+/// Internal commands sent from the [`StreamGateway`]
+/// to the [`GatewayHandler`].
+///
+/// These commands allow the behavior to control the lifecycle of individual
+/// connections, specifically enabling the "Direct-Only" policy where handshakes
+/// are suppressed on relayed transports.
+#[derive(Debug)]
+enum Command {
+    /// Signals the handler to proceed with the protocol handshake.
+    ///
+    /// By default, handlers are initialized in a paused state to prevent
+    /// performing the Neptune Cash handshake over relayed connections.
+    /// Once the [`StreamGateway`] verifies that a connection is direct (whether
+    /// via DCUtR or a public IP), it dispatches this command to begin the
+    /// sub-protocol negotiation.
+    Activate,
+}
+
 /// Coordinates the inner protocol's event loops across all active connections.
 ///
 /// The [`StreamGateway`] is the central "Brain" of the portal between the
@@ -214,11 +256,41 @@ pub(crate) enum GatewayEvent {
 /// This struct implements
 /// [`NetworkBehaviour`], allowing it to be plugged directly into a libp2p
 /// [`Swarm`](libp2p::Swarm).
+///
+/// ## Direct-Only Policy
+///
+/// To optimize network health and security, this behaviour enforces a
+/// "Direct-Only" policy for the Neptune Cash sub-protocol. This policy means
+/// that in order of the handshake and subsequent hijack to take place, the
+/// connection must first be verified to be direct, *i.e.*, not relayed by a
+/// proxy.
+///
+/// ### Motivation
+///
+/// * **Resource Conservation**: Relays are a shared community resource with
+///   limited bandwidth and substream slots. Running the Neptune Cash consensus
+///   protocol over them is a poor allocation of resources.
+/// * **Latency**: The inner protocol are sensitive to Round-Trip Time (RTT).
+///   Direct paths provide the performance required for stable protocol
+///   execution.
+/// * **Accountability**: Direct connections allow for IP-based peer banning,
+///   whereas relayed traffic masks the perpetrator behind the relay's identity.
+///
+/// ### Enforcement
+///
+/// Enforcement is handled via a "Gatekeeper" pattern. When a connection is
+/// established, the [`GatewayHandler`] is initialized in a `paused` state if
+/// the transport is identified as a relay (containing `/p2p-circuit`).
+///
+/// The protocol remains pause until a direct connection is verified—either
+/// immediately upon creation or subsequently via a successful DCUtR hole punch.
+/// Once verified, a [`Command::Activate`] signal is dispatched to the handler,
+/// unblocking the `poll` loop to initiate the handshake.
 pub(crate) struct StreamGateway {
     /// Used for getting the handshake data
     global_state: GlobalStateLock,
 
-    events: VecDeque<ToSwarm<GatewayEvent, ()>>,
+    events: VecDeque<ToSwarm<GatewayEvent, Command>>,
 }
 
 impl StreamGateway {
@@ -254,11 +326,12 @@ impl NetworkBehaviour for StreamGateway {
         _connection_id: ConnectionId,
         _peer: PeerId,
         _local_addr: &Multiaddr,
-        _remote_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         Ok(GatewayHandler {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
+            pause: !NetworkActor::is_direct(remote_addr),
         })
     }
 
@@ -271,13 +344,14 @@ impl NetworkBehaviour for StreamGateway {
         &mut self,
         _connection_id: ConnectionId,
         _peer: PeerId,
-        _addr: &Multiaddr,
+        addr: &Multiaddr,
         _endpoint: libp2p::core::Endpoint,
         _port_use: PortUse,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         Ok(GatewayHandler {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
+            pause: !NetworkActor::is_direct(addr),
         })
     }
 
@@ -287,7 +361,44 @@ impl NetworkBehaviour for StreamGateway {
     /// it would be moot to communicate the event to the event loop because the
     /// event loop is for high-level protocol events and makes abstraction of
     /// low-level network events.
-    fn on_swarm_event(&mut self, _event: libp2p::swarm::FromSwarm) {}
+    fn on_swarm_event(&mut self, event: libp2p::swarm::FromSwarm) {
+        match event {
+            libp2p::swarm::FromSwarm::ConnectionEstablished(info) => {
+                if info.endpoint.is_relayed() {
+                    tracing::debug!(peer=%info.peer_id, "Relayed connection: StreamGateway idling.");
+                    // Do nothing. We disallow gateway access to relayed
+                    // connections.
+                    return;
+                }
+
+                tracing::info!(peer=%info.peer_id, "Direct connection established: Initiating StreamGateway handshake.");
+                self.events.push_back(ToSwarm::NotifyHandler {
+                    peer_id: info.peer_id,
+                    handler: libp2p::swarm::NotifyHandler::One(info.connection_id),
+                    event: Command::Activate,
+                });
+            }
+            libp2p::swarm::FromSwarm::AddressChange(address_change) => {
+                // A "hole punch" can sometimes trigger a whole new connection
+                // (already handled by `ConnectionEstablished`), or a "mere"
+                // address upgrade -- handled here.
+                if address_change.old.is_relayed() && !address_change.new.is_relayed() {
+                    tracing::info!(peer=%address_change.peer_id, "Connection upgraded to direct: Initiating StreamGateway handshake.");
+                    self.events.push_back(ToSwarm::NotifyHandler {
+                        peer_id: address_change.peer_id,
+                        handler: libp2p::swarm::NotifyHandler::One(address_change.connection_id),
+                        event: Command::Activate,
+                    });
+                }
+            }
+            libp2p::swarm::FromSwarm::NewExternalAddrOfPeer(_new_external_addr_of_peer) => {
+                // We learned of a new address for the peer, but this event does
+                // not indicate that we actually have a connection to them. So
+                // there is no point initiating the handshake-hijack.
+            }
+            _ => {}
+        }
+    }
 
     /// Receive and process results from a connection handler.
     ///
@@ -322,10 +433,7 @@ impl NetworkBehaviour for StreamGateway {
     /// This method is polled by the Swarm to check if any handshakes have
     /// finished. By returning `Poll::Ready`, we pass the verified stream
     /// and handshake data up to the Actor's main event loop.
-    fn poll(
-        &mut self,
-        _cx: &mut Context<'_>,
-    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<ToSwarm<Self::ToSwarm, Command>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
