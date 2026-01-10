@@ -11,7 +11,7 @@ use rand::Rng;
 
 // #[traced_test]
 #[tokio::test(flavor = "multi_thread")]
-pub async fn custom_coinbase_distribution() {
+pub async fn custom_coinbase_distribution_separate() {
     logging::tracing_logger();
 
     let mut rng = rand::rng();

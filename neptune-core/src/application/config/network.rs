@@ -177,6 +177,33 @@ impl FromStr for Network {
     }
 }
 
+// #[cfg(any(test, feature = "arbitrary-impls"))]
+#[cfg(test)] // otherwise "unused" warnings
+pub(crate) mod arbitrary {
+    use proptest::prelude::BoxedStrategy;
+    use proptest::prelude::Strategy;
+    use proptest_arbitrary_interop::arb;
+
+    use super::*;
+
+    impl Network {
+        pub(crate) fn arbitrary() -> BoxedStrategy<Self> {
+            let determinant_strategy = 0..4;
+            let distinguisher_strategy = arb::<u8>();
+
+            (determinant_strategy, distinguisher_strategy)
+                .prop_map(|(determinant, distinguisher)| match determinant {
+                    0 => Network::TestnetMock,
+                    1 => Network::Testnet(distinguisher),
+                    2 => Network::RegTest,
+                    3 => Network::Main,
+                    _ => unreachable!("all networks accounted for"),
+                })
+                .boxed()
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

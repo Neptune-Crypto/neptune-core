@@ -287,11 +287,16 @@ impl MockRpcClient {
         // can't modify PeerInfo from outside neptune-core crate since all fields and
         // constructors are pub(crate). to show any ui behavior, we just replace the peer with a new random one
         let mut state = self.state.lock().unwrap();
-        if let Some(idx) = state
-            .peers
-            .iter()
-            .position(|p| p.connected_address().ip() == peer_ip)
-        {
+        if let Some(idx) = state.peers.iter().position(|p| {
+            p.address()
+                .iter()
+                .find_map(|component| match component {
+                    multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                    multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                    _ => None,
+                })
+                .is_some_and(|ip| ip == peer_ip)
+        }) {
             let mut rng = StdRng::from_seed(rng().random());
             state.peers[idx] = rng.random();
         }

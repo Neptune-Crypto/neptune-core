@@ -10,6 +10,9 @@ There are four classes of tasks:
 - `mining`: runs `miner_loop`, has a worker and a monitor task
 - `server[]`: handles `server` for incoming RPC requests
 
+With the introduction of the libp2p [network stack](network_stack.md), there is a fifth:
+ - `NetworkActor`: responsible for driving the libp2p swarm of peers and, whenever a new connection is established, spawning a `peer_loop` for it.
+
 ## Channels
 Long-lived tasks can communicate with each other through channels provided by the tokio framework. All communication goes through the main task. Eg, there is no way for the miner task to communicate with peer tasks.
 
@@ -19,6 +22,8 @@ The channels are:
 - miner to main: `mpsc`. Only one miner task (the monitor/master task) sends messages to main. Used to tell the main loop about newly found blocks.
 - main to miner: `watch`. Used to tell the miner to mine on top of a new block; to shut down; or that the mempool has been updated, and that it therefore is safe to mine on the next block.
 - rpc server to main: `mpsc`: Used to e.g. send a transaction object that is built from client-controlled UTXOs to the main task where it can be added to the mempool. This channel is also used to shut down the program when the `shutdown` command is called.
+- NetworkActor to main: `mpsc`: used to notify the main loop of network-level events.
+- main to NetworkActor: `mpsc`: used to issue commands (e.g., "dial this address") to the NetworkActor.
 
 ## Global State
 All tasks that are part of Neptune Core have access to the global state and they can all read from it. Each type of task can have its own local state that is not shared across tasks, this is **not** what is discussed here.
