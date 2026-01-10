@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::BufWriter;
@@ -38,6 +39,7 @@ use serde_derive::Serialize;
 pub(crate) struct BlackList {
     pub(crate) filename: PathBuf,
     pub(crate) list: HashMap<IpAddr, SystemTime>,
+    pub(crate) ephemeral_bans: HashSet<IpAddr>,
 }
 
 impl BlackList {
@@ -45,7 +47,13 @@ impl BlackList {
         BlackList {
             filename,
             list: HashMap::new(),
+            ephemeral_bans: HashSet::new(),
         }
+    }
+
+    pub(crate) fn with_ephemeral_bans(mut self, ephemeral_bans: Vec<IpAddr>) -> Self {
+        self.ephemeral_bans = ephemeral_bans.into_iter().collect();
+        self
     }
 
     /// Insert the IP into the black list.
@@ -66,7 +74,7 @@ impl BlackList {
 
     /// Determine whether the given IP is on the black list.
     pub(crate) fn is_banned(&self, ip_address: &IpAddr) -> bool {
-        self.list.contains_key(ip_address)
+        self.list.contains_key(ip_address) || self.ephemeral_bans.contains(ip_address)
     }
 
     /// Write the current blacklist to disk.
@@ -80,7 +88,7 @@ impl BlackList {
     pub(crate) fn save_to_disk(&self) -> anyhow::Result<()> {
         let file = File::create(self.filename.clone())?;
         let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, self)?;
+        serde_json::to_writer_pretty(writer, &self.list)?;
         Ok(())
     }
 
@@ -100,10 +108,14 @@ impl BlackList {
             return Ok(Self::new(path.as_ref().to_path_buf()));
         }
 
-        let file = File::open(path)?;
+        let file = File::open(&path)?;
         let reader = BufReader::new(file);
-        let blacklist = serde_json::from_reader(reader)?;
-        Ok(blacklist)
+        let list = serde_json::from_reader(reader)?;
+        Ok(BlackList {
+            filename: path.as_ref().to_path_buf(),
+            list,
+            ephemeral_bans: HashSet::new(),
+        })
     }
 }
 
@@ -114,6 +126,7 @@ mod tests {
 
     use super::*;
 
+    use proptest::collection::vec;
     use proptest::prelude::any;
     use proptest::prelude::Strategy;
     use proptest::prop_assert;
@@ -125,8 +138,13 @@ mod tests {
         let path_strategy = any::<String>().prop_map(|s| PathBuf::from(format!("{}.json", s)));
         let list_strategy =
             proptest::collection::hash_map(arb_ip_addr(), arb_system_time(), 0..100);
+        let set_strategy = vec(arb_ip_addr(), 0..20);
 
-        (path_strategy, list_strategy).prop_map(|(filename, list)| BlackList { filename, list })
+        (path_strategy, list_strategy, set_strategy).prop_map(|(filename, list, set)| BlackList {
+            filename,
+            list,
+            ephemeral_bans: set.into_iter().collect(),
+        })
     }
 
     #[proptest]
@@ -170,6 +188,8 @@ mod tests {
                 .unwrap()
                 .as_secs();
             prop_assert_eq!(original_dur, loaded_dur);
+
+            prop_assert!(loaded.ephemeral_bans.is_empty());
         }
 
         // clean up
@@ -182,6 +202,16 @@ mod tests {
         #[strategy(arb_ip_addr())] ip: IpAddr,
     ) {
         black_list.ban(ip);
+
+        prop_assert!(black_list.is_banned(&ip));
+    }
+
+    #[proptest]
+    fn cli_peer_is_banned(
+        #[strategy(black_list_strategy())] mut black_list: BlackList,
+        #[strategy(arb_ip_addr())] ip: IpAddr,
+    ) {
+        black_list.ephemeral_bans.insert(ip);
 
         prop_assert!(black_list.is_banned(&ip));
     }

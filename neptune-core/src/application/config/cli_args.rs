@@ -85,15 +85,14 @@ pub struct Args {
     /// used here may not contain spaces.
     pub(crate) block_notify: Option<String>,
 
-    /// Ban connections to this node from IP address.
+    /// Ban connections to and from the given IP address.
     ///
-    /// This node can still make outgoing connections to IP address.
+    /// If a libp2p Multiaddr is supplied, the underlying IP address will be
+    /// exctracted.
     ///
-    /// To do this, see `--peer`.
-    ///
-    /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8
-    #[clap(long, value_name = "IP")]
-    pub(crate) ban: Vec<IpAddr>,
+    /// E.g.: --ban 1.2.3.4 --ban /ip4/8.8.4.4/udp/1337/quic-v1
+    #[structopt(long = "ban", value_parser(parse_to_multiaddr))]
+    pub(crate) bans: Vec<Multiaddr>,
 
     /// The threshold at which a peer's standing is considered “bad”. Current
     /// connections to peers in bad standing are terminated. Connection attempts
@@ -401,13 +400,12 @@ pub struct Args {
     ///
     /// It's easier to connect without `/p2p/...` in the end of the address.
     ///
-    /// The trust assumptions are interpreted in spirit of multiaddress.
+    /// The trust assumptions are interpreted in spirit of libp2p Multiaddr.
     ///
-    /// - without `/p2p/...` it will be adding any peer found on the endpoint
+    /// - without `/p2p/...` it will be adding any peer found on the endpoint;
     /// - with `/p2p/...` connections to the given endpoint will fail if the
-    ///   peer id there had changed
-    /// - with only `/p2p/...` it will be trying to reach this peer (if the node
-    ///   will ever find how to connect to the network)
+    ///   `PeerId` there had changed; and it will continue to try to reach this
+    ///   peer indefinitely.
     #[structopt(long = "peer", value_parser(parse_to_multiaddr))]
     pub peers: Vec<Multiaddr>,
 
@@ -918,6 +916,23 @@ impl Args {
         }
 
         addrs
+    }
+
+    /// The list of IPs banned from the CLI.
+    ///
+    /// This convenience function extracts the IPs from the `bans` argument
+    /// which contains `Multiaddr`s, not IPs.
+    pub fn banned_ips(&self) -> Vec<IpAddr> {
+        self.bans
+            .iter()
+            .filter_map(|ma| {
+                ma.iter().find_map(|protocol| match protocol {
+                    Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                    Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                    _ => None,
+                })
+            })
+            .collect()
     }
 }
 

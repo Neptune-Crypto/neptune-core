@@ -191,12 +191,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         .await?;
     info!("UTXO restoration check complete");
 
-    // Set up the libp2p network Actor
+    // Set up the libp2p NetworkActor
     info!("Setting up Network Actor");
     let network_config = NetworkConfig::default()
         .with_subdirectory(data_directory.network_subdirectory())
         .with_network(cli_args.network)
-        .with_max_num_peers(cli_args.max_num_peers);
+        .with_max_num_peers(cli_args.max_num_peers)
+        .with_cli_bans(cli_args.bans.clone())
+        .with_cli_peers(cli_args.peers.clone());
     let identity = resolve_identity(
         cli_args
             .identity_file
