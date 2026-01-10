@@ -4,6 +4,7 @@ pub(crate) mod upgrade_incentive;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::process::Command;
 use std::process::Stdio;
@@ -12,6 +13,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::Result;
+use itertools::Either;
 use itertools::Itertools;
 use libp2p::PeerId;
 use proof_upgrader::get_upgrade_task_from_mempool;
@@ -1126,7 +1128,7 @@ impl MainLoopHandler {
                 // the ban.
                 if let Err(e) = self
                     .network_command_tx
-                    .send(NetworkActorCommand::Ban(malicious_peer_id))
+                    .send(NetworkActorCommand::Ban(Either::Left(malicious_peer_id)))
                     .await
                 {
                     error!("Cannot send message to NetworkActor: {e}.");
@@ -2062,6 +2064,88 @@ impl MainLoopHandler {
                         .restore_monitored_utxos_from_archival_mutator_set()
                         .await;
                 });
+
+                Ok(false)
+            }
+            RPCServerToMain::Ban(multiaddr) => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::Ban");
+
+                // Try get `PeerId` from peer map. Success indicates we are
+                // currently connected to them.
+                let mut maybe_network_command = None;
+                let mut maybe_peer_message: Option<MainToPeerTask> = None;
+                if let Some((peer_id, peer_info)) = self
+                    .global_state_lock()
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .peer_map
+                    .iter_mut()
+                    .find(|(_peer_id, peer_info)| peer_info.address() == multiaddr)
+                {
+                    // Send `Ban` command to NetworkActor.
+                    info!("Banning peer by PeerId {peer_id}.");
+                    maybe_network_command = Some(NetworkActorCommand::Ban(Either::Left(*peer_id)));
+
+                    // Max out peer's negative standing.
+                    peer_info.standing.standing = -peer_info.standing.peer_tolerance;
+
+                    // Disconnect.
+                    maybe_peer_message = Some(MainToPeerTask::Disconnect(*peer_id));
+                } else if let Some(ip_addr) = multiaddr.iter().find_map(|protocol| match protocol {
+                    libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                    libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                    _ => None,
+                }) {
+                    // Send `Ban` command to NetworkActor.
+                    info!("Banning peer by IP {ip_addr}.");
+                    maybe_network_command = Some(NetworkActorCommand::Ban(Either::Right(ip_addr)));
+                } else {
+                    warn!("Cannot ban peer: failed to extract PeerId and IP address. Nothing to hammer.");
+                };
+
+                // Now that the lock is dropped, we can send messages without
+                // risk of heart attack.
+                if let Some(ban_command) = maybe_network_command {
+                    if let Err(e) = self.network_command_tx.send(ban_command).await {
+                        error!("Cannot send Ban message to NetworkActor: {e}.");
+                    }
+                }
+                if let Some(peer_message) = maybe_peer_message {
+                    if let Err(e) = self.main_to_peer_broadcast_tx.send(peer_message) {
+                        error!("Cannot send Disconnect message to peer loop: {e}.");
+                    }
+                }
+                Ok(false)
+            }
+            RPCServerToMain::Unban(multiaddr) => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::Unban");
+
+                if let Some(ip_addr) = multiaddr.iter().find_map(|protocol| match protocol {
+                    libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                    libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                    _ => None,
+                }) {
+                    // Send Unban command to NetworkActor
+                    if let Err(e) = self
+                        .network_command_tx
+                        .send(NetworkActorCommand::Unban(ip_addr))
+                        .await
+                    {
+                        error!("Cannot send Unban message to NetworkActor: {e}.");
+                        return Ok(false);
+                    };
+
+                    // Reset standing in database.
+                    self.global_state_lock()
+                        .lock_guard_mut()
+                        .await
+                        .net
+                        .clear_ip_standing_in_database(ip_addr)
+                        .await;
+                } else {
+                    warn!("Cannot ban peer: failed to extract IP address. Nothing to hammer.");
+                }
 
                 Ok(false)
             }

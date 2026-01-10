@@ -1318,26 +1318,37 @@ impl NetworkActor {
                 }
             }
 
-            NetworkActorCommand::Ban(malicious_peer_id) => {
-                // Extract IPs
+            NetworkActorCommand::Ban(malicious_peer) => {
                 let mut bannable_ips = HashSet::new();
-                let active_connection_address = self
-                    .active_connections
-                    .get(&malicious_peer_id)
-                    .cloned()
-                    .into_iter();
-                let address_book_addresses = self
-                    .address_book
-                    .get(&malicious_peer_id)
-                    .into_iter()
-                    .flat_map(|peer| peer.listen_addresses.clone());
-                for address in active_connection_address.chain(address_book_addresses) {
-                    if let Some(ip) = address.iter().find_map(|protocol| match protocol {
-                        libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
-                        libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
-                        _ => None,
-                    }) {
-                        bannable_ips.insert(ip);
+
+                match malicious_peer {
+                    itertools::Either::Left(malicious_peer_id) => {
+                        // Extract IPs
+                        let active_connection_address = self
+                            .active_connections
+                            .get(&malicious_peer_id)
+                            .cloned()
+                            .into_iter();
+                        let address_book_addresses = self
+                            .address_book
+                            .get(&malicious_peer_id)
+                            .into_iter()
+                            .flat_map(|peer| peer.listen_addresses.clone());
+                        for address in active_connection_address.chain(address_book_addresses) {
+                            if let Some(ip) = address.iter().find_map(|protocol| match protocol {
+                                libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                                libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                                _ => None,
+                            }) {
+                                bannable_ips.insert(ip);
+                            }
+                        }
+
+                        // Disconnect
+                        let _ = self.swarm.disconnect_peer_id(malicious_peer_id);
+                    }
+                    itertools::Either::Right(ip_addr) => {
+                        bannable_ips.insert(ip_addr);
                     }
                 }
 
@@ -1350,9 +1361,6 @@ impl NetworkActor {
                         self.black_list.ban(ip);
                     }
                 }
-
-                // Disconnect
-                let _ = self.swarm.disconnect_peer_id(malicious_peer_id);
             }
 
             NetworkActorCommand::Unban(ip_addr) => {

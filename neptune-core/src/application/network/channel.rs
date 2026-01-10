@@ -1,5 +1,6 @@
 use std::net::IpAddr;
 
+use itertools::Either;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use tokio::task::JoinHandle;
@@ -15,7 +16,7 @@ pub enum NetworkActorCommand {
 
     /// Instructs the [`NetworkActor`](super::actor::NetworkActor) to ban the
     /// given peer.
-    Ban(PeerId),
+    Ban(Either<PeerId, IpAddr>),
 
     /// Instructs the [`NetworkActor`](super::actor::NetworkActor) to remove the
     /// IP address from the black list, thereby unbanning them.
