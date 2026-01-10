@@ -123,6 +123,13 @@ pub(crate) enum PeerTaskToMain {
     DroppedPeer(PeerId),
     SyncCoverage(SynchronizationBitMask, PeerId),
     PeerWantsSyncBlock(PeerId, BlockHeight),
+
+    // Node wants to ban the peer. The legacy peer-to-peer stack already takes
+    // care of this in the destructor of the peer loop. However, for the ban to
+    // have effect at the libp2p network stack as well, this message must reach
+    // there. So: send a message to the main loop to be relayed to the
+    // NetworkActor.
+    Ban(PeerId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,6 +153,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::DroppedPeer(_) => "dropped peer",
             PeerTaskToMain::SyncCoverage(_, _) => "sync coverage",
             PeerTaskToMain::PeerWantsSyncBlock(_, _) => "peer wants sync block",
+            PeerTaskToMain::Ban(_) => "node wants to ban a malicious peer",
         }
         .to_string()
     }

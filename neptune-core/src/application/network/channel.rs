@@ -1,4 +1,7 @@
+use std::net::IpAddr;
+
 use libp2p::Multiaddr;
+use libp2p::PeerId;
 use tokio::task::JoinHandle;
 
 /// Commands from Application -> Network
@@ -6,11 +9,20 @@ pub enum NetworkActorCommand {
     /// Instructs the libp2p swarm to dial a specific [`Multiaddr`].
     Dial(Multiaddr),
 
-    /// Instructs the Actor to open dialing endpoint on the given [`Multiaddr`]
-    /// for incoming connections.
+    /// Instructs the [`NetworkActor`](super::actor::NetworkActor) to open
+    /// dialing endpoint on the given [`Multiaddr`]for incoming connections.
     Listen(Multiaddr),
 
-    /// Signals the Actor to begin a graceful shutdown of all network tasks.
+    /// Instructs the [`NetworkActor`](super::actor::NetworkActor) to ban the
+    /// given peer.
+    Ban(PeerId),
+
+    /// Instructs the [`NetworkActor`](super::actor::NetworkActor) to remove the
+    /// IP address from the black list, thereby unbanning them.
+    Unban(IpAddr),
+
+    /// Signals the [`NetworkActor`](super::actor::NetworkActor) to begin a
+    /// graceful shutdown of all network tasks.
     Shutdown,
 }
 
