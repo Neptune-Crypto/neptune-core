@@ -290,7 +290,7 @@ pub struct PeerStanding {
     pub standing: i32,
     pub latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
     pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
-    peer_tolerance: i32,
+    pub(crate) peer_tolerance: i32,
 }
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct StandingExceedsBanThreshold;

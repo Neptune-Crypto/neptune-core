@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use futures::channel::oneshot;
+use libp2p::Multiaddr;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
@@ -135,6 +136,8 @@ pub enum RPCServerToMain {
         first: BlockHeight,
         last: BlockHeight,
     },
+    Ban(Multiaddr),
+    Unban(Multiaddr),
 }
 
 pub trait Cancelable: Send + Sync {
