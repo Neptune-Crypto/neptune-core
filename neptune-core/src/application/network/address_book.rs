@@ -8,11 +8,11 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::ops::Deref;
 use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use anyhow::bail;
 use get_size2::GetSize;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
@@ -108,26 +108,33 @@ mod protocol_vec_serde {
 /// Maps [`PeerId`]s to peer metadata such as listen addresses, among other
 /// fields.
 ///
-/// The [`AddressBook`] acts as a specialized wrapper around a [`HashMap`].
+/// The [`AddressBook`] contains a [`HashMap`] of [`PeerId`] --> [`Peer`], in
+/// addition to a filename which determines where it is persisted.
 ///
 /// By encapsulating the [`Peer`] struct, it ensures that peer metadata—such as
 /// 'first seen' and 'last seen' timestamps—is managed consistently and cannot
 /// be modified arbitrarily by external actors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct AddressBook(pub(super) HashMap<PeerId, Peer>);
+pub(crate) struct AddressBook {
+    pub(super) book: HashMap<PeerId, Peer>,
+    pub(super) filename: PathBuf,
+}
 
 impl Deref for AddressBook {
     type Target = HashMap<PeerId, Peer>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.book
     }
 }
 
 impl AddressBook {
-    /// Creates a new, empty `AddressBook`.
-    pub(crate) fn new() -> Self {
-        Self(HashMap::new())
+    /// Create a new *empty* (except for the file name) [`AddressBook`].
+    pub(super) fn new_empty<P: AsRef<Path>>(filename: P) -> Self {
+        Self {
+            book: HashMap::<PeerId, Peer>::new(),
+            filename: filename.as_ref().to_path_buf(),
+        }
     }
 
     /// Inserts a new peer or updates an existing one with raw data fields.
@@ -180,7 +187,7 @@ impl AddressBook {
             return;
         }
 
-        if let Some(peer) = self.0.get_mut(&peer_id) {
+        if let Some(peer) = self.book.get_mut(&peer_id) {
             peer.listen_addresses = listen_addresses;
             peer.agent_version = agent_version;
             peer.protocol_version = protocol_version;
@@ -196,7 +203,7 @@ impl AddressBook {
                 last_seen: SystemTime::now(),
                 fail_count: 0,
             };
-            self.0.insert(peer_id, peer);
+            self.book.insert(peer_id, peer);
         }
     }
 
@@ -207,13 +214,13 @@ impl AddressBook {
     /// 2. Whether the peer was seen in the last 10 minutes.
     /// 3. Have the oldest 'first_seen' timestamp (demonstrated longevity).
     pub(crate) fn prune_to_length(&mut self, target_length: usize) {
-        if self.0.len() <= target_length {
+        if self.book.len() <= target_length {
             return;
         }
 
         // Collect scores for sorting by.
         let mut peer_scores: Vec<(PeerId, PeerScore)> = self
-            .0
+            .book
             .iter()
             .map(|(id, peer)| (*id, PeerScore::from_peer(peer)))
             .collect();
@@ -229,11 +236,11 @@ impl AddressBook {
             .map(|(id, _)| id)
             .collect();
 
-        self.0.retain(|id, _| keys_to_keep.contains(id));
+        self.book.retain(|id, _| keys_to_keep.contains(id));
 
         tracing::info!(
             target = target_length,
-            remaining = self.0.len(),
+            remaining = self.book.len(),
             "Address book pruned."
         );
     }
@@ -241,7 +248,7 @@ impl AddressBook {
     /// Increment by one the `fail_count` variable which tracks how often a
     /// connection attempt has failed since the last success.
     pub(crate) fn bump_fail_count(&mut self, peer_id: PeerId) {
-        if let Some(peer) = self.0.get_mut(&peer_id) {
+        if let Some(peer) = self.book.get_mut(&peer_id) {
             peer.fail_count = peer.fail_count.saturating_add(1);
         }
     }
@@ -249,7 +256,7 @@ impl AddressBook {
     /// Reset to 0 the `fail_count` variable, which tracks how often a
     /// connection has failed since the last success.
     pub(crate) fn reset_fail_count(&mut self, peer_id: PeerId) {
-        if let Some(peer) = self.0.get_mut(&peer_id) {
+        if let Some(peer) = self.book.get_mut(&peer_id) {
             peer.fail_count = 0;
         }
     }
@@ -259,7 +266,7 @@ impl AddressBook {
     /// Prioritizes peers matching our supported protocols and recent activity.
     pub(crate) fn select_initial_peers(&self, limit: usize) -> Vec<Multiaddr> {
         let mut scores: Vec<(PeerScore, &Peer)> = self
-            .0
+            .book
             .values()
             .map(|p| (PeerScore::from_peer(p), p))
             // Only dial peers that support Neptune Cash
@@ -300,54 +307,58 @@ impl AddressBook {
             .collect()
     }
 
-    /// Persists the address book to a JSON file at the specified path.
+    /// Persists the address book to a JSON file.
     ///
     /// This allows the node to recover its address book after a restart,
     /// significantly speeding up the peer discovery process.
-    pub(crate) fn save_to_disk<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let file = File::create(path)?;
+    pub(crate) fn save_to_disk(&self) -> anyhow::Result<()> {
+        let file = File::create(self.filename.clone())?;
         let writer = BufWriter::new(file);
 
         // Pretty-printing during development; swap to to_writer if file size
         // becomes an issue.
-        serde_json::to_writer_pretty(writer, &self.0)?;
+        serde_json::to_writer_pretty(writer, &self)?;
 
         tracing::info!("Address book persisted to disk.");
         Ok(())
     }
 
-    /// Populates the address book with the entries from a given JSON file.
+    /// Loads the address book from the given file.
     ///
-    /// If the file does not exist, an error is returned but otherwise nothing
-    /// happens. If the file contains one or more entries that already live in
-    /// the address book, they will be overwritten.
-    pub(crate) fn load_from_disk<P: AsRef<Path>>(&mut self, path: P) -> anyhow::Result<()> {
+    /// If the file does not exist, the empty address book is returned.
+    ///
+    /// # Return Value
+    ///
+    ///  - `Ok(empty_address_book)` if the file does not exist.
+    ///  - `Ok(address_book)` if the file does exist and everything succeeded.
+    ///  - `Err(e)` if there was a decoding or file operations error.
+    pub(crate) fn load_or_new<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         if !path.as_ref().exists() {
-            bail!("No address book file found; starting with an empty list.");
+            return Ok(Self::new_empty(path));
         }
 
         let file = File::open(path)?;
         let reader = BufReader::new(file);
-        let map: HashMap<PeerId, Peer> = serde_json::from_reader(reader)?;
+        let address_book: AddressBook = serde_json::from_reader(reader)?;
 
-        tracing::info!(peer_count = map.len(), "Address book loaded from disk.");
+        tracing::info!(
+            peer_count = address_book.book.len(),
+            "Address book loaded from disk."
+        );
 
-        for (peer_id, peer) in map {
-            self.0.insert(peer_id, peer);
-        }
-        Ok(())
+        Ok(address_book)
     }
 }
 
 impl PartialEq for AddressBook {
     fn eq(&self, other: &Self) -> bool {
         let lhs = self
-            .0
+            .book
             .iter()
             .map(|(peer_id, peer)| (*peer_id, peer.clone()))
             .collect::<HashSet<_>>();
         let rhs = other
-            .0
+            .book
             .iter()
             .map(|(peer_id, peer)| (*peer_id, peer.clone()))
             .collect::<HashSet<_>>();
@@ -386,59 +397,68 @@ impl PeerScore {
 mod tests {
     use std::env;
     use std::fs;
-    use std::time::UNIX_EPOCH;
 
+    use proptest::collection::vec;
+    use proptest::prelude::any;
+    use proptest::prelude::BoxedStrategy;
+    use proptest::prelude::Strategy;
     use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
+    use crate::application::network::arbitrary::arb_peer_id;
     use crate::application::network::stack::NEPTUNE_PROTOCOL;
 
     use super::*;
 
+    impl AddressBook {
+        /// Create a new [`AddressBook`] with the given fields.
+        fn new<P: AsRef<Path>>(book: HashMap<PeerId, Peer>, filename: P) -> Self {
+            Self {
+                book,
+                filename: filename.as_ref().to_path_buf(),
+            }
+        }
+
+        pub(crate) fn arbitrary() -> BoxedStrategy<Self> {
+            ((0usize..20), any::<String>())
+                .prop_flat_map(move |(num_entries, filename)| {
+                    let filename = filename.clone();
+                    (
+                        vec(arb_peer_id(), num_entries),
+                        vec(Peer::arbitrary(), num_entries),
+                    )
+                        .prop_map(move |(peer_ids, entries)| {
+                            let hash_map: HashMap<PeerId, Peer> =
+                                peer_ids.into_iter().zip(entries).collect();
+                            AddressBook::new(hash_map, filename.clone())
+                        })
+                })
+                .boxed()
+        }
+    }
+
     #[proptest]
     fn write_read_address_book_round_trip(
-        #[strategy(AddressBook::arbitrary())] address_book: AddressBook,
+        #[strategy(AddressBook::arbitrary())] mut address_book: AddressBook,
+        #[strategy(arb::<u64>())] file_id: u64,
     ) {
         let mut path = env::temp_dir();
+        path.push(format!("address_book_test_{}.json", file_id));
+        address_book.filename = path.clone();
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        path.push(format!("address_book_test_{}.json", timestamp));
+        address_book.save_to_disk().unwrap();
 
-        address_book.save_to_disk(&path).unwrap();
-
-        let mut loaded_book = AddressBook::new();
-        loaded_book.load_from_disk(&path).unwrap();
+        let loaded_book = AddressBook::load_or_new(&path).unwrap();
 
         prop_assert_eq!(address_book, loaded_book);
 
         let _ = fs::remove_file(&path);
     }
 
-    #[proptest]
-    fn read_fail_address_book_no_change(
-        #[strategy(AddressBook::arbitrary())] address_book: AddressBook,
-    ) {
-        let mut path = env::temp_dir();
-
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        path.push(format!("address_book_test_{}.json", timestamp));
-
-        let mut new_address_book = address_book.clone();
-
-        new_address_book.load_from_disk(&path).unwrap_err();
-
-        prop_assert_eq!(address_book, new_address_book);
-    }
-
     #[test]
     fn can_select_bootstrap_peers() {
-        let address_book = AddressBook::new();
+        let address_book = AddressBook::new(HashMap::new(), "not-loaded.file");
         let bootstrap_peers = address_book.select_initial_peers(10); // no crash
         assert!(!bootstrap_peers.is_empty());
     }

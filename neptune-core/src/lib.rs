@@ -193,9 +193,16 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
 
     // Set up the libp2p network Actor
     info!("Setting up Network Actor");
+    let network_config = NetworkConfig::default()
+        .with_subdirectory(data_directory.network_subdirectory())
+        .with_network(cli_args.network)
+        .with_max_num_peers(cli_args.max_num_peers);
     let identity = resolve_identity(
-        data_directory.root_dir_path(),
-        cli_args.identity_file.clone(),
+        cli_args
+            .identity_file
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| network_config.identity_file()),
         cli_args.incognito,
         cli_args.new_identity,
     )?;
@@ -203,10 +210,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         peer_task_to_main_tx.clone(),
         main_to_peer_broadcast_tx.clone(),
     );
-    let network_config = NetworkConfig::default()
-        .with_address_book(data_directory.address_book_file())
-        .with_network(cli_args.network)
-        .with_max_num_peers(cli_args.max_num_peers);
     let mut actor = NetworkActor::new(
         identity,
         channels,

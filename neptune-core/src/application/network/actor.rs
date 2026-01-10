@@ -81,9 +81,6 @@ pub(crate) struct NetworkActor {
     /// Dictionary to find peer metadata, connected or not.
     address_book: AddressBook,
 
-    /// [`NetworkConfig`] options for the [`NetworkActor`]
-    config: NetworkConfig,
-
     /// Tracks which peers are holding a reservation for us, along with the
     /// 80%-in timestamp and the listener id (which we need to stop listening).
     relays: HashMap<PeerId, (Option<SystemTime>, libp2p::core::transport::ListenerId)>,
@@ -91,6 +88,8 @@ pub(crate) struct NetworkActor {
     /// Tracks active local listeners (open ports). These IDs represent local
     /// sockets bound to the NIC.
     active_listeners: Vec<libp2p::core::transport::ListenerId>,
+
+    black_list: BlackList,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -202,7 +201,7 @@ impl NetworkActor {
         local_key: libp2p::identity::Keypair,
         channels: NetworkActorChannels,
         global_state_lock: GlobalStateLock,
-        mut config: NetworkConfig,
+        config: NetworkConfig,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let NetworkActorChannels {
             peer_to_main_loop_tx,
@@ -310,21 +309,25 @@ impl NetworkActor {
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
 
-        let mut address_book = AddressBook::new();
-        if let Some(file_name) = config.address_book.as_ref() {
-            if let Err(e) = address_book.load_from_disk(file_name.clone()) {
-                tracing::warn!(
-                    "Failed to load address book from '{}': {e}.",
-                    file_name.to_string_lossy()
-                );
-            } else {
-                tracing::info!(
-                    "Loaded address book from '{}'.",
-                    file_name.to_string_lossy()
-                );
-                config.address_book = Some(file_name.clone());
-            }
-        }
+        // Load or build address book
+        let address_book_file = config.address_book_file();
+        let address_book = AddressBook::load_or_new(&address_book_file).unwrap_or_else(|e| {
+            tracing::warn!(
+                "Failed to load address book from '{}': {e}.",
+                address_book_file.to_string_lossy()
+            );
+            AddressBook::new_empty(address_book_file)
+        });
+
+        // Load or build black list
+        let black_list_file = config.blacklist_file();
+        let black_list = BlackList::load_or_new(&black_list_file).unwrap_or_else(|e| {
+            tracing::warn!(
+                "Failed to load blacklist from '{}': {e}.",
+                black_list_file.to_string_lossy()
+            );
+            BlackList::new(black_list_file)
+        });
 
         Ok(Self {
             swarm,
@@ -335,9 +338,9 @@ impl NetworkActor {
             global_state_lock,
             active_connections: HashMap::new(),
             address_book,
-            config,
             relays: HashMap::new(),
             active_listeners: vec![],
+            black_list,
         })
     }
 
@@ -1151,6 +1154,10 @@ impl NetworkActor {
                 }
             }
 
+            NetworkActorCommand::Ban(malicious_peer_id) => {
+                todo!();
+            }
+
             NetworkActorCommand::Shutdown => {
                 tracing::info!("Network Actor shutting down Swarm...");
 
@@ -1182,14 +1189,14 @@ impl NetworkActor {
                     .with_max_pending_outgoing(Some(0));
                 *self.swarm.behaviour_mut().limits.limits_mut() = zero_limits;
 
-                // Save the address book, if any.
-                if let Some(file_name) = self.config.address_book.as_ref() {
-                    if let Err(e) = self.address_book.save_to_disk(file_name) {
-                        tracing::warn!(
-                            "Failed to persist address book at '{}': {e}.",
-                            file_name.to_string_lossy()
-                        );
-                    }
+                // Save the address book.
+                if let Err(e) = self.address_book.save_to_disk() {
+                    tracing::warn!("Failed to persist address book: {e}.");
+                }
+
+                // Save the black list.
+                if let Err(e) = self.black_list.save_to_disk() {
+                    tracing::warn!("Failed to persist black list: {e}.")
                 }
 
                 // Break connections.
