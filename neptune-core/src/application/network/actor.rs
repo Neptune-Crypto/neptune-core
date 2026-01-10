@@ -90,7 +90,15 @@ pub(crate) struct NetworkActor {
     /// sockets bound to the NIC.
     active_listeners: Vec<libp2p::core::transport::ListenerId>,
 
+    /// Curated list of banned IPs.
     black_list: BlackList,
+
+    /// Peer addresses passed through CLI.
+    ///
+    /// This map maps such peers to `None` if
+    /// no connection was opened; or to `PeerId` if it was opened at some point
+    /// and might be open still.
+    sticky_peers: HashMap<Multiaddr, Option<PeerId>>,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -322,13 +330,21 @@ impl NetworkActor {
 
         // Load or build black list
         let black_list_file = config.blacklist_file();
-        let black_list = BlackList::load_or_new(&black_list_file).unwrap_or_else(|e| {
-            tracing::warn!(
-                "Failed to load blacklist from '{}': {e}.",
-                black_list_file.to_string_lossy()
-            );
-            BlackList::new(black_list_file)
-        });
+        let black_list = BlackList::load_or_new(&black_list_file)
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Failed to load blacklist from '{}': {e}.",
+                    black_list_file.to_string_lossy()
+                );
+                BlackList::new(black_list_file)
+            })
+            .with_ephemeral_bans(config.banned_ips());
+
+        let sticky_peers = config
+            .sticky_peers
+            .iter()
+            .map(|ma| (ma.clone(), None))
+            .collect();
 
         Ok(Self {
             swarm,
@@ -342,6 +358,7 @@ impl NetworkActor {
             relays: HashMap::new(),
             active_listeners: vec![],
             black_list,
+            sticky_peers,
         })
     }
 
@@ -1181,10 +1198,11 @@ impl NetworkActor {
     ///
     /// # Return Value
     ///
-    ///  - Err(_) if something went wrong badly enough to warrant the
-    ///    application (or at least the libp2p Actor) to shut down immediately.
-    ///  - Ok(Self::KEEP_ALIVE) to keep the event loop running.
-    ///  - Ok(!Self::KEEP_ALIVE) to gracefully shut down the event loop.
+    ///  - `Err(_)`` if something went wrong badly enough to warrant the
+    ///    application (or at least the libp2p NetworkActor) to shut down
+    ///    immediately.
+    ///  - `Ok(Self::KEEP_ALIVE)` to keep the event loop running.
+    ///  - `Ok(!Self::KEEP_ALIVE)` to gracefully shut down the event loop.
     #[allow(
         clippy::unnecessary_wraps,
         reason = "function signature anticipates more complex, fallible commands"
@@ -1193,6 +1211,26 @@ impl NetworkActor {
         match command {
             NetworkActorCommand::Dial(addr) => {
                 tracing::info!("Manual dial requested for address: {}", addr);
+
+                // If the peer was banned as a result of poor standing, then the
+                // Dial overturns that ban. If the peer is banned as a result of
+                // a `--ban <IP>` CLI argument, that ban stands.
+                if let Some(ip_addr) = addr.iter().find_map(|protocol| match protocol {
+                    libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                    libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                    _ => None,
+                }) {
+                    if let Some(timestamp) = self.black_list.list.remove(&ip_addr) {
+                        tracing::info!(%ip_addr, "Dialed peer was banned until {:?}; now unbanned.", timestamp);
+
+                        // The main loop must not forget to boost the peer's
+                        // standing, or they will not be able to set up a
+                        // Gateway / peer loop connection. However, this boost
+                        // is the main loop's responsibility and should be done
+                        // in conjunction with issuing the `Dial` command.
+                    }
+                }
+
                 // We use the swarm's dial method. libp2p handles the underlying
                 // TCP/transport logic.
                 if let Err(e) = self.swarm.dial(addr.clone()) {
