@@ -61,7 +61,7 @@ impl BlackList {
         self.list.contains_key(ip_address)
     }
 
-    /// Writes the current blacklist to file.
+    /// Write the current blacklist to disk.
     ///
     /// Uses JSON encoding.
     ///
@@ -69,8 +69,8 @@ impl BlackList {
     ///
     ///  - `Ok(())` in case of success.
     ///  - `Err(_)` if JSON encoding failed or it file operations failed.
-    pub(crate) fn save_to_disk<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let file = File::create(path)?;
+    pub(crate) fn save_to_disk(&self) -> anyhow::Result<()> {
+        let file = File::create(self.filename.clone())?;
         let writer = BufWriter::new(file);
         serde_json::to_writer_pretty(writer, self)?;
         Ok(())
@@ -87,7 +87,7 @@ impl BlackList {
     ///    succeeded.
     ///  - `Err(_)` if the file does exist and either reading or decoding
     ///    failed.
-    pub(crate) fn load_from_disk_or_new<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+    pub(crate) fn load_or_new<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         if !path.as_ref().exists() {
             return Ok(Self::new(path.as_ref().to_path_buf()));
         }
@@ -101,37 +101,22 @@ impl BlackList {
 
 #[cfg(test)]
 mod tests {
+    use crate::application::network::arbitrary::arb_ip_addr;
+    use crate::application::network::arbitrary::arb_system_time;
+
     use super::*;
 
     use proptest::prelude::any;
     use proptest::prelude::Strategy;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
-    use proptest::prop_oneof;
     use proptest_arbitrary_interop::arb;
-    use std::time::Duration;
     use test_strategy::proptest;
-
-    // Strategy to generate an IpAddr
-    fn any_ip_addr() -> impl Strategy<Value = IpAddr> {
-        prop_oneof![
-            any::<[u8; 4]>().prop_map(|octets| IpAddr::V4(octets.into())),
-            any::<[u8; 16]>().prop_map(|octets| IpAddr::V6(octets.into())),
-        ]
-    }
-
-    // Strategy to generate a SystemTime (within a reasonable range around "now")
-    fn any_system_time() -> impl Strategy<Value = SystemTime> {
-        // Generate a timestamp within +/- 10 years of Unix Epoch for stability,
-        // or use a specific range relative to now.
-        any::<u64>()
-            .prop_map(|secs| SystemTime::UNIX_EPOCH + Duration::from_secs(secs % 2_000_000_000))
-    }
 
     fn black_list_strategy() -> impl Strategy<Value = BlackList> {
         let path_strategy = any::<String>().prop_map(|s| PathBuf::from(format!("{}.json", s)));
         let list_strategy =
-            proptest::collection::hash_map(any_ip_addr(), any_system_time(), 0..100);
+            proptest::collection::hash_map(arb_ip_addr(), arb_system_time(), 0..100);
 
         (path_strategy, list_strategy).prop_map(|(filename, list)| BlackList { filename, list })
     }
@@ -149,12 +134,9 @@ mod tests {
         temp_path.push(unique_name);
         original.filename = temp_path.clone();
 
-        original
-            .save_to_disk(&temp_path)
-            .expect("Failed to save to disk");
+        original.save_to_disk().expect("Failed to save to disk");
 
-        let loaded =
-            BlackList::load_from_disk_or_new(&temp_path).expect("Failed to load from disk");
+        let loaded = BlackList::load_or_new(&temp_path).expect("Failed to load from disk");
 
         // aAssert equality
         // Note: SystemTime precision can sometimes vary by a few nanoseconds on
@@ -184,5 +166,35 @@ mod tests {
 
         // clean up
         let _ = std::fs::remove_file(temp_path);
+    }
+
+    #[proptest]
+    fn banned_peer_is_banned(
+        #[strategy(black_list_strategy())] mut black_list: BlackList,
+        #[strategy(arb_ip_addr())] ip: IpAddr,
+    ) {
+        black_list.ban(ip);
+
+        prop_assert!(black_list.is_banned(&ip));
+    }
+
+    #[proptest]
+    fn new_peer_is_not_banned(
+        #[strategy(black_list_strategy())] black_list: BlackList,
+        #[strategy(arb_ip_addr())] ip: IpAddr,
+    ) {
+        prop_assert!(!black_list.is_banned(&ip));
+    }
+
+    #[proptest]
+    fn unbanned_peer_is_not_banned(
+        #[strategy(black_list_strategy())] mut black_list: BlackList,
+        #[strategy(arb_ip_addr())] ip: IpAddr,
+    ) {
+        black_list.ban(ip);
+
+        black_list.unban(&ip);
+
+        prop_assert!(!black_list.is_banned(&ip));
     }
 }

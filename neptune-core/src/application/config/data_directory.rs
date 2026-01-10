@@ -24,7 +24,7 @@ use crate::state::wallet::wallet_file::WALLET_OUTPUT_COUNT_DB_NAME;
 const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.
 const DB_MIGRATION_BACKUPS_DIR: &str = "migration_backups";
-const ADDRESS_BOOK_FILE: &str = "address-book.json";
+const NETWORK_SUBDIRECTORY_NAME: &str = "network";
 
 // TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -98,9 +98,8 @@ impl DataDirectory {
         self.data_dir.join(Path::new(DATABASE_DIRECTORY_ROOT_NAME))
     }
 
-    /// The location of the address book file
-    pub fn address_book_file(&self) -> PathBuf {
-        self.data_dir.join(Path::new(ADDRESS_BOOK_FILE))
+    pub fn network_subdirectory(&self) -> PathBuf {
+        self.data_dir.join(Path::new(NETWORK_SUBDIRECTORY_NAME))
     }
 
     ///////////////////////////////////////////////////////////////////////////

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::net::IpAddr;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -6,22 +6,32 @@ use libp2p::Multiaddr;
 use libp2p::PeerId;
 use libp2p::StreamProtocol;
 use proptest::collection::vec;
+use proptest::prelude::any;
 use proptest::prelude::BoxedStrategy;
 use proptest::prelude::Strategy;
+use proptest::prop_oneof;
 
-use crate::application::network::address_book::AddressBook;
 use crate::application::network::address_book::Peer;
 
+// Strategy to generate an IpAddr
+pub(crate) fn arb_ip_addr() -> impl Strategy<Value = IpAddr> {
+    prop_oneof![
+        any::<[u8; 4]>().prop_map(|octets| IpAddr::V4(octets.into())),
+        any::<[u8; 16]>().prop_map(|octets| IpAddr::V6(octets.into())),
+    ]
+}
+
 pub(crate) fn arb_multiaddr() -> impl Strategy<Value = Multiaddr> {
-    // Generate the 4 octets of an IP address
-    let ip_strat = proptest::collection::vec(0..255u8, 4);
     // Generate a standard port range
     let port_strat = 1..65535u16;
 
-    (ip_strat, port_strat).prop_map(|(ip, port)| {
-        format!("/ip4/{}.{}.{}.{}/tcp/{}", ip[0], ip[1], ip[2], ip[3], port)
-            .parse::<Multiaddr>()
-            .expect("Generated Multiaddr string should always be valid")
+    (arb_ip_addr(), port_strat).prop_map(|(ip, port)| {
+        match ip {
+            IpAddr::V4(ipv4_addr) => format!("/ip4/{ipv4_addr}/tcp/{port}"),
+            IpAddr::V6(ipv6_addr) => format!("/ip6/{ipv6_addr}/tcp/{port}"),
+        }
+        .parse::<Multiaddr>()
+        .expect("Generated Multiaddr string should always be valid")
     })
 }
 
@@ -118,22 +128,4 @@ pub(crate) fn arb_peer_id() -> impl Strategy<Value = PeerId> {
         let keypair = libp2p::identity::ed25519::Keypair::from(secret_key);
         PeerId::from_public_key(&libp2p::identity::PublicKey::from(keypair.public()))
     })
-}
-
-impl AddressBook {
-    pub(crate) fn arbitrary() -> BoxedStrategy<Self> {
-        (0usize..20)
-            .prop_flat_map(|num_entries| {
-                (
-                    vec(arb_peer_id(), num_entries),
-                    vec(Peer::arbitrary(), num_entries),
-                )
-                    .prop_map(|(peer_ids, entries)| {
-                        let hash_map: HashMap<PeerId, Peer> =
-                            peer_ids.into_iter().zip(entries).collect();
-                        AddressBook(hash_map)
-                    })
-            })
-            .boxed()
-    }
 }

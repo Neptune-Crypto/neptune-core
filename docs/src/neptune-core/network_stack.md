@@ -154,9 +154,15 @@ Note that the main loop is responsible for broadcasting a `Disconnect` message t
 
 In the `NetworkStack` (the libp2p `NetworkBehaviour`), each subprotocol serves a specialized role. Together, they handle everything from finding peers in a decentralized DHT to "punching" through firewalls.
 
-Here is a summary of the protocols integrated into Neptune-Cash.
+## 5. Persistence
 
-## 5. Component Protocols
+Three separate pieces of information are persisted to disk, and read from disk at startup. By default these are stored in the subdirectory `[DATA_DIR]/network/`.
+
+ 1. The *identity file* `identity.key` contains the secret key for the node's libp2p key pair. As per standard libp2p practice, the node's `PeerId` is the multihash of its public key, and this public key is determined by this file.
+ 2. The *address book* `address-book.json` contains peer metadata for long-lived dialable connections. The address book can contain entries that do not correspond to currently active connections, but over time unreachable nodes will be degraded in score and eventually booted from the list.
+ 3. The *black list* `black-list.json` contains the IP addresses of banned peers.
+
+## 6. Component Protocols
 
 ### [Identify](https://github.com/libp2p/specs/tree/master/identify)
 
