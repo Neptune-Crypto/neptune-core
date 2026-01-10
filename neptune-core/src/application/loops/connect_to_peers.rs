@@ -155,7 +155,7 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
         }
     }
 
-    if cli.ban.contains(&connecting_ip) {
+    if cli.banned_ips().contains(&connecting_ip) {
         debug!("Rejecting incoming connection because it's explicitly banned");
         return false;
     }
@@ -186,7 +186,7 @@ async fn check_if_connection_is_allowed(
     let global_state = global_state_lock.lock_guard().await;
 
     // Disallow connection if peer is banned via CLI arguments
-    if cli_arguments.ban.contains(&peer_address.ip()) {
+    if cli_arguments.banned_ips().contains(&peer_address.ip()) {
         let ip = peer_address.ip();
         debug!("Peer {ip}, banned via CLI argument, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
@@ -914,7 +914,7 @@ mod tests {
         );
 
         cli.restrict_peers_to_list = false;
-        cli.ban.push(socket_address.ip());
+        cli.bans.push(Multiaddr::from(socket_address.ip()));
         assert!(
             !precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
             "Incoming disallowed when peer is banned via CLI argument"
@@ -992,7 +992,7 @@ mod tests {
         );
 
         // pretend --ban <peer_sa>
-        cli.ban.push(peer_sa.ip());
+        cli.bans.push(Multiaddr::from(peer_sa.ip()));
         state_lock.set_cli(cli.clone()).await;
 
         // Verify that banned peers are rejected by this check
@@ -1010,7 +1010,7 @@ mod tests {
         );
 
         // pretend --ban ""
-        cli.ban.pop();
+        cli.bans.pop();
         state_lock.set_cli(cli.clone()).await;
 
         status = check_if_connection_is_allowed(

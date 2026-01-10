@@ -1,4 +1,7 @@
+use std::net::IpAddr;
 use std::path::PathBuf;
+
+use libp2p::Multiaddr;
 
 use crate::api::export::Network;
 
@@ -20,6 +23,9 @@ pub(crate) struct NetworkConfig {
     address_book_file: Option<PathBuf>,
     blacklist_file: Option<PathBuf>,
 
+    banned_peers: Vec<Multiaddr>,
+    pub(super) sticky_peers: Vec<Multiaddr>,
+
     /// The max. number of peers to connect to.
     pub(super) max_num_peers: usize,
 }
@@ -32,6 +38,8 @@ impl Default for NetworkConfig {
             identify_file: None,
             address_book_file: None,
             blacklist_file: None,
+            banned_peers: vec![],
+            sticky_peers: vec![],
             max_num_peers: 10,
         }
     }
@@ -50,6 +58,16 @@ impl NetworkConfig {
 
     pub(crate) fn with_max_num_peers(mut self, new_max: usize) -> Self {
         self.max_num_peers = new_max;
+        self
+    }
+
+    pub(crate) fn with_cli_bans(mut self, banned_peers: Vec<Multiaddr>) -> Self {
+        self.banned_peers.extend(banned_peers);
+        self
+    }
+
+    pub(crate) fn with_cli_peers(mut self, sticky_peers: Vec<Multiaddr>) -> Self {
+        self.sticky_peers.extend(sticky_peers);
         self
     }
 
@@ -81,5 +99,18 @@ impl NetworkConfig {
                 .clone()
                 .unwrap_or_else(|| PathBuf::from(DEFAULT_BLACKLIST_FILENAME)),
         )
+    }
+
+    pub(crate) fn banned_ips(&self) -> Vec<IpAddr> {
+        self.banned_peers
+            .iter()
+            .filter_map(|ma| {
+                ma.iter().find_map(|protocol| match protocol {
+                    libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                    libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                    _ => None,
+                })
+            })
+            .collect()
     }
 }

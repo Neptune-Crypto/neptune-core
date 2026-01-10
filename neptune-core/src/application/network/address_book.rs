@@ -317,7 +317,7 @@ impl AddressBook {
 
         // Pretty-printing during development; swap to to_writer if file size
         // becomes an issue.
-        serde_json::to_writer_pretty(writer, &self)?;
+        serde_json::to_writer_pretty(writer, &self.book)?;
 
         tracing::info!("Address book persisted to disk.");
         Ok(())
@@ -337,16 +337,16 @@ impl AddressBook {
             return Ok(Self::new_empty(path));
         }
 
-        let file = File::open(path)?;
+        let file = File::open(&path)?;
         let reader = BufReader::new(file);
-        let address_book: AddressBook = serde_json::from_reader(reader)?;
+        let book: HashMap<PeerId, Peer> = serde_json::from_reader(reader)?;
 
-        tracing::info!(
-            peer_count = address_book.book.len(),
-            "Address book loaded from disk."
-        );
+        tracing::info!(peer_count = book.len(), "Address book loaded from disk.");
 
-        Ok(address_book)
+        Ok(AddressBook {
+            book,
+            filename: path.as_ref().to_path_buf(),
+        })
     }
 }
 
