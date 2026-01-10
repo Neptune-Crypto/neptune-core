@@ -65,8 +65,7 @@ const IDENTITY_WARNING_HEADER: &str = r#"# =====================================
 /// Note that if the caller wants to fall back on an ephemeral identity in the
 /// event of file system or codec failure, this is the caller's responsibility.
 pub(crate) fn resolve_identity(
-    data_dir: PathBuf,
-    identity_file: Option<String>,
+    identity_filename: PathBuf,
     incognito: bool,
     new_identity: bool,
 ) -> Result<Keypair> {
@@ -76,29 +75,25 @@ pub(crate) fn resolve_identity(
         return Ok(Keypair::generate_ed25519());
     }
 
-    // Determine path (default to data_dir/identity.key)
-    let path = identity_file
-        .map(PathBuf::from)
-        .unwrap_or_else(|| data_dir.join("identity.key"));
-
     // New Identity: rotate existing file with timestamped backup
-    if new_identity && path.exists() {
+    if new_identity && identity_filename.exists() {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-        let backup = path.with_extension(format!("{}.bak", ts));
-        fs::rename(&path, &backup).context("Failed to backup identity")?;
+        let backup = identity_filename.with_extension(format!("{}.bak", ts));
+        fs::rename(&identity_filename, &backup).context("Failed to backup identity")?;
         info!(
             "Backed up existing identity file to '{}'.",
             backup.to_string_lossy()
         );
         info!(
             "Proceeding with fresh new identity at '{}'.",
-            path.to_string_lossy()
+            identity_filename.to_string_lossy()
         );
     }
 
     // Load or create identity
-    if path.exists() {
-        let content = fs::read_to_string(&path).context("Failed to read identity file")?;
+    if identity_filename.exists() {
+        let content =
+            fs::read_to_string(&identity_filename).context("Failed to read identity file")?;
         let encoded_key = content
             .lines()
             .find(|line| !line.trim().starts_with('#') && !line.trim().is_empty())
@@ -108,12 +103,15 @@ pub(crate) fn resolve_identity(
         let keypair =
             Keypair::from_protobuf_encoding(&bytes).context("Failed to parse protobuf key");
 
-        info!("Using identity file '{}'.", path.to_string_lossy());
+        info!(
+            "Using identity file '{}'.",
+            identity_filename.to_string_lossy()
+        );
 
         keypair
     } else {
         info!("Generating new persistent identity.");
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = identity_filename.parent() {
             fs::create_dir_all(parent).context("Create identity directory")?;
         }
 
@@ -123,8 +121,11 @@ pub(crate) fn resolve_identity(
             .context("Failed to encode key")?;
         let file_content = format!("{}\n{}", IDENTITY_WARNING_HEADER, hex::encode(bytes));
 
-        fs::write(&path, file_content).context("Failed to save identity file")?;
-        info!("Saved new identity file to '{}'.", path.to_string_lossy());
+        fs::write(&identity_filename, file_content).context("Failed to save identity file")?;
+        info!(
+            "Saved new identity file to '{}'.",
+            identity_filename.to_string_lossy()
+        );
         Ok(new_key)
     }
 }
@@ -143,16 +144,17 @@ mod tests {
             .as_nanos();
         let mut data_dir = env::temp_dir();
         data_dir.push(format!("identity_test_{}", ts));
+        let filename = data_dir.join("identity.key");
 
         fs::create_dir_all(&data_dir).expect("Failed to create test temp dir");
 
         // --- Test 1: Initial Generation ---
-        let key1 = resolve_identity(data_dir.clone(), None, false, false)
-            .expect("Should generate new identity");
+        let key1 =
+            resolve_identity(filename.clone(), false, false).expect("Should generate new identity");
         let id1 = key1.public().to_peer_id();
 
         // --- Test 2: Persistence (Load existing) ---
-        let key2 = resolve_identity(data_dir.clone(), None, false, false)
+        let key2 = resolve_identity(filename.clone(), false, false)
             .expect("Should load existing identity");
         assert_eq!(
             id1,
@@ -161,7 +163,7 @@ mod tests {
         );
 
         // --- Test 3: Incognito (Ignore file) ---
-        let key_incog = resolve_identity(data_dir.clone(), None, true, false)
+        let key_incog = resolve_identity(filename.clone(), true, false)
             .expect("Should generate incognito identity");
         assert_ne!(
             id1,
@@ -171,7 +173,7 @@ mod tests {
 
         // --- Test 4: New Identity (Backup and rotate) ---
         let key_new =
-            resolve_identity(data_dir.clone(), None, false, true).expect("Should back up identity");
+            resolve_identity(filename.clone(), false, true).expect("Should back up identity");
         assert_ne!(
             id1,
             key_new.public().to_peer_id(),
@@ -189,6 +191,6 @@ mod tests {
         assert!(has_backup, "Backup file should exist after backing up");
 
         // Cleanup
-        let _ = fs::remove_dir_all(&data_dir);
+        let _ = fs::remove_dir_all(&filename);
     }
 }

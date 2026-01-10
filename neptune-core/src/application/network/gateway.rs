@@ -178,8 +178,8 @@ impl ConnectionHandler for GatewayHandler {
     /// 1. **Dormancy**: If `pause` is true (the default for new connections),
     ///    this method returns [`Poll::Pending`], which halts progress.
     /// 2. **Activation**: Once the [`NetworkBehaviour`] verifies a direct path
-    ///   (e.g., via DCUtR), it sends a [`Command::Activate`] signal. This
-    ///   method then resumes execution.
+    ///    (e.g., via DCUtR), it sends a [`Command::Activate`] signal. This
+    ///    method then resumes execution.
     /// 3. **Event Propagation**: It drains the `pending_events` queue, passing
     ///    completed handshake results (successful "hijacks") up to the
     ///    Behaviour's `on_connection_handler_event`.
