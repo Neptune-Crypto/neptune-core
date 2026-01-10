@@ -201,6 +201,10 @@ impl PeerLoopHandler {
         let sanction_result = peer_info.standing.sanction(PeerSanction::Negative(reason));
         if let Err(err) = sanction_result {
             warn!("Banning peer: {err}");
+            let _ = self
+                .to_main_tx
+                .send(PeerTaskToMain::Ban(self.peer_id))
+                .await;
         }
 
         sanction_result.map_err(|err| anyhow::anyhow!("Banning peer: {err}"))

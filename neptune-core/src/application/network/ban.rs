@@ -48,15 +48,23 @@ impl BlackList {
         }
     }
 
+    /// Insert the IP into the black list.
     pub(crate) fn ban(&mut self, ip_address: IpAddr) {
         let now = SystemTime::now();
         self.list.insert(ip_address, now);
     }
 
-    pub(crate) fn unban(&mut self, ip_address: &IpAddr) {
-        self.list.remove(ip_address);
+    /// Remove the IP from the black list.
+    ///
+    /// # Return Value
+    ///
+    ///  - `true` if the IP address was on the black list.
+    ///  - `false` otherwise.
+    pub(crate) fn unban(&mut self, ip_address: &IpAddr) -> bool {
+        self.list.remove(ip_address).is_some()
     }
 
+    /// Determine whether the given IP is on the black list.
     pub(crate) fn is_banned(&self, ip_address: &IpAddr) -> bool {
         self.list.contains_key(ip_address)
     }

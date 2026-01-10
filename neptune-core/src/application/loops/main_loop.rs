@@ -1121,6 +1121,17 @@ impl MainLoopHandler {
                     sync_loop.send_try_fetch_block(peer, height);
                 }
             }
+            PeerTaskToMain::Ban(malicious_peer_id) => {
+                // Forward the request. The NetworkActor is the one to enforce
+                // the ban.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::Ban(malicious_peer_id))
+                    .await
+                {
+                    error!("Cannot send message to NetworkActor: {e}.");
+                }
+            }
         }
 
         Ok(())

@@ -10,6 +10,7 @@ use tokio::task::JoinHandle;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::net::IpAddr;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -606,12 +607,41 @@ impl NetworkActor {
                 }
             }
 
+            SwarmEvent::IncomingConnection {
+                connection_id,
+                local_addr: _,
+                send_back_addr,
+            } => {
+                if self.bounce(&send_back_addr) {
+                    tracing::warn!(%send_back_addr, %connection_id, "Bouncing incoming connection.");
+
+                    // Signal the swarm to drop this connection
+                    // immediately to prevent Identify/Kademlia from
+                    // ever seeing this peer.
+                    self.swarm.close_connection(connection_id);
+                }
+            }
+
             // Handle successful connections.
             SwarmEvent::ConnectionEstablished {
-                peer_id, endpoint, ..
+                peer_id,
+                endpoint,
+                connection_id,
+                ..
             } => {
-                self.address_book.reset_fail_count(peer_id);
                 let address = endpoint.get_remote_address().clone();
+
+                // Check for banned IPs again. The catch above in
+                // `IncomingConnection` is a good first filter but because of
+                // race conditions, masked addresses, and automatic outgoing
+                // dials (as happens in Kademlia), it is possible for banned
+                // connections to get to this stage.
+                if self.bounce(&address) {
+                    tracing::warn!(%address, %connection_id, "Bouncing established connection.");
+                    self.swarm.close_connection(connection_id);
+                }
+
+                self.address_book.reset_fail_count(peer_id);
                 let direction = if endpoint.is_dialer() {
                     "Outbound"
                 } else {
@@ -651,6 +681,32 @@ impl NetworkActor {
         }
 
         Ok(())
+    }
+
+    /// Check if the address is on the black list.
+    ///
+    /// Besides the ban, this function enforces the policy that requires all
+    /// connections to have an IP. In the future, we can accept alternative,
+    /// non-IP addresses, but *as long as they can be soundly banned* -- because
+    /// otherwise they expose the node to DoS attacks. Since we have no
+    /// mechanism to ban generic `Multiaddr`s, the default behavior should be to
+    /// treat such peers as banned from the start.
+    fn bounce(&self, address: &Multiaddr) -> bool {
+        if let Some(ip) = address.iter().find_map(|protocol| match protocol {
+            libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+            libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+            _ => None,
+        }) {
+            if self.black_list.is_banned(&ip) {
+                return true;
+            }
+        }
+        // In this `else` case, we have a peer `Multiaddr` but no IP.
+        else {
+            return true;
+        }
+
+        false
     }
 
     /// Handles Identify protocol events to synchronize protocol versions and
@@ -1155,7 +1211,46 @@ impl NetworkActor {
             }
 
             NetworkActorCommand::Ban(malicious_peer_id) => {
-                todo!();
+                // Extract IPs
+                let mut bannable_ips = HashSet::new();
+                let active_connection_address = self
+                    .active_connections
+                    .get(&malicious_peer_id)
+                    .cloned()
+                    .into_iter();
+                let address_book_addresses = self
+                    .address_book
+                    .get(&malicious_peer_id)
+                    .into_iter()
+                    .flat_map(|peer| peer.listen_addresses.clone());
+                for address in active_connection_address.chain(address_book_addresses) {
+                    if let Some(ip) = address.iter().find_map(|protocol| match protocol {
+                        libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                        libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                        _ => None,
+                    }) {
+                        bannable_ips.insert(ip);
+                    }
+                }
+
+                // Hammer
+                if bannable_ips.is_empty() {
+                    tracing::warn!("Could not ban peer because no IP addresses for it are known.");
+                } else {
+                    tracing::info!("Banning IP addresses [{}].", bannable_ips.iter().join(", "));
+                    for ip in bannable_ips {
+                        self.black_list.ban(ip);
+                    }
+                }
+
+                // Disconnect
+                let _ = self.swarm.disconnect_peer_id(malicious_peer_id);
+            }
+
+            NetworkActorCommand::Unban(ip_addr) => {
+                if !self.black_list.unban(&ip_addr) {
+                    tracing::warn!("Unbanned IP address {ip_addr} was not in black list.");
+                }
             }
 
             NetworkActorCommand::Shutdown => {
