@@ -95,10 +95,12 @@ pub(crate) struct NetworkActor {
 
     /// Peer addresses passed through CLI.
     ///
-    /// This map maps such peers to `None` if
-    /// no connection was opened; or to `PeerId` if it was opened at some point
-    /// and might be open still.
-    sticky_peers: HashMap<Multiaddr, Option<PeerId>>,
+    /// This dictionary maps addresses (specified in CLI arguments) to
+    ///  - `StickyPeer::None` by default;
+    ///  - `StickyPeer::Dialing(since_simestamp)` when a connection attempt is
+    ///    on-going and has been since `since_timestamp`;
+    ///  - `StickyPeer::Connected(peer_id)` when a connection was established.
+    sticky_peers: HashMap<Multiaddr, StickyPeer>,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -191,6 +193,13 @@ impl NetworkActorChannels {
 
         (channels, network_command_tx, network_event_rx)
     }
+}
+
+#[derive(Debug, Clone)]
+enum StickyPeer {
+    None,
+    Dialing(SystemTime),
+    Connected(PeerId),
 }
 
 impl NetworkActor {
@@ -343,7 +352,7 @@ impl NetworkActor {
         let sticky_peers = config
             .sticky_peers
             .iter()
-            .map(|ma| (ma.clone(), None))
+            .map(|ma| (ma.clone(), StickyPeer::None))
             .collect();
 
         Ok(Self {
@@ -419,6 +428,9 @@ impl NetworkActor {
         // Timer for refreshing the Kademlia crawl.
         let mut refresh_kademlia_crawl = tokio::time::interval(Duration::from_mins(10));
 
+        // Timer for checking that we are still connected to sticky peers.
+        let mut check_sticky_peers = tokio::time::interval(Duration::from_secs(30));
+
         loop {
             tokio::select! {
                 // Handle libp2p Swarm Events.
@@ -456,6 +468,43 @@ impl NetworkActor {
                         tracing::warn!("Crawl refresh skipped: No known peers to ask. {:?}", e);
                     } else {
                         tracing::info!("Starting periodic network crawl to maintain connectivity ...");
+                    }
+                }
+
+                // Check sticky peers.
+                _ = check_sticky_peers.tick() => {
+                    for (multiaddr, sticky_peer) in &mut self.sticky_peers {
+                        let now = SystemTime::now();
+                        match sticky_peer.clone() {
+                            StickyPeer::None => {
+                                *sticky_peer = StickyPeer::Dialing(now);
+                                if let Err(e) = self.swarm.dial(multiaddr.clone()) {
+                                    tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
+                                }
+                            }
+                            StickyPeer::Dialing(since_timestamp) => {
+                                // If time since dialing started is too big,
+                                // try again.
+                                if now.duration_since(since_timestamp).ok().is_some_and(|duration| duration > Duration::from_mins(2)) {
+                                    tracing::info!(%multiaddr, "Sticky peer seems stuck in dialing phase; trying again.");
+                                    *sticky_peer = StickyPeer::Dialing(now);
+                                    if let Err(e) = self.swarm.dial(multiaddr.clone()) {
+                                        tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
+                                    }
+                                }
+                            }
+                            StickyPeer::Connected(peer_id) => {
+                                // Verify that the peer id is connected, and if
+                                // not, re-dial.
+                                if !self.active_connections.contains_key(&peer_id) {
+                                    tracing::info!(%peer_id, %multiaddr, "Sticky peer disconnected; attempting to re-establish connection..");
+                                    *sticky_peer = StickyPeer::Dialing(now);
+                                    if let Err(e) = self.swarm.dial(multiaddr.clone()) {
+                                        tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -658,6 +707,8 @@ impl NetworkActor {
                     self.swarm.close_connection(connection_id);
                 }
 
+                // Connection was successfully established, so erase information
+                // about prior failures.
                 self.address_book.reset_fail_count(peer_id);
                 let direction = if endpoint.is_dialer() {
                     "Outbound"
@@ -665,6 +716,25 @@ impl NetworkActor {
                     "Inbound"
                 };
                 tracing::info!("{direction} connection established with {peer_id} at {address}.");
+
+                // If this address belongs to one of our sticky peers (`--peer`
+                // CLI arguments) then make sure we record the `PeerId`.
+                if self.sticky_peers.contains_key(&address) {
+                    self.sticky_peers.entry(address.clone()).and_modify(|p| {
+                        match p {
+                            StickyPeer::None | StickyPeer::Dialing(_) => {
+                                tracing::info!(%peer_id, "Found peer id of sticky peer {address}.");
+                                *p = StickyPeer::Connected(peer_id);
+                            },
+                            StickyPeer::Connected(pid) => {
+                                if *pid != peer_id {
+                                    tracing::info!(%peer_id, "Found *new* peer id of sticky peer {address}.");
+                                    *pid = peer_id;
+                                }
+                            },
+                        }
+                    });
+                }
 
                 // Store the new connection. If the new connection is a direct
                 // one and the old connection was relayed, then the relayed
