@@ -18,6 +18,7 @@ use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
 use crate::application::network::address_book::AddressBook;
 use crate::application::network::address_book::ADDRESS_BOOK_MAX_SIZE;
+use crate::application::network::ban::BlackList;
 use crate::application::network::bridge::bridge_libp2p_stream;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
