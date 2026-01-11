@@ -145,7 +145,6 @@ libp2p = {version = "0.56.0", features = [
     "upnp",
     "yamux",
 ]}
-libp2p-connection-limits = "0.6.0"
 whoami = "2.0.0"
 
 [dev-dependencies]

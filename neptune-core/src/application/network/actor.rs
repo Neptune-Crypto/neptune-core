@@ -102,6 +102,9 @@ pub(crate) struct NetworkActor {
     ///    on-going and has been since `since_timestamp`;
     ///  - `StickyPeer::Connected(peer_id)` when a connection was established.
     sticky_peers: HashMap<Multiaddr, StickyPeer>,
+
+    /// Limits the total number of connections.
+    max_num_peers: usize,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -243,12 +246,7 @@ impl NetworkActor {
             .with_timeout(std::time::Duration::from_secs(20)); // 20s until we give up
 
         // Configure connection limits
-        let max_num_peers = u32::try_from(config.max_num_peers).unwrap_or(10);
-        let limits = libp2p_connection_limits::ConnectionLimits::default()
-            .with_max_established_incoming(Some(max_num_peers / 2))
-            .with_max_established_outgoing(Some(max_num_peers / 2))
-            .with_max_established(Some(max_num_peers))
-            .with_max_established_per_peer(Some(1));
+        let max_num_peers = config.max_num_peers;
 
         // Configure autoNAT
         let autonat_config = if config.network.is_reg_test() {
@@ -321,7 +319,6 @@ impl NetworkActor {
                     relay_client,
                     dcutr: libp2p::dcutr::Behaviour::new(local_peer_id),
                     kademlia,
-                    limits: libp2p_connection_limits::Behaviour::new(limits),
                     gateway: StreamGateway::new(global_state_lock.clone()),
                 }
             })?
@@ -369,6 +366,7 @@ impl NetworkActor {
             active_listeners: vec![],
             black_list,
             sticky_peers,
+            max_num_peers,
         })
     }
 
@@ -474,11 +472,15 @@ impl NetworkActor {
 
                 // Check sticky peers.
                 _ = check_sticky_peers.tick() => {
+
+                    // Determine which sticky peers to re-dial.
+                    let mut dials = vec![];
                     for (multiaddr, sticky_peer) in &mut self.sticky_peers {
                         let now = SystemTime::now();
                         match sticky_peer.clone() {
                             StickyPeer::None => {
                                 *sticky_peer = StickyPeer::Dialing(now);
+                                dials.push(multiaddr.clone());
                                 if let Err(e) = self.swarm.dial(multiaddr.clone()) {
                                     tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
                                 }
@@ -489,6 +491,7 @@ impl NetworkActor {
                                 if now.duration_since(since_timestamp).ok().is_some_and(|duration| duration > Duration::from_mins(2)) {
                                     tracing::info!(%multiaddr, "Sticky peer seems stuck in dialing phase; trying again.");
                                     *sticky_peer = StickyPeer::Dialing(now);
+                                dials.push(multiaddr.clone());
                                     if let Err(e) = self.swarm.dial(multiaddr.clone()) {
                                         tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
                                     }
@@ -500,11 +503,27 @@ impl NetworkActor {
                                 if !self.active_connections.contains_key(&peer_id) {
                                     tracing::info!(%peer_id, %multiaddr, "Sticky peer disconnected; attempting to re-establish connection..");
                                     *sticky_peer = StickyPeer::Dialing(now);
+                                dials.push(multiaddr.clone());
                                     if let Err(e) = self.swarm.dial(multiaddr.clone()) {
                                         tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // Disconnect if necessary to free up enough slots.
+                    let num_free_slots = self.max_num_peers.saturating_sub(self.active_connections.len());
+                    if num_free_slots < dials.len() {
+                        for _ in num_free_slots..dials.len() {
+                            self.disconnect_from_longest_lived_peer();
+                        }
+                    }
+
+                    // Issue dial commands.
+                    for dial in dials {
+                        if let Err(e) = self.swarm.dial(dial.clone()) {
+                            tracing::warn!(%dial, "Could not dial sticky peer: {e}.");
                         }
                     }
                 }
@@ -776,13 +795,20 @@ impl NetworkActor {
 
     /// Check if the address is on the black list.
     ///
-    /// Besides the ban, this function enforces the policy that requires all
-    /// connections to have an IP. In the future, we can accept alternative,
-    /// non-IP addresses, but *as long as they can be soundly banned* -- because
-    /// otherwise they expose the node to DoS attacks. Since we have no
-    /// mechanism to ban generic `Multiaddr`s, the default behavior should be to
-    /// treat such peers as banned from the start.
+    /// This function enforces three things:
+    ///  1. The `max_num_peers` limit on the number of connections.
+    ///  2. Bans.
+    ///  3. The IP requirement.
+    ///
+    /// In the future, we can accept alternative, non-IP addresses, but *as long
+    /// as they can be soundly banned* -- because otherwise they expose the node
+    /// to DoS attacks. Since we have no mechanism to ban generic `Multiaddr`s,
+    /// the default behavior should be to treat such peers as banned from the
+    /// start.
     fn bounce(&self, address: &Multiaddr) -> bool {
+        if self.active_connections.len() >= self.max_num_peers {
+            return true;
+        }
         if let Some(ip) = address.iter().find_map(|protocol| match protocol {
             libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
             libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
@@ -1305,6 +1331,18 @@ impl NetworkActor {
                     }
                 }
 
+                // If we are already at max capacity in terms of number of
+                // peers, then we disconnect from the peer whose connection is
+                // oldest.
+                if self.active_connections.len() >= self.max_num_peers {
+                    tracing::info!(
+                        "At connection capacity ({}). Evicting a peer for manual dial.",
+                        self.max_num_peers
+                    );
+
+                    self.disconnect_from_longest_lived_peer();
+                }
+
                 // We use the swarm's dial method. libp2p handles the underlying
                 // TCP/transport logic.
                 if let Err(e) = self.swarm.dial(addr.clone()) {
@@ -1403,14 +1441,9 @@ impl NetworkActor {
                     .kademlia
                     .set_mode(Some(libp2p::kad::Mode::Client));
 
-                // Set limits to zero. Any incoming OR outgoing dial attempts
+                // Set max num peers to zero. Any incoming connection attempts
                 // will now be 'Denied'.
-                let zero_limits = libp2p::connection_limits::ConnectionLimits::default()
-                    .with_max_established(Some(0))
-                    .with_max_established_per_peer(Some(0))
-                    .with_max_pending_incoming(Some(0))
-                    .with_max_pending_outgoing(Some(0));
-                *self.swarm.behaviour_mut().limits.limits_mut() = zero_limits;
+                self.max_num_peers = 0;
 
                 // Save the address book.
                 if let Err(e) = self.address_book.save_to_disk() {
@@ -1640,6 +1673,44 @@ impl NetworkActor {
         !address
             .iter()
             .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+    }
+
+    /// Disconnect from the longest-lived peer in the network.
+    ///
+    /// This method identifies the peer that has been connected for the greatest
+    /// amount of time based on its entry in `active_connections`. It then
+    /// requests the [`Swarm`](libp2p::Swarm) to terminate that connection and
+    /// immediately removes the peer from the internal tracking map.
+    ///
+    /// # Behavior
+    ///
+    /// - If multiple peers have the exact same connection time, one is chosen
+    ///   arbitrarily.
+    /// - If no peers are currently connected, this method does nothing.
+    /// - The peer is removed from `active_connections` even if the
+    ///   [Swarm](libp2p::Swarm) fails to perform the physical disconnect (e.g.,
+    ///   if the peer just disconnected).
+    fn disconnect_from_longest_lived_peer(&mut self) {
+        let oldest_peer = self
+            .active_connections
+            .iter()
+            .min_by_key(|(_peer_id, (connected_at, _addr))| *connected_at)
+            .map(|(peer_id, _)| *peer_id);
+
+        if let Some(peer_id) = oldest_peer {
+            tracing::info!(%peer_id, "Disconnecting from longest-lived peer.");
+
+            // Signal the swarm to drop the connection
+            if self.swarm.disconnect_peer_id(peer_id).is_err() {
+                tracing::warn!(%peer_id, "Attempted to disconnect peer, but it was already gone.");
+            }
+
+            // We remove it from our map immediately so the count is
+            // accurate for any dial logic happening in the same tick.
+            self.active_connections.remove(&peer_id);
+        } else {
+            tracing::debug!("No peers available to disconnect from.");
+        }
     }
 }
 
