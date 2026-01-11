@@ -154,6 +154,12 @@ Note that the main loop is responsible for broadcasting a `Disconnect` message t
 
 In the `NetworkStack` (the libp2p `NetworkBehaviour`), each subprotocol serves a specialized role. Together, they handle everything from finding peers in a decentralized DHT to "punching" through firewalls.
 
+### Resource Management
+
+The total number of connections is limited by the command-line argument `--max-num-peers` which defaults to 10. This limit is enforced by the `NetworkActor` (as opposed to by some subprotocol like connection-limits) in order to prioritize sticky peers and own dialing attempts.
+
+To prevent memory-based DoS attacks without impacting the Mempool's growth, Neptune-Cash avoids process-wide memory limits. Instead, it uses Yamux Auto-Tuning and a strict cap on sub-streams (`set_max_num_streams(256)`) to ensure that a single malicious peer cannot exhaust the node's resources by opening thousands of idle streams.
+
 ## 5. Persistence
 
 Three separate pieces of information are persisted to disk, and read from disk at startup. By default these are stored in the subdirectory `[DATA_DIR]/network/`.
@@ -208,13 +214,6 @@ Coordinates a "synchronized" connection attempt between two private nodes alread
 
 * **Neptune Use:** "Hole punching." It upgrades a slow, proxied Relay connection to a fast, direct P2P connection.
 
-### [Connection Limits](https://docs.rs/libp2p-connection-limits/latest/libp2p_connection_limits/)
-
-Enforces hard caps on the number of concurrent connections.
-
-* **Neptune Use:** Prevents Sybil attacks and resource exhaustion by limiting the total number of established and pending connections.
-
-***Resource Safety Note:*** To prevent memory-based DoS attacks without impacting the Mempool's growth, Neptune-Cash avoids process-wide memory limits. Instead, it uses Yamux Auto-Tuning and a strict cap on sub-streams (`set_max_num_streams(256)`) to ensure that a single malicious peer cannot exhaust the node's resources by opening thousands of idle streams.
 
 ### StreamGateway (Custom)
 
