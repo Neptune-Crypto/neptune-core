@@ -937,6 +937,15 @@ impl RpcApi for RpcServer {
 
         Ok(UnbanAllResponse {})
     }
+
+    async fn dial_call(&self, request: DialRequest) -> RpcResult<DialResponse> {
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::Dial(request.address))
+            .await;
+
+        Ok(DialResponse {})
+    }
 }
 
 #[cfg(test)]
@@ -1597,5 +1606,20 @@ pub mod tests {
         let _ = rpc_server.ban(multiaddr.clone()).await;
         let _ = rpc_server.unban(multiaddr).await;
         let _ = rpc_server.unban_all().await;
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn dial_command_does_not_crash() {
+        // Dito regarding indirect effect on state.
+        let rpc_server = test_rpc_server().await;
+
+        // Sample random Multiaddr.
+        let mut test_runner =
+            proptest::test_runner::TestRunner::new(proptest::test_runner::Config::default());
+        let multiaddr = proptest::strategy::ValueTree::current(
+            &proptest::prelude::Strategy::new_tree(&arb_multiaddr(), &mut test_runner).unwrap(),
+        );
+
+        let _ = rpc_server.dial(multiaddr).await;
     }
 }

@@ -181,6 +181,8 @@ pub enum RpcMethods {
     Unban,
     #[namespace(Namespace::Networking)]
     UnbanAll,
+    #[namespace(Namespace::Networking)]
+    Dial,
 }
 
 #[cfg(test)]

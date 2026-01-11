@@ -570,4 +570,8 @@ pub trait RpcApi: Sync + Send {
     async fn unban_all(&self) -> RpcResult<UnbanAllResponse> {
         self.unban_all_call(UnbanAllRequest {}).await
     }
+    async fn dial_call(&self, request: DialRequest) -> RpcResult<DialResponse>;
+    async fn dial(&self, address: Multiaddr) -> RpcResult<DialResponse> {
+        self.dial_call(DialRequest { address }).await
+    }
 }

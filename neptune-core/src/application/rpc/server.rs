@@ -1662,6 +1662,10 @@ pub trait RPC {
     /// Requires a connection to the server.
     async fn unban_all(token: auth::Token) -> RpcResult<()>;
 
+    /// Dial (attempt to initiate a connection to) a
+    /// [`Multiaddr`](libp2p::Multiaddr).
+    async fn dial(token: auth::Token, address: Multiaddr) -> RpcResult<()>;
+
     /// record transaction and initiate broadcast to peers
     ///
     /// todo: docs.
@@ -3317,6 +3321,23 @@ impl RPC for NeptuneRPCServer {
 
         self.rpc_server_to_main_tx
             .try_send(RPCServerToMain::UnbanAll)
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn dial(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        address: Multiaddr,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::Dial(address))
             .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
 
         Ok(())
