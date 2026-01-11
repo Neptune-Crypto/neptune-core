@@ -3279,7 +3279,6 @@ dependencies = [
  "itertools 0.11.0",
  "leveldb-sys",
  "libp2p",
- "libp2p-connection-limits",
  "macro_rules_attr",
  "memmap2",
  "neptune-rpc-macros",

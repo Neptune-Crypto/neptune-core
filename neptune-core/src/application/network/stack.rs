@@ -45,8 +45,6 @@ pub(crate) const NEPTUNE_PROTOCOL: StreamProtocol = StreamProtocol::new(NEPTUNE_
 /// * **[`kademlia`](libp2p::kad)**: Implements node lookup through a DHT. By
 ///   looking up ourselves, we end up crawling the network and populating our
 ///   internal phone book along the way, not to mention those of peers.
-/// * **[`limits`](libp2p_connection_limits)**: Limits the number of peers we
-///   are connected to, to configurable values.
 /// * **[`gateway`](Self::gateway)**: A "stream factory" that uses a raw stream
 ///   and hijacks it. It negotiates the initial handshake via CBOR
 ///   and provides the raw [`libp2p::Stream`] which is then upgraded into a
@@ -70,7 +68,6 @@ pub(crate) struct NetworkStack {
     pub(crate) relay_client: libp2p::relay::client::Behaviour,
     pub(crate) dcutr: libp2p::dcutr::Behaviour,
     pub(crate) kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
-    pub(crate) limits: libp2p::connection_limits::Behaviour,
 
     /// Custom "Hijacker" that handles the handshake and turns it into a stream.
     pub(crate) gateway: StreamGateway,
@@ -181,16 +178,6 @@ impl From<libp2p::dcutr::Event> for NetworkStackEvent {
 impl From<libp2p::kad::Event> for NetworkStackEvent {
     fn from(event: libp2p::kad::Event) -> Self {
         Self::Kademlia(Box::new(event))
-    }
-}
-
-/// Note: We implement `From<Infallible>` because the ConnectionLimits behavior
-/// is silent -- it enforces our `max_num_peers`-peer diversity policy without
-/// emitting events. This satisfies the trait bound required by the
-/// `NetworkBehaviour` derive macro.
-impl From<std::convert::Infallible> for NetworkStackEvent {
-    fn from(_: std::convert::Infallible) -> Self {
-        unreachable!("Connection limits behavior never emits events")
     }
 }
 
