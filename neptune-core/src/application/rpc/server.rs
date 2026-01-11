@@ -1662,8 +1662,7 @@ pub trait RPC {
     /// Requires a connection to the server.
     async fn unban_all(token: auth::Token) -> RpcResult<()>;
 
-    /// Dial (attempt to initiate a connection to) a
-    /// [`Multiaddr`](libp2p::Multiaddr).
+    /// Dial (attempt to initiate a connection to) a [`Multiaddr`].
     async fn dial(token: auth::Token, address: Multiaddr) -> RpcResult<()>;
 
     /// record transaction and initiate broadcast to peers
