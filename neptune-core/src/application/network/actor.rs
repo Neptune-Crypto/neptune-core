@@ -76,8 +76,9 @@ pub(crate) struct NetworkActor {
     command_rx: mpsc::Receiver<NetworkActorCommand>,
     event_tx: mpsc::Sender<NetworkEvent>,
 
-    /// Lookup table to find the current addresses of connected peers.
-    active_connections: HashMap<PeerId, Multiaddr>,
+    /// Lookup table to find the current address of connected peers or how long
+    /// they have been connected for.
+    active_connections: HashMap<PeerId, (SystemTime, Multiaddr)>,
 
     /// Dictionary to find peer metadata, connected or not.
     address_book: AddressBook,
@@ -559,7 +560,7 @@ impl NetworkActor {
             }
 
             SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-                if let Some(address) = self.active_connections.remove(&peer_id) {
+                if let Some((_timestamp, address)) = self.active_connections.remove(&peer_id) {
                     tracing::info!("Connection to peer {peer_id} at {address} closed.");
                 } else {
                     tracing::warn!(peer = %peer_id, "Connection closed abruptly: {:?}", cause);
@@ -739,13 +740,16 @@ impl NetworkActor {
                 // Store the new connection. If the new connection is a direct
                 // one and the old connection was relayed, then the relayed
                 // address will be overwritten in favor of the direct one.
-                if let Some(old_address) = self.active_connections.insert(peer_id, address.clone())
-                {
-                    tracing::debug!("Overwriting old address {} in favor of new address {address} in active connections map.", old_address);
-                    if !Self::is_direct(&old_address) && Self::is_direct(&address) {
-                        tracing::info!("New address is direct whereas old address was not. Good!");
-                    }
-                }
+                self.active_connections
+                    .entry(peer_id)
+                    .and_modify(|(_timestamp, addr)| {
+                        tracing::debug!("Overwriting old address {} in favor of new address {} in active connections map.", *addr, address.clone());
+                        if !Self::is_direct(addr) && Self::is_direct(&address) {
+                            tracing::info!("New address is direct whereas old address was not. Good!");
+                        }
+                        *addr = address.clone();
+                    })
+                    .or_insert_with(|| (SystemTime::now(), address.clone()));
 
                 // Note: Identify and Kademlia will now automatically start
                 // their handshakes over this new "open line."
@@ -1104,7 +1108,7 @@ impl NetworkActor {
         let from_main_rx = self.main_to_peer_broadcast.subscribe();
 
         // Fetch address from carefully maintained address map.
-        let Some(address) = self.active_connections.get(&peer_id).cloned() else {
+        let Some((_timestamp, address)) = self.active_connections.get(&peer_id).cloned() else {
             return Err(ActorError::NoAddressForPeer(peer_id));
         };
 
@@ -1328,7 +1332,8 @@ impl NetworkActor {
                             .active_connections
                             .get(&malicious_peer_id)
                             .cloned()
-                            .into_iter();
+                            .into_iter()
+                            .map(|(_ts, ad)| ad);
                         let address_book_addresses = self
                             .address_book
                             .get(&malicious_peer_id)
@@ -1512,7 +1517,7 @@ impl NetworkActor {
 
         let mut counter = 0;
         for &peer_id in available_peers {
-            let Some(addr) = self.active_connections.get(&peer_id).cloned() else {
+            let Some((_timestamp, addr)) = self.active_connections.get(&peer_id).cloned() else {
                 continue;
             };
 
