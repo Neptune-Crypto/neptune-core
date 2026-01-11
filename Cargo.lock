@@ -3335,6 +3335,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "itertools 0.11.0",
+ "libp2p",
  "neptune-cash",
  "proptest",
  "proptest-arbitrary-interop",

@@ -913,6 +913,30 @@ impl RpcApi for RpcServer {
 
         Ok(tx)
     }
+
+    async fn ban_call(&self, request: BanRequest) -> RpcResult<BanResponse> {
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::Ban(request.address))
+            .await;
+
+        Ok(BanResponse {})
+    }
+
+    async fn unban_call(&self, request: UnbanRequest) -> RpcResult<UnbanResponse> {
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::Unban(request.address))
+            .await;
+
+        Ok(UnbanResponse {})
+    }
+
+    async fn unban_all_call(&self, _request: UnbanAllRequest) -> RpcResult<UnbanAllResponse> {
+        let _ = self.to_main_tx.send(RPCServerToMain::UnbanAll).await;
+
+        Ok(UnbanAllResponse {})
+    }
 }
 
 #[cfg(test)]
@@ -942,6 +966,7 @@ pub mod tests {
     use crate::application::json_rpc::core::model::message::BlockHeightsByFlagsRequest;
     use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
+    use crate::application::network::arbitrary::arb_multiaddr;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
     use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
@@ -1550,5 +1575,27 @@ pub mod tests {
             .unwrap()
             .block_heights
             .is_empty());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn ban_commands_do_not_crash() {
+        // The ban commands have an *indirect* effect on state. The main loop
+        // receives messages from the RPC server and may modify state directly
+        // or may pass on messages to the network actor or to the peer loop
+        // which then modify state. These secondary effects are not in the
+        // scope of this test module. For now it suffices to verify that the
+        // ban commands can be delivered without crashing.
+        let rpc_server = test_rpc_server().await;
+
+        // Sample random Multiaddr.
+        let mut test_runner =
+            proptest::test_runner::TestRunner::new(proptest::test_runner::Config::default());
+        let multiaddr = proptest::strategy::ValueTree::current(
+            &proptest::prelude::Strategy::new_tree(&arb_multiaddr(), &mut test_runner).unwrap(),
+        );
+
+        let _ = rpc_server.ban(multiaddr.clone()).await;
+        let _ = rpc_server.unban(multiaddr).await;
+        let _ = rpc_server.unban_all().await;
     }
 }

@@ -1,3 +1,4 @@
+use libp2p::Multiaddr;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_tuple::Deserialize_tuple;
@@ -518,3 +519,28 @@ pub struct BestTransactionForNextBlockRequest {}
 pub struct BestTransactionForNextBlockResponse {
     pub transaction: Option<RpcTransactionKernel>,
 }
+pub struct BanRequest {
+    pub address: Multiaddr,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BanResponse {}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct UnbanRequest {
+    pub address: Multiaddr,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnbanResponse {}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct UnbanAllRequest {}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnbanAllResponse {}

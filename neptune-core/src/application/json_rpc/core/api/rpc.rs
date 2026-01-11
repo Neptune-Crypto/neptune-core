@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use libp2p::Multiaddr;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -555,4 +556,18 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: BestTransactionForNextBlockRequest,
     ) -> RpcResult<BestTransactionForNextBlockResponse>;
+    /* Networking */
+
+    async fn ban_call(&self, request: BanRequest) -> RpcResult<BanResponse>;
+    async fn ban(&self, address: Multiaddr) -> RpcResult<BanResponse> {
+        self.ban_call(BanRequest { address }).await
+    }
+    async fn unban_call(&self, request: UnbanRequest) -> RpcResult<UnbanResponse>;
+    async fn unban(&self, address: Multiaddr) -> RpcResult<UnbanResponse> {
+        self.unban_call(UnbanRequest { address }).await
+    }
+    async fn unban_all_call(&self, request: UnbanAllRequest) -> RpcResult<UnbanAllResponse>;
+    async fn unban_all(&self) -> RpcResult<UnbanAllResponse> {
+        self.unban_all_call(UnbanAllRequest {}).await
+    }
 }

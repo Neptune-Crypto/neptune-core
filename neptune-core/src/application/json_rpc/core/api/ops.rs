@@ -175,6 +175,12 @@ pub enum RpcMethods {
     /// density, sync status, and proof quality.
     #[namespace(Namespace::Mempool)]
     BestTransactionForNextBlock,
+    #[namespace(Namespace::Networking)]
+    Ban,
+    #[namespace(Namespace::Networking)]
+    Unban,
+    #[namespace(Namespace::Networking)]
+    UnbanAll,
 }
 
 #[cfg(test)]

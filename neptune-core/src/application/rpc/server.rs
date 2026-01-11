@@ -60,6 +60,7 @@ use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
 use libp2p::multiaddr::Protocol;
+use libp2p::Multiaddr;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -1568,7 +1569,10 @@ pub trait RPC {
     /******** CHANGE THINGS ********/
     // Place all things that change state here
 
-    /// Clears standing for all peers, connected or not
+    /// Clears standing for all peers, connected or not.
+    ///
+    /// Legacy command, applies at the peer loop logic level. For the modern
+    /// equivalent, see [`RPC::unban_all`].
     ///
     /// ```no_run
     /// # use anyhow::Result;
@@ -1601,7 +1605,10 @@ pub trait RPC {
     /// ```
     async fn clear_all_standings(token: auth::Token) -> RpcResult<()>;
 
-    /// Clears standing for ip, whether connected or not
+    /// Clears standing for ip, whether connected or not.
+    ///
+    /// Legacy command, applies at the peer loop logic level. For the modern
+    /// equivalent, see [`RPC::unban`].
     ///
     /// ```no_run
     /// # use anyhow::Result;
@@ -1637,6 +1644,23 @@ pub trait RPC {
     /// # }
     /// ```
     async fn clear_standing_by_ip(token: auth::Token, ip: IpAddr) -> RpcResult<()>;
+
+    /// Put the given address on the black list and disconnect if there is a
+    /// connection to this peer.
+    ///
+    /// Requires a connection to the server.
+    async fn ban(token: auth::Token, ip: Multiaddr) -> RpcResult<()>;
+
+    /// Remove the given address from black list and clear the corresponding
+    /// peer standing.
+    ///
+    /// Requires a connection to the server.
+    async fn unban(token: auth::Token, ip: Multiaddr) -> RpcResult<()>;
+
+    /// Remove all entries from the black list and clear all peer standings.
+    ///
+    /// Requires a connection to the server.
+    async fn unban_all(token: auth::Token) -> RpcResult<()>;
 
     /// record transaction and initiate broadcast to peers
     ///
@@ -3246,10 +3270,56 @@ impl RPC for NeptuneRPCServer {
                 }
             });
 
-        //Also clears this IP's standing in database, whether it is connected or not.
+        // Also clears this IP's standing in database, whether it is connected or not.
         global_state_mut.net.clear_ip_standing_in_database(ip).await;
 
         Ok(global_state_mut.flush_databases().await?)
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn ban(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        address: Multiaddr,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::Ban(address))
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn unban(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        address: Multiaddr,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::Unban(address))
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn unban_all(self, _: context::Context, token: auth::Token) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::UnbanAll)
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.

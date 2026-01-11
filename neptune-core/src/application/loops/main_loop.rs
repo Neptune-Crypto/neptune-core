@@ -2149,6 +2149,28 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
+            RPCServerToMain::UnbanAll => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::UnbanAll");
+
+                // Reset standings.
+                self.global_state_lock()
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .clear_all_standings_in_database()
+                    .await;
+
+                // Instruct NetworkActor to revoke bans.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::UnbanAll)
+                    .await
+                {
+                    error!("Cannot send UnbanAll message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
         }
     }
 
