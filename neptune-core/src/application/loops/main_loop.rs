@@ -2171,6 +2171,20 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
+            RPCServerToMain::Dial(address) => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::UnbanAll");
+
+                // Pass on message to NetworkActor.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::Dial(address))
+                    .await
+                {
+                    error!("Cannot send Dial message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
         }
     }
 

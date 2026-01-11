@@ -280,6 +280,14 @@ enum Command {
         all: bool,
     },
 
+    /// Dial the given address.
+    ///
+    /// In other words, attempt to initiate a connection to it.
+    Dial {
+        #[arg(required = true)]
+        address: Multiaddr,
+    },
+
     /// claim an off-chain utxo-transfer.
     ClaimUtxo {
         #[clap(subcommand)]
@@ -1192,6 +1200,10 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
+        }
+        Command::Dial { address } => {
+            client.dial(ctx, token, address).await??;
+            println!("beeep brp");
         }
         Command::ClaimUtxo {
             format,

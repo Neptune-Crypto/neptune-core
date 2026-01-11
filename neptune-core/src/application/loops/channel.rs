@@ -139,6 +139,7 @@ pub enum RPCServerToMain {
     Ban(Multiaddr),
     Unban(Multiaddr),
     UnbanAll,
+    Dial(Multiaddr),
 }
 
 pub trait Cancelable: Send + Sync {
