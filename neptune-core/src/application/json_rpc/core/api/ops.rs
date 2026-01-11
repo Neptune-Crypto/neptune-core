@@ -145,6 +145,13 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Mempool)]
     GetTransactionProof,
+
+    #[namespace(Namespace::Networking)]
+    Ban,
+    #[namespace(Namespace::Networking)]
+    Unban,
+    #[namespace(Namespace::Networking)]
+    UnbanAll,
 }
 
 #[cfg(test)]

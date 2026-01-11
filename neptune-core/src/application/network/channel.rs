@@ -22,6 +22,10 @@ pub enum NetworkActorCommand {
     /// IP address from the black list, thereby unbanning them.
     Unban(IpAddr),
 
+    /// Instructs the [`NetworkActor`](super::actor::NetworkActor) to remove all
+    /// IP addresses from the black list, thereby revoking all bans.
+    UnbanAll,
+
     /// Signals the [`NetworkActor`](super::actor::NetworkActor) to begin a
     /// graceful shutdown of all network tasks.
     Shutdown,

@@ -1369,6 +1369,13 @@ impl NetworkActor {
                 }
             }
 
+            NetworkActorCommand::UnbanAll => {
+                let keys = self.black_list.list.keys().copied().collect_vec();
+                for entry in keys {
+                    self.black_list.unban(&entry);
+                }
+            }
+
             NetworkActorCommand::Shutdown => {
                 tracing::info!("Network Actor shutting down Swarm...");
 

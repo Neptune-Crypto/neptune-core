@@ -9,6 +9,7 @@ use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -20,6 +21,7 @@ use clap::Parser;
 use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
+use libp2p::Multiaddr;
 use neptune_cash::api::export::TransactionKernelId;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::application::config::data_directory::DataDirectory;
@@ -241,12 +243,41 @@ enum Command {
     /// shutdown neptune-core
     Shutdown,
 
-    /// clear all peer standings
+    /// Clear all peer standings.
+    ///
+    /// This is a legacy command that applies to the peer loop logic only. So in
+    /// particular, any peers banned at the modern libp2p-level will remain
+    /// banned. For the modern equivalent, use the command `unban --all` (which
+    /// also clears all standings at the peer loop logic level).
     ClearAllStandings,
 
-    /// clear standings for peer with a given IP
+    /// Clear standing for peer with a given IP.
+    ///
+    /// This is a legacy command that applies to the peer loop logic only. So in
+    /// particular, if the peer is banned at the modern libp2p-level, that ban
+    /// will remain in effect. For the modern equivalent, use the command
+    /// `unban` (which also clears the peer's standing at the peer loop logic
+    /// level).
     ClearStandingByIp {
         ip: IpAddr,
+    },
+
+    /// Ban one or more peers by address.
+    Ban {
+        /// The Multiaddrs to ban (e.g., /ip4/1.2.3.4/tcp/8080)
+        #[arg(required = true, num_args = 1..)]
+        addresses: Vec<Multiaddr>,
+    },
+
+    /// Unban one or more peers.
+    Unban {
+        /// The Multiaddrs to unban
+        #[arg(num_args = 0..)]
+        addresses: Vec<Multiaddr>,
+
+        /// Clear the entire blacklist
+        #[arg(short, long, conflicts_with = "addresses")]
+        all: bool,
     },
 
     /// claim an off-chain utxo-transfer.
@@ -1142,6 +1173,25 @@ async fn main() -> Result<()> {
         Command::ClearStandingByIp { ip } => {
             client.clear_standing_by_ip(ctx, token, ip).await??;
             println!("Cleared standing of {ip}");
+        }
+        Command::Ban { addresses } => {
+            for address in addresses {
+                client.ban(ctx, token, address.clone()).await??;
+                println!("Banned {address}.");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+        Command::Unban { addresses, all } => {
+            if all {
+                client.unban_all(ctx, token).await??;
+                println!("Unbanned all.");
+            } else {
+                for address in addresses {
+                    client.unban(ctx, token, address.clone()).await??;
+                    println!("Unbanned {address}.");
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
         }
         Command::ClaimUtxo {
             format,
