@@ -19,7 +19,7 @@ pub const RPC_API_VERSION: u16 = 1;
 #[strum(ascii_case_insensitive)]
 pub enum Namespace {
     Node,
-    Networking,
+    Network,
     Chain,
     Mining,
     Archival,
@@ -146,13 +146,13 @@ pub enum RpcMethods {
     #[namespace(Namespace::Mempool)]
     GetTransactionProof,
 
-    #[namespace(Namespace::Networking)]
+    #[namespace(Namespace::Network)]
     Ban,
-    #[namespace(Namespace::Networking)]
+    #[namespace(Namespace::Network)]
     Unban,
-    #[namespace(Namespace::Networking)]
+    #[namespace(Namespace::Network)]
     UnbanAll,
-    #[namespace(Namespace::Networking)]
+    #[namespace(Namespace::Network)]
     Dial,
 }
 

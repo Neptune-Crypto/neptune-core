@@ -50,7 +50,7 @@ impl RpcServer {
             }
         }
 
-        if !self.unrestricted && namespaces.contains(&Namespace::Networking) {
+        if !self.unrestricted && namespaces.contains(&Namespace::Network) {
             warn!("Networking module is enabled without unsafe mode - this may expose sensitive data.")
         }
 

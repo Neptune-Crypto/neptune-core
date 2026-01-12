@@ -78,6 +78,9 @@ pub enum RpcError {
     // Common case errors
     #[error("Invalid address provided in arguments")]
     InvalidAddress,
+
+    #[error("Access to this endpoint is restricted")]
+    RestrictedAccess,
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
