@@ -4600,6 +4600,9 @@ pub mod error {
 
         #[error("Wallet key counter is zero. Must be positive after init")]
         WalletKeyCounterIsZero,
+
+        #[error("Access to this endpoint is restricted")]
+        RestrictedAccess,
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {

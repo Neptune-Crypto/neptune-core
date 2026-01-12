@@ -915,6 +915,10 @@ impl RpcApi for RpcServer {
     }
 
     async fn ban_call(&self, request: BanRequest) -> RpcResult<BanResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
         let _ = self
             .to_main_tx
             .send(RPCServerToMain::Ban(request.address))
@@ -924,6 +928,10 @@ impl RpcApi for RpcServer {
     }
 
     async fn unban_call(&self, request: UnbanRequest) -> RpcResult<UnbanResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
         let _ = self
             .to_main_tx
             .send(RPCServerToMain::Unban(request.address))
@@ -933,12 +941,20 @@ impl RpcApi for RpcServer {
     }
 
     async fn unban_all_call(&self, _request: UnbanAllRequest) -> RpcResult<UnbanAllResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
         let _ = self.to_main_tx.send(RPCServerToMain::UnbanAll).await;
 
         Ok(UnbanAllResponse {})
     }
 
     async fn dial_call(&self, request: DialRequest) -> RpcResult<DialResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
         let _ = self
             .to_main_tx
             .send(RPCServerToMain::Dial(request.address))
@@ -953,6 +969,7 @@ impl RpcApi for RpcServer {
 pub mod tests {
     use std::collections::HashSet;
 
+    use libp2p::Multiaddr;
     use macro_rules_attr::apply;
     use num_traits::Zero;
     use tasm_lib::prelude::Digest;
@@ -1586,6 +1603,14 @@ pub mod tests {
             .is_empty());
     }
 
+    fn random_multiaddr() -> Multiaddr {
+        let mut test_runner =
+            proptest::test_runner::TestRunner::new(proptest::test_runner::Config::default());
+        proptest::strategy::ValueTree::current(
+            &proptest::prelude::Strategy::new_tree(&arb_multiaddr(), &mut test_runner).unwrap(),
+        )
+    }
+
     #[apply(shared_tokio_runtime)]
     async fn ban_commands_do_not_crash() {
         // The ban commands have an *indirect* effect on state. The main loop
@@ -1594,32 +1619,57 @@ pub mod tests {
         // which then modify state. These secondary effects are not in the
         // scope of this test module. For now it suffices to verify that the
         // ban commands can be delivered without crashing.
+        let mut rpc_server = test_rpc_server().await;
+        rpc_server.unrestricted = true;
+
+        let multiaddr = random_multiaddr();
+
+        rpc_server.ban(multiaddr.clone()).await.unwrap();
+        rpc_server.unban(multiaddr).await.unwrap();
+        rpc_server.unban_all().await.unwrap();
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn ban_commands_require_unrestricted_access() {
         let rpc_server = test_rpc_server().await;
 
-        // Sample random Multiaddr.
-        let mut test_runner =
-            proptest::test_runner::TestRunner::new(proptest::test_runner::Config::default());
-        let multiaddr = proptest::strategy::ValueTree::current(
-            &proptest::prelude::Strategy::new_tree(&arb_multiaddr(), &mut test_runner).unwrap(),
-        );
+        let multiaddr = random_multiaddr();
 
-        let _ = rpc_server.ban(multiaddr.clone()).await;
-        let _ = rpc_server.unban(multiaddr).await;
-        let _ = rpc_server.unban_all().await;
+        assert_eq!(
+            RpcError::RestrictedAccess,
+            rpc_server.ban(multiaddr.clone()).await.unwrap_err()
+        );
+        assert_eq!(
+            RpcError::RestrictedAccess,
+            rpc_server.unban(multiaddr).await.unwrap_err()
+        );
+        assert_eq!(
+            RpcError::RestrictedAccess,
+            rpc_server.unban_all().await.unwrap_err()
+        );
     }
 
     #[apply(shared_tokio_runtime)]
     async fn dial_command_does_not_crash() {
         // Dito regarding indirect effect on state.
+        let mut rpc_server = test_rpc_server().await;
+        rpc_server.unrestricted = true;
+
+        let multiaddr = random_multiaddr();
+
+        rpc_server.dial(multiaddr).await.unwrap();
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn dial_command_requires_unrestricted_access() {
+        // Dito regarding indirect effect on state.
         let rpc_server = test_rpc_server().await;
 
-        // Sample random Multiaddr.
-        let mut test_runner =
-            proptest::test_runner::TestRunner::new(proptest::test_runner::Config::default());
-        let multiaddr = proptest::strategy::ValueTree::current(
-            &proptest::prelude::Strategy::new_tree(&arb_multiaddr(), &mut test_runner).unwrap(),
-        );
+        let multiaddr = random_multiaddr();
 
-        let _ = rpc_server.dial(multiaddr).await;
+        assert_eq!(
+            RpcError::RestrictedAccess,
+            rpc_server.dial(multiaddr).await.unwrap_err()
+        );
     }
 }
