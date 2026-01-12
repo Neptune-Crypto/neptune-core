@@ -1082,17 +1082,29 @@ impl GlobalState {
     async fn rescan_single_block_announced_incoming(
         &mut self,
         keys: &HashMap<AnnouncementFlag, SpendingKey>,
-        block_hash: Digest,
+        block_height: u64,
     ) -> Result<()> {
+        let Some(block_hash) = self
+            .chain
+            .archival_state()
+            .archival_block_mmr
+            .ammr()
+            .try_get_leaf(block_height)
+            .await
+        else {
+            warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
+            return Ok(());
+        };
+
         // get (flag, receiver_id) pairs in block, from the announcement index DB/table
         let Some(announcement_flags) = self
             .chain
             .archival_state()
             .utxo_index
-            .announcement_flags_by_block(block_hash)
+            .announcement_flags(block_hash)
             .await
         else {
-            bail!("Block with hash {block_hash:x} not processed by the UTXO index.")
+            bail!("Block {block_hash:x} not processed by the UTXO index.")
         };
 
         let announcement_flags = announcement_flags
@@ -1226,20 +1238,12 @@ impl GlobalState {
             .map(|key| ((&key.to_address()).into(), key))
             .collect();
 
+        // Notice that we *do not* use the announcement flag to block height
+        // lookup here but instead loop over all blocks in the range. This is
+        // done because the announcement flag to block height lookup may be
+        // pruned in size for addresses receiving very many UTXOs.
         for block_height in first..=last {
-            let Some(block_hash) = self
-                .chain
-                .archival_state()
-                .archival_block_mmr
-                .ammr()
-                .try_get_leaf(block_height)
-                .await
-            else {
-                warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
-                return Ok(());
-            };
-
-            self.rescan_single_block_announced_incoming(&keys, block_hash)
+            self.rescan_single_block_announced_incoming(&keys, block_height)
                 .await?;
         }
 
@@ -2937,7 +2941,7 @@ mod tests {
         ///
         /// Does not work if any key in question has matching
         /// [`AnnouncementFlag`]s in more than
-        /// [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS] blocks.
+        /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST] blocks.
         ///
         /// # Panics
         /// - If start block height is greater than end block height
@@ -2946,7 +2950,7 @@ mod tests {
         /// the specific kind of rescan that they want, not use a catch-all,
         /// since all these functions can be somewhat slow.
         ///
-        /// [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS]: crate::state::archival_state::rusty_utxo_index::MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS
+        /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: crate::state::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
         pub(crate) async fn rescan_announced_incoming_from_flag_index(
             &mut self,
             keys: Vec<SpendingKey>,
@@ -2968,11 +2972,11 @@ mod tests {
                 .chain
                 .archival_state()
                 .utxo_index
-                .block_hashes_by_announcement_flags(&announcement_flags)
+                .blocks_by_announcement_flags(&announcement_flags)
                 .await;
 
-            for block_hash in relevant_blocks {
-                self.rescan_single_block_announced_incoming(&all_keys, block_hash)
+            for block_height in relevant_blocks {
+                self.rescan_single_block_announced_incoming(&all_keys, block_height.into())
                     .await?;
             }
 

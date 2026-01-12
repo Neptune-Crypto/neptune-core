@@ -425,18 +425,19 @@ pub trait RpcApi: Sync + Send {
 
     /* Utxo Index */
 
-    async fn block_hashes_by_flags(
+    async fn block_heights_by_flags(
         &self,
         announcement_flags: Vec<AnnouncementFlag>,
-    ) -> RpcResult<BlockHashesByFlagsResponse> {
-        self.block_hashes_by_flags_call(BlockHashesByFlagsRequest { announcement_flags })
+    ) -> RpcResult<BlockHeightsByFlagsResponse> {
+        self.block_heights_by_flags_call(BlockHeightsByFlagsRequest { announcement_flags })
             .await
     }
 
-    async fn block_hashes_by_flags_call(
+    async fn block_heights_by_flags_call(
         &self,
-        request: BlockHashesByFlagsRequest,
-    ) -> RpcResult<BlockHashesByFlagsResponse>;
+        request: BlockHeightsByFlagsRequest,
+    ) -> RpcResult<BlockHeightsByFlagsResponse>;
+
     /* Mempool */
 
     async fn transactions(&self) -> RpcResult<TransactionsResponse> {

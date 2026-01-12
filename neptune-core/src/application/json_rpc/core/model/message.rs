@@ -402,14 +402,14 @@ pub struct SubmitBlockResponse {
 
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockHashesByFlagsRequest {
+pub struct BlockHeightsByFlagsRequest {
     pub announcement_flags: Vec<AnnouncementFlag>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockHashesByFlagsResponse {
-    pub block_hashes: Vec<Digest>,
+pub struct BlockHeightsByFlagsResponse {
+    pub block_heights: Vec<RpcBlockHeight>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]

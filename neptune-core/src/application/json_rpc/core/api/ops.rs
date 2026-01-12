@@ -133,10 +133,10 @@ pub enum RpcMethods {
     #[namespace(Namespace::Mining)]
     SubmitBlock,
 
-    /// Return block hashes for blocks containing announcements with specified
+    /// Return block heights for blocks containing announcements with specified
     /// announcement flags.
     #[namespace(Namespace::UtxoIndex)]
-    BlockHashesByFlags,
+    BlockHeightsByFlags,
     #[namespace(Namespace::Mempool)]
     Transactions,
 

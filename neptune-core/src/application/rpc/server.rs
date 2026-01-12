@@ -533,7 +533,7 @@ pub trait RPC {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<Vec<Announcement>>>;
 
-    /// Return the block digests of blocks with announcements matching the
+    /// Return the block heights of blocks with announcements matching the
     /// specified flags. Returns the empty list if no blocks with these flags
     /// are known.
     ///
@@ -543,13 +543,13 @@ pub trait RPC {
     ///
     /// Will not return all block if any key in question has matching
     /// [`AnnouncementFlag`]s in more than
-    /// [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS] blocks.
+    /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST] blocks.
     ///
-    /// [MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS]: crate::state::archival_state::rusty_utxo_index::MAX_BLOCK_COUNT_FOR_ANNOUNCEMENT_FLAGS
-    async fn block_hashes_by_announcement_flags(
+    /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: crate::state::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
+    async fn block_heights_by_announcement_flags(
         token: auth::Token,
         announcement_flags: Vec<AnnouncementFlag>,
-    ) -> RpcResult<Vec<Digest>>;
+    ) -> RpcResult<Vec<BlockHeight>>;
 
     /// Return the digests of known blocks with specified height.
     ///
@@ -2694,12 +2694,12 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn block_hashes_by_announcement_flags(
+    async fn block_heights_by_announcement_flags(
         self,
         _context: tarpc::context::Context,
         token: auth::Token,
         announcement_flags: Vec<AnnouncementFlag>,
-    ) -> RpcResult<Vec<Digest>> {
+    ) -> RpcResult<Vec<BlockHeight>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2715,7 +2715,7 @@ impl RPC for NeptuneRPCServer {
             .chain
             .archival_state()
             .utxo_index
-            .block_hashes_by_announcement_flags(&announcement_flags)
+            .blocks_by_announcement_flags(&announcement_flags)
             .await;
 
         Ok(blocks.into_iter().collect())
@@ -4725,7 +4725,7 @@ mod tests {
             .await;
         let _ = rpc_server
             .clone()
-            .block_hashes_by_announcement_flags(
+            .block_heights_by_announcement_flags(
                 ctx,
                 token,
                 vec![AnnouncementFlag {

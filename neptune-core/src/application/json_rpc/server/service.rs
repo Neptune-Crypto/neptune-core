@@ -687,26 +687,26 @@ impl RpcApi for RpcServer {
         Ok(SubmitBlockResponse { success })
     }
 
-    async fn block_hashes_by_flags_call(
+    async fn block_heights_by_flags_call(
         &self,
-        request: BlockHashesByFlagsRequest,
-    ) -> RpcResult<BlockHashesByFlagsResponse> {
+        request: BlockHeightsByFlagsRequest,
+    ) -> RpcResult<BlockHeightsByFlagsResponse> {
         let announcement_flags: HashSet<_> = request.announcement_flags.into_iter().collect();
-        let block_hashes = self
+        let heights = self
             .state
             .lock_guard()
             .await
             .chain
             .archival_state()
             .utxo_index
-            .block_hashes_by_announcement_flags(&announcement_flags)
+            .blocks_by_announcement_flags(&announcement_flags)
             .await;
 
-        let block_hashes = BlockHashesByFlagsResponse {
-            block_hashes: block_hashes.into_iter().collect(),
+        let block_heights = BlockHeightsByFlagsResponse {
+            block_heights: heights.into_iter().collect(),
         };
 
-        Ok(block_hashes)
+        Ok(block_heights)
     }
 
     async fn transactions_call(&self, _: TransactionsRequest) -> RpcResult<TransactionsResponse> {
@@ -785,7 +785,7 @@ pub mod tests {
     use crate::application::json_rpc::core::api::rpc::RpcApi;
     use crate::application::json_rpc::core::api::rpc::RpcError;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
-    use crate::application::json_rpc::core::model::message::BlockHashesByFlagsRequest;
+    use crate::application::json_rpc::core::model::message::BlockHeightsByFlagsRequest;
     use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -1311,20 +1311,20 @@ pub mod tests {
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn block_hashes_by_flag_empty() {
+    async fn block_heights_by_flag_empty() {
         let rpc_server = test_rpc_server().await;
-        let request = BlockHashesByFlagsRequest {
+        let request = BlockHeightsByFlagsRequest {
             announcement_flags: vec![],
         };
         let resp = rpc_server
-            .block_hashes_by_flags_call(request)
+            .block_heights_by_flags_call(request)
             .await
             .unwrap();
-        assert!(resp.block_hashes.is_empty());
+        assert!(resp.block_heights.is_empty());
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn block_hashes_by_flag_with_match() {
+    async fn block_heights_by_flag_with_match() {
         let cli_args = cli_args::Args {
             utxo_index: true,
             network: Network::Main,
@@ -1345,21 +1345,21 @@ pub mod tests {
             receiver_id: bfe!(4447),
         }];
         assert!(rpc_server
-            .block_hashes_by_flags(with_match.clone())
+            .block_heights_by_flags(with_match.clone())
             .await
             .unwrap()
-            .block_hashes
+            .block_heights
             .is_empty());
 
         rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
 
         assert_eq!(
-            vec![block1.hash()],
+            vec![BlockHeight::from(1u64)],
             rpc_server
-                .block_hashes_by_flags(with_match)
+                .block_heights_by_flags(with_match)
                 .await
                 .unwrap()
-                .block_hashes
+                .block_heights
         );
 
         let no_match = vec![AnnouncementFlag {
@@ -1367,10 +1367,10 @@ pub mod tests {
             receiver_id: bfe!(1_001),
         }];
         assert!(rpc_server
-            .block_hashes_by_flags(no_match)
+            .block_heights_by_flags(no_match)
             .await
             .unwrap()
-            .block_hashes
+            .block_heights
             .is_empty());
     }
 }
