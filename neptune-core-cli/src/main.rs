@@ -288,6 +288,22 @@ enum Command {
         address: Multiaddr,
     },
 
+    /// Manually trigger a NAT status probe.
+    ///
+    /// Neptune nodes use AutoNAT to determine if they are publicly reachable.
+    /// Run this if you have recently changed your router settings or
+    /// port-forwarding and want the node to update its reachability status
+    /// immediately.
+    ProbeNat,
+
+    /// Reset all active relay reservations.
+    ///
+    /// If your node is not publicly reachable and relies on libp2p relays,
+    /// this command will drop current relay connections and attempt to
+    /// re-reserve slots. This can help resolve "No Relay Circuit" errors
+    /// without restarting the entire node.
+    ResetRelayReservations,
+
     /// claim an off-chain utxo-transfer.
     ClaimUtxo {
         #[clap(subcommand)]
@@ -1204,6 +1220,12 @@ async fn main() -> Result<()> {
         Command::Dial { address } => {
             client.dial(ctx, token, address).await??;
             println!("beeep brp");
+        }
+        Command::ProbeNat => {
+            client.probe_nat(ctx, token).await??;
+        }
+        Command::ResetRelayReservations => {
+            client.reset_relay_reservations(ctx, token).await??;
         }
         Command::ClaimUtxo {
             format,

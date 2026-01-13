@@ -140,6 +140,8 @@ pub enum RPCServerToMain {
     Unban(Multiaddr),
     UnbanAll,
     Dial(Multiaddr),
+    ProbeNat,
+    ResetRelayReservations,
 }
 
 pub trait Cancelable: Send + Sync {
