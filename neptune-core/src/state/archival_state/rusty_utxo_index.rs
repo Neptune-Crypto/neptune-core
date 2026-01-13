@@ -92,7 +92,7 @@ enum UtxoIndexKey {
     /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST] different blocks, the list will be
     /// capped.
     ///
-    /// This mapping does not include guesser-reward addition records.
+    /// This mapping includes guesser-reward addition records.
     ///
     /// Since the indexed blocks are not guaranteed to be canonical, this
     /// mapping may contain entries for blocks that are not part of the
@@ -359,8 +359,11 @@ impl RustyUtxoIndex {
 
         // Loop over all addition records to maintain addition record to block
         // mapping.
-        for addition_record in &tx_kernel.outputs {
-            let addition_record = UtxoIndexKey::BlocksByAdditionRecord(*addition_record);
+        for addition_record in block
+            .all_addition_records()
+            .expect("Block must have mutator set update")
+        {
+            let addition_record = UtxoIndexKey::BlocksByAdditionRecord(addition_record);
             let mut block_heights = self
                 .db
                 .get(addition_record)

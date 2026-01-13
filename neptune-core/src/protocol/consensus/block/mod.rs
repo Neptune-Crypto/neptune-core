@@ -1104,22 +1104,25 @@ impl Block {
         self.kernel.guesser_fee_addition_records(block_hash)
     }
 
+    /// Return all addition records (transaction outputs) in this block,
+    /// including guesser rewards.
+    pub(crate) fn all_addition_records(&self) -> Result<Vec<AdditionRecord>, BlockValidationError> {
+        let mut addition_records = self.body().transaction_kernel.outputs.clone();
+        let guesser_addition_records = self.guesser_fee_addition_records()?;
+        addition_records.extend(guesser_addition_records);
+
+        Ok(addition_records)
+    }
+
     /// Return the mutator set update corresponding to this block, which sends
     /// the mutator set accumulator after the predecessor to the mutator set
     /// accumulator after self.
     pub(crate) fn mutator_set_update(&self) -> Result<MutatorSetUpdate, BlockValidationError> {
+        let outputs = self.all_addition_records()?;
         let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
             .map_err(BlockValidationError::from)?;
 
-        let mut mutator_set_update =
-            MutatorSetUpdate::new(inputs, self.body().transaction_kernel.outputs.clone());
-
-        let guesser_addition_records = self.guesser_fee_addition_records()?;
-        mutator_set_update
-            .additions
-            .extend(guesser_addition_records);
-
-        Ok(mutator_set_update)
+        Ok(MutatorSetUpdate::new(inputs, outputs))
     }
 
     /// Compute the total supply of coins that were liquid immediately after
