@@ -134,9 +134,22 @@ pub enum RpcMethods {
     SubmitBlock,
 
     /// Return block heights for blocks containing announcements with specified
-    /// announcement flags.
+    /// announcement flags. May return results from orphaned blocks.
     #[namespace(Namespace::UtxoIndex)]
     BlockHeightsByFlags,
+
+    /// Return block heights for blocks containing specified addition records.
+    /// Returned block heights are guaranteed to reference blocks belonging to
+    /// the canonical chain.
+    #[namespace(Namespace::UtxoIndex)]
+    BlockHeightsByAdditionRecords,
+
+    /// Return block heights for blocks containing specified absolute index
+    /// sets. Returned block heights are guaranteed to reference blocks
+    /// belonging to the canonical chain.
+    #[namespace(Namespace::UtxoIndex)]
+    BlockHeightsByAbsoluteIndexSets,
+
     #[namespace(Namespace::Mempool)]
     Transactions,
 

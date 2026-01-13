@@ -42,7 +42,7 @@ impl RpcServer {
         }
 
         if namespaces.contains(&Namespace::UtxoIndex) {
-            let has_utxo_index = state.cli().utxo_index;
+            let has_utxo_index = state.chain.archival_state().utxo_index.is_some();
 
             if !has_utxo_index {
                 namespaces.remove(&Namespace::UtxoIndex);

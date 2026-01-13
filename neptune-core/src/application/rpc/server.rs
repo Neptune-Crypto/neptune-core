@@ -2715,6 +2715,8 @@ impl RPC for NeptuneRPCServer {
             .chain
             .archival_state()
             .utxo_index
+            .as_ref()
+            .expect("UTXO index must be present when set in CLI arguments")
             .blocks_by_announcement_flags(&announcement_flags)
             .await;
 

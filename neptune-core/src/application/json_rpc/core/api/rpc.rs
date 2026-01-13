@@ -438,6 +438,36 @@ pub trait RpcApi: Sync + Send {
         request: BlockHeightsByFlagsRequest,
     ) -> RpcResult<BlockHeightsByFlagsResponse>;
 
+    async fn block_heights_by_addition_records(
+        &self,
+        addition_records: Vec<RpcAdditionRecord>,
+    ) -> RpcResult<BlockHeightsByAdditionRecordsResponse> {
+        self.block_heights_by_addition_records_call(BlockHeightsByAdditionRecordsRequest {
+            addition_records,
+        })
+        .await
+    }
+
+    async fn block_heights_by_addition_records_call(
+        &self,
+        request: BlockHeightsByAdditionRecordsRequest,
+    ) -> RpcResult<BlockHeightsByAdditionRecordsResponse>;
+
+    async fn block_heights_by_absolute_index_sets(
+        &self,
+        absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+    ) -> RpcResult<BlockHeightsByAbsoluteIndexSetsResponse> {
+        self.block_heights_by_absolute_index_sets_call(BlockHeightsByAbsoluteIndexSetsRequest {
+            absolute_index_sets,
+        })
+        .await
+    }
+
+    async fn block_heights_by_absolute_index_sets_call(
+        &self,
+        request: BlockHeightsByAbsoluteIndexSetsRequest,
+    ) -> RpcResult<BlockHeightsByAbsoluteIndexSetsResponse>;
+
     /* Mempool */
 
     async fn transactions(&self) -> RpcResult<TransactionsResponse> {

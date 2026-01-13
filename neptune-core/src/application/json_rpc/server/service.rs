@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use tracing::debug;
 
+use crate::api::export::AdditionRecord;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
@@ -19,6 +20,7 @@ use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 #[async_trait]
 impl RpcApi for RpcServer {
@@ -699,11 +701,67 @@ impl RpcApi for RpcServer {
             .chain
             .archival_state()
             .utxo_index
+            .as_ref()
+            .expect("Utxo index namespace can only be active when UTXO index is present")
             .blocks_by_announcement_flags(&announcement_flags)
             .await;
 
         let block_heights = BlockHeightsByFlagsResponse {
             block_heights: heights.into_iter().collect(),
+        };
+
+        Ok(block_heights)
+    }
+
+    async fn block_heights_by_addition_records_call(
+        &self,
+        request: BlockHeightsByAdditionRecordsRequest,
+    ) -> RpcResult<BlockHeightsByAdditionRecordsResponse> {
+        let addition_records: HashSet<AdditionRecord> = request
+            .addition_records
+            .into_iter()
+            .map(|x| x.into())
+            .collect();
+
+        let block_heights = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .addition_records_to_block_height(addition_records)
+            .await
+            .expect("Utxo index namespace can only be active when UTXO index is present");
+
+        let block_heights = BlockHeightsByAdditionRecordsResponse {
+            block_heights: block_heights.into_iter().collect(),
+        };
+
+        Ok(block_heights)
+    }
+
+    async fn block_heights_by_absolute_index_sets_call(
+        &self,
+        request: BlockHeightsByAbsoluteIndexSetsRequest,
+    ) -> RpcResult<BlockHeightsByAbsoluteIndexSetsResponse> {
+        let absolute_index_sets: HashSet<AbsoluteIndexSet> = request
+            .absolute_index_sets
+            .into_iter()
+            .map(|x| x.into())
+            .collect();
+
+        let block_heights = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .absolute_index_sets_to_block_heights(absolute_index_sets)
+            .await
+            .expect("Utxo index namespace can only be active when UTXO index is present");
+
+        let block_heights = BlockHeightsByAbsoluteIndexSetsResponse {
+            block_heights: block_heights.into_iter().collect(),
         };
 
         Ok(block_heights)
@@ -1312,15 +1370,39 @@ pub mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn block_heights_by_flag_empty() {
-        let rpc_server = test_rpc_server().await;
-        let request = BlockHeightsByFlagsRequest {
-            announcement_flags: vec![],
+        let cli_args = cli_args::Args {
+            utxo_index: true,
+            network: Network::Main,
+            ..Default::default()
         };
-        let resp = rpc_server
-            .block_heights_by_flags_call(request)
-            .await
-            .unwrap();
-        assert!(resp.block_heights.is_empty());
+        let rpc_server = test_rpc_server_with_cli_args(cli_args).await;
+        assert!(
+            rpc_server
+                .block_heights_by_flags_call(BlockHeightsByFlagsRequest {
+                    announcement_flags: vec![],
+                })
+                .await
+                .unwrap()
+                .block_heights
+                .is_empty(),
+            "Response to empty request must be empty when no blocks are indexed"
+        );
+
+        let an_announcement_flag = AnnouncementFlag {
+            flag: bfe!(0),
+            receiver_id: bfe!(0),
+        };
+        assert!(
+            rpc_server
+                .block_heights_by_flags_call(BlockHeightsByFlagsRequest {
+                    announcement_flags: vec![an_announcement_flag],
+                })
+                .await
+                .unwrap()
+                .block_heights
+                .is_empty(),
+            "Response to non-empty request must be empty when no blocks are indexed"
+        );
     }
 
     #[apply(shared_tokio_runtime)]

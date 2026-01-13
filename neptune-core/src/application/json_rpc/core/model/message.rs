@@ -412,6 +412,30 @@ pub struct BlockHeightsByFlagsResponse {
     pub block_heights: Vec<RpcBlockHeight>,
 }
 
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockHeightsByAdditionRecordsRequest {
+    pub addition_records: Vec<RpcAdditionRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockHeightsByAdditionRecordsResponse {
+    pub block_heights: Vec<RpcBlockHeight>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockHeightsByAbsoluteIndexSetsRequest {
+    pub absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockHeightsByAbsoluteIndexSetsResponse {
+    pub block_heights: Vec<RpcBlockHeight>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionsRequest {}

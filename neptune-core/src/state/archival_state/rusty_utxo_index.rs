@@ -263,33 +263,28 @@ impl RustyUtxoIndex {
         block_heights
     }
 
-    /// Return the block heights for blocks containing any of the requested
-    /// addition records. The referenced blocks are not guaranteed to be
+    /// Return all block heights for blocks containing the requested
+    /// addition record. The referenced blocks are not guaranteed to be
     /// canonical.
-    ///
     /// # Warning
     ///
     /// For each addition record, the returned list is capped in length (for
     /// DOS reasons) by [`MAX_NUM_BLOCKS_IN_LOOKUP_LIST`]. But since addition
     /// records are unlikely to be repeated in large numbers, this truncation
     /// is probably never met.
-    pub(crate) async fn blocks_by_addition_records(
+    pub(crate) async fn blocks_by_addition_record(
         &self,
-        addition_records: &HashSet<AdditionRecord>,
+        addition_record: AdditionRecord,
     ) -> HashSet<BlockHeight> {
-        let mut block_heights = HashSet::new();
-        for addition_record in addition_records {
-            let key = UtxoIndexKey::BlocksByAdditionRecord(*addition_record);
-            let matching_blocks = self
-                .db
-                .get(key)
-                .await
-                .map(|x| x.as_blocks_by_addition_records())
-                .unwrap_or_default();
-            block_heights.extend(matching_blocks);
-        }
+        let key = UtxoIndexKey::BlocksByAdditionRecord(addition_record);
+        let blocks = self
+            .db
+            .get(key)
+            .await
+            .map(|x| x.as_blocks_by_addition_records())
+            .unwrap_or_default();
 
-        block_heights
+        blocks.into_iter().collect()
     }
 
     /// Return the block height of the block containing the specified
@@ -459,6 +454,8 @@ impl StorageWriter for RustyUtxoIndex {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use macro_rules_attr::apply;
     use rand::Rng;
     use tasm_lib::twenty_first::bfe;
@@ -683,17 +680,14 @@ mod tests {
         for block in blocks {
             let expected: HashSet<_> = [block.header().height].into_iter().collect();
             for ar in block.all_addition_records().unwrap() {
-                let ars: HashSet<_> = [ar].into_iter().collect();
-                assert_eq!(expected, utxo_index.blocks_by_addition_records(&ars).await);
+                assert_eq!(expected, utxo_index.blocks_by_addition_record(ar).await);
             }
         }
 
-        let unknown_addition_record: HashSet<_> = [AdditionRecord::new(Digest::default())]
-            .into_iter()
-            .collect();
+        let unknown_addition_record = AdditionRecord::new(Digest::default());
         assert!(
             utxo_index
-                .blocks_by_addition_records(&unknown_addition_record)
+                .blocks_by_addition_record(unknown_addition_record)
                 .await
                 .is_empty(),
             "Unknown addition record must return empty set"
@@ -743,14 +737,13 @@ mod tests {
         }
 
         // Block 1 and 2 contain this addition record, block 3 does not
-        let an_addition_record: HashSet<_> = [an_addition_record].into_iter().collect();
         let expected: HashSet<_> = [BlockHeight::from(1u64), BlockHeight::from(2u64)]
             .into_iter()
             .collect();
         assert_eq!(
             expected,
             utxo_index
-                .blocks_by_addition_records(&an_addition_record)
+                .blocks_by_addition_record(an_addition_record)
                 .await
         );
     }
@@ -820,8 +813,12 @@ mod tests {
             .iter()
             .copied()
             .collect();
-        let expected_blocks_by_addition_records =
-            utxo_index.blocks_by_addition_records(&block2_ars).await;
+
+        let mut expected_blocks_by_addition_records = HashMap::new();
+        for ar in &block2_ars {
+            expected_blocks_by_addition_records
+                .insert(*ar, utxo_index.blocks_by_addition_record(*ar).await);
+        }
 
         utxo_index.index_block(&block1).await;
         utxo_index.index_block(&block2).await;
@@ -840,10 +837,17 @@ mod tests {
                 .block_heights_by_announcements(&announcements)
                 .await
         );
+
+        let mut read_blocks_by_addition_records = HashMap::new();
+        for ar in block2_ars {
+            read_blocks_by_addition_records
+                .insert(ar, utxo_index.blocks_by_addition_record(ar).await);
+        }
         assert_eq!(
             expected_blocks_by_addition_records,
-            utxo_index.blocks_by_addition_records(&block2_ars).await
+            read_blocks_by_addition_records
         );
+
         assert_eq!(block2.hash(), utxo_index.sync_label().await);
     }
 

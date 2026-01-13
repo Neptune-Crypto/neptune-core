@@ -757,6 +757,11 @@ impl GlobalState {
     /// # Panics
     /// - If start block height is greater than end block height
     pub async fn rescan_outgoing(&mut self, first: BlockHeight, last: BlockHeight) -> Result<()> {
+        ensure!(
+            self.chain.archival_state().utxo_index.is_some(),
+            "Cannot rescan for spent UTXOs when node does not maintain a UTXO index"
+        );
+
         let first: u64 = first.into();
         let last: u64 = last.into();
         assert!(
@@ -781,6 +786,8 @@ impl GlobalState {
                 .chain
                 .archival_state()
                 .utxo_index
+                .as_ref()
+                .unwrap()
                 .index_set_digests(block_hash)
                 .await
             else {
@@ -1084,6 +1091,11 @@ impl GlobalState {
         keys: &HashMap<AnnouncementFlag, SpendingKey>,
         block_height: u64,
     ) -> Result<()> {
+        ensure!(
+            self.chain.archival_state().utxo_index.is_some(),
+            "Cannot rescan for spent UTXOs when node does not maintain a UTXO index"
+        );
+
         let Some(block_hash) = self
             .chain
             .archival_state()
@@ -1101,6 +1113,8 @@ impl GlobalState {
             .chain
             .archival_state()
             .utxo_index
+            .as_ref()
+            .unwrap()
             .announcement_flags(block_hash)
             .await
         else {
@@ -2193,7 +2207,9 @@ impl GlobalState {
             .persist()
             .await;
 
-        self.chain.archival_state_mut().utxo_index.persist().await;
+        if let Some(utxo_index) = &mut self.chain.archival_state_mut().utxo_index {
+            utxo_index.persist().await;
+        }
 
         // flush peer_standings
         self.net.peer_databases.peer_standings.flush().await;
@@ -2297,12 +2313,10 @@ impl GlobalState {
             .await?;
 
         // If we are maintaining a UTXO index, apply block to this.
-        if self.cli.utxo_index {
-            self.chain
-                .archival_state_mut()
-                .update_utxo_index(&new_tip)
-                .await;
-        }
+        self.chain
+            .archival_state_mut()
+            .update_utxo_index(&new_tip)
+            .await;
 
         *self.chain.light_state_mut() = std::sync::Arc::new(new_tip.clone());
 
@@ -2962,6 +2976,11 @@ mod tests {
                 "Must call function with a non-empty range. Got range: {first}..={last}."
             );
 
+            ensure!(
+                self.chain.archival_state().utxo_index.is_some(),
+                "Only works when UTXO index is maintained"
+            );
+
             let all_keys: HashMap<AnnouncementFlag, SpendingKey> = keys
                 .into_iter()
                 .map(|key| ((&key.to_address()).into(), key))
@@ -2972,6 +2991,8 @@ mod tests {
                 .chain
                 .archival_state()
                 .utxo_index
+                .as_ref()
+                .unwrap()
                 .blocks_by_announcement_flags(&announcement_flags)
                 .await;
 
