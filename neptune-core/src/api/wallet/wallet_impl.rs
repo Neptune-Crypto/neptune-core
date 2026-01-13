@@ -202,53 +202,15 @@ impl<'a> Wallet<'a> {
         utxo_ix: usize,
         block: Digest,
     ) -> Result<(Claim, NeptuneProof), WalletError> {
-        state_lock_call_async!(
-            &self.state_lock,
-            worker::prove_transfer,
-            tx_ix,
-            utxo_ix,
-            block
-        )
-        .await
-    }
-}
-
-mod worker {
-    use tasm_lib::twenty_first::prelude::Mmr;
-
-    use super::*;
-
-    pub async fn next_unused_spending_key(
-        gsm: &mut GlobalState,
-        key_type: KeyType,
-    ) -> Result<SpendingKey, WalletError> {
-        let address = gsm.wallet_state.next_unused_spending_key(key_type).await;
-
-        // persist wallet state to disk
-        gsm.persist_wallet().await?;
-
-        Ok(address)
-    }
-
-    pub async fn balances(gs: &GlobalState, timestamp: Timestamp) -> WalletBalances {
-        WalletBalances::from_global_state(gs, timestamp).await
-    }
-
-    pub async fn spendable_inputs(gs: &GlobalState, timestamp: Timestamp) -> TxInputList {
-        // Sadly we have to collect here because we can't hold ref after lock guard is dropped.
-        gs.wallet_spendable_inputs(timestamp)
-            .await
-            .into_iter()
-            .into()
-    }
-
-    pub async fn prove_transfer(
-        gs: &GlobalState,
-        tx_ix: u64,
-        utxo_ix: usize,
-        block: Digest,
-    ) -> Result<(Claim, NeptuneProof), WalletError> {
-        let block = gs
+        // state_lock_call_async!(
+        //     &self.state_lock,
+        //     worker::prove_transfer,
+        //     tx_ix,
+        //     utxo_ix,
+        //     block
+        // )
+        // .await
+        let block = &self.state_lock.gs()
             .chain
             .archival_state()
             .get_block(block)
@@ -258,7 +220,7 @@ mod worker {
 
         let tx_sent =
             &crate::application::database::storage::storage_vec::traits::StorageVecBase::get(
-                gs.wallet_state.wallet_db.sent_transactions(),
+                self.state_lock.gs().wallet_state.wallet_db.sent_transactions(),
                 tx_ix,
             )
             .await;
@@ -274,11 +236,11 @@ mod worker {
             .body()
             .mutator_set_accumulator_without_guesser_fees()
             .aocl;
-        let block_aocl_numleafs = block_aocl.num_leafs();
+        let block_aocl_numleafs = tasm_lib::twenty_first::prelude::Mmr::num_leafs(&block_aocl);
 
         // let aocl_digest = block_aocl.bag_peaks();
 
-        let aocl_archival_ref = &gs.chain.archival_state().archival_mutator_set.ams().aocl;
+        let aocl_archival_ref = &self.state_lock.gs().chain.archival_state().archival_mutator_set.ams().aocl;
         let aocl_leaf_ix = aocl_archival_ref
             .get_leaf_range_inclusive_async(0..=(block_aocl_numleafs - 1))
             .await
@@ -327,5 +289,33 @@ mod worker {
         .map_err(|e| WalletError::Failed(e.to_string()))?;
 
         Ok((claim, proof))
+    }
+}
+
+mod worker {
+    use super::*;
+
+    pub async fn next_unused_spending_key(
+        gsm: &mut GlobalState,
+        key_type: KeyType,
+    ) -> Result<SpendingKey, WalletError> {
+        let address = gsm.wallet_state.next_unused_spending_key(key_type).await;
+
+        // persist wallet state to disk
+        gsm.persist_wallet().await?;
+
+        Ok(address)
+    }
+
+    pub async fn balances(gs: &GlobalState, timestamp: Timestamp) -> WalletBalances {
+        WalletBalances::from_global_state(gs, timestamp).await
+    }
+
+    pub async fn spendable_inputs(gs: &GlobalState, timestamp: Timestamp) -> TxInputList {
+        // Sadly we have to collect here because we can't hold ref after lock guard is dropped.
+        gs.wallet_spendable_inputs(timestamp)
+            .await
+            .into_iter()
+            .into()
     }
 }

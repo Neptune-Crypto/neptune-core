@@ -29,23 +29,11 @@ use tasm_lib::{
 };
 
 use crate::{
-    api::export::{NativeCurrencyAmount, Utxo},
-    protocol::proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
+    api::export::{NativeCurrencyAmount, Utxo}, application::util_proof::{ProofOfTransfer, ProofOfTransferWitness}, protocol::proof_abstractions::{SecretWitness, tasm::program::ConsensusProgram}
 };
 
 // const ERROR_UTXO_DIGEST_NEQ: i128 = 1_000_520;
 const ERROR_AOCL_PROOF_VERIFICATION_FAILED: i128 = 1_000_521;
-
-#[derive(TasmObject, tasm_lib::triton_vm::prelude::BFieldCodec, Debug)]
-struct WitnessMemory {
-    /// AOCL accumulator of the block
-    aocl: MmrAccumulator,
-    membership_proof: MmrMembershipProof,
-    sender_randomness: Digest,
-    aocl_leaf_index: u64,
-    utxo: Utxo,
-    // utxo_digest: Digest,
-}
 
 pub fn claim_inputs(
     c: Claim,
@@ -108,9 +96,9 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
 
     // let rustfield_membershipproof = rustfield!(WitnessMemory::membership_proof);
     // let rustfield_senderrandomness = rustfield!(MmrMembershipProof::sender_randomness);
-    let rustfield_utxo = rustfield!(WitnessMemory::utxo);
-    let rustfield_utxo_digest = rustfield!(WitnessMemory::utxo_digest);
-    let rustfield_aoclleafindex = rustfield!(WitnessMemory::aocl_leaf_index);
+    let rustfield_utxo = rustfield!(ProofOfTransferWitness::utxo);
+    let rustfield_utxo_digest = rustfield!(ProofOfTransferWitness::utxo_digest);
+    let rustfield_aoclleafindex = rustfield!(ProofOfTransferWitness::aocl_leaf_index);
 
     let main = triton_asm! {
         // _
@@ -125,7 +113,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // the AOCL will end up hashed and outputted to check the used block
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         // _ *w
-        {&WitnessMemory::get_field("aocl")}
+        {&ProofOfTransferWitness::get_field("aocl")}
         // _ *aocl
 
         // the peaks will be needed for the membership verification
@@ -139,7 +127,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         // _ *w
-        {&WitnessMemory::get_field("sender_randomness")}
+        {&ProofOfTransferWitness::get_field("sender_randomness")}
         addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
@@ -160,7 +148,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
 
         // hash varlen the UTXO from the witness
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        {&WitnessMemory::get_field_with_size("utxo")}
+        {&ProofOfTransferWitness::get_field_with_size("utxo")}
         call {lib_hash_varlen}
         hint utxo_hash = stack[0..5]
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
@@ -192,7 +180,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        {&WitnessMemory::get_field("membership_proof")}
+        {&ProofOfTransferWitness::get_field("membership_proof")}
         {&MmrMembershipProof::get_field("authentication_path")}
         // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment] *auth_path
 
@@ -264,8 +252,6 @@ pub fn hash() -> Digest {
     *DIGEST.get_or_init(|| Program::new(&library_and_code().1).hash())
 }
 
-#[derive(Debug)]
-pub struct The(WitnessMemory, Claim);
 pub fn new(
     c: Claim,
     witness_aocl: MmrAccumulator,
@@ -273,10 +259,10 @@ pub fn new(
     witness_aoclleafindex: u64,
     witness_utxo: Utxo,
     witness_membershipproof: MmrMembershipProof,
-) -> The {
+) -> ProofOfTransfer {
     // let coins = witness_utxo.coins();
-    The(
-        WitnessMemory {
+    ProofOfTransfer(
+        ProofOfTransferWitness {
             aocl: witness_aocl,
             membership_proof: witness_membershipproof,
             // utxo_digest: tasm_lib::prelude::Tip5::hash(&witness_utxo),
@@ -287,7 +273,7 @@ pub fn new(
         c,
     )
 }
-impl SecretWitness for The {
+impl SecretWitness for ProofOfTransfer {
     fn standard_input(&self) -> PublicInput {
         PublicInput {
             individual_tokens: self.claim().input,
@@ -321,7 +307,7 @@ impl SecretWitness for The {
     }
 }
 
-impl ConsensusProgram for The {
+impl ConsensusProgram for ProofOfTransfer {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         library_and_code()
     }

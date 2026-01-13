@@ -23,7 +23,7 @@ use crate::{
 };
 
 impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification
-    for super::The
+    for super::ProofOfTransfer
 {
     fn source(&self) {
         // get in the current program's hash digest
@@ -34,7 +34,7 @@ impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgram
         let publicinput_receiverdigest: Digest = tasm::builtins::tasmlib_io_read_stdin___digest();
 
         // divine witness from memory
-        let ram: super::WitnessMemory = tasm::builtins::decode_from_memory(
+        let ram: super::ProofOfTransferWitness = tasm::builtins::decode_from_memory(
             tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
         );
 
