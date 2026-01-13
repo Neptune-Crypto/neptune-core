@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use libp2p::Multiaddr;
 use serde::Deserialize;
@@ -81,6 +83,13 @@ pub enum RpcError {
 
     #[error("Access to this endpoint is restricted")]
     RestrictedAccess,
+
+    // Application-level errors
+    #[error("Internal response timed out: {0:?}.")]
+    Timeout(Duration),
+
+    #[error("Sender dropped while awaiting response.")]
+    RxChannel,
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -589,4 +598,12 @@ pub trait RpcApi: Sync + Send {
         self.reset_relay_reservations_call(ResetRelayReservationsRequest {})
             .await
     }
+
+    async fn get_network_overview(&self) -> RpcResult<NetworkOverviewResponse> {
+        self.network_overview_call(NetworkOverviewRequest {}).await
+    }
+    async fn network_overview_call(
+        &self,
+        _request: NetworkOverviewRequest,
+    ) -> RpcResult<NetworkOverviewResponse>;
 }

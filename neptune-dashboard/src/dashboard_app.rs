@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::io;
 use std::io::Stdout;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -188,7 +187,6 @@ impl DashboardApp {
         rpc_server: Arc<DashboardRpcClient>,
         network: Network,
         token: auth::Token,
-        listen_addr_for_peers: Option<SocketAddr>,
     ) -> Self {
         let mut screens = HashMap::<MenuItem, Rc<RefCell<dyn Screen>>>::new();
 
@@ -196,7 +194,6 @@ impl DashboardApp {
             rpc_server.clone(),
             network,
             token,
-            listen_addr_for_peers,
         )));
         let overview_screen_dyn = Rc::clone(&overview_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Overview, Rc::clone(&overview_screen_dyn));
@@ -315,16 +312,9 @@ impl DashboardApp {
         client: DashboardRpcClient,
         network: Network,
         token: auth::Token,
-        listen_addr_for_peers: Option<SocketAddr>,
     ) -> Result<String, Box<dyn Error>> {
         // create app
-        let mut app = DashboardApp::new(
-            Arc::new(config),
-            Arc::new(client),
-            network,
-            token,
-            listen_addr_for_peers,
-        );
+        let mut app = DashboardApp::new(Arc::new(config), Arc::new(client), network, token);
         let (refresh_tx, mut refresh_rx) = tokio::sync::mpsc::channel::<()>(2);
 
         // setup terminal

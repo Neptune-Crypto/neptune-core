@@ -54,6 +54,7 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -69,6 +70,7 @@ use systemstat::System;
 use tarpc::context;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
+use tokio::sync::oneshot;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
@@ -86,6 +88,7 @@ use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
+use crate::application::network::overview::NetworkOverview;
 use crate::application::rpc::server::coinbase_output_readable::CoinbaseOutputReadable;
 use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
@@ -1671,6 +1674,9 @@ pub trait RPC {
     /// Reset this node's relay reservations with its relaying peers.
     async fn reset_relay_reservations(token: auth::Token) -> RpcResult<()>;
 
+    /// Get the network overview data and health statistics.
+    async fn get_network_overview(token: auth::Token) -> RpcResult<NetworkOverview>;
+
     /// record transaction and initiate broadcast to peers
     ///
     /// todo: docs.
@@ -2368,6 +2374,28 @@ impl NeptuneRPCServer {
     /// get the data_directory for this neptune-core instance
     pub fn data_directory(&self) -> &DataDirectory {
         &self.data_directory
+    }
+
+    async fn get_network_overview_inner(&self) -> RpcResult<NetworkOverview> {
+        // Create one-shot channel.
+        let (tx, rx) = oneshot::channel();
+
+        // Send one-shot channel to NetworkActor, via main loop.
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::GetNetworkOverview(tx))
+            .await
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
+
+        // Await receipt.
+        match tokio::time::timeout(Duration::from_secs(1), rx).await {
+            Ok(Ok(overview)) => Ok(overview),
+            Ok(Err(e)) => Err(RpcError::SendError(format!("NetworkActor dropped: {e}."))),
+            Err(e) => Err(RpcError::Failed(format!(
+                "RPC Timeout while waiting for NetworkActor response: {e}."
+            ))),
+        }
     }
 }
 
@@ -3165,8 +3193,8 @@ impl RPC for NeptuneRPCServer {
         let cpu_temp = None; // disable for now.  call is too slow.
         let proving_capability = self.state.cli().proving_capability();
 
-        let peer_count = Some(state.net.peer_map.len());
-        let max_num_peers = self.state.cli().max_num_peers;
+        let peer_count = state.net.peer_map.len();
+        let network_overview = self.get_network_overview_inner().await.ok();
 
         let mining_status = Some(state.mining_state.mining_status);
 
@@ -3207,11 +3235,11 @@ impl RPC for NeptuneRPCServer {
             confirmed_total_balance,
             unconfirmed_available_balance,
             unconfirmed_total_balance,
+            peer_count,
+            network_overview,
             mempool_size,
             mempool_total_tx_count,
             mempool_own_tx_count,
-            peer_count,
-            max_num_peers,
             mining_status,
             proving_capability,
             confirmations,
@@ -3297,7 +3325,9 @@ impl RPC for NeptuneRPCServer {
 
         self.rpc_server_to_main_tx
             .try_send(RPCServerToMain::Ban(address))
-            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
 
         Ok(())
     }
@@ -3314,7 +3344,9 @@ impl RPC for NeptuneRPCServer {
 
         self.rpc_server_to_main_tx
             .try_send(RPCServerToMain::Unban(address))
-            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
 
         Ok(())
     }
@@ -3326,7 +3358,9 @@ impl RPC for NeptuneRPCServer {
 
         self.rpc_server_to_main_tx
             .try_send(RPCServerToMain::UnbanAll)
-            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
 
         Ok(())
     }
@@ -3343,7 +3377,9 @@ impl RPC for NeptuneRPCServer {
 
         self.rpc_server_to_main_tx
             .try_send(RPCServerToMain::Dial(address))
-            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
 
         Ok(())
     }
@@ -3355,7 +3391,9 @@ impl RPC for NeptuneRPCServer {
 
         self.rpc_server_to_main_tx
             .try_send(RPCServerToMain::ProbeNat)
-            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
 
         Ok(())
     }
@@ -3371,9 +3409,22 @@ impl RPC for NeptuneRPCServer {
 
         self.rpc_server_to_main_tx
             .try_send(RPCServerToMain::ResetRelayReservations)
-            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
 
         Ok(())
+    }
+    // Already documented in trait; do not add docstring.
+    async fn get_network_overview(
+        self,
+        _: context::Context,
+        token: auth::Token,
+    ) -> RpcResult<NetworkOverview> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.get_network_overview_inner().await
     }
 
     // documented in trait. do not add doc-comment.

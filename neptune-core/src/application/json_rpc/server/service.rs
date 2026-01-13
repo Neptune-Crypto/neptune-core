@@ -1,7 +1,9 @@
 use std::collections::HashSet;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use itertools::Itertools;
+use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::api::export::AdditionRecord;
@@ -988,6 +990,32 @@ impl RpcApi for RpcServer {
 
         Ok(ResetRelayReservationsResponse {})
     }
+
+    async fn network_overview_call(
+        &self,
+        _request: NetworkOverviewRequest,
+    ) -> RpcResult<NetworkOverviewResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        // Create one-shot channel.
+        let (tx, rx) = oneshot::channel();
+
+        // Send one-shot channel to NetworkActor, via main loop.
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::GetNetworkOverview(tx))
+            .await;
+
+        // Await receipt.
+        let timeout_period = Duration::from_secs(1);
+        match tokio::time::timeout(timeout_period, rx).await {
+            Ok(Ok(network_overview)) => Ok(NetworkOverviewResponse { network_overview }),
+            Ok(Err(_e)) => Err(RpcError::RxChannel),
+            Err(_e) => Err(RpcError::Timeout(timeout_period)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1656,6 +1684,8 @@ pub mod tests {
         rpc_server.dial(multiaddr).await.unwrap();
         rpc_server.probe_nat().await.unwrap();
         rpc_server.reset_relay_reservations().await.unwrap();
+        rpc_server.get_network_overview().await
+            .expect_err("dummy main loop consumes and drops incoming messages including oneshot back-communication channel");
     }
 
     #[apply(shared_tokio_runtime)]
@@ -1674,5 +1704,6 @@ pub mod tests {
             err,
             rpc_server.reset_relay_reservations().await.unwrap_err()
         );
+        assert_eq!(err, rpc_server.get_network_overview().await.unwrap_err());
     }
 }

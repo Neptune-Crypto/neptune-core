@@ -5,6 +5,8 @@ use libp2p::Multiaddr;
 use libp2p::PeerId;
 use tokio::task::JoinHandle;
 
+use crate::application::network::overview::NetworkOverview;
+
 /// Commands from Application -> Network
 pub enum NetworkActorCommand {
     /// Instructs the libp2p swarm to dial a specific [`Multiaddr`].
@@ -40,6 +42,14 @@ pub enum NetworkActorCommand {
     /// configured relay nodes. Use this if the node is stuck behind a symmetric
     /// NAT and relay connectivity has degraded.
     ResetRelayReservations,
+
+    /// Asks for a status update.
+    ///
+    /// In more detail, this variant instructs the
+    /// [`NetworkActor`](super::actor::NetworkActor) to assemble a
+    /// [`NetworkOverview`] package of overview data and health statistics and
+    /// send the assembled package back over the given channel.
+    GetNetworkOverview(tokio::sync::oneshot::Sender<NetworkOverview>),
 
     /// Signals the [`NetworkActor`](super::actor::NetworkActor) to begin a
     /// graceful shutdown of all network tasks.

@@ -3358,6 +3358,7 @@ dependencies = [
  "crossterm 0.27.0",
  "humantime",
  "itertools 0.11.0",
+ "libp2p",
  "multiaddr",
  "neptune-cash",
  "num-traits",

@@ -26,6 +26,7 @@ use crate::application::network::channel::NetworkEvent;
 use crate::application::network::config::NetworkConfig;
 use crate::application::network::gateway::GatewayEvent;
 use crate::application::network::gateway::StreamGateway;
+use crate::application::network::overview::NetworkOverview;
 use crate::application::network::stack::NetworkStack;
 use crate::application::network::stack::NetworkStackEvent;
 use crate::application::network::stack::NEPTUNE_PROTOCOL;
@@ -1513,6 +1514,13 @@ impl NetworkActor {
                     self.active_connections.remove(&peer_id);
                 }
             }
+            NetworkActorCommand::GetNetworkOverview(channel) => {
+                tracing::info!("Assembling network overview ...");
+                let overview = self.assemble_overview();
+                if channel.send(overview).is_err() {
+                    tracing::error!("Cannot send NetworkOverview from NetworkActor over one-shot.");
+                }
+            }
         }
 
         Ok(Self::KEEP_ALIVE)
@@ -1752,6 +1760,37 @@ impl NetworkActor {
             self.active_connections.remove(&peer_id);
         } else {
             tracing::debug!("No peers available to disconnect from.");
+        }
+    }
+
+    /// Collects a point-in-time snapshot of the node's network stack.
+    ///
+    /// This method aggregates data from the internal Swarm behaviors (AutoNAT,
+    /// Relay), the standard libp2p address observation, and the
+    /// [`NetworkActor`]'s manual connection tracking to provide a comprehensive
+    /// view of current connectivity.
+    ///
+    /// This is intended for use by dashboard UIs, CLI status commands, or
+    /// health-check diagnostics.
+    pub(crate) fn assemble_overview(&self) -> NetworkOverview {
+        let nat_status = self.swarm.behaviour().autonat.nat_status();
+        let external_addresses = self.swarm.external_addresses().cloned().collect();
+        let num_active_relays = self.relays.len();
+        let address_book_size = self.address_book.len();
+        let num_banned_peers = self.black_list.list.len();
+
+        NetworkOverview {
+            peer_id: *self.swarm.local_peer_id(),
+            nat_status,
+            external_addresses,
+
+            connection_count: self.active_connections.len(),
+            connection_limit: self.max_num_peers,
+
+            num_active_relays,
+
+            address_book_size,
+            num_banned_peers,
         }
     }
 }
