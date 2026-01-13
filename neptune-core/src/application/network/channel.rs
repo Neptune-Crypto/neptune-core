@@ -26,6 +26,21 @@ pub enum NetworkActorCommand {
     /// IP addresses from the black list, thereby revoking all bans.
     UnbanAll,
 
+    /// Forces a re-evaluation of the local NAT status.
+    ///
+    /// This triggers the `libp2p-autonat` behavior to probe current network
+    /// observability. It is useful if the node has moved networks or if
+    /// port-forwarding rules have changed since startup.
+    ProbeNat,
+
+    /// Clears and re-establishes all active relay circuit reservations.
+    ///
+    /// This command drops all existing `v2::hop` and `v2::stop` reservations
+    /// and forces the `Relay` behavior to seek fresh connections with
+    /// configured relay nodes. Use this if the node is stuck behind a symmetric
+    /// NAT and relay connectivity has degraded.
+    ResetRelayReservations,
+
     /// Signals the [`NetworkActor`](super::actor::NetworkActor) to begin a
     /// graceful shutdown of all network tasks.
     Shutdown,

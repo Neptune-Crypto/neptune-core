@@ -1665,6 +1665,12 @@ pub trait RPC {
     /// Dial (attempt to initiate a connection to) a [`Multiaddr`].
     async fn dial(token: auth::Token, address: Multiaddr) -> RpcResult<()>;
 
+    /// Probe the NAT status of this node.
+    async fn probe_nat(token: auth::Token) -> RpcResult<()>;
+
+    /// Reset this node's relay reservations with its relaying peers.
+    async fn reset_relay_reservations(token: auth::Token) -> RpcResult<()>;
+
     /// record transaction and initiate broadcast to peers
     ///
     /// todo: docs.
@@ -3337,6 +3343,34 @@ impl RPC for NeptuneRPCServer {
 
         self.rpc_server_to_main_tx
             .try_send(RPCServerToMain::Dial(address))
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn probe_nat(self, _: context::Context, token: auth::Token) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::ProbeNat)
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn reset_relay_reservations(
+        self,
+        _: context::Context,
+        token: auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::ResetRelayReservations)
             .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
 
         Ok(())

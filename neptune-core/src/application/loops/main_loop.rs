@@ -2172,7 +2172,7 @@ impl MainLoopHandler {
                 Ok(false)
             }
             RPCServerToMain::Dial(address) => {
-                log_slow_scope!(fn_name!() + "::RPCServerToMain::UnbanAll");
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::Dial");
 
                 // Pass on message to NetworkActor.
                 if let Err(e) = self
@@ -2181,6 +2181,34 @@ impl MainLoopHandler {
                     .await
                 {
                     error!("Cannot send Dial message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::ProbeNat => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::ProbeNat");
+
+                // Pass on message to NetworkActor.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::ProbeNat)
+                    .await
+                {
+                    error!("Cannot send ProbeNat message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::ResetRelayReservations => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::ResetRelayReservations");
+
+                // Pass on message to NetworkActor.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::ResetRelayReservations)
+                    .await
+                {
+                    error!("Cannot send ResetRelayReservations message to NetworkActor: {e}.");
                 }
 
                 Ok(false)

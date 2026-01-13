@@ -962,6 +962,32 @@ impl RpcApi for RpcServer {
 
         Ok(DialResponse {})
     }
+
+    async fn probe_nat_call(&self, _request: ProbeNatRequest) -> RpcResult<ProbeNatResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        let _ = self.to_main_tx.send(RPCServerToMain::ProbeNat).await;
+
+        Ok(ProbeNatResponse {})
+    }
+
+    async fn reset_relay_reservations_call(
+        &self,
+        _request: ResetRelayReservationsRequest,
+    ) -> RpcResult<ResetRelayReservationsResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::ResetRelayReservations)
+            .await;
+
+        Ok(ResetRelayReservationsResponse {})
+    }
 }
 
 #[cfg(test)]
@@ -1612,64 +1638,41 @@ pub mod tests {
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn ban_commands_do_not_crash() {
-        // The ban commands have an *indirect* effect on state. The main loop
+    async fn network_commands_do_not_crash() {
+        // Network commands have an *indirect* effect on state. The main loop
         // receives messages from the RPC server and may modify state directly
         // or may pass on messages to the network actor or to the peer loop
         // which then modify state. These secondary effects are not in the
         // scope of this test module. For now it suffices to verify that the
-        // ban commands can be delivered without crashing.
+        // network commands can be delivered without crashing.
         let mut rpc_server = test_rpc_server().await;
         rpc_server.unrestricted = true;
 
         let multiaddr = random_multiaddr();
 
         rpc_server.ban(multiaddr.clone()).await.unwrap();
-        rpc_server.unban(multiaddr).await.unwrap();
+        rpc_server.unban(multiaddr.clone()).await.unwrap();
         rpc_server.unban_all().await.unwrap();
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn ban_commands_require_unrestricted_access() {
-        let rpc_server = test_rpc_server().await;
-
-        let multiaddr = random_multiaddr();
-
-        assert_eq!(
-            RpcError::RestrictedAccess,
-            rpc_server.ban(multiaddr.clone()).await.unwrap_err()
-        );
-        assert_eq!(
-            RpcError::RestrictedAccess,
-            rpc_server.unban(multiaddr).await.unwrap_err()
-        );
-        assert_eq!(
-            RpcError::RestrictedAccess,
-            rpc_server.unban_all().await.unwrap_err()
-        );
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn dial_command_does_not_crash() {
-        // Dito regarding indirect effect on state.
-        let mut rpc_server = test_rpc_server().await;
-        rpc_server.unrestricted = true;
-
-        let multiaddr = random_multiaddr();
-
         rpc_server.dial(multiaddr).await.unwrap();
+        rpc_server.probe_nat().await.unwrap();
+        rpc_server.reset_relay_reservations().await.unwrap();
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn dial_command_requires_unrestricted_access() {
-        // Dito regarding indirect effect on state.
+    async fn network_commands_require_unrestricted_access() {
         let rpc_server = test_rpc_server().await;
 
         let multiaddr = random_multiaddr();
 
+        let err = RpcError::RestrictedAccess;
+        assert_eq!(err, rpc_server.ban(multiaddr.clone()).await.unwrap_err());
+        assert_eq!(err, rpc_server.unban(multiaddr.clone()).await.unwrap_err());
+        assert_eq!(err, rpc_server.unban_all().await.unwrap_err());
+        assert_eq!(err, rpc_server.dial(multiaddr).await.unwrap_err());
+        assert_eq!(err, rpc_server.probe_nat().await.unwrap_err());
         assert_eq!(
-            RpcError::RestrictedAccess,
-            rpc_server.dial(multiaddr).await.unwrap_err()
+            err,
+            rpc_server.reset_relay_reservations().await.unwrap_err()
         );
     }
 }

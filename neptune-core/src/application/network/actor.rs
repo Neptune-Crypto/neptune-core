@@ -1471,6 +1471,48 @@ impl NetworkActor {
                 // loop.
                 return Ok(!Self::KEEP_ALIVE);
             }
+            NetworkActorCommand::ProbeNat => {
+                tracing::info!("Triggering NAT probe...");
+                // Call `autonat.probe_address` with a good guess at our own
+                // public address. Where to get that good guess from?
+                //  1. external addresses confirmed by the swarm;
+                //  2. listen addresses,
+                //  3. localhost. (This last one is obviously not publicly
+                //     reachable but the point is to trigger the `prove_address`
+                //     logic.)
+                let mut addresses: Vec<Multiaddr> =
+                    self.swarm.external_addresses().cloned().collect();
+                if addresses.is_empty() {
+                    addresses = self.swarm.listeners().cloned().collect();
+                }
+                if addresses.is_empty() {
+                    tracing::warn!(
+                        "No listeners or external addresses found. Using fallback loopback."
+                    );
+                    if let Ok(fallback) = "/ip4/127.0.0.1/tcp/0".parse::<Multiaddr>() {
+                        addresses.push(fallback);
+                    }
+                }
+
+                // If we do have more than one good guess at our own public
+                // address, then probe all of them.
+                for addr in addresses {
+                    // This tells AutoNAT: "I think these are my public
+                    // addresses. Please ask a random server to try and dial me
+                    // here."
+                    self.swarm.behaviour_mut().autonat.probe_address(addr);
+                }
+            }
+            NetworkActorCommand::ResetRelayReservations => {
+                tracing::info!("Resetting relay reservations...");
+
+                for (peer_id, (_maybe_timestamp, listener_id)) in self.relays.drain() {
+                    tracing::info!(%peer_id, "Evicting relay to force re-reservation.");
+                    self.swarm.remove_listener(listener_id);
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                    self.active_connections.remove(&peer_id);
+                }
+            }
         }
 
         Ok(Self::KEEP_ALIVE)

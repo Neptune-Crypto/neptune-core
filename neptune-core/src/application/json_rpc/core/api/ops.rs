@@ -184,6 +184,10 @@ pub enum RpcMethods {
     UnbanAll,
     #[namespace(Namespace::Network)]
     Dial,
+    #[namespace(Namespace::Network)]
+    ProbeNat,
+    #[namespace(Namespace::Network)]
+    ResetRelayReservations,
 }
 
 #[cfg(test)]

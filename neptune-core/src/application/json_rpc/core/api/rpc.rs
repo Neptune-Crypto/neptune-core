@@ -577,4 +577,16 @@ pub trait RpcApi: Sync + Send {
     async fn dial(&self, address: Multiaddr) -> RpcResult<DialResponse> {
         self.dial_call(DialRequest { address }).await
     }
+    async fn probe_nat_call(&self, request: ProbeNatRequest) -> RpcResult<ProbeNatResponse>;
+    async fn probe_nat(&self) -> RpcResult<ProbeNatResponse> {
+        self.probe_nat_call(ProbeNatRequest {}).await
+    }
+    async fn reset_relay_reservations_call(
+        &self,
+        request: ResetRelayReservationsRequest,
+    ) -> RpcResult<ResetRelayReservationsResponse>;
+    async fn reset_relay_reservations(&self) -> RpcResult<ResetRelayReservationsResponse> {
+        self.reset_relay_reservations_call(ResetRelayReservationsRequest {})
+            .await
+    }
 }

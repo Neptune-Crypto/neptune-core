@@ -554,3 +554,19 @@ pub struct DialRequest {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DialResponse {}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeNatRequest {}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeNatResponse {}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetRelayReservationsRequest {}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetRelayReservationsResponse {}
