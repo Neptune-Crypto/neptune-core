@@ -1,5 +1,4 @@
 use std::cmp::min;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -7,7 +6,9 @@ use std::time::SystemTime;
 
 use bytesize::ByteSize;
 use itertools::Itertools;
+use libp2p::autonat::NatStatus;
 use neptune_cash::application::config::network::Network;
+use neptune_cash::application::network::overview::NetworkOverview;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::protocol::consensus::block::block_header::BlockHeader;
 use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
@@ -58,10 +59,8 @@ pub struct OverviewData {
     mempool_total_tx_count: Option<u32>,
     mempool_own_tx_count: Option<u32>,
 
-    listen_address: Option<SocketAddr>,
-    peer_count: Option<usize>,
-    max_num_peers: Option<usize>,
-    authenticated_peer_count: Option<usize>,
+    network_overview: Option<NetworkOverview>,
+    peer_count: usize,
 
     up_since: Option<u64>,
     cpu_load: Option<f64>,
@@ -76,10 +75,9 @@ pub struct OverviewData {
 }
 
 impl OverviewData {
-    pub fn new(network: Network, listen_address: Option<SocketAddr>) -> Self {
+    pub fn new(network: Network) -> Self {
         Self {
             network,
-            listen_address,
             ..Default::default()
         }
     }
@@ -99,21 +97,13 @@ pub struct OverviewScreen {
 }
 
 impl OverviewScreen {
-    pub fn new(
-        rpc_server: Arc<DashboardRpcClient>,
-        network: Network,
-        token: auth::Token,
-        listen_addr_for_peers: Option<SocketAddr>,
-    ) -> Self {
+    pub fn new(rpc_server: Arc<DashboardRpcClient>, network: Network, token: auth::Token) -> Self {
         Self {
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
             in_focus: false,
-            data: Arc::new(Mutex::new(OverviewData::new(
-                network,
-                listen_addr_for_peers,
-            ))),
+            data: Arc::new(Mutex::new(OverviewData::new(network))),
             server: rpc_server,
             token,
             poll_task: None,
@@ -156,9 +146,7 @@ impl OverviewScreen {
                                 own_overview_data.mempool_size = Some(ByteSize::b(resp.mempool_size.try_into().unwrap()));
                                 own_overview_data.mempool_total_tx_count = Some(resp.mempool_total_tx_count.try_into().unwrap());
                                 own_overview_data.mempool_own_tx_count = Some(resp.mempool_own_tx_count.try_into().unwrap());
-                                own_overview_data.peer_count=resp.peer_count;
-                                own_overview_data.max_num_peers = Some(resp.max_num_peers);
-                                own_overview_data.authenticated_peer_count=Some(0);
+                                own_overview_data.network_overview = resp.network_overview;
                                 own_overview_data.sync_status=resp.sync_status;
                                 own_overview_data.confirmed_available_balance = Some(resp.confirmed_available_balance);
                                 own_overview_data.confirmed_total_balance = Some(resp.confirmed_total_balance);
@@ -415,20 +403,63 @@ impl Widget for OverviewScreen {
             .style(style)
             .render(vrecter.next(2 + lines.len() as u16), buf);
 
-        // peers
+        // network
         lines = vec![];
         lines.push(format!(
-            "listen address: {}",
-            dashifnotset!(data.listen_address)
+            "own peer id: {}",
+            dashifnotset!(data.network_overview.as_ref().map(|no| no.peer_id))
         ));
         lines.push(format!(
-            "number: {} / {}",
-            dashifnotset!(data.peer_count),
-            dashifnotset!(data.max_num_peers)
+            "NAT status: {}",
+            data.network_overview
+                .as_ref()
+                .map(|no| match no.nat_status {
+                    NatStatus::Unknown => "unknown",
+                    NatStatus::Private => "natted",
+                    NatStatus::Public(_) => "reachable",
+                })
+                .unwrap_or("-")
         ));
         lines.push(format!(
-            "↪ authenticated: {}",
-            dashifnotset!(data.authenticated_peer_count)
+            "external address(es): (0/{}) {}",
+            dashifnotset!(data
+                .network_overview
+                .as_ref()
+                .map(|no| no.external_addresses.len())),
+            dashifnotset!(data
+                .network_overview
+                .as_ref()
+                .and_then(|no| no.external_addresses.first())),
+        ));
+        lines.push(format!(
+            "# peers: {}({}) / {}",
+            data.network_overview
+                .as_ref()
+                .map(|no| no.connection_count.to_string())
+                .unwrap_or("-".to_string()),
+            data.peer_count,
+            dashifnotset!(data
+                .network_overview
+                .as_ref()
+                .map(|no| no.connection_limit.to_string())),
+        ));
+        lines.push(format!(
+            "# relays: {}",
+            dashifnotset!(data
+                .network_overview
+                .as_ref()
+                .map(|no| no.num_active_relays))
+        ));
+        lines.push(format!(
+            "# bans: {}",
+            dashifnotset!(data.network_overview.as_ref().map(|no| no.num_banned_peers))
+        ));
+        lines.push(format!(
+            "# address book: {}",
+            dashifnotset!(data
+                .network_overview
+                .as_ref()
+                .map(|no| no.address_book_size))
         ));
         Self::report(&lines, "Peers")
             .style(style)

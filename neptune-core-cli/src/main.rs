@@ -304,6 +304,9 @@ enum Command {
     /// without restarting the entire node.
     ResetRelayReservations,
 
+    /// Show a brief overview of network vitals.
+    NetworkOverview,
+
     /// claim an off-chain utxo-transfer.
     ClaimUtxo {
         #[clap(subcommand)]
@@ -1226,6 +1229,10 @@ async fn main() -> Result<()> {
         }
         Command::ResetRelayReservations => {
             client.reset_relay_reservations(ctx, token).await??;
+        }
+        Command::NetworkOverview => {
+            let overview = client.get_network_overview(ctx, token).await??;
+            println!("{overview}");
         }
         Command::ClaimUtxo {
             format,

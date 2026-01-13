@@ -1663,7 +1663,7 @@ impl MainLoopHandler {
 
                 // Handle messages from rpc server task
                 Some(rpc_server_message) = self.rpc_server_to_main_rx.recv() => {
-                    let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone(), &mut main_loop_state).await?;
+                    let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message, &mut main_loop_state).await?;
                     if shutdown_after_execution {
                         break SUCCESS_EXIT_CODE
                     }
@@ -2209,6 +2209,21 @@ impl MainLoopHandler {
                     .await
                 {
                     error!("Cannot send ResetRelayReservations message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::GetNetworkOverview(channel) => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::ResetRelayReservations");
+
+                // Pass on message to NetworkActor.
+
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::GetNetworkOverview(channel))
+                    .await
+                {
+                    error!("Cannot send GetNetworkOverview message to NetworkActor: {e}.");
                 }
 
                 Ok(false)

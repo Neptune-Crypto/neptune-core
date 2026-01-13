@@ -39,6 +39,9 @@ use serde_derive::Serialize;
 pub(crate) struct BlackList {
     pub(crate) filename: PathBuf,
     pub(crate) list: HashMap<IpAddr, SystemTime>,
+
+    /// Ephemeral bans are not persisted. They may correspond to bans specified
+    /// as CLI arguments.
     pub(crate) ephemeral_bans: HashSet<IpAddr>,
 }
 
@@ -122,7 +125,7 @@ impl BlackList {
 #[cfg(test)]
 mod tests {
     use crate::application::network::arbitrary::arb_ip_addr;
-    use crate::application::network::arbitrary::arb_system_time;
+    use crate::application::network::arbitrary::tests::arb_system_time;
 
     use super::*;
 

@@ -158,6 +158,8 @@ pub enum RpcMethods {
     ProbeNat,
     #[namespace(Namespace::Network)]
     ResetRelayReservations,
+    #[namespace(Namespace::Network)]
+    NetworkOverview,
 }
 
 #[cfg(test)]

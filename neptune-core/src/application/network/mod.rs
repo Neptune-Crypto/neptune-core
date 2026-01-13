@@ -6,7 +6,8 @@ pub(crate) mod channel;
 pub(crate) mod config;
 pub(crate) mod gateway;
 pub(crate) mod handshake;
+pub mod overview;
 pub(crate) mod stack;
 
-#[cfg(test)]
-pub(crate) mod arbitrary;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+pub mod arbitrary;
