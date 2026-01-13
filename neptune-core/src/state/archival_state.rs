@@ -200,33 +200,6 @@ impl ArchivalState {
         Ok(archival_bmmr)
     }
 
-    async fn initialize_utxo_index(data_dir: &DataDirectory) -> Result<RustyUtxoIndex> {
-        let utxo_index_dir = data_dir.utxo_index_dir_path();
-        DataDirectory::create_dir_if_not_exists(&utxo_index_dir).await?;
-
-        let result = NeptuneLevelDb::new(&utxo_index_dir, &create_db_if_missing()).await;
-
-        let db = match result {
-            Ok(db) => db,
-            Err(e) => {
-                tracing::error!(
-                    "Could not open UTXO index database at {}: {e}",
-                    utxo_index_dir.display()
-                );
-                panic!(
-                    "Could not open database; do not know how to proceed. Panicking.\n\
-                    If you suspect the database may be corrupted, consider renaming the directory {}\
-                     or removing it altogether. Or perhaps a node is already running?",
-                     utxo_index_dir.display()
-                );
-            }
-        };
-
-        let utxo_index = RustyUtxoIndex::connect(db).await;
-
-        Ok(utxo_index)
-    }
-
     /// Find the path connecting two blocks. Every path involves going down some
     /// number of steps and then going up some number of steps. So this function
     /// returns two lists: the list of down steps and the list of up steps. It
@@ -352,11 +325,11 @@ impl ArchivalState {
 
         // UTXO index is always initialized. But only populated with blocks if
         // this index is activated.
-        let mut utxo_index = ArchivalState::initialize_utxo_index(&data_dir)
+        let mut utxo_index = RustyUtxoIndex::initialize(&data_dir)
             .await
             .expect("Must be able to initialize utxo index database");
 
-        if cli.utxo_index && utxo_index.sync_label() == Digest::default() {
+        if cli.utxo_index && utxo_index.sync_label().await == Digest::default() {
             utxo_index.index_block(&genesis_block).await;
         }
 
@@ -676,7 +649,7 @@ impl ArchivalState {
     /// - If any of the predecessor blocks have not been applied to the block
     ///   index database.
     pub(crate) async fn update_utxo_index(&mut self, new_block: &Block) {
-        let current_sync = self.utxo_index.sync_label();
+        let current_sync = self.utxo_index.sync_label().await;
         let new_block_hash = new_block.hash();
 
         // Index all not-yet-indexed blocks preceding the new block. In the

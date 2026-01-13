@@ -1,24 +1,23 @@
 use std::collections::HashSet;
 
+use anyhow::Result;
 use itertools::Itertools;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tracing::warn;
 
 use crate::api::export::AdditionRecord;
 use crate::api::export::BlockHeight;
+use crate::application::config::data_directory::DataDirectory;
+use crate::application::database::create_db_if_missing;
 use crate::application::database::storage::storage_schema::traits::*;
-use crate::application::database::storage::storage_schema::DbtMap;
-use crate::application::database::storage::storage_schema::DbtSingleton;
-use crate::application::database::storage::storage_schema::RustyKey;
-use crate::application::database::storage::storage_schema::RustyValue;
-use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::NeptuneLevelDb;
+use crate::application::database::WriteBatchAsync;
 use crate::protocol::consensus::block::Block;
 use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-
-pub(super) const UTXO_INDEX_SCHEMA_VERSION: u16 = 1;
 
 /// The maximum number of blocks stored for each [`AnnouncementFlag`]. Wallets
 /// with incoming UTXOs in more than this number of blocks cannot rely on the
@@ -45,26 +44,29 @@ pub const MAX_NUM_BLOCKS_IN_LOOKUP_LIST: usize = 10_000;
 /// [`ArchivalMutatorSet`]: crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet
 /// [`ArchivalState`]: crate::state::archival_state::ArchivalState
 #[derive(Debug)]
-struct UtxoIndexTables {
-    #[allow(dead_code)]
-    /// Schema version to be used in case this model changes, and data needs to
-    /// be migrated or recreated.
-    pub(super) schema_version: DbtSingleton<u16>,
+pub(crate) struct RustyUtxoIndex {
+    db: NeptuneLevelDb<UtxoIndexKey, UtxoIndexValue>,
+}
 
-    /// Latest block handled by this database
-    pub(super) sync_label: DbtSingleton<Digest>,
+/// The key types used by the UTXO index database.
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+enum UtxoIndexKey {
+    /// Latest block handled by this database. Any initialized database must
+    /// have a sync label set. The default value indicates that no blocks have
+    /// been processed by the UTXO index.
+    SyncLabel,
 
     /// Mapping from block hash to the list of announcement flags contained in
     /// the block.
     ///
     /// Can be used to speed up the scanning for incoming, announced UTXOs.
-    pub(super) announcements_by_block: DbtMap<Digest, Vec<AnnouncementFlag>>,
+    AnnouncementsByBlock(Digest),
 
     /// Mapping from block hash to the list of digests of the absolute indices
     /// being set in the block.
     ///
     /// Can be used to speed up the scanning for used UTXOs, i.e. expenditures.
-    pub(super) index_set_digests_by_block: DbtMap<Digest, Vec<Digest>>,
+    IndexSetDigestsByBlock(Digest),
 
     /// Mapping from announcement flag to block height for all blocks in which
     /// announcements with this flag are present. Length of list of block
@@ -81,7 +83,7 @@ struct UtxoIndexTables {
     ///
     /// Can be used to speed up the scanning for incoming, announced UTXOs, and
     /// to serve RPC requests from external wallet programs.
-    pub(super) blocks_by_announcement_flag: DbtMap<AnnouncementFlag, Vec<BlockHeight>>,
+    BlocksByAnnouncementFlag(AnnouncementFlag),
 
     /// Mapping from addition record to block height for all blocks containing
     /// the specific addition record. Length of list of block heights is capped
@@ -98,51 +100,98 @@ struct UtxoIndexTables {
     ///
     /// Can be used to serve an RPC endpoint that maps addition records to block
     /// heights.
-    pub(super) blocks_by_addition_records: DbtMap<AdditionRecord, Vec<BlockHeight>>,
+    BlocksByAdditionRecord(AdditionRecord),
 
     /// Mapping from hash of absolute index set to block height.
     ///
     /// Can be used to serve an RPC endpoint that maps absolute index sets to
     /// block heights.
-    pub(super) block_by_index_set_digest: DbtMap<Digest, BlockHeight>,
+    BlockByIndexSetDigest(Digest),
 }
 
-#[derive(Debug)]
-pub(crate) struct RustyUtxoIndex {
-    storage: SimpleRustyStorage,
-    tables: UtxoIndexTables,
+/// The values used by the UTXO index database.
+///
+/// See documentstion in [`UtxoIndexKey`] for each variant of this enum.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum UtxoIndexValue {
+    SyncLabel(Digest),
+    AnnouncementsByBlock(Vec<AnnouncementFlag>),
+    IndexSetDigestsByBlock(Vec<Digest>),
+    BlocksByAnnouncementFlag(Vec<BlockHeight>),
+    BlocksByAdditionRecord(Vec<BlockHeight>),
+    BlockByIndexSetDigest(BlockHeight),
+}
+
+impl UtxoIndexValue {
+    fn as_sync_label(self) -> Digest {
+        match self {
+            UtxoIndexValue::SyncLabel(digest) => digest,
+            _ => panic!("Expected SyncLabel found {:?}", self),
+        }
+    }
+
+    fn as_announcements_by_block(self) -> Vec<AnnouncementFlag> {
+        match self {
+            UtxoIndexValue::AnnouncementsByBlock(flags) => flags,
+            _ => panic!("Expected AnnouncementsByBlock found {:?}", self),
+        }
+    }
+
+    fn as_index_set_digests_by_block(self) -> Vec<Digest> {
+        match self {
+            UtxoIndexValue::IndexSetDigestsByBlock(index_set_digests) => index_set_digests,
+            _ => panic!("Expected IndexSetDigestsByBlock found {:?}", self),
+        }
+    }
+
+    fn as_blocks_by_announcements(self) -> Vec<BlockHeight> {
+        match self {
+            UtxoIndexValue::BlocksByAnnouncementFlag(block_heights) => block_heights,
+            _ => panic!("Expected BlocksByAnnouncementFlag found {:?}", self),
+        }
+    }
+
+    fn as_blocks_by_addition_records(self) -> Vec<BlockHeight> {
+        match self {
+            UtxoIndexValue::BlocksByAdditionRecord(block_heights) => block_heights,
+            _ => panic!("Expected BlocksByAdditionRecord found {:?}", self),
+        }
+    }
+
+    fn as_block_by_index_set_digest(self) -> BlockHeight {
+        match self {
+            UtxoIndexValue::BlockByIndexSetDigest(height) => height,
+            _ => panic!("Expected BlockByIndexSetDigest found {:?}", self),
+        }
+    }
 }
 
 impl RustyUtxoIndex {
-    pub(super) async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
-        let mut storage = SimpleRustyStorage::new_with_callback(
-            db,
-            "RustyUtxoIndex-Schema",
-            crate::LOG_TOKIO_LOCK_EVENT_CB,
-        );
+    /// Initialize a UTXO index. Does not apply the genesis block to the index.
+    pub(super) async fn initialize(data_dir: &DataDirectory) -> Result<Self> {
+        let utxo_index_db_dir_path = data_dir.utxo_index_dir_path();
+        DataDirectory::create_dir_if_not_exists(&utxo_index_db_dir_path).await?;
 
-        let schema_version = storage.schema.new_singleton::<u16>("schema_version").await;
-        let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
-        let announcements_by_block = storage.schema.new_map("announcements_by_block").await;
-        let index_set_digests_by_block = storage.schema.new_map("index_set_digests_by_block").await;
-        let blocks_by_announcement_flag =
-            storage.schema.new_map("blocks_by_announcement_flag").await;
-        let blocks_by_addition_records = storage.schema.new_map("blocks_by_addition_records").await;
-        let block_by_index_set_digest = storage.schema.new_map("block_by_index_set_digest").await;
+        let utxo_index = NeptuneLevelDb::<UtxoIndexKey, UtxoIndexValue>::new(
+            &utxo_index_db_dir_path,
+            &create_db_if_missing(),
+        )
+        .await?;
 
-        let mut tables = UtxoIndexTables {
-            schema_version,
-            sync_label,
-            announcements_by_block,
-            index_set_digests_by_block,
-            blocks_by_announcement_flag,
-            blocks_by_addition_records,
-            block_by_index_set_digest,
-        };
+        let mut utxo_index = RustyUtxoIndex { db: utxo_index };
 
-        tables.schema_version.set(UTXO_INDEX_SCHEMA_VERSION).await;
+        // After initialization a value for sync label must always be set.
+        if utxo_index.db.get(UtxoIndexKey::SyncLabel).await.is_none() {
+            utxo_index
+                .db
+                .put(
+                    UtxoIndexKey::SyncLabel,
+                    UtxoIndexValue::SyncLabel(Digest::default()),
+                )
+                .await;
+        }
 
-        Self { storage, tables }
+        Ok(utxo_index)
     }
 
     /// Return the announcement keys for the announcement in the specified
@@ -153,16 +202,21 @@ impl RustyUtxoIndex {
         &self,
         block_hash: Digest,
     ) -> Option<Vec<AnnouncementFlag>> {
-        self.tables.announcements_by_block.get(&block_hash).await
+        let key = UtxoIndexKey::AnnouncementsByBlock(block_hash);
+        self.db
+            .get(key)
+            .await
+            .map(|x| x.as_announcements_by_block())
     }
 
     /// Return the digests of all absolute index sets of the removal records in
     /// this block. Returns `None` if the block is not known to this index.
     pub(crate) async fn index_set_digests(&self, block_hash: Digest) -> Option<Vec<Digest>> {
-        self.tables
-            .index_set_digests_by_block
-            .get(&block_hash)
+        let key = UtxoIndexKey::IndexSetDigestsByBlock(block_hash);
+        self.db
+            .get(key)
             .await
+            .map(|x| x.as_index_set_digests_by_block())
     }
 
     /// Return the block heights for blocks containing announcements matching
@@ -182,13 +236,14 @@ impl RustyUtxoIndex {
     ) -> HashSet<BlockHeight> {
         let mut block_heights = HashSet::new();
         for flag in announcement_flags {
-            let blocks_matching_flag = self
-                .tables
-                .blocks_by_announcement_flag
-                .get(flag)
+            let key = UtxoIndexKey::BlocksByAnnouncementFlag(*flag);
+            let matching_blocks = self
+                .db
+                .get(key)
                 .await
+                .map(|x| x.as_blocks_by_announcements())
                 .unwrap_or_default();
-            block_heights.extend(blocks_matching_flag);
+            block_heights.extend(matching_blocks);
         }
 
         block_heights
@@ -206,15 +261,16 @@ impl RustyUtxoIndex {
     /// is probably never met.
     pub(crate) async fn blocks_by_addition_records(
         &self,
-        addition_records: &[AdditionRecord],
+        addition_records: &HashSet<AdditionRecord>,
     ) -> HashSet<BlockHeight> {
         let mut block_heights = HashSet::new();
         for addition_record in addition_records {
+            let key = UtxoIndexKey::BlocksByAdditionRecord(*addition_record);
             let matching_blocks = self
-                .tables
-                .blocks_by_addition_records
-                .get(addition_record)
+                .db
+                .get(key)
                 .await
+                .map(|x| x.as_blocks_by_addition_records())
                 .unwrap_or_default();
             block_heights.extend(matching_blocks);
         }
@@ -232,10 +288,11 @@ impl RustyUtxoIndex {
         index_set: &AbsoluteIndexSet,
     ) -> Option<BlockHeight> {
         let index_set_digest = Tip5::hash(index_set);
-        self.tables
-            .block_by_index_set_digest
-            .get(&index_set_digest)
+        let key = UtxoIndexKey::BlockByIndexSetDigest(index_set_digest);
+        self.db
+            .get(key)
             .await
+            .map(|x| x.as_block_by_index_set_digest())
     }
 
     /// Add block to UTXO index. Adds all announcements, addition records, and
@@ -260,18 +317,20 @@ impl RustyUtxoIndex {
         // sort announcement flags to ensure idempotency
         let mut announcement_flags = announcement_flags.iter().copied().collect_vec();
         announcement_flags.sort_unstable();
-        self.tables
-            .announcements_by_block
-            .insert(hash, announcement_flags.clone())
-            .await;
+        let mut batch_writes = WriteBatchAsync::new();
+        batch_writes.op_write(
+            UtxoIndexKey::AnnouncementsByBlock(hash),
+            UtxoIndexValue::AnnouncementsByBlock(announcement_flags.clone()),
+        );
 
         // Loop over all announcement flags to maintain flag to block mapping
         for announcement_flag in announcement_flags {
+            let announcement_flag = UtxoIndexKey::BlocksByAnnouncementFlag(announcement_flag);
             let mut block_heights = self
-                .tables
-                .blocks_by_announcement_flag
-                .get(&announcement_flag)
+                .db
+                .get(announcement_flag)
                 .await
+                .map(|x| x.as_blocks_by_announcements())
                 .unwrap_or_default();
 
             // Ensure same block is not added twice, to ensure function's
@@ -292,20 +351,21 @@ impl RustyUtxoIndex {
 
             block_heights.push(height);
 
-            self.tables
-                .blocks_by_announcement_flag
-                .insert(announcement_flag, block_heights)
-                .await;
+            batch_writes.op_write(
+                announcement_flag,
+                UtxoIndexValue::BlocksByAnnouncementFlag(block_heights),
+            );
         }
 
         // Loop over all addition records to maintain addition record to block
         // mapping.
         for addition_record in &tx_kernel.outputs {
+            let addition_record = UtxoIndexKey::BlocksByAdditionRecord(*addition_record);
             let mut block_heights = self
-                .tables
-                .blocks_by_addition_records
+                .db
                 .get(addition_record)
                 .await
+                .map(|x| x.as_blocks_by_addition_records())
                 .unwrap_or_default();
 
             // Ensure same block is not added twice, to ensure function's
@@ -327,10 +387,10 @@ impl RustyUtxoIndex {
 
             block_heights.push(height);
 
-            self.tables
-                .blocks_by_addition_records
-                .insert(*addition_record, block_heights)
-                .await;
+            batch_writes.op_write(
+                addition_record,
+                UtxoIndexValue::BlocksByAdditionRecord(block_heights),
+            );
         }
 
         // Loop over all inputs to maintain hash(absolute index set) to block
@@ -343,36 +403,42 @@ impl RustyUtxoIndex {
         for index_set_digest in &index_set_digests {
             // All absolute index sets are assumed to be unique, so no
             // duplication removal is needed here.
-            self.tables
-                .block_by_index_set_digest
-                .insert(*index_set_digest, height)
-                .await;
+            batch_writes.op_write(
+                UtxoIndexKey::BlockByIndexSetDigest(*index_set_digest),
+                UtxoIndexValue::BlockByIndexSetDigest(height),
+            );
         }
 
-        self.tables
-            .index_set_digests_by_block
-            .insert(hash, index_set_digests)
-            .await;
+        batch_writes.op_write(
+            UtxoIndexKey::IndexSetDigestsByBlock(hash),
+            UtxoIndexValue::IndexSetDigestsByBlock(index_set_digests),
+        );
 
-        self.tables.sync_label.set(hash).await;
+        batch_writes.op_write(UtxoIndexKey::SyncLabel, UtxoIndexValue::SyncLabel(hash));
+
+        self.db.batch_write(batch_writes).await;
     }
 
-    pub(crate) fn sync_label(&self) -> Digest {
-        self.tables.sync_label.get()
+    pub(crate) async fn sync_label(&self) -> Digest {
+        self.db
+            .get(UtxoIndexKey::SyncLabel)
+            .await
+            .expect("UTXO index must have a SyncLabel set")
+            .as_sync_label()
     }
 
     /// Returns true if the block was already indexed.
     pub(crate) async fn block_was_indexed(&self, block_hash: Digest) -> bool {
-        self.tables
-            .announcements_by_block
-            .contains_key(&block_hash)
+        self.db
+            .get(UtxoIndexKey::AnnouncementsByBlock(block_hash))
             .await
+            .is_some()
     }
 }
 
 impl StorageWriter for RustyUtxoIndex {
     async fn persist(&mut self) {
-        self.storage.persist().await;
+        self.db.flush().await;
     }
 
     async fn drop_unpersisted(&mut self) {
@@ -390,7 +456,6 @@ mod tests {
     use crate::api::export::Announcement;
     use crate::api::export::GenerationSpendingKey;
     use crate::api::export::Network;
-    use crate::state::archival_state::ArchivalState;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
     use crate::tests::shared_tokio_runtime;
@@ -418,9 +483,7 @@ mod tests {
 
     async fn test_utxo_index(network: Network) -> RustyUtxoIndex {
         let data_dir = crate::tests::shared::files::unit_test_data_directory(network).unwrap();
-        ArchivalState::initialize_utxo_index(&data_dir)
-            .await
-            .unwrap()
+        RustyUtxoIndex::initialize(&data_dir).await.unwrap()
     }
 
     fn announcements_length_0_to_3() -> Vec<Announcement> {
@@ -484,38 +547,38 @@ mod tests {
                 BlockHeight::from(3u64)
             ],
             utxo_index
-                .tables
-                .blocks_by_announcement_flag
-                .get(&AnnouncementFlag {
+                .db
+                .get(UtxoIndexKey::BlocksByAnnouncementFlag(AnnouncementFlag {
                     flag: bfe!(22),
                     receiver_id: bfe!(55),
-                })
+                }))
                 .await
                 .unwrap()
+                .as_blocks_by_announcements()
         );
         assert_eq!(
             vec![BlockHeight::from(1u64), BlockHeight::from(3u64)],
             utxo_index
-                .tables
-                .blocks_by_announcement_flag
-                .get(&AnnouncementFlag {
+                .db
+                .get(UtxoIndexKey::BlocksByAnnouncementFlag(AnnouncementFlag {
                     flag: bfe!(1),
                     receiver_id: bfe!(444),
-                })
+                }))
                 .await
                 .unwrap()
+                .as_blocks_by_announcements()
         );
         assert_eq!(
             vec![BlockHeight::from(2u64),],
             utxo_index
-                .tables
-                .blocks_by_announcement_flag
-                .get(&AnnouncementFlag {
+                .db
+                .get(UtxoIndexKey::BlocksByAnnouncementFlag(AnnouncementFlag {
                     flag: bfe!(1),
                     receiver_id: bfe!(888),
-                })
+                }))
                 .await
                 .unwrap()
+                .as_blocks_by_announcements()
         );
     }
 
@@ -551,7 +614,13 @@ mod tests {
         let expected_blocks_by_flag = utxo_index
             .block_heights_by_announcements(&announcements)
             .await;
-        let block2_ars = block2.body().transaction_kernel().outputs.clone();
+        let block2_ars: HashSet<_> = block2
+            .body()
+            .transaction_kernel()
+            .outputs
+            .iter()
+            .copied()
+            .collect();
         let expected_blocks_by_addition_records =
             utxo_index.blocks_by_addition_records(&block2_ars).await;
 
@@ -574,11 +643,9 @@ mod tests {
         );
         assert_eq!(
             expected_blocks_by_addition_records,
-            utxo_index
-                .block_heights_by_announcements(&announcements)
-                .await
+            utxo_index.blocks_by_addition_records(&block2_ars).await
         );
-        assert_eq!(block2.hash(), utxo_index.sync_label());
+        assert_eq!(block2.hash(), utxo_index.sync_label().await);
     }
 
     #[apply(shared_tokio_runtime)]
@@ -600,6 +667,15 @@ mod tests {
                 .unwrap()
                 .len(),
             "Announcements of length 2 and above should be indexed"
+        );
+    }
+
+    async fn initialize_sets_sync_label() {
+        let network = Network::Main;
+        let mut utxo_index = test_utxo_index(network).await;
+        assert!(
+            utxo_index.db.get(UtxoIndexKey::SyncLabel).await.is_some(),
+            "sync label must be set during initialization"
         );
     }
 }
