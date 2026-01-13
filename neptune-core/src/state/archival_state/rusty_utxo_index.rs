@@ -23,7 +23,7 @@ use crate::util_types::mutator_set::removal_record::absolute_index_set::Absolute
 /// with incoming UTXOs in more than this number of blocks cannot rely on the
 /// mapping from announcement flags to block heights to restore a wallet. They
 /// must instead use other methods. Also used to cap mapping from addition
-/// records to blocks.
+/// records to block heights.
 pub const MAX_NUM_BLOCKS_IN_LOOKUP_LIST: usize = 10_000;
 
 /// The purpose of the UTXO index is to speed up the rescanning of historical
@@ -31,12 +31,13 @@ pub const MAX_NUM_BLOCKS_IN_LOOKUP_LIST: usize = 10_000;
 /// incoming and outgoing UTXOs as quickly as possible. It assumes the presence
 /// of an [`ArchivalState`]. Any decision about tables in the UTXO index should
 /// be made in the light of allowing clients or 3rd parties to discover balance-
-/// affecting input or output UTXOs in historical blocks as quickly as possible.
+/// affecting input or output UTXOs in historical blocks as quickly as possible,
+/// and to minimize storage requirements for the UTXO index.
 ///
 /// The tables of the UTXO index database. Does not include a mapping from
-/// block digest to the block's addition records since those are included in
-/// the [`ArchivalMutatorSet`] which is assumed to be part of the state of all
-/// nodes that also maintain a UTXO index.
+/// block digest to the block's addition records since that mapping can be found
+/// from the [`ArchivalMutatorSet`] which is assumed to be part of the state of
+/// all nodes that maintain a UTXO index.
 ///
 /// Block heights are often preferred over block digests due to their smaller
 /// serialized size (8 bytes vs. 40).
@@ -65,7 +66,7 @@ enum UtxoIndexKey {
     /// Mapping from block hash to the list of digests of the absolute indices
     /// being set in the block.
     ///
-    /// Can be used to speed up the scanning for used UTXOs, i.e. expenditures.
+    /// Can be used to speed up the scanning for spent UTXOs, i.e. expenditures.
     IndexSetDigestsByBlock(Digest),
 
     /// Mapping from announcement flag to block height for all blocks in which
@@ -167,6 +168,19 @@ impl UtxoIndexValue {
 }
 
 impl RustyUtxoIndex {
+    /// Returns true iff no blocks have been indexed.
+    pub(super) async fn is_empty(&self) -> bool {
+        self.sync_label().await == Default::default()
+    }
+
+    /// Returns true if the block was already indexed.
+    pub(crate) async fn block_was_indexed(&self, block_hash: Digest) -> bool {
+        self.db
+            .get(UtxoIndexKey::AnnouncementsByBlock(block_hash))
+            .await
+            .is_some()
+    }
+
     /// Initialize a UTXO index. Does not apply the genesis block to the index.
     pub(super) async fn initialize(data_dir: &DataDirectory) -> Result<Self> {
         let utxo_index_db_dir_path = data_dir.utxo_index_dir_path();
@@ -279,10 +293,10 @@ impl RustyUtxoIndex {
     }
 
     /// Return the block height of the block containing the specified
-    /// transaction input in the form of the input's absolute index set. Any
-    /// referenced block is not guaranteed to be canonical.
+    /// transaction input. Any referenced block is not guaranteed to be
+    /// canonical.
     ///
-    /// Returns `None` if the UTXO index has never seen this index set.
+    /// Returns `None` if the UTXO index has never seen this absolute index set.
     pub(crate) async fn block_by_index_set(
         &self,
         index_set: &AbsoluteIndexSet,
@@ -422,20 +436,14 @@ impl RustyUtxoIndex {
         self.db.batch_write(batch_writes).await;
     }
 
+    /// Return the hash of the latest block indexed. The default value means
+    /// that no blocks have been indexed.
     pub(crate) async fn sync_label(&self) -> Digest {
         self.db
             .get(UtxoIndexKey::SyncLabel)
             .await
             .expect("UTXO index must have a SyncLabel set")
             .as_sync_label()
-    }
-
-    /// Returns true if the block was already indexed.
-    pub(crate) async fn block_was_indexed(&self, block_hash: Digest) -> bool {
-        self.db
-            .get(UtxoIndexKey::AnnouncementsByBlock(block_hash))
-            .await
-            .is_some()
     }
 }
 
@@ -452,6 +460,7 @@ impl StorageWriter for RustyUtxoIndex {
 #[cfg(test)]
 mod tests {
     use macro_rules_attr::apply;
+    use rand::Rng;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::bfe_vec;
 
@@ -465,6 +474,7 @@ mod tests {
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
+    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::BFieldElement;
 
@@ -505,6 +515,45 @@ mod tests {
         vec![length0, length1, length2, length3]
     }
 
+    /// Return a block with the specied number of inputs/outputs. Inputs and
+    /// outputs are random. Also contains randomized composer rewards.
+    async fn block_with_num_puts(
+        network: Network,
+        predecessor: &Block,
+        num_inputs: u128,
+        num_outputs: usize,
+    ) -> Block {
+        let mut rng = rand::rng();
+        let inputs = (0..num_inputs)
+            .map(|_| RemovalRecord {
+                absolute_indices: AbsoluteIndexSet::new(
+                    vec![
+                        (1u128 << 20) + rng.random_range(0..=(CHUNK_SIZE as u128));
+                        NUM_TRIALS as usize
+                    ]
+                    .try_into()
+                    .unwrap(),
+                ),
+                target_chunks: ChunkDictionary::default(),
+            })
+            .collect_vec();
+
+        let outputs = vec![rng.random(); num_outputs];
+
+        let (block, _) = make_mock_block_with_inputs_and_outputs(
+            &predecessor,
+            inputs,
+            outputs,
+            None,
+            GenerationSpendingKey::derive_from_seed(rng.random()),
+            rng.random(),
+            network,
+        )
+        .await;
+
+        block
+    }
+
     #[apply(shared_tokio_runtime)]
     async fn announcement_flag_to_block_heights_unit_test() {
         let network = Network::Main;
@@ -539,9 +588,24 @@ mod tests {
         let block2 = invalid_empty_block_with_announcements(&block1, network, announcements2);
         let block3 = invalid_empty_block_with_announcements(&block2, network, announcements3);
 
-        utxo_index.index_block(&block1).await;
-        utxo_index.index_block(&block2).await;
-        utxo_index.index_block(&block3).await;
+        let blocks = [block1, block2, block3];
+        for block in &blocks {
+            utxo_index.index_block(block).await;
+        }
+
+        // All announcements in all blocks must return block's height.
+        for block in &blocks {
+            for announcement in &block.body().transaction_kernel().announcements {
+                let Ok(announcement_flag) = AnnouncementFlag::try_from(announcement) else {
+                    continue;
+                };
+                let announcement_flag: HashSet<_> = [announcement_flag].into_iter().collect();
+                assert!(utxo_index
+                    .blocks_by_announcement_flags(&announcement_flag)
+                    .await
+                    .contains(&block.header().height),);
+            }
+        }
 
         assert_eq!(
             vec![
@@ -586,25 +650,157 @@ mod tests {
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn block_index_is_idempotent() {
+    async fn index_set_by_block_unit_test() {
         let network = Network::Main;
-        let mut utxo_index = test_utxo_index(network).await;
-        let an_input = RemovalRecord {
-            absolute_indices: AbsoluteIndexSet::new([(1u128 << 20); NUM_TRIALS as usize]),
-            target_chunks: ChunkDictionary::default(),
-        };
-
         let genesis = Block::genesis(network);
-        let (block1, _) = make_mock_block_with_inputs_and_outputs(
+        let block1 = block_with_num_puts(network, &genesis, 12, 11).await;
+        let block2 = block_with_num_puts(network, &block1, 4, 55).await;
+
+        let mut utxo_index = test_utxo_index(network).await;
+        utxo_index.index_block(&block1).await;
+        utxo_index.index_block(&block2).await;
+
+        let block1_res = utxo_index.index_set_digests(block1.hash()).await.unwrap();
+        assert_eq!(12, block1_res.len(), "index set list must have 12 entries");
+
+        let block2_res = utxo_index.index_set_digests(block2.hash()).await.unwrap();
+        assert_eq!(4, block2_res.len(), "index set list must have 4 entries");
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn block_by_addition_record_unit_test() {
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let block1 = block_with_num_puts(network, &genesis, 12, 11).await;
+        let block2 = block_with_num_puts(network, &block1, 4, 55).await;
+        let blocks = [block1, block2];
+
+        let mut utxo_index = test_utxo_index(network).await;
+        for block in &blocks {
+            utxo_index.index_block(&block).await;
+        }
+
+        for block in blocks {
+            let expected: HashSet<_> = [block.header().height].into_iter().collect();
+            for ar in block.all_addition_records().unwrap() {
+                let ars: HashSet<_> = [ar].into_iter().collect();
+                assert_eq!(expected, utxo_index.blocks_by_addition_records(&ars).await);
+            }
+        }
+
+        let unknown_addition_record: HashSet<_> = [AdditionRecord::new(Digest::default())]
+            .into_iter()
+            .collect();
+        assert!(
+            utxo_index
+                .blocks_by_addition_records(&unknown_addition_record)
+                .await
+                .is_empty(),
+            "Unknown addition record must return empty set"
+        );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn can_handle_repeated_addition_records() {
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+
+        let an_addition_record = AdditionRecord::new(Digest::default());
+
+        let inputs = vec![];
+        let (block1_one_addition_record, _) = make_mock_block_with_inputs_and_outputs(
             &genesis,
-            vec![an_input],
-            vec![],
+            inputs.clone(),
+            vec![an_addition_record],
             None,
             GenerationSpendingKey::derive_from_seed(Digest::default()),
             Digest::default(),
             network,
         )
         .await;
+        let (block2_two_repeated_addition_records, _) = make_mock_block_with_inputs_and_outputs(
+            &block1_one_addition_record,
+            inputs,
+            vec![an_addition_record, an_addition_record],
+            None,
+            GenerationSpendingKey::derive_from_seed(Digest::default()),
+            Digest::default(),
+            network,
+        )
+        .await;
+        let block3_other_addition_records =
+            block_with_num_puts(network, &block2_two_repeated_addition_records, 10, 10).await;
+
+        let blocks = [
+            block1_one_addition_record,
+            block2_two_repeated_addition_records,
+            block3_other_addition_records,
+        ];
+
+        let mut utxo_index = test_utxo_index(network).await;
+        for block in &blocks {
+            utxo_index.index_block(&block).await;
+        }
+
+        // Block 1 and 2 contain this addition record, block 3 does not
+        let an_addition_record: HashSet<_> = [an_addition_record].into_iter().collect();
+        let expected: HashSet<_> = [BlockHeight::from(1u64), BlockHeight::from(2u64)]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            expected,
+            utxo_index
+                .blocks_by_addition_records(&an_addition_record)
+                .await
+        );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn block_by_index_set_unit_test() {
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let block1 = block_with_num_puts(network, &genesis, 20, 2).await;
+        let block2 = block_with_num_puts(network, &block1, 21, 3).await;
+
+        let blocks = [block1, block2];
+
+        let mut utxo_index = test_utxo_index(network).await;
+        for block in &blocks {
+            for input in &block.body().transaction_kernel().inputs {
+                assert!(
+                    utxo_index
+                        .block_by_index_set(&input.absolute_indices)
+                        .await
+                        .is_none(),
+                    "Block by index set lookup must return none prior to indexing"
+                );
+            }
+        }
+
+        for block in &blocks {
+            utxo_index.index_block(&block).await;
+        }
+
+        for block in &blocks {
+            for input in &block.body().transaction_kernel().inputs {
+                assert_eq!(
+                    block.header().height,
+                    utxo_index
+                        .block_by_index_set(&input.absolute_indices)
+                        .await
+                        .unwrap()
+                );
+            }
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn block_index_is_idempotent() {
+        let network = Network::Main;
+        let mut utxo_index = test_utxo_index(network).await;
+
+        let genesis = Block::genesis(network);
+        let block1 = block_with_num_puts(network, &genesis, 1, 0).await;
         let announcements = announcements_length_0_to_3();
         let block2 =
             invalid_empty_block_with_announcements(&block1, network, announcements.clone());
@@ -673,12 +869,20 @@ mod tests {
         );
     }
 
+    #[apply(shared_tokio_runtime)]
     async fn initialize_sets_sync_label() {
         let network = Network::Main;
-        let mut utxo_index = test_utxo_index(network).await;
+        let utxo_index = test_utxo_index(network).await;
         assert!(
             utxo_index.db.get(UtxoIndexKey::SyncLabel).await.is_some(),
             "sync label must be set during initialization"
         );
+        assert!(
+            utxo_index.is_empty().await,
+            "UTXO index must be marked as empty after new initialization with empty database"
+        );
+
+        // ensure no panic
+        utxo_index.sync_label().await;
     }
 }

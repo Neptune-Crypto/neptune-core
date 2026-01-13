@@ -329,7 +329,7 @@ impl ArchivalState {
             .await
             .expect("Must be able to initialize utxo index database");
 
-        if cli.utxo_index && utxo_index.sync_label().await == Digest::default() {
+        if cli.utxo_index && utxo_index.is_empty().await {
             utxo_index.index_block(&genesis_block).await;
         }
 
