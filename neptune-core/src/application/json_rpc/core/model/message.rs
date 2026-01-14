@@ -266,6 +266,18 @@ pub struct FindUtxoOriginResponse {
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
+pub struct AreSetRequest {
+    pub absolute_index_set: RpcAbsoluteIndexSet,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AreSetResponse {
+    pub are_set: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
 pub struct CirculatingSupplyRequest {}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

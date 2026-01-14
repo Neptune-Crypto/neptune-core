@@ -276,6 +276,13 @@ pub trait RpcApi: Sync + Send {
         request: FindUtxoOriginRequest,
     ) -> RpcResult<FindUtxoOriginResponse>;
 
+    async fn are_set(&self, absolute_index_set: RpcAbsoluteIndexSet) -> RpcResult<AreSetResponse> {
+        self.are_set_call(AreSetRequest { absolute_index_set })
+            .await
+    }
+
+    async fn are_set_call(&self, request: AreSetRequest) -> RpcResult<AreSetResponse>;
+
     async fn circulating_supply(&self) -> RpcResult<CirculatingSupplyResponse> {
         self.circulating_supply_call(CirculatingSupplyRequest {})
             .await
