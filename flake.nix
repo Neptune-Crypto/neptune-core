@@ -26,17 +26,7 @@
           inherit system overlays;
           config.allowUnfree = true;
         };
-        rust = pkgs.rust-bin.selectLatestNightlyWith (
-          toolchain:
-            toolchain.default.override {
-              extensions = [
-                "rust-src"
-                "rust-analyzer"
-                "miri"
-              ];
-              targets = ["x86_64-unknown-linux-gnu"];
-            }
-        );
+        rust = pkgs.rust-bin.stable.latest.default;
         naerskLib = pkgs.callPackage naersk {
           cargo = rust;
           rustc = rust;
