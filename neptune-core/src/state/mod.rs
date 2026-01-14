@@ -4425,15 +4425,9 @@ mod tests {
                     alice
                         .chain
                         .archival_state_mut()
-                        .write_block_as_tip(&mock_block_1a)
+                        .set_new_tip(&mock_block_1a)
                         .await
                         .unwrap();
-                    alice
-                        .chain
-                        .archival_state_mut()
-                        .update_mutator_set(&mock_block_1a)
-                        .await
-                        .expect("Updating mutator set must succeed");
                     *alice.chain.light_state_mut() = std::sync::Arc::new(mock_block_1a.clone());
                 }
 

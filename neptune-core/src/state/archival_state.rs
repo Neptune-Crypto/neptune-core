@@ -551,7 +551,16 @@ impl ArchivalState {
 
     /// Update all of archival state with a new block which is set as tip.
     ///
+    /// May also be used to set the tip back to any earlier block, including the
+    /// genesis block. However, a path from the current tip to the new tip must
+    /// be known.
+    ///
     /// Performs no validation.
+    ///
+    /// # Panics
+    ///
+    /// - If the new tip does not have a mutator set update.
+    /// - If databases are in an inconsistent state.
     pub(crate) async fn set_new_tip(&mut self, block: &Block) -> Result<()> {
         self.write_block_as_tip(block).await?;
         self.append_to_archival_block_mmr(block).await;
@@ -575,7 +584,7 @@ impl ArchivalState {
     /// If block was already written to database, then it is only marked as
     /// tip, and no write to disk occurs. Instead, the old block database entry
     /// is assumed to be valid, and so is the block stored on disk.
-    pub(crate) async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
+    async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
         self.write_block_internal(new_block, true).await
     }
 
@@ -660,11 +669,13 @@ impl ArchivalState {
     ///
     /// This method handles reorganizations, but all predecessors of this block
     /// must be known and stored in the block index database for it to work.
+    /// Reorganizations leaves ophaned blocks in the index though. So this must
+    /// be accounted for when reading from the index.
     ///
     /// # Panics
     /// - If any of the predecessor blocks have not been applied to the block
     ///   index database.
-    pub(crate) async fn update_utxo_index(&mut self, new_block: &Block) {
+    async fn update_utxo_index(&mut self, new_block: &Block) {
         if self.utxo_index.is_none() {
             return;
         }
@@ -1603,6 +1614,8 @@ impl ArchivalState {
     ///
     ///  - If the database does not contain rolled back blocks.
     ///  - If there is no path to the new block.
+    // Public bc used in benchmarks.
+    #[doc(hidden)]
     pub async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
         #[cfg(test)]
         {
