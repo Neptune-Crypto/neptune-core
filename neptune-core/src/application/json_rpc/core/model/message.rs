@@ -5,7 +5,6 @@ use serde_tuple::Serialize_tuple;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::api::export::AnnouncementFlag;
 use crate::application::json_rpc::core::model::block::body::*;
 use crate::application::json_rpc::core::model::block::header::*;
 use crate::application::json_rpc::core::model::block::transaction_kernel::*;
@@ -16,6 +15,7 @@ use crate::application::json_rpc::core::model::wallet::block::*;
 use crate::application::json_rpc::core::model::wallet::mutator_set::*;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
+use crate::application::json_rpc::core::model::wallet::RpcAnnouncementFlag;
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -403,7 +403,7 @@ pub struct SubmitBlockResponse {
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockHeightsByFlagsRequest {
-    pub announcement_flags: Vec<AnnouncementFlag>,
+    pub announcement_flags: Vec<RpcAnnouncementFlag>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
