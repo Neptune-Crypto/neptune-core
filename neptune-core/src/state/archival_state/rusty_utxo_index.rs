@@ -124,42 +124,42 @@ enum UtxoIndexValue {
 }
 
 impl UtxoIndexValue {
-    fn as_sync_label(self) -> Digest {
+    fn expect_sync_label(self) -> Digest {
         match self {
             UtxoIndexValue::SyncLabel(digest) => digest,
             _ => panic!("Expected SyncLabel found {:?}", self),
         }
     }
 
-    fn as_announcements_by_block(self) -> Vec<AnnouncementFlag> {
+    fn expect_announcements_by_block(self) -> Vec<AnnouncementFlag> {
         match self {
             UtxoIndexValue::AnnouncementsByBlock(flags) => flags,
             _ => panic!("Expected AnnouncementsByBlock found {:?}", self),
         }
     }
 
-    fn as_index_set_digests_by_block(self) -> Vec<Digest> {
+    fn expect_index_set_digests_by_block(self) -> Vec<Digest> {
         match self {
             UtxoIndexValue::IndexSetDigestsByBlock(index_set_digests) => index_set_digests,
             _ => panic!("Expected IndexSetDigestsByBlock found {:?}", self),
         }
     }
 
-    fn as_blocks_by_announcements(self) -> Vec<BlockHeight> {
+    fn expect_blocks_by_announcements(self) -> Vec<BlockHeight> {
         match self {
             UtxoIndexValue::BlocksByAnnouncementFlag(block_heights) => block_heights,
             _ => panic!("Expected BlocksByAnnouncementFlag found {:?}", self),
         }
     }
 
-    fn as_blocks_by_addition_records(self) -> Vec<BlockHeight> {
+    fn expect_blocks_by_addition_records(self) -> Vec<BlockHeight> {
         match self {
             UtxoIndexValue::BlocksByAdditionRecord(block_heights) => block_heights,
             _ => panic!("Expected BlocksByAdditionRecord found {:?}", self),
         }
     }
 
-    fn as_block_by_index_set_digest(self) -> BlockHeight {
+    fn expect_block_by_index_set_digest(self) -> BlockHeight {
         match self {
             UtxoIndexValue::BlockByIndexSetDigest(height) => height,
             _ => panic!("Expected BlockByIndexSetDigest found {:?}", self),
@@ -220,7 +220,7 @@ impl RustyUtxoIndex {
         self.db
             .get(key)
             .await
-            .map(|x| x.as_announcements_by_block())
+            .map(|x| x.expect_announcements_by_block())
     }
 
     /// Return the digests of all absolute index sets of the removal records in
@@ -230,7 +230,7 @@ impl RustyUtxoIndex {
         self.db
             .get(key)
             .await
-            .map(|x| x.as_index_set_digests_by_block())
+            .map(|x| x.expect_index_set_digests_by_block())
     }
 
     /// Return the block heights for blocks containing announcements matching
@@ -242,7 +242,7 @@ impl RustyUtxoIndex {
     /// For each announcement flag, the returned list is capped in length (for
     /// DOS reasons) by [`MAX_NUM_BLOCKS_IN_LOOKUP_LIST`] so extremely active
     /// wallets cannot rely on this method for wallet recovery. They should
-    /// instead use [`Self::announcement_flags_by_block`] to scan through
+    /// instead use [`UtxoIndexKey::AnnouncementsByBlock`] to scan through
     /// each block.
     pub(crate) async fn blocks_by_announcement_flags(
         &self,
@@ -255,7 +255,7 @@ impl RustyUtxoIndex {
                 .db
                 .get(key)
                 .await
-                .map(|x| x.as_blocks_by_announcements())
+                .map(|x| x.expect_blocks_by_announcements())
                 .unwrap_or_default();
             block_heights.extend(matching_blocks);
         }
@@ -281,7 +281,7 @@ impl RustyUtxoIndex {
             .db
             .get(key)
             .await
-            .map(|x| x.as_blocks_by_addition_records())
+            .map(|x| x.expect_blocks_by_addition_records())
             .unwrap_or_default();
 
         blocks.into_iter().collect()
@@ -301,7 +301,7 @@ impl RustyUtxoIndex {
         self.db
             .get(key)
             .await
-            .map(|x| x.as_block_by_index_set_digest())
+            .map(|x| x.expect_block_by_index_set_digest())
     }
 
     /// Add block to UTXO index. Adds all announcements, addition records, and
@@ -339,7 +339,7 @@ impl RustyUtxoIndex {
                 .db
                 .get(announcement_flag)
                 .await
-                .map(|x| x.as_blocks_by_announcements())
+                .map(|x| x.expect_blocks_by_announcements())
                 .unwrap_or_default();
 
             // Ensure same block is not added twice, to ensure function's
@@ -377,7 +377,7 @@ impl RustyUtxoIndex {
                 .db
                 .get(addition_record)
                 .await
-                .map(|x| x.as_blocks_by_addition_records())
+                .map(|x| x.expect_blocks_by_addition_records())
                 .unwrap_or_default();
 
             // Ensure same block is not added twice, to ensure function's
@@ -438,7 +438,7 @@ impl RustyUtxoIndex {
             .get(UtxoIndexKey::SyncLabel)
             .await
             .expect("UTXO index must have a SyncLabel set")
-            .as_sync_label()
+            .expect_sync_label()
     }
 }
 
@@ -525,7 +525,7 @@ mod tests {
             .map(|_| RemovalRecord {
                 absolute_indices: AbsoluteIndexSet::new(
                     vec![
-                        (1u128 << 20) + rng.random_range(0..=(CHUNK_SIZE as u128));
+                        (1u128 << 20) + rng.random_range(0..=u128::from(CHUNK_SIZE));
                         NUM_TRIALS as usize
                     ]
                     .try_into()
@@ -538,7 +538,7 @@ mod tests {
         let outputs = vec![rng.random(); num_outputs];
 
         let (block, _) = make_mock_block_with_inputs_and_outputs(
-            &predecessor,
+            predecessor,
             inputs,
             outputs,
             None,
@@ -618,7 +618,7 @@ mod tests {
                 }))
                 .await
                 .unwrap()
-                .as_blocks_by_announcements()
+                .expect_blocks_by_announcements()
         );
         assert_eq!(
             vec![BlockHeight::from(1u64), BlockHeight::from(3u64)],
@@ -630,7 +630,7 @@ mod tests {
                 }))
                 .await
                 .unwrap()
-                .as_blocks_by_announcements()
+                .expect_blocks_by_announcements()
         );
         assert_eq!(
             vec![BlockHeight::from(2u64),],
@@ -642,7 +642,7 @@ mod tests {
                 }))
                 .await
                 .unwrap()
-                .as_blocks_by_announcements()
+                .expect_blocks_by_announcements()
         );
     }
 
@@ -674,7 +674,7 @@ mod tests {
 
         let mut utxo_index = test_utxo_index(network).await;
         for block in &blocks {
-            utxo_index.index_block(&block).await;
+            utxo_index.index_block(block).await;
         }
 
         for block in blocks {
@@ -733,7 +733,7 @@ mod tests {
 
         let mut utxo_index = test_utxo_index(network).await;
         for block in &blocks {
-            utxo_index.index_block(&block).await;
+            utxo_index.index_block(block).await;
         }
 
         // Block 1 and 2 contain this addition record, block 3 does not
@@ -771,7 +771,7 @@ mod tests {
         }
 
         for block in &blocks {
-            utxo_index.index_block(&block).await;
+            utxo_index.index_block(block).await;
         }
 
         for block in &blocks {

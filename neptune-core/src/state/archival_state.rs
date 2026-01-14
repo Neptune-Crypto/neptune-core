@@ -553,10 +553,10 @@ impl ArchivalState {
     ///
     /// Performs no validation.
     pub(crate) async fn set_new_tip(&mut self, block: &Block) -> Result<()> {
-        self.write_block_as_tip(&block).await?;
-        self.append_to_archival_block_mmr(&block).await;
-        self.update_mutator_set(&block).await?;
-        self.update_utxo_index(&block).await;
+        self.write_block_as_tip(block).await?;
+        self.append_to_archival_block_mmr(block).await;
+        self.update_mutator_set(block).await?;
+        self.update_utxo_index(block).await;
 
         Ok(())
     }
@@ -4683,7 +4683,7 @@ pub(super) mod tests {
         ) -> Block {
             let mut rng = rand::rng();
             let (block, _) = make_mock_block_with_inputs_and_outputs(
-                &predecessor,
+                predecessor,
                 inputs,
                 outputs,
                 None,

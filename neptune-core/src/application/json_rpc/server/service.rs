@@ -744,11 +744,8 @@ impl RpcApi for RpcServer {
         &self,
         request: BlockHeightsByAbsoluteIndexSetsRequest,
     ) -> RpcResult<BlockHeightsByAbsoluteIndexSetsResponse> {
-        let absolute_index_sets: HashSet<AbsoluteIndexSet> = request
-            .absolute_index_sets
-            .into_iter()
-            .map(|x| x.into())
-            .collect();
+        let absolute_index_sets: HashSet<AbsoluteIndexSet> =
+            request.absolute_index_sets.into_iter().collect();
 
         let block_heights = self
             .state
