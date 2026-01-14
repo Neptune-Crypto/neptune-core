@@ -2295,28 +2295,10 @@ impl GlobalState {
     async fn set_new_tip_internal(&mut self, new_tip: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
-        // Update archival state
         self.chain
             .archival_state_mut()
-            .write_block_as_tip(&new_tip)
+            .set_new_tip(&new_tip)
             .await?;
-
-        self.chain
-            .archival_state_mut()
-            .append_to_archival_block_mmr(&new_tip)
-            .await;
-
-        // update the archival mutator set with the UTXOs from this block
-        self.chain
-            .archival_state_mut()
-            .update_mutator_set(&new_tip)
-            .await?;
-
-        // If we are maintaining a UTXO index, apply block to this.
-        self.chain
-            .archival_state_mut()
-            .update_utxo_index(&new_tip)
-            .await;
 
         *self.chain.light_state_mut() = std::sync::Arc::new(new_tip.clone());
 
