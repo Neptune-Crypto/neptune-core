@@ -252,26 +252,28 @@ pub fn hash() -> Digest {
     *DIGEST.get_or_init(|| Program::new(&library_and_code().1).hash())
 }
 
-pub fn new(
-    c: Claim,
-    witness_aocl: MmrAccumulator,
-    witness_senderrandomness: Digest,
-    witness_aoclleafindex: u64,
-    witness_utxo: Utxo,
-    witness_membershipproof: MmrMembershipProof,
-) -> ProofOfTransfer {
-    // let coins = witness_utxo.coins();
-    ProofOfTransfer(
-        ProofOfTransferWitness {
-            aocl: witness_aocl,
-            membership_proof: witness_membershipproof,
-            // utxo_digest: tasm_lib::prelude::Tip5::hash(&witness_utxo),
-            utxo: witness_utxo,
-            sender_randomness: witness_senderrandomness,
-            aocl_leaf_index: witness_aoclleafindex,
-        },
-        c,
-    )
+impl ProofOfTransfer {
+    pub fn new(
+        c: Claim,
+        witness_aocl: MmrAccumulator,
+        witness_senderrandomness: Digest,
+        witness_aoclleafindex: u64,
+        witness_utxo: Utxo,
+        witness_membershipproof: MmrMembershipProof,
+    ) -> ProofOfTransfer {
+        // let coins = witness_utxo.coins();
+        ProofOfTransfer(
+            ProofOfTransferWitness {
+                aocl: witness_aocl,
+                membership_proof: witness_membershipproof,
+                // utxo_digest: tasm_lib::prelude::Tip5::hash(&witness_utxo),
+                utxo: witness_utxo,
+                sender_randomness: witness_senderrandomness,
+                aocl_leaf_index: witness_aoclleafindex,
+            },
+            c,
+        )
+    }
 }
 impl SecretWitness for ProofOfTransfer {
     fn standard_input(&self) -> PublicInput {

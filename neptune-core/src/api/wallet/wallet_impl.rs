@@ -254,7 +254,7 @@ impl<'a> Wallet<'a> {
             .prove_membership_relative_to_smaller_mmr(aocl_leaf_ix, block_aocl_numleafs)
             .await;
 
-        let sent = sent::new(
+        let sent = ProofOfTransfer::new(
             sent::claim_outputs(
                 sent::claim_inputs(
                     tasm_lib::triton_vm::proof::Claim::new(sent::hash()),
