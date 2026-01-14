@@ -839,7 +839,7 @@ impl NetworkActor {
                 tracing::debug!(peer = %peer_id, "Received identify info");
 
                 // Check if the peer speaks the same Neptune version as us.
-                if !info.protocols.contains(&NEPTUNE_PROTOCOL) {
+                if info.protocol_version != NEPTUNE_PROTOCOL_STR {
                     tracing::warn!(
                         peer = %peer_id,
                         version = %info.protocol_version,
