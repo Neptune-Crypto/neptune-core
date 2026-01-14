@@ -1,4 +1,5 @@
 use futures::channel::oneshot;
+use itertools::Itertools;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -54,7 +55,11 @@ use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::Randomness;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
 /// Create a valid block on top of provided block. Returned block is valid in
 /// terms of both block validity and PoW, and is thus the new canonical block of
@@ -278,6 +283,47 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         .collect();
 
     (block, composer_expected_utxos)
+}
+
+/// Return a block with the specied number of inputs/outputs. Inputs and
+/// outputs are random. Also contains randomized composer rewards.
+///
+/// Does not have a valid proof, nor valid PoW. Not deterministic.
+pub(crate) async fn block_with_num_puts(
+    network: Network,
+    predecessor: &Block,
+    num_inputs: u128,
+    num_outputs: usize,
+) -> Block {
+    let mut rng = rand::rng();
+    let inputs = (0..num_inputs)
+        .map(|_| RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new(
+                vec![
+                    (1u128 << 20) + rng.random_range(0..=u128::from(CHUNK_SIZE));
+                    NUM_TRIALS as usize
+                ]
+                .try_into()
+                .unwrap(),
+            ),
+            target_chunks: ChunkDictionary::default(),
+        })
+        .collect_vec();
+
+    let outputs = vec![rng.random(); num_outputs];
+
+    let (block, _) = make_mock_block_with_inputs_and_outputs(
+        predecessor,
+        inputs,
+        outputs,
+        None,
+        GenerationSpendingKey::derive_from_seed(rng.random()),
+        rng.random(),
+        network,
+    )
+    .await;
+
+    block
 }
 
 /// Build a fake block with a random hash, containing *two* outputs for the

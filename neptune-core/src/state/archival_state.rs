@@ -4680,9 +4680,12 @@ pub(super) mod tests {
         }
     }
 
+    /// Test of functions that require both UTXO index and other parts of the
+    /// archival state
     mod utxo_index {
         use super::*;
         use crate::api::export::GenerationSpendingKey;
+        use crate::tests::shared::blocks::block_with_num_puts;
         use crate::tests::shared::blocks::invalid_empty_block;
         use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
 
@@ -4751,6 +4754,58 @@ pub(super) mod tests {
         }
 
         #[apply(shared_tokio_runtime)]
+        async fn only_canonical_absolute_index_sets_are_matched() {
+            let network = Network::Main;
+            let cli = Args {
+                utxo_index: true,
+                network,
+                ..Default::default()
+            };
+            let mut archive = make_test_archival_state(&cli).await;
+
+            let genesis = Block::genesis(network);
+            let abandoned_block1 = block_with_num_puts(network, &genesis, 4, 4).await;
+            let canonical_block1 = block_with_num_puts(network, &genesis, 4, 4).await;
+
+            archive.set_new_tip(&abandoned_block1).await.unwrap();
+            archive.set_new_tip(&canonical_block1).await.unwrap();
+
+            // Verify no inputs from abandoned block are matched.
+            for abs_index_set in abandoned_block1
+                .body()
+                .transaction_kernel()
+                .inputs
+                .iter()
+                .map(|x| x.absolute_indices)
+            {
+                let abs_index_set = [abs_index_set].into_iter().collect();
+                let res = archive
+                    .absolute_index_sets_to_block_heights(abs_index_set)
+                    .await
+                    .unwrap();
+                assert!(res.is_empty());
+            }
+
+            // Verify that all inputs from canonical block 1 are matched.
+            for abs_index_set in canonical_block1
+                .body()
+                .transaction_kernel()
+                .inputs
+                .iter()
+                .map(|x| x.absolute_indices)
+            {
+                let abs_index_set = [abs_index_set].into_iter().collect();
+                let res = archive
+                    .absolute_index_sets_to_block_heights(abs_index_set)
+                    .await
+                    .unwrap();
+                let expected: HashSet<BlockHeight> =
+                    [BlockHeight::from(1u64)].into_iter().collect();
+                assert_eq!(expected, res);
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
         async fn returns_multiple_block_heights_on_repeated_addition_records() {
             let network = Network::Main;
             let cli = Args {
@@ -4805,6 +4860,32 @@ pub(super) mod tests {
                     .await
                     .unwrap()
             );
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn no_panic_when_utxo_index_is_not_present() {
+            let network = Network::Main;
+            let cli = Args {
+                utxo_index: false,
+                network,
+                ..Default::default()
+            };
+            let archive = make_test_archival_state(&cli).await;
+            assert!(archive.utxo_index.is_none());
+
+            let dummy_tx_input = AbsoluteIndexSet::empty_dummy();
+            let dummy_tx_input = [dummy_tx_input].into_iter().collect();
+            assert!(archive
+                .absolute_index_sets_to_block_heights(dummy_tx_input)
+                .await
+                .is_err());
+
+            let dummy_tx_output = AdditionRecord::new(Digest::default());
+            let dummy_tx_output = [dummy_tx_output].into_iter().collect();
+            assert!(archive
+                .addition_records_to_block_height(dummy_tx_output)
+                .await
+                .is_err());
         }
     }
 

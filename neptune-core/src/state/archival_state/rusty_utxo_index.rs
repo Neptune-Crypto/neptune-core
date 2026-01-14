@@ -457,7 +457,6 @@ mod tests {
     use std::collections::HashMap;
 
     use macro_rules_attr::apply;
-    use rand::Rng;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::bfe_vec;
 
@@ -465,14 +464,10 @@ mod tests {
     use crate::api::export::Announcement;
     use crate::api::export::GenerationSpendingKey;
     use crate::api::export::Network;
+    use crate::tests::shared::blocks::block_with_num_puts;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
-    use crate::util_types::mutator_set::removal_record::RemovalRecord;
-    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::BFieldElement;
 
     impl RustyUtxoIndex {
@@ -510,45 +505,6 @@ mod tests {
             message: bfe_vec![22, 878, 668],
         };
         vec![length0, length1, length2, length3]
-    }
-
-    /// Return a block with the specied number of inputs/outputs. Inputs and
-    /// outputs are random. Also contains randomized composer rewards.
-    async fn block_with_num_puts(
-        network: Network,
-        predecessor: &Block,
-        num_inputs: u128,
-        num_outputs: usize,
-    ) -> Block {
-        let mut rng = rand::rng();
-        let inputs = (0..num_inputs)
-            .map(|_| RemovalRecord {
-                absolute_indices: AbsoluteIndexSet::new(
-                    vec![
-                        (1u128 << 20) + rng.random_range(0..=u128::from(CHUNK_SIZE));
-                        NUM_TRIALS as usize
-                    ]
-                    .try_into()
-                    .unwrap(),
-                ),
-                target_chunks: ChunkDictionary::default(),
-            })
-            .collect_vec();
-
-        let outputs = vec![rng.random(); num_outputs];
-
-        let (block, _) = make_mock_block_with_inputs_and_outputs(
-            predecessor,
-            inputs,
-            outputs,
-            None,
-            GenerationSpendingKey::derive_from_seed(rng.random()),
-            rng.random(),
-            network,
-        )
-        .await;
-
-        block
     }
 
     #[apply(shared_tokio_runtime)]
