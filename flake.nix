@@ -58,31 +58,42 @@
         ];
       in
         with pkgs; {
-          # Build the packages with `nix build` or `nix build .#neptune-core`
+          # Build the packages with `nix build` or `nix build .#neptune-core` for example.
           packages = rec {
             default = neptune-core;
             neptune-core = naerskLib.buildPackage {
               pname = "neptune-core";
+              cargoBuildFlags = ["--bin" "neptune-core"];
               src = ./.;
               inherit buildInputs;
             };
-            neptune-core-cli = naerskLib.buildPackage {
-              pname = "neptune-core-cli";
+            neptune-cli = naerskLib.buildPackage {
+              pname = "neptune-cli";
+              cargoBuildFlags = ["--bin" "neptune-core-cli"];
+              src = ./.;
+              inherit buildInputs;
+            };
+            neptune-dashboard = naerskLib.buildPackage {
+              pname = "neptune-dashboard";
+              cargoBuildFlags = ["--bin" "neptune-dashboard"];
               src = ./.;
               inherit buildInputs;
             };
           };
-          # Run the packages with `nix run` or `nix run .#neptune-core`
+          # Run the packages with `nix run` or `nix run .#neptune-core` for example.
           apps = rec {
             default = neptune-core;
             neptune-core = flake-utils.lib.mkApp {
               drv = self.packages.${system}.neptune-core;
             };
-            neptune-core-cli = flake-utils.lib.mkApp {
-              drv = self.packages.${system}.neptune-core;
+            neptune-cli = flake-utils.lib.mkApp {
+              drv = self.packages.${system}.neptune-cli;
+            };
+            neptune-dashboard = flake-utils.lib.mkApp {
+              drv = self.packages.${system}.neptune-dashboard;
             };
           };
-          # Enter the reproducible development shell using `nix develop`
+          # Enter the reproducible development shell using `nix develop` (automatically done with `direnv allow` if available)
           devShells.default = mkShell {
             buildInputs = buildInputs ++ tooling;
           };
