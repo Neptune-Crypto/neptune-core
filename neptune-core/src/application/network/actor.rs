@@ -468,6 +468,7 @@ impl NetworkActor {
                     // Asks our current neighbors: "Who is new in the network?"
                     if let Err(e) = self.swarm.behaviour_mut().kademlia.bootstrap() {
                         tracing::warn!("Crawl refresh skipped: No known peers to ask. {:?}", e);
+                        self.dial_initial_peers();
                     } else {
                         tracing::info!("Starting periodic network crawl to maintain connectivity ...");
                     }
