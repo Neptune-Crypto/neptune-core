@@ -837,9 +837,10 @@ impl PeerLoopHandler {
                     }
                 };
 
-                info!("Responding to sync challenge from {}", self.peer_id);
+                debug!("Responding to sync challenge from {} ...", self.peer_id);
                 peer.send(PeerMessage::SyncChallengeResponse(Box::new(response)))
                     .await?;
+                info!("Responded to sync challenge from {}", self.peer_id);
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
