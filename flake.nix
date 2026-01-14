@@ -12,6 +12,7 @@
   };
 
   outputs = {
+    self,
     nixpkgs,
     rust-overlay,
     flake-utils,
@@ -75,10 +76,10 @@
           apps = rec {
             default = neptune-core;
             neptune-core = flake-utils.lib.mkApp {
-              drv = system.packages.neptune-core;
+              drv = self.packages.${system}.neptune-core;
             };
             neptune-core-cli = flake-utils.lib.mkApp {
-              drv = system.packages.neptune-core;
+              drv = self.packages.${system}.neptune-core;
             };
           };
           # Enter the reproducible development shell using `nix develop`
