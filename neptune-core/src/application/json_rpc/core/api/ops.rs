@@ -97,6 +97,12 @@ pub enum RpcMethods {
     #[namespace(Namespace::Archival)]
     FindUtxoOrigin,
 
+    /// Check if indices in an absolute index set are set. Can be used to check
+    /// if a UTXO is spent without having to know the mutator set membership
+    /// proof.
+    #[namespace(Namespace::Archival)]
+    AreBloomIndicesSet,
+
     #[namespace(Namespace::Archival)]
     CirculatingSupply,
 
