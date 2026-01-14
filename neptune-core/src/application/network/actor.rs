@@ -397,6 +397,7 @@ impl NetworkActor {
     /// Fetch a list of suitable peers from the address book and dial them.
     pub(crate) fn dial_initial_peers(&mut self) {
         let initial_peers = self.address_book.select_initial_peers(10);
+        tracing::debug!("Dialing {} initial peers.", initial_peers.len());
         for peer in initial_peers {
             if let Err(e) = self.swarm.dial(peer.clone()) {
                 tracing::warn!("Failed to dial initial peer {}: {e}", peer.to_string());
@@ -491,7 +492,7 @@ impl NetworkActor {
                                 // If time since dialing started is too big,
                                 // try again.
                                 if now.duration_since(since_timestamp).ok().is_some_and(|duration| duration > Duration::from_mins(2)) {
-                                    tracing::info!(%multiaddr, "Sticky peer seems stuck in dialing phase; trying again.");
+                                    tracing::warn!(%multiaddr, "Sticky peer seems stuck in dialing phase; trying again.");
                                     *sticky_peer = StickyPeer::Dialing(now);
                                 dials.push(multiaddr.clone());
                                     if let Err(e) = self.swarm.dial(multiaddr.clone()) {
@@ -503,7 +504,7 @@ impl NetworkActor {
                                 // Verify that the peer id is connected, and if
                                 // not, re-dial.
                                 if !self.active_connections.contains_key(&peer_id) {
-                                    tracing::info!(%peer_id, %multiaddr, "Sticky peer disconnected; attempting to re-establish connection..");
+                                    tracing::warn!(%peer_id, %multiaddr, "Sticky peer disconnected; attempting to re-establish connection..");
                                     *sticky_peer = StickyPeer::Dialing(now);
                                 dials.push(multiaddr.clone());
                                     if let Err(e) = self.swarm.dial(multiaddr.clone()) {
@@ -873,9 +874,6 @@ impl NetworkActor {
 
                 // Activate the Kademlia "Bridge": feed the address to Kademlia.
                 for addr in info.listen_addrs {
-                    // No risk of over-connecting: the `limits` behavior in the
-                    // `NetworkStack` automatically bounces peers once we've
-                    // crosse the limit.
                     self.swarm
                         .behaviour_mut()
                         .kademlia
