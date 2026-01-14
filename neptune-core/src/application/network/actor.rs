@@ -298,6 +298,7 @@ impl NetworkActor {
                 libp2p::noise::Config::new,
                 yamux_tuner,
             )?
+            .with_quic()
             .with_relay_client(libp2p::noise::Config::new, yamux_tuner)?
             .with_behaviour(|key, relay_client| {
                 let local_peer_id = key.public().to_peer_id();
@@ -1505,17 +1506,17 @@ impl NetworkActor {
                 }
             }
             NetworkActorCommand::ResetRelayReservations => {
-                tracing::info!("Resetting relay reservations...");
+                tracing::info!("Resetting relay reservations ...");
 
                 for (peer_id, (_maybe_timestamp, listener_id)) in self.relays.drain() {
-                    tracing::info!(%peer_id, "Evicting relay to force re-reservation.");
+                    tracing::debug!(%peer_id, "Evicting relay to force re-reservation.");
                     self.swarm.remove_listener(listener_id);
                     let _ = self.swarm.disconnect_peer_id(peer_id);
                     self.active_connections.remove(&peer_id);
                 }
             }
             NetworkActorCommand::GetNetworkOverview(channel) => {
-                tracing::info!("Assembling network overview ...");
+                tracing::debug!("Assembling network overview ...");
                 let overview = self.assemble_overview();
                 if channel.send(overview).is_err() {
                     tracing::error!("Cannot send NetworkOverview from NetworkActor over one-shot.");
