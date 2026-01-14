@@ -23,6 +23,7 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::archival_mutator_set::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 use crate::util_types::mutator_set::MutatorSetError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -489,21 +490,61 @@ where
         self.swbf_active.slide_window_back(&last_inactive_chunk);
     }
 
-    /// Determine whether the index `index` is set in the Bloom
-    /// filter, whether in the active window, or in some chunk.
-    pub async fn bloom_filter_contains(&mut self, index: u128) -> bool {
-        let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
-
+    /// Return true if index is set in the Bloom filter. Uses only one database
+    /// lookup as opposed to the naive implementation which would need two.
+    ///
+    /// Returns false if the index is a future index. So this function can never
+    /// panic if the mutator set is well-formed.
+    #[inline]
+    async fn bloom_filter_contains_inner(&self, index: u128, active_window_start: u128) -> bool {
         if index >= active_window_start {
             let relative_index = (index - active_window_start) as u32;
+            if relative_index >= WINDOW_SIZE {
+                return false;
+            }
+
             self.swbf_active.contains(relative_index)
         } else {
             let chunk_index = (index / u128::from(CHUNK_SIZE)) as u64;
             let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
+            if relative_index >= CHUNK_SIZE {
+                return false;
+            }
+
             let relevant_chunk = self.chunks.get(chunk_index).await;
             relevant_chunk.contains(relative_index)
         }
+    }
+
+    /// Returns true iff all indices in the absolute index set are set.
+    ///
+    /// Returns false if any index is a future index.
+    pub async fn absolute_index_set_was_applied(&self, absolute_indices: AbsoluteIndexSet) -> bool {
+        let batch_index = self.get_batch_index_async().await;
+        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
+
+        // Returns once the first not-set index is found. Should be optimal
+        // from a performance perspective.
+        for index in absolute_indices.iter() {
+            if !self
+                .bloom_filter_contains_inner(index, active_window_start)
+                .await
+            {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Determine whether the index `index` is set in the Bloom
+    /// filter, whether in the active window, or in some chunk.
+    pub async fn bloom_filter_contains(&self, index: u128) -> bool {
+        let batch_index = self.get_batch_index_async().await;
+        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
+
+        self.bloom_filter_contains_inner(index, active_window_start)
+            .await
     }
 
     pub async fn accumulator(&self) -> MutatorSetAccumulator {
@@ -642,6 +683,53 @@ mod tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
+
+    #[apply(shared_tokio_runtime)]
+    async fn index_set_checkers_cannot_panic() {
+        let rms = empty_rusty_mutator_set().await;
+        let archival_mutator_set = rms.ams();
+        let future_absolute_index_set0 =
+            AbsoluteIndexSet::new_raw(1 << 32, [0; NUM_TRIALS as usize]);
+        assert!(
+            !archival_mutator_set
+                .absolute_index_set_was_applied(future_absolute_index_set0)
+                .await
+        );
+        let future_absolute_index_set1 =
+            AbsoluteIndexSet::new_raw(u128::from(WINDOW_SIZE), [0; NUM_TRIALS as usize]);
+        assert!(
+            !archival_mutator_set
+                .absolute_index_set_was_applied(future_absolute_index_set1)
+                .await
+        );
+        assert!(!archival_mutator_set.bloom_filter_contains(u128::MAX).await);
+        assert!(
+            !archival_mutator_set
+                .bloom_filter_contains(u128::from(u64::MAX))
+                .await
+        );
+        assert!(
+            !archival_mutator_set
+                .bloom_filter_contains(u128::from(u32::MAX))
+                .await
+        );
+        assert!(
+            !archival_mutator_set
+                .bloom_filter_contains(u128::from(WINDOW_SIZE) + 1)
+                .await
+        );
+        assert!(
+            !archival_mutator_set
+                .bloom_filter_contains(u128::from(WINDOW_SIZE))
+                .await
+        );
+        assert!(
+            !archival_mutator_set
+                .bloom_filter_contains(u128::from(WINDOW_SIZE) - 1)
+                .await
+        );
+        assert!(!archival_mutator_set.bloom_filter_contains(0u128).await);
+    }
 
     #[apply(shared_tokio_runtime)]
     async fn archival_set_commitment_test() {
@@ -864,7 +952,19 @@ mod tests {
         let rem0 = archival_mutator_set
             .drop(items[saw_collision_at.0 .0], &mps[saw_collision_at.0 .0])
             .await;
+
+        assert!(
+            !archival_mutator_set
+                .absolute_index_set_was_applied(rem0.absolute_indices)
+                .await
+        );
         archival_mutator_set.remove(&rem0).await;
+        assert!(
+            archival_mutator_set
+                .absolute_index_set_was_applied(rem0.absolute_indices)
+                .await
+        );
+
         msa.remove(&rem0);
         assert!(
             archival_mutator_set
@@ -902,7 +1002,19 @@ mod tests {
         let rem1 = archival_mutator_set
             .drop(items[saw_collision_at.0 .1], &mps[saw_collision_at.0 .1])
             .await;
+
+        assert!(
+            !archival_mutator_set
+                .absolute_index_set_was_applied(rem1.absolute_indices)
+                .await
+        );
         archival_mutator_set.remove(&rem1).await;
+        assert!(
+            archival_mutator_set
+                .absolute_index_set_was_applied(rem1.absolute_indices)
+                .await
+        );
+
         msa.remove(&rem1);
         assert!(
             archival_mutator_set
@@ -943,6 +1055,11 @@ mod tests {
         // Reverse 1st removal
         archival_mutator_set.revert_remove(&rem0).await;
         assert!(
+            !archival_mutator_set
+                .absolute_index_set_was_applied(rem0.absolute_indices)
+                .await
+        );
+        assert!(
             archival_mutator_set
                 .bloom_filter_contains(saw_collision_at.1)
                 .await,
@@ -959,7 +1076,17 @@ mod tests {
         }
 
         // Reverse 2nd removal
+        assert!(
+            archival_mutator_set
+                .absolute_index_set_was_applied(rem1.absolute_indices)
+                .await
+        );
         archival_mutator_set.revert_remove(&rem1).await;
+        assert!(
+            !archival_mutator_set
+                .absolute_index_set_was_applied(rem1.absolute_indices)
+                .await
+        );
         assert!(
             !archival_mutator_set
                 .bloom_filter_contains(saw_collision_at.1)
@@ -1065,14 +1192,30 @@ mod tests {
                 .drop(item, &restored_membership_proof)
                 .await;
             let commitment_before_remove = archival_mutator_set.hash().await;
+
+            assert!(
+                !archival_mutator_set
+                    .absolute_index_set_was_applied(removal_record.absolute_indices)
+                    .await
+            );
             archival_mutator_set.remove(&removal_record).await;
             assert!(
                 !archival_mutator_set
                     .verify(item, &restored_membership_proof)
                     .await
             );
+            assert!(
+                archival_mutator_set
+                    .absolute_index_set_was_applied(removal_record.absolute_indices)
+                    .await
+            );
 
             archival_mutator_set.revert_remove(&removal_record).await;
+            assert!(
+                !archival_mutator_set
+                    .absolute_index_set_was_applied(removal_record.absolute_indices)
+                    .await
+            );
             let commitment_after_revert = archival_mutator_set.hash().await;
             assert_eq!(commitment_before_remove, commitment_after_revert);
             assert!(

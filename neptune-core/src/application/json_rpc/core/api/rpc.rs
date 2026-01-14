@@ -276,6 +276,19 @@ pub trait RpcApi: Sync + Send {
         request: FindUtxoOriginRequest,
     ) -> RpcResult<FindUtxoOriginResponse>;
 
+    async fn are_bloom_indices_set(
+        &self,
+        absolute_index_set: RpcAbsoluteIndexSet,
+    ) -> RpcResult<AreBloomIndicesSetResponse> {
+        self.are_bloom_indices_set_call(AreBloomIndicesSetRequest { absolute_index_set })
+            .await
+    }
+
+    async fn are_bloom_indices_set_call(
+        &self,
+        request: AreBloomIndicesSetRequest,
+    ) -> RpcResult<AreBloomIndicesSetResponse>;
+
     async fn circulating_supply(&self) -> RpcResult<CirculatingSupplyResponse> {
         self.circulating_supply_call(CirculatingSupplyRequest {})
             .await

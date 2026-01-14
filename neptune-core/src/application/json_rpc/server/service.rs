@@ -352,6 +352,24 @@ impl RpcApi for RpcServer {
         })
     }
 
+    async fn are_bloom_indices_set_call(
+        &self,
+        request: AreBloomIndicesSetRequest,
+    ) -> RpcResult<AreBloomIndicesSetResponse> {
+        Ok(AreBloomIndicesSetResponse {
+            are_set: self
+                .state
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .archival_mutator_set
+                .ams()
+                .absolute_index_set_was_applied(request.absolute_index_set)
+                .await,
+        })
+    }
+
     async fn circulating_supply_call(
         &self,
         _request: CirculatingSupplyRequest,
