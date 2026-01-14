@@ -281,15 +281,15 @@ impl AddressBook {
         let hardcoded_bootstrap_nodes = [
             (
                 IpAddr::V4(Ipv4Addr::from_str("139.162.193.206").unwrap()),
-                9800,
+                9801,
             ),
             (
                 IpAddr::V4(Ipv4Addr::from_str("51.15.139.238").unwrap()),
-                9800,
+                9801,
             ),
             (
                 IpAddr::V6(Ipv6Addr::from_str("2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9").unwrap()),
-                9800,
+                9801,
             ),
         ]
         .into_iter()
