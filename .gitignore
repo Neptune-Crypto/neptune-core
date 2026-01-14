@@ -126,3 +126,7 @@ fabric.properties
 # Debuggable Tasm programs for triton-tui
 program.tasm
 vm_state.json
+
+# `nix build` created symlink to build result
+result
+.direnv
