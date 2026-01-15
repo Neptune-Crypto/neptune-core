@@ -2918,7 +2918,7 @@ pub(crate) mod tests {
                 .await;
             bob.chain
                 .archival_state_mut()
-                .write_block_as_tip(&new_block)
+                .set_new_tip(&new_block)
                 .await
                 .unwrap();
             *bob.chain.light_state_mut() = new_block.clone().into();

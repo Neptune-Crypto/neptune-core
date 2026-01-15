@@ -303,6 +303,13 @@ mod tests {
         pub(crate) fn new_raw(minimum: u128, distances: [u32; NUM_TRIALS as usize]) -> Self {
             Self { minimum, distances }
         }
+
+        pub(crate) fn empty_dummy() -> Self {
+            Self {
+                minimum: 0,
+                distances: [0; NUM_TRIALS as usize],
+            }
+        }
     }
 
     #[proptest]

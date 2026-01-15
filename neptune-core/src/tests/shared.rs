@@ -43,7 +43,6 @@ use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
-pub mod archival;
 pub mod blocks;
 pub mod files;
 pub mod globalstate;

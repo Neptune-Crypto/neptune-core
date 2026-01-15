@@ -18,10 +18,10 @@ use crate::api::export::ReceivingAddress;
 pub struct AnnouncementFlag {
     /// Purpose of the announcement. E.g.: announcement for generational
     /// address, or for symmetric key address.
-    pub(crate) flag: BFieldElement,
+    pub flag: BFieldElement,
 
     /// An ID identifying the receiver.
-    pub(crate) receiver_id: BFieldElement,
+    pub receiver_id: BFieldElement,
 }
 
 impl Ord for AnnouncementFlag {
