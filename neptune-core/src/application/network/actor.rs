@@ -281,8 +281,8 @@ impl NetworkActor {
 
         // Configure Ping.
         let ping_config = libp2p::ping::Config::new()
-            .with_interval(std::time::Duration::from_secs(30)) // Ping every 30s
-            .with_timeout(std::time::Duration::from_secs(20)); // 20s until we give up
+            .with_interval(std::time::Duration::from_secs(9)) // Ping every 9s
+            .with_timeout(std::time::Duration::from_secs(32)); // 32s until we give up
 
         // Configure connection limits
         let max_num_peers = config.max_num_peers;
