@@ -266,8 +266,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         "Most known canonical block has height {}",
         own_handshake_data.tip_header.height
     );
+    let legacy_socketaddr = |multiaddr: &libp2p::Multiaddr| {
+        multiaddr_to_socketaddr(multiaddr).and_then(|sa| {
+            if [9800, 9801].contains(&sa.port()) {
+                None
+            } else {
+                Some(sa)
+            }
+        })
+    };
     for multiaddress in &global_state_lock.cli().peers {
-        if let Some(peer_address) = multiaddr_to_socketaddr(multiaddress) {
+        if let Some(peer_address) = legacy_socketaddr(multiaddress) {
             let peer_state_var = global_state_lock.clone(); // bump arc refcount
             let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
                 main_to_peer_broadcast_tx.subscribe();
@@ -285,11 +294,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
                 .await;
             });
             task_join_handles.push(peer_join_handle);
-        } else {
-            network_command_tx
-                .send(NetworkActorCommand::Dial(multiaddress.clone()))
-                .await?;
         }
+        // Else: NetworkActor already got CLI peers via NetworkConfig.
     }
     debug!("Made outgoing connections to peers");
 

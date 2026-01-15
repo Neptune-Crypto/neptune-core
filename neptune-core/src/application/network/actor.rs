@@ -34,6 +34,39 @@ use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::state::GlobalStateLock;
 
+/// Tracks the status of a relay reservation.
+#[derive(Debug, Copy, Clone)]
+enum RelayStatus {
+    Waiting(libp2p::core::transport::ListenerId),
+    Active(SystemTime, libp2p::core::transport::ListenerId),
+    Closed(SystemTime),
+}
+
+impl RelayStatus {
+    /// Set the status to `Active(now, listener_id)`.
+    ///
+    /// Works regardless of whether previous status was
+    ///  - `Waiting(listener_id)`, or
+    ///  - `Active(previous_timestamp, listener_id)`.
+    ///
+    /// # Panics
+    ///
+    ///  - If status was `Closed(_)`
+    fn activate(&mut self) {
+        let listener_id = self.listener_id().expect("Cannot activate `Closed` relay.");
+        *self = RelayStatus::Active(SystemTime::now(), listener_id);
+    }
+
+    /// Fetch the listener ID, if any; otherwise `None`.
+    fn listener_id(&self) -> Option<libp2p::core::transport::ListenerId> {
+        match self {
+            RelayStatus::Waiting(listener_id) => Some(*listener_id),
+            RelayStatus::Active(_system_time, listener_id) => Some(*listener_id),
+            RelayStatus::Closed(_system_time) => None,
+        }
+    }
+}
+
 /// The libp2p adapter for the Neptune network stack.
 ///
 /// The [`NetworkActor`] serves as a specialized interface between the libp2p
@@ -84,9 +117,10 @@ pub(crate) struct NetworkActor {
     /// Dictionary to find peer metadata, connected or not.
     address_book: AddressBook,
 
-    /// Tracks which peers are holding a reservation for us, along with the
-    /// 80%-in timestamp and the listener id (which we need to stop listening).
-    relays: HashMap<PeerId, (Option<SystemTime>, libp2p::core::transport::ListenerId)>,
+    /// Tracks which peers are going to hold a reservation for us, currently
+    /// holding one for us, or closed the reservation for us abruptly, along
+    /// with timestamps and the listener id (which we need to stop listening).
+    relays: HashMap<PeerId, RelayStatus>,
 
     /// Tracks active local listeners (open ports). These IDs represent local
     /// sockets bound to the NIC.
@@ -214,6 +248,10 @@ impl NetworkActor {
 
     /// How long relay reservations (proxy addresses) last.
     const RELAY_RESERVATION_DURATION: Duration = Duration::from_secs(120);
+
+    /// How long before we are allowed to re-initiate a relay to replace the
+    /// failed one.
+    const RELAY_COOLDOWN_PERIOD: Duration = Duration::from_secs(10);
 
     /// Initialize a new libp2p Actor.
     ///
@@ -459,7 +497,7 @@ impl NetworkActor {
 
                 // Renew about-to-expire relay reservations (if any).
                 _ = check_relay_reservations.tick() => {
-                    self.check_relay_renewals();
+                    self.check_relays_reservations();
                 }
 
                 // Re-launch a crawl with Kademlia
@@ -663,13 +701,18 @@ impl NetworkActor {
                 reason,
                 ..
             } => {
-                // Match the listener ID against the listener IDs we are
-                // for proxy addresses.
+                // Find the matching entry in the local dictionary `relays`.
                 let failing_relay = self
                     .relays
                     .iter()
-                    .find(|(_, (_, id))| *id == listener_id)
-                    .map(|(peer_id, _)| *peer_id);
+                    .find_map(|(peer_id, status)| match status {
+                        RelayStatus::Waiting(id) | RelayStatus::Active(_, id)
+                            if *id == listener_id =>
+                        {
+                            Some(*peer_id)
+                        }
+                        _ => None,
+                    });
 
                 // A match necessarily means an *accidental* closure, because
                 // intentional closures come after removing the entry from the
@@ -690,10 +733,12 @@ impl NetworkActor {
                     }
 
                     // Remove it from our tracking map.
-                    self.relays.remove(&peer_id);
+                    self.relays
+                        .entry(peer_id)
+                        .and_modify(|status| *status = RelayStatus::Closed(SystemTime::now()));
 
-                    // Find a replacement.
-                    self.request_peer_relays(1);
+                    // Finding a replacement happens automatically in the
+                    // regular maintenance task `check_relays`.
                 }
             }
 
@@ -979,11 +1024,9 @@ impl NetworkActor {
             libp2p::relay::client::Event::ReservationReqAccepted { relay_peer_id, .. } => {
                 let eighty_percent = Self::RELAY_RESERVATION_DURATION * 8 / 10;
                 let eighty_percent_in = SystemTime::now() + eighty_percent;
-                self.relays
-                    .entry(relay_peer_id)
-                    .and_modify(|(timestamp, _listener_id)| {
-                        *timestamp = Some(eighty_percent_in);
-                    });
+                self.relays.entry(relay_peer_id).and_modify(|status| {
+                    status.activate();
+                });
 
                 tracing::info!(
                     peer = %relay_peer_id,
@@ -1231,7 +1274,12 @@ impl NetworkActor {
                             .set_mode(Some(libp2p::kad::Mode::Server));
                     }
                     libp2p::autonat::NatStatus::Private => {
-                        self.request_peer_relays(3);
+                        // If we have external addresses, request for relays.
+                        if self.swarm.external_addresses().count() > 0 {
+                            self.request_peer_relays(3);
+                        } else {
+                            tracing::debug!("AutoNAT says Private, but waiting for Identify/UPnP to confirm an external address before requesting relay.");
+                        }
 
                         // Set Kademlia mode to client.
                         self.swarm
@@ -1507,9 +1555,11 @@ impl NetworkActor {
             NetworkActorCommand::ResetRelayReservations => {
                 tracing::info!("Resetting relay reservations ...");
 
-                for (peer_id, (_maybe_timestamp, listener_id)) in self.relays.drain() {
+                for (peer_id, status) in self.relays.drain() {
                     tracing::debug!(%peer_id, "Evicting relay to force re-reservation.");
-                    self.swarm.remove_listener(listener_id);
+                    if let Some(listener_id) = status.listener_id() {
+                        self.swarm.remove_listener(listener_id);
+                    }
                     let _ = self.swarm.disconnect_peer_id(peer_id);
                     self.active_connections.remove(&peer_id);
                 }
@@ -1534,41 +1584,54 @@ impl NetworkActor {
     fn cleanup_relays(&mut self) {
         tracing::info!("Cleaning up relay reservations.");
 
-        for (_peer_id, (_expiration_date, listener_id)) in self.relays.drain() {
-            if self.swarm.remove_listener(listener_id) {
-                tracing::debug!(?listener_id, "Closed relay listener.");
+        for (_peer_id, status) in self.relays.drain() {
+            if let Some(listener_id) = status.listener_id() {
+                if self.swarm.remove_listener(listener_id) {
+                    tracing::debug!(?listener_id, "Closed relay listener.");
+                }
             }
         }
     }
 
-    /// Monitors active relay reservations and triggers renewals for those
-    /// nearing expiration.
+    /// Monitors active relay reservations.
     ///
-    /// This function checks the '80% mark' -- a timestamp calculated at the
-    /// time the reservation is accepted -- against the current system time. If
-    /// a reservation has passed this mark, it is removed from the active relay
-    /// set, and [Self::request_peer_relays] is called to secure a replacement
-    /// reservation.
+    /// Triggers renewals for those relays nearing expiration, and re-launches
+    /// relays to replace those that were closed abruptly.
+    ///
+    /// This function compares the timestamp calculated at the time the
+    /// reservation is accepted against the current system time. If a
+    /// reservation has passed the 80% mark, it is removed from the relay
+    /// set.
+    ///
+    /// The closed relays, whose closure timestamps exceed now by more than the
+    /// cooldown period, are counted and removed from the relay set.
+    ///
+    /// Finally [Self::request_peer_relays] is called to secure replacement
+    /// reservation for all duly and abruptly closed reservations.
     ///
     /// By refreshing slightly before the actual expiration, the node remains
-    /// reachable throughout.
-    fn check_relay_renewals(&mut self) {
+    /// reachable throughout (under normal conditions).
+    fn check_relays_reservations(&mut self) {
         if self.relays.is_empty() {
             return;
         }
 
+        // Collect and remove about-to-expire relays.
         let now = SystemTime::now();
         let expired_relays = self
             .relays
             .iter()
-            .filter_map(|(peer_id, (eighty_percent_mark, _listener_id))| {
-                eighty_percent_mark.and_then(|epm| {
-                    if now.duration_since(epm).is_ok() {
+            .filter_map(|(peer_id, status)| match status {
+                RelayStatus::Active(timestamp, _listener_id) => {
+                    let eighty_percent = Self::RELAY_RESERVATION_DURATION * 8 / 10;
+                    let eighty_percent_mark = *timestamp + eighty_percent;
+                    if now.duration_since(eighty_percent_mark).is_ok() {
                         Some(*peer_id)
                     } else {
                         None
                     }
-                })
+                }
+                _ => None,
             })
             .collect_vec();
         let num_expired_relays = expired_relays.len();
@@ -1579,7 +1642,30 @@ impl NetworkActor {
             self.relays.remove(&expiry);
         }
 
-        self.request_peer_relays(num_expired_relays);
+        // Collect and remove (abruptly) closed relays.
+        let closed_relays = self
+            .relays
+            .iter()
+            .filter_map(|(peer_id, status)| match status {
+                RelayStatus::Closed(timestamp) => {
+                    let cooldown_end = *timestamp + Self::RELAY_COOLDOWN_PERIOD;
+                    if now.duration_since(cooldown_end).is_ok() {
+                        Some(*peer_id)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect_vec();
+        let num_closed_relays = closed_relays.len();
+        for closure in closed_relays {
+            self.relays.remove(&closure);
+        }
+
+        // Request new relays to replace about-to-expire and closed relays.
+        tracing::info!("Requesting relays to replace {num_expired_relays} expired relays and {num_closed_relays} abruptly closed ones.");
+        self.request_peer_relays(num_expired_relays + num_closed_relays);
     }
 
     /// Make a random selection of k peers from the set of active connections
@@ -1589,6 +1675,13 @@ impl NetworkActor {
     /// instance if there are not enough active connections without on-going
     /// relay commitments.
     fn request_peer_relays(&mut self, num_relays: usize) {
+        // Delay requesting relay reservations until we have at least one
+        // confirmed external address.
+        if self.swarm.external_addresses().next().is_none() {
+            tracing::debug!("Skipping relay reservation: No confirmed external addresses yet.");
+            return;
+        }
+
         let current_relays = self.relays.keys().collect::<HashSet<_>>();
         let mut available_peers = self
             .active_connections
@@ -1604,6 +1697,14 @@ impl NetworkActor {
                 continue;
             };
 
+            // Skip addresses that already contain a p2p-circuit.
+            if addr
+                .iter()
+                .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+            {
+                continue;
+            }
+
             tracing::info!(%peer_id, "Attempting relay reservation at {}", addr);
 
             // Construct the circuit address.
@@ -1617,11 +1718,12 @@ impl NetworkActor {
 
             // Listen on the circuit address. This activity triggers the
             // reservation, so catch and record the listener id. We will catch
-            // the matching success event (`ReservationReqAccepted`) to put the
-            // right 80%-to-expiry timestamp in at that time.
+            // the matching success event (`ReservationReqAccepted`) to activate
+            // the relay with an accurate timestamp at that time.
             match self.swarm.listen_on(circuit_addr) {
                 Ok(listener_id) => {
-                    self.relays.insert(peer_id, (None, listener_id));
+                    self.relays
+                        .insert(peer_id, RelayStatus::Waiting(listener_id));
 
                     counter += 1;
                     if counter >= num_relays {
