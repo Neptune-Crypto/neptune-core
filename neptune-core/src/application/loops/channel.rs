@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use futures::channel::oneshot;
+use libp2p::Multiaddr;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 
 use crate::api::export::SpendingKey;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::network::overview::NetworkOverview;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::transaction::Transaction;
@@ -102,7 +104,7 @@ pub(crate) struct ClaimUtxoData {
 }
 
 /// represents messages that can be sent from RPC server to main loop.
-#[derive(Clone, Debug, strum::Display)]
+#[derive(Debug, strum::Display)]
 pub enum RPCServerToMain {
     BroadcastTx(Arc<Transaction>),
     PerformTxProofUpgrade(Box<UpgradeJob>),
@@ -135,6 +137,13 @@ pub enum RPCServerToMain {
         first: BlockHeight,
         last: BlockHeight,
     },
+    Ban(Multiaddr),
+    Unban(Multiaddr),
+    UnbanAll,
+    Dial(Multiaddr),
+    ProbeNat,
+    ResetRelayReservations,
+    GetNetworkOverview(tokio::sync::oneshot::Sender<NetworkOverview>),
 }
 
 pub trait Cancelable: Send + Sync {

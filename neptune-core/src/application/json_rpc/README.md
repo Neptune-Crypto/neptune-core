@@ -6,7 +6,7 @@ Let’s say you want to add a new method called `submit_block`.
 
 1. **Add a new operation**
 
-   * In `json_rpc::core::api::ops::RpcApiOps`, create a new variant (e.g. `SubmitBlock`).
+   * In `json_rpc::core::api::ops::RpcMethods`, create a new variant (e.g. `SubmitBlock`).
 
 2. **Create request and response types**
 

@@ -185,6 +185,7 @@ impl GenesisNode {
                 .enumerate()
                 .filter(|(x, _)| *x != usize::from(i))
                 .map(|(_, s)| s)
+                .map(neptune_cash::application::config::parser::multiaddr::socketaddr_to_multiaddr)
                 .collect();
             args.peer_port = base_args.peer_port + u16::from(i);
             args.rpc_port = base_args.rpc_port + u16::from(i);
