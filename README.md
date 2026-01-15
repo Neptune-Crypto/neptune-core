@@ -24,10 +24,11 @@ Neptune-core is the reference implementation for the [Neptune Cash](https://nept
     ```shell
     sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon`
     ```
- -  Now simply install the desired package globally with:
-    - `nix profile install .#neptune-core`: The core node binary
-    - `nix profile install .#neptune-cli`: The command line interface
-    - `nix profile install .#neptune-dashboard`: The terminal dashboard
+ -  Now simply run it with:
+    - `nix run github:Neptune-Crypto/neptune-core` will run the `neptune-core` binary, fetching the git repo automatically.
+    - Or run a specific package with `nix run github:Neptune-Crypto/neptune-core#neptune-cli`.
+    - Or locally in the repo with `nix run` or `nix run .#neptune-cli`
+    - To globally install use `nix profile install` or a specific package with `nix profile install .#neptune-cli`
 
 All required build dependencies are packaged reproducibly and defined in `flake.nix`.
 A development shell is included and can be accessed by running `nix develop` or use `direnv allow` if available.
