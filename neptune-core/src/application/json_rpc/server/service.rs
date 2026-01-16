@@ -10,6 +10,7 @@ use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
 use crate::application::json_rpc::core::api::rpc::*;
+use crate::application::json_rpc::core::model::block::header::TransactionKernelWithPriority;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
@@ -831,6 +832,86 @@ impl RpcApi for RpcServer {
                 other => Some(other.into()),
             }),
         })
+    }
+
+    async fn get_transactions_by_addition_records_call(
+        &self,
+        request: GetTransactionsByAdditionRecordsRequest,
+    ) -> RpcResult<GetTransactionsByAdditionRecordsResponse> {
+        let addition_records = request
+            .addition_records
+            .into_iter()
+            .map(|x| x.into())
+            .collect();
+        let transactions = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .with_matching_addition_records(&addition_records);
+
+        let transactions = transactions
+            .into_iter()
+            .map(|(tx_kernel, queue_order)| {
+                TransactionKernelWithPriority::new(
+                    &tx_kernel,
+                    queue_order.map(|order| {
+                        u32::try_from(order)
+                            .expect("Cannot have more than u32::MAX transactions in mempool")
+                    }),
+                )
+            })
+            .collect_vec();
+        let transactions = GetTransactionsByAdditionRecordsResponse { transactions };
+
+        Ok(transactions)
+    }
+
+    async fn get_transactions_by_absolute_index_sets_call(
+        &self,
+        request: GetTransactionsByAbsoluteIndexSetsRequest,
+    ) -> RpcResult<GetTransactionsByAbsoluteIndexSetsResponse> {
+        let absolute_index_sets = request.absolute_index_sets.into_iter().collect();
+        let transactions = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .with_matching_absolute_index_sets(&absolute_index_sets);
+
+        let transactions = transactions
+            .into_iter()
+            .map(|(tx_kernel, queue_order)| {
+                TransactionKernelWithPriority::new(
+                    &tx_kernel,
+                    queue_order.map(|order| {
+                        u32::try_from(order)
+                            .expect("Cannot have more than u32::MAX transactions in mempool")
+                    }),
+                )
+            })
+            .collect_vec();
+        let transactions = GetTransactionsByAbsoluteIndexSetsResponse { transactions };
+
+        Ok(transactions)
+    }
+
+    async fn best_transaction_for_next_block_call(
+        &self,
+        _: BestTransactionForNextBlockRequest,
+    ) -> RpcResult<BestTransactionForNextBlockResponse> {
+        let tx = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .get_transactions_for_block_composition(usize::MAX, Some(1));
+        let tx = tx.first();
+        let tx = BestTransactionForNextBlockResponse {
+            transaction: tx.map(|tx| (&tx.kernel).into()),
+        };
+
+        Ok(tx)
     }
 }
 

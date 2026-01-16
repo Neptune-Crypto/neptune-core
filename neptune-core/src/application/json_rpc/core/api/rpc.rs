@@ -514,4 +514,45 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: GetTransactionProofRequest,
     ) -> RpcResult<GetTransactionProofResponse>;
+
+    async fn get_transactions_by_addition_records(
+        &self,
+        addition_records: Vec<RpcAdditionRecord>,
+    ) -> RpcResult<GetTransactionsByAdditionRecordsResponse> {
+        self.get_transactions_by_addition_records_call(GetTransactionsByAdditionRecordsRequest {
+            addition_records,
+        })
+        .await
+    }
+    async fn get_transactions_by_addition_records_call(
+        &self,
+        request: GetTransactionsByAdditionRecordsRequest,
+    ) -> RpcResult<GetTransactionsByAdditionRecordsResponse>;
+
+    async fn get_transactions_by_absolute_index_sets(
+        &self,
+        absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+    ) -> RpcResult<GetTransactionsByAbsoluteIndexSetsResponse> {
+        self.get_transactions_by_absolute_index_sets_call(
+            GetTransactionsByAbsoluteIndexSetsRequest {
+                absolute_index_sets,
+            },
+        )
+        .await
+    }
+    async fn get_transactions_by_absolute_index_sets_call(
+        &self,
+        request: GetTransactionsByAbsoluteIndexSetsRequest,
+    ) -> RpcResult<GetTransactionsByAbsoluteIndexSetsResponse>;
+
+    async fn best_transaction_for_next_block(
+        &self,
+    ) -> RpcResult<BestTransactionForNextBlockResponse> {
+        self.best_transaction_for_next_block_call(BestTransactionForNextBlockRequest {})
+            .await
+    }
+    async fn best_transaction_for_next_block_call(
+        &self,
+        request: BestTransactionForNextBlockRequest,
+    ) -> RpcResult<BestTransactionForNextBlockResponse>;
 }

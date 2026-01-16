@@ -8,12 +8,14 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::api::export::BlockHeight;
 use crate::api::export::Timestamp;
+use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::BlockPow;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
 use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 use crate::protocol::consensus::block::pow::POW_MEMORY_TREE_HEIGHT;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 
 // TODO: Mirror consensus impl (RpcBlockPow = RpcPow<POW_MEMORY_TREE_HEIGHT>)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -194,6 +196,27 @@ impl From<RpcBlockHeader> for BlockHeader {
             cumulative_proof_of_work: header.cumulative_proof_of_work.into(),
             difficulty: header.difficulty.into(),
             guesser_receiver_data: header.guesser_receiver_data.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TransactionKernelWithPriority {
+    /// The kernel of the transaction.
+    pub kernel: RpcTransactionKernel,
+
+    /// The transaction's priority in the mempool queue. A `None` value
+    /// indicates that the transaction is not yet backed by a single proof, or
+    /// that it is not synced to the tip, i.e. it is not ready for block
+    /// inclusion yet.
+    pub priority: Option<u32>,
+}
+
+impl TransactionKernelWithPriority {
+    pub(crate) fn new(kernel: &TransactionKernel, priority: Option<u32>) -> Self {
+        Self {
+            kernel: kernel.into(),
+            priority,
         }
     }
 }
