@@ -29,7 +29,9 @@ use tasm_lib::{
 };
 
 use crate::{
-    api::export::{NativeCurrencyAmount, Utxo}, application::util_proof::{ProofOfTransfer, ProofOfTransferWitness}, protocol::proof_abstractions::{SecretWitness, tasm::program::ConsensusProgram}
+    api::export::{NativeCurrencyAmount, Utxo},
+    application::util_proof::{ProofOfTransfer, ProofOfTransferWitness},
+    protocol::proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
 };
 
 // const ERROR_UTXO_DIGEST_NEQ: i128 = 1_000_520;

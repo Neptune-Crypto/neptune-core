@@ -13,6 +13,7 @@ use crate::tests::shared::blocks::invalid_block_with_transaction;
 use crate::tests::shared::Randomness;
 use crate::tests::shared_tokio_runtime;
 use num_traits::CheckedSub;
+use proptest::prop_assert;
 use proptest::test_runner::RngSeed;
 use proptest_arbitrary_interop::arb;
 use rand::Rng;
@@ -159,7 +160,7 @@ async fn property_test_happy_path(
         utxo.lock_script_hash(),
         tx_output.native_currency_amount(),
     );
-    let sent = super::new(
+    let sent = super::ProofOfTransfer::new(
         claim.clone(),
         aocl.clone(),
         sender_randomness,
@@ -274,7 +275,7 @@ async fn aocl_proof_verification_failed(
         tx_output.native_currency_amount(),
     );
 
-    let mut sent = super::new(
+    let mut sent = super::ProofOfTransfer::new(
         claim.clone(),
         aocl.clone(),
         sender_randomness,
@@ -283,24 +284,31 @@ async fn aocl_proof_verification_failed(
         aocl_mp,
     );
 
+    proptest::prop_assume!(
+        aocl_mp_bad != sent.0.membership_proof,
+        "The 'bad' AOCL membership proof must actually be invalid for the test to be meaningful"
+    );
     sent.0.membership_proof = aocl_mp_bad;
 
     // Run the program and expect a Triton VM panic with AOCL proof verification error id.
-    match sent.run_tasm(&sent.standard_input(), sent.nondeterminism()) {
-        Ok(_) => panic!("Expected Triton VM panic, but program succeeded"),
-        Err(ConsensusError::TritonVMPanic(err, instruction_error)) => {
-            assert!(
-                format!("{instruction_error:?}").contains(
-                    super::ERROR_AOCL_PROOF_VERIFICATION_FAILED
-                        .to_string()
-                        .as_str()
-                ),
-                "Expected Triton VM error id {}, got: {instruction_error}; err: {err}",
-                super::ERROR_AOCL_PROOF_VERIFICATION_FAILED
-            );
-        }
-        Err(other) => panic!("Expected TritonVMPanic, got: {other:?}"),
-    }
+    if let Err(ConsensusError::TritonVMPanic(
+        _,
+        tasm_lib::triton_vm::error::InstructionError::AssertionFailed(inner),
+    )) = sent.run_tasm(&sent.standard_input(), sent.nondeterminism())
+    {
+        proptest::prop_assert_eq![
+            inner.id,
+            Some(super::ERROR_AOCL_PROOF_VERIFICATION_FAILED),
+            "Expected Triton VM error id {}, got: {:?}",
+            super::ERROR_AOCL_PROOF_VERIFICATION_FAILED,
+            inner.id
+        ]
+    } else {
+        prop_assert!(
+            false,
+            "the program was expected to fail in the particular way"
+        )
+    };
 }
 
 // impl rand::distr::Distribution<PercentageDecimal> for rand::distr::StandardUniform

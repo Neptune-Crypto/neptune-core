@@ -64,7 +64,7 @@ impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgram
             )
         );
 
-        // output the AOCL digest used for the proof
+        // output the bagged peaks of the AOCL used for the proof
         tasmlib_io_write_to_stdout___digest(ram.aocl.bag_peaks());
 
         // adapted from this trait implementation for `NativeCurrency`
