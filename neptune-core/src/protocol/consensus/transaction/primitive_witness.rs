@@ -1136,6 +1136,28 @@ mod tests {
     }
 
     impl PrimitiveWitness {
+        /// Return a primitive witness that's guaranteed to be invalid
+        pub(crate) fn invalid() -> Self {
+            let network = Network::Main;
+            let mutator_set_accumulator = MutatorSetAccumulator::default();
+            let timestamp = network.launch_date();
+            let kernel = TransactionDetails::nop(mutator_set_accumulator, timestamp, network)
+                .transaction_kernel();
+            Self {
+                input_utxos: SaltedUtxos::empty(),
+                input_membership_proofs: vec![],
+                lock_scripts_and_witnesses: vec![],
+                // Invalid because there is no type script. All transactions
+                // must prove to be satisfying the native current type script.
+                type_scripts_and_witnesses: vec![],
+                output_utxos: SaltedUtxos::empty(),
+                output_sender_randomnesses: vec![],
+                output_receiver_digests: vec![],
+                mutator_set_accumulator: MutatorSetAccumulator::default(),
+                kernel,
+            }
+        }
+
         /// Arbitrary with: (num inputs, num outputs, num pub announcements)
         pub(crate) fn arbitrary_tuple_with_matching_mutator_sets<const N: usize>(
             param_sets: [(usize, usize, usize); N],
@@ -1747,6 +1769,12 @@ mod tests {
                 )
                 .boxed()
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn invalid_pw_is_invalid() {
+        let pw = PrimitiveWitness::invalid();
+        assert!(pw.validate().await.is_err());
     }
 
     #[traced_test]

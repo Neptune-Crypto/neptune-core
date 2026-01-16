@@ -164,6 +164,17 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Mempool)]
     GetTransactionProof,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionsByAdditionRecords,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionsByAbsoluteIndexSets,
+
+    /// Return transaction most likely to be mined in next block, based on fee
+    /// density, sync status, and proof quality.
+    #[namespace(Namespace::Mempool)]
+    BestTransactionForNextBlock,
 }
 
 #[cfg(test)]
