@@ -22,7 +22,7 @@ Neptune-core is the reference implementation for the [Neptune Cash](https://nept
 
  -  Make sure you have `nix` installed or install it with:
     ```shell
-    sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon`
+    sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon
     ```
  -  Now simply run it with:
     - `nix run github:Neptune-Crypto/neptune-core` will run the `neptune-core` binary, fetching the git repo automatically.
