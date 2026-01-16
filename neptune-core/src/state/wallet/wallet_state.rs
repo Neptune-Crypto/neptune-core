@@ -61,6 +61,7 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::archival_state::ArchivalState;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -142,6 +143,56 @@ impl Debug for WalletState {
                 &self.configuration.data_directory().wallet_directory_path(),
             )
             .finish()
+    }
+}
+
+pub enum UtxoValidityChecker<'a> {
+    Light {
+        tip_digest: Digest,
+        mutator_set_accumulator: &'a MutatorSetAccumulator,
+    },
+    Archival(&'a ArchivalState),
+}
+
+impl<'a> UtxoValidityChecker<'a> {
+    #[inline]
+    async fn synced_and_spent(&self, monitored_utxo: &MonitoredUtxo) -> (bool, bool) {
+        match self {
+            UtxoValidityChecker::Light {
+                tip_digest,
+                mutator_set_accumulator,
+            } => {
+                if let Some(mp) = monitored_utxo.get_membership_proof_for_block(*tip_digest) {
+                    let synced = true;
+                    let spent =
+                        !mutator_set_accumulator.verify(Tip5::hash(&monitored_utxo.utxo), &mp);
+                    (synced, spent)
+                } else {
+                    (false, false)
+                }
+            }
+            UtxoValidityChecker::Archival(archival_state) => {
+                // Assume that all blocks have been processed. So we just need
+                // to check whether a spend was ever discovered, and in what
+                // block UTXO was received.
+                let spent =
+                    if let Some((block_hash, _, block_height)) = monitored_utxo.spent_in_block {
+                        archival_state
+                            .is_canonical_block(block_hash, block_height)
+                            .await
+                    } else {
+                        false
+                    };
+                let synced = {
+                    let (block_hash, _, block_height) = monitored_utxo.confirmed_in_block;
+                    archival_state
+                        .is_canonical_block(block_hash, block_height)
+                        .await
+                };
+
+                (synced, spent)
+            }
+        }
     }
 }
 
@@ -1833,10 +1884,9 @@ impl WalletState {
     }
 
     /// see [WalletStatus] for a description
-    pub async fn get_wallet_status(
+    pub async fn get_wallet_status<'a>(
         &self,
-        tip_digest: Digest,
-        mutator_set_accumulator: &MutatorSetAccumulator,
+        validity_checker: UtxoValidityChecker<'a>,
     ) -> WalletStatus {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut synced_unspent = vec![];
@@ -1852,23 +1902,16 @@ impl WalletState {
         pin_mut!(stream); // needed for iteration
 
         while let Some((_i, mutxo)) = stream.next().await {
-            let utxo = mutxo.utxo.clone();
-            if let Some(mp) = mutxo.get_membership_proof_for_block(tip_digest) {
-                // To determine whether the UTXO was spent, we cannot rely on
-                // the `spent_in_block` which might be set to blocks that have
-                // since been reorganized away.
-                let spent = !mutator_set_accumulator.verify(Tip5::hash(&mutxo.utxo), &mp);
-                if spent {
-                    synced_spent.push(WalletStatusElement::new(mp.aocl_leaf_index, utxo));
-                } else {
-                    synced_unspent.push((
-                        WalletStatusElement::new(mp.aocl_leaf_index, utxo),
-                        mp.clone(),
-                    ));
-                }
+            let (synced, spent) = validity_checker.synced_and_spent(&mutxo).await;
+            let wse = WalletStatusElement::new(mutxo.aocl_leaf_index, mutxo.utxo);
+
+            if !spent && synced {
+                synced_unspent.push(wse);
+            } else if spent && synced {
+                synced_spent.push(wse);
             } else {
-                let wse = WalletStatusElement::new(mutxo.aocl_leaf_index, mutxo.utxo);
-                unsynced.push(wse);
+                // Not synced. So we don't know if spent or not
+                unsynced.push(wse)
             }
         }
 
@@ -1901,8 +1944,10 @@ impl WalletState {
             .collect();
 
         // filter spendable inputs.
-        wallet_status.synced_unspent.into_iter().filter_map(
-            move |(wallet_status_element, membership_proof)| {
+        wallet_status
+            .synced_unspent
+            .into_iter()
+            .filter_map(move |wallet_status_element| {
                 // filter out UTXOs that are still timelocked.
                 if !wallet_status_element.utxo.can_spend_at(timestamp) {
                     return None;
@@ -1935,8 +1980,7 @@ impl WalletState {
                     )
                     .into(),
                 )
-            },
-        )
+            })
     }
 
     /// Allocate sufficient UTXOs to generate a transaction.

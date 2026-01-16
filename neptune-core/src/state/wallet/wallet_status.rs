@@ -8,7 +8,6 @@ use strum::EnumIter;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WalletStatusElement {
@@ -61,7 +60,7 @@ impl Display for WalletStatusElement {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WalletStatus {
     /// UTXOs that have a synced and valid membership proof
-    pub synced_unspent: Vec<(WalletStatusElement, MsMembershipProof)>,
+    pub synced_unspent: Vec<WalletStatusElement>,
 
     /// UTXOs that have a synced membership proof but it is invalid (probably
     /// because it was spent)
@@ -81,7 +80,7 @@ impl WalletStatus {
     pub fn total_confirmed(&self) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
-            .map(|(wse, _msmp)| &wse.utxo)
+            .map(|wse| &wse.utxo)
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
     }
@@ -90,7 +89,7 @@ impl WalletStatus {
     pub fn available_confirmed(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
-            .map(|(wse, _msmp)| &wse.utxo)
+            .map(|wse| &wse.utxo)
             .filter(|utxo| utxo.can_spend_at(timestamp))
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
@@ -100,7 +99,7 @@ impl WalletStatus {
     pub fn synced_unspent_timelocked_amount(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
-            .map(|(wse, _msmp)| &wse.utxo)
+            .map(|wse| &wse.utxo)
             .filter(|utxo| !utxo.can_spend_at(timestamp))
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
@@ -173,13 +172,13 @@ impl WalletStatusExportFormat {
                     wallet_status
                         .synced_unspent
                         .iter()
-                        .map(|(wse, _)| wse)
+                        .map(|wse| wse)
                         .map(row)
                         .join("\n"),
                     wallet_status
                         .synced_unspent
                         .iter()
-                        .map(|(wse, _)| wse.utxo.get_native_currency_amount())
+                        .map(|wse| wse.utxo.get_native_currency_amount())
                         .sum::<NativeCurrencyAmount>()
                         .display_lossless(),
                     wallet_status.synced_spent.iter().map(row).join("\n"),

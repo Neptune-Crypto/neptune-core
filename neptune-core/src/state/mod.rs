@@ -98,6 +98,7 @@ use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_input::TxInput;
 use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
+use crate::state::wallet::wallet_state::UtxoValidityChecker;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -722,15 +723,29 @@ impl GlobalState {
     }
 
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
-        let tip_digest = self.chain.light_state().hash();
-        let mutator_set_accumulator = self
-            .chain
-            .light_state()
-            .mutator_set_accumulator_after()
-            .expect("block in state must have mutator set after");
-        self.wallet_state
-            .get_wallet_status(tip_digest, &mutator_set_accumulator)
-            .await
+        let is_archival = self.chain.is_archival_node();
+        let validity_checker = if is_archival {
+            UtxoValidityChecker::Archival(self.chain.archival_state())
+        } else {
+            let tip_digest = self.chain.light_state().hash();
+            let mutator_set_accumulator = self
+                .chain
+                .light_state()
+                .mutator_set_accumulator_after()
+                .expect("block in state must have mutator set after");
+            UtxoValidityChecker::Light {
+                tip_digest,
+                mutator_set_accumulator,
+            }
+        };
+
+        self.wallet_state.get_wallet_status(validity_checker).await
+    }
+
+    /// Get [`WalletStatus`] with the help from an archival state. May only be
+    /// called if the state maintains an [`ArchivalState`].
+    pub async fn get_wallet_status_with_archive(&self) -> WalletStatus {
+        todo!()
     }
 
     pub(crate) fn consensus_rule_set(&self) -> ConsensusRuleSet {
