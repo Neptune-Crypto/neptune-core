@@ -111,6 +111,48 @@ impl From<RpcAnnouncement> for Announcement {
     }
 }
 
+/// A transaction kernel without membership proofs for the inputs. Inputs in
+/// this type only consists of a list of absolute index sets.
+///
+/// Significantly smaller than a [`TransactionKernel`] in most cases.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcTransactionKernelLeanInputs {
+    pub inputs: Vec<RpcAbsoluteIndexSet>,
+    pub outputs: Vec<RpcAdditionRecord>,
+    pub announcements: Vec<RpcAnnouncement>,
+    pub fee: RpcNativeCurrencyAmount,
+    pub coinbase: Option<RpcNativeCurrencyAmount>,
+    pub timestamp: Timestamp,
+    pub mutator_set_hash: Digest,
+    pub merge_bit: bool,
+}
+
+impl From<&TransactionKernel> for RpcTransactionKernelLeanInputs {
+    fn from(kernel: &TransactionKernel) -> Self {
+        Self {
+            inputs: kernel
+                .inputs
+                .clone()
+                .into_iter()
+                .map(|x| x.absolute_indices)
+                .collect(),
+            outputs: kernel.outputs.iter().copied().map(Into::into).collect(),
+            announcements: kernel
+                .announcements
+                .clone()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            fee: kernel.fee.into(),
+            coinbase: kernel.coinbase.map(|c| c.into()),
+            timestamp: kernel.timestamp,
+            mutator_set_hash: kernel.mutator_set_hash,
+            merge_bit: kernel.merge_bit,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcTransactionKernel {

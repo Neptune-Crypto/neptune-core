@@ -266,6 +266,18 @@ pub struct FindUtxoOriginResponse {
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
+pub struct AreSetRequest {
+    pub absolute_index_set: RpcAbsoluteIndexSet,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AreSetResponse {
+    pub are_set: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
 pub struct CirculatingSupplyRequest {}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -375,6 +387,7 @@ pub struct RescanGuesserRewardsRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RescanGuesserRewardsResponse {}
 
+/* Mining */
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct GetBlockTemplateRequest {
@@ -400,6 +413,7 @@ pub struct SubmitBlockResponse {
     pub success: bool,
 }
 
+/* Utxo Index */
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockHeightsByFlagsRequest {
@@ -436,6 +450,7 @@ pub struct BlockHeightsByAbsoluteIndexSetsResponse {
     pub block_heights: Vec<RpcBlockHeight>,
 }
 
+/* Mempool */
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionsRequest {}
@@ -468,4 +483,38 @@ pub struct GetTransactionProofRequest {
 #[serde(rename_all = "camelCase")]
 pub struct GetTransactionProofResponse {
     pub proof: Option<RpcTransactionProof>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTransactionsByAdditionRecordsRequest {
+    pub addition_records: Vec<RpcAdditionRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTransactionsByAdditionRecordsResponse {
+    pub transactions: Vec<TransactionKernelWithPriority>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTransactionsByAbsoluteIndexSetsRequest {
+    pub absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTransactionsByAbsoluteIndexSetsResponse {
+    pub transactions: Vec<TransactionKernelWithPriority>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct BestTransactionForNextBlockRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BestTransactionForNextBlockResponse {
+    pub transaction: Option<RpcTransactionKernelLeanInputs>,
 }
