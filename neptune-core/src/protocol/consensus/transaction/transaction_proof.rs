@@ -18,6 +18,7 @@ use crate::protocol::proof_abstractions::verifier::verify;
 ///
 /// the types are ordered (asc) by proof-generation complexity.
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, strum::Display)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 #[repr(u8)]
 pub enum TransactionProofType {
     /// a primitive-witness.  exposes secrets (keys).  this proof must not be shared.
@@ -180,6 +181,22 @@ mod tests {
     use super::*;
     use crate::twenty_first::bfe_vec;
     use crate::BFieldElement;
+
+    impl TransactionProofType {
+        pub(crate) fn invalid(self) -> TransactionProof {
+            match self {
+                TransactionProofType::PrimitiveWitness => {
+                    TransactionProof::Witness(PrimitiveWitness::invalid())
+                }
+                TransactionProofType::ProofCollection => {
+                    TransactionProof::ProofCollection(ProofCollection::invalid())
+                }
+                TransactionProofType::SingleProof => {
+                    TransactionProof::SingleProof(NeptuneProof::from(vec![]))
+                }
+            }
+        }
+    }
 
     impl TransactionProof {
         /// A proof that will always be invalid
