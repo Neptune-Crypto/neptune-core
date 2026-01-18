@@ -1151,7 +1151,8 @@ impl NetworkActor {
                 peer, is_new_peer, ..
             } => {
                 if is_new_peer {
-                    tracing::info!(peer_id = %peer, "DHT: New peer discovered and added to buckets.");
+                    tracing::info!(peer_id = %peer, "DHT: New peer discovered and added to buckets. Running Kademlia bootstrap.");
+                    self.swarm.behaviour_mut().kademlia.bootstrap().ok();
                 } else {
                     tracing::info!(peer_id = %peer, "DHT: new addresses found for existing peer.");
                 }

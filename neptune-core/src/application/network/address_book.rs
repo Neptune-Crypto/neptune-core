@@ -407,7 +407,6 @@ mod tests {
     use test_strategy::proptest;
 
     use crate::application::network::arbitrary::arb_peer_id;
-    use crate::application::network::stack::NEPTUNE_PROTOCOL;
 
     use super::*;
 
@@ -475,7 +474,7 @@ mod tests {
             listen_addresses: vec![],
             agent_version: "".to_string(),
             protocol_version: NEPTUNE_PROTOCOL_STR.to_string(),
-            supported_protocols: vec![NEPTUNE_PROTOCOL],
+            supported_protocols: vec![libp2p::StreamProtocol::new(NEPTUNE_PROTOCOL_STR)],
             first_seen: three_hours_ago,
             last_seen: now,
             fail_count: 0,
