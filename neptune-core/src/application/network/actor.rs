@@ -253,6 +253,11 @@ impl NetworkActor {
     /// failed one.
     const RELAY_COOLDOWN_PERIOD: Duration = Duration::from_secs(10);
 
+    /// Hardcoded version strings for Kademlia.
+    const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "/kad/1.0.0");
+    const KADEMLIA_FOR_NEPTUNE_PROTOCOL: libp2p::StreamProtocol =
+        libp2p::StreamProtocol::new(Self::KADEMLIA_FOR_NEPTUNE_STRING);
+
     /// Initialize a new libp2p Actor.
     ///
     /// This constructor sets up the underlying libp2p Swarm with TCP transport,
@@ -264,10 +269,6 @@ impl NetworkActor {
         global_state_lock: GlobalStateLock,
         config: NetworkConfig,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "/kad/1.0.0");
-        const KADEMLIA_FOR_NEPTUNE_PROTOCOL: libp2p::StreamProtocol =
-            libp2p::StreamProtocol::new(KADEMLIA_FOR_NEPTUNE_STRING);
-
         let NetworkActorChannels {
             peer_to_main_loop_tx,
             main_to_peer_broadcast,
@@ -330,7 +331,7 @@ impl NetworkActor {
         };
 
         // Configure Kademlia
-        let kad_config = libp2p::kad::Config::new(KADEMLIA_FOR_NEPTUNE_PROTOCOL);
+        let kad_config = libp2p::kad::Config::new(Self::KADEMLIA_FOR_NEPTUNE_PROTOCOL);
 
         // Build Swarm
         let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
@@ -832,19 +833,6 @@ impl NetworkActor {
 
                 // Note: Identify and Kademlia will now automatically start
                 // their handshakes over this new "open line."
-
-                // If the peer does not run Kademlia, then the Kademlia
-                // will fail, and Kademlia will handle that failure eventually.
-                // However, if we dialed them, then we already know they are a
-                // Neptune Cash peer, so we might as well tell Kademlia directly
-                // that we are connected to a compatible node -- without waiting
-                // for Kademlia to figure that out on its own.
-                if endpoint.is_dialer() {
-                    self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .add_address(&peer_id, address);
-                }
             }
 
             _ => {}
@@ -1152,6 +1140,17 @@ impl NetworkActor {
             } => {
                 if is_new_peer {
                     tracing::info!(peer_id = %peer, "DHT: New peer discovered and added to buckets. Running Kademlia bootstrap.");
+                    // We perform the debug crawl in a separate block
+                    {
+                        let kad = &mut self.swarm.behaviour_mut().kademlia;
+                        let mut peer_count = 0;
+                        for bucket in kad.kbuckets() {
+                            for _entry in bucket.iter() {
+                                peer_count += 1;
+                            }
+                        }
+                        tracing::info!("DEBUG: Kademlia Routing Table size: {}", peer_count);
+                    }
                     self.swarm.behaviour_mut().kademlia.bootstrap().ok();
                 } else {
                     tracing::info!(peer_id = %peer, "DHT: new addresses found for existing peer.");
