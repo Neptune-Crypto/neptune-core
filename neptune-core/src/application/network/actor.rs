@@ -1,3 +1,4 @@
+use const_format::concatcp;
 use futures::prelude::*;
 use itertools::Itertools;
 use libp2p::swarm::SwarmEvent;
@@ -29,7 +30,6 @@ use crate::application::network::gateway::StreamGateway;
 use crate::application::network::overview::NetworkOverview;
 use crate::application::network::stack::NetworkStack;
 use crate::application::network::stack::NetworkStackEvent;
-use crate::application::network::stack::NEPTUNE_PROTOCOL;
 use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::state::GlobalStateLock;
@@ -264,6 +264,10 @@ impl NetworkActor {
         global_state_lock: GlobalStateLock,
         config: NetworkConfig,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "/kad/1.0.0");
+        const KADEMLIA_FOR_NEPTUNE_PROTOCOL: libp2p::StreamProtocol =
+            libp2p::StreamProtocol::new(KADEMLIA_FOR_NEPTUNE_STRING);
+
         let NetworkActorChannels {
             peer_to_main_loop_tx,
             main_to_peer_broadcast,
@@ -326,7 +330,7 @@ impl NetworkActor {
         };
 
         // Configure Kademlia
-        let kad_config = libp2p::kad::Config::new(NEPTUNE_PROTOCOL);
+        let kad_config = libp2p::kad::Config::new(KADEMLIA_FOR_NEPTUNE_PROTOCOL);
 
         // Build Swarm
         let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
@@ -889,6 +893,10 @@ impl NetworkActor {
             // We received Identify info from a remote peer.
             libp2p::identify::Event::Received { peer_id, info, .. } => {
                 tracing::debug!(peer = %peer_id, "Received identify info");
+                tracing::debug!("--- Identify Diagnostic for {} ---", peer_id);
+                tracing::debug!("Protocols supported by remote: {:?}", info.protocols);
+                tracing::debug!("Observed Address: {:?}", info.observed_addr);
+                tracing::debug!("Agent Version: {:?}", info.agent_version);
 
                 // Check if the peer speaks the same Neptune version as us.
                 if info.protocol_version != NEPTUNE_PROTOCOL_STR {
@@ -1133,6 +1141,8 @@ impl NetworkActor {
             } => {
                 if is_new_peer {
                     tracing::info!(peer_id = %peer, "DHT: New peer discovered and added to buckets.");
+                } else {
+                    tracing::info!(peer_id = %peer, "DHT: new addresses found for existing peer.");
                 }
             }
 
@@ -1144,8 +1154,14 @@ impl NetworkActor {
             } => {
                 tracing::info!(
                     remaining = status.num_remaining,
-                    "DHT: Bootstrap in progress..."
+                    "Hop! DHT bootstrap in progress..."
                 );
+            }
+            libp2p::kad::Event::OutboundQueryProgressed {
+                result: libp2p::kad::QueryResult::Bootstrap(Err(e)),
+                ..
+            } => {
+                tracing::info!("Boink! DHT bootstrap ran into error: {e}.");
             }
             _ => {}
         }
