@@ -554,6 +554,12 @@ impl NetworkActor {
                         }
                     }
 
+                    // If we are not connected to anyone, and if there are not
+                    // sticky peers, then dial initial peers from address book.
+                    if self.sticky_peers.is_empty() && self.active_connections.is_empty() {
+                        dials.append(&mut self.address_book.select_initial_peers(3));
+                    }
+
                     // Disconnect if necessary to free up enough slots.
                     let num_free_slots = self.max_num_peers.saturating_sub(self.active_connections.len());
                     if num_free_slots < dials.len() {
@@ -565,7 +571,7 @@ impl NetworkActor {
                     // Issue dial commands.
                     for dial in dials {
                         if let Err(e) = self.swarm.dial(dial.clone()) {
-                            tracing::warn!(%dial, "Could not dial sticky peer: {e}.");
+                            tracing::warn!(%dial, "Could not dial peer: {e}.");
                         }
                     }
                 }
