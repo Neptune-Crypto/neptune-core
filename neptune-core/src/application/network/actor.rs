@@ -345,8 +345,9 @@ impl NetworkActor {
                     libp2p::relay::Behaviour::new(local_peer_id, relay_server_config);
 
                 let store = libp2p::kad::store::MemoryStore::new(local_peer_id);
-                let kademlia =
+                let mut kademlia =
                     libp2p::kad::Behaviour::with_config(local_peer_id, store, kad_config);
+                kademlia.set_mode(Some(libp2p::kad::Mode::Server));
 
                 let upnp = libp2p::upnp::tokio::Behaviour::default();
 
@@ -436,12 +437,12 @@ impl NetworkActor {
     pub(crate) fn dial_initial_peers(&mut self) {
         let initial_peers = self.address_book.select_initial_peers(10);
         tracing::debug!("Dialing {} initial peers.", initial_peers.len());
-        for peer in initial_peers {
-            if let Err(e) = self.swarm.dial(peer.clone()) {
-                tracing::warn!("Failed to dial initial peer {}: {e}", peer.to_string());
-            } else {
-                tracing::info!("Dialed initial peer {}.", peer.to_string());
+        for address in initial_peers {
+            if let Err(e) = self.swarm.dial(address.clone()) {
+                tracing::warn!("Failed to dial initial peer {}: {e}", address.to_string());
+                continue;
             }
+            tracing::info!("Dialed initial peer {}.", address.to_string());
         }
     }
 
@@ -924,8 +925,12 @@ impl NetworkActor {
                 // Prune if necessary, to avoid state bloat.
                 self.address_book.prune_to_length(ADDRESS_BOOK_MAX_SIZE);
 
-                // Activate the Kademlia "Bridge": feed the address to Kademlia.
-                for addr in info.listen_addrs {
+                // Activate the Kademlia "Bridge": feed the addresses (both the
+                // one we used and the one they claim to listen to) to Kademlia.
+                for addr in vec![info.observed_addr]
+                    .into_iter()
+                    .chain(info.listen_addrs)
+                {
                     self.swarm
                         .behaviour_mut()
                         .kademlia
