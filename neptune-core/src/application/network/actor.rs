@@ -892,6 +892,11 @@ impl NetworkActor {
         match event {
             // We received Identify info from a remote peer.
             libp2p::identify::Event::Received { peer_id, info, .. } => {
+                if peer_id == *self.swarm.local_peer_id() {
+                    tracing::error!("Received Identify event from ourselves.");
+                    return;
+                }
+
                 tracing::debug!(peer = %peer_id, "Received identify info");
                 tracing::debug!("--- Identify Diagnostic for {} ---", peer_id);
                 tracing::debug!("Protocols supported by remote: {:?}", info.protocols);
@@ -933,12 +938,18 @@ impl NetworkActor {
                 // Prune if necessary, to avoid state bloat.
                 self.address_book.prune_to_length(ADDRESS_BOOK_MAX_SIZE);
 
-                // Activate the Kademlia "Bridge": feed the addresses (both the
-                // one we used and the one they claim to listen to) to Kademlia.
-                for addr in vec![info.observed_addr]
-                    .into_iter()
-                    .chain(info.listen_addrs)
-                {
+                // Activate the Kademlia "Bridge": feed the addresses to
+                // Kademlia. Filter out local addresses.
+                for addr in info.listen_addrs {
+                    // Filter out local addresses.
+                    let addr_str = addr.to_string();
+                    let is_local = addr_str.contains("127.0.0.1")
+                        || addr_str.contains("::1")
+                        || addr_str.contains("/lan/");
+                    if is_local {
+                        continue;
+                    }
+
                     self.swarm
                         .behaviour_mut()
                         .kademlia
