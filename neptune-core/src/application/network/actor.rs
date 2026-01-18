@@ -1151,7 +1151,11 @@ impl NetworkActor {
                         }
                         tracing::info!("DEBUG: Kademlia Routing Table size: {}", peer_count);
                     }
-                    self.swarm.behaviour_mut().kademlia.bootstrap().ok();
+                    let random_peer = PeerId::random();
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .get_closest_peers(random_peer);
                 } else {
                     tracing::info!(peer_id = %peer, "DHT: new addresses found for existing peer.");
                 }
