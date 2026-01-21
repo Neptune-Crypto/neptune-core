@@ -35,8 +35,6 @@ mod tests {
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
     use tasm_lib::triton_vm::prelude::BFieldElement;
-    use tasm_lib::triton_vm::prelude::XFieldElement;
-    use tasm_lib::twenty_first::math::x_field_element::EXTENSION_DEGREE;
     use tracing_test::traced_test;
     use unlocked_utxo::UnlockedUtxo;
 
@@ -61,6 +59,7 @@ mod tests {
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::expected_utxo::UtxoNotifier;
+    use crate::state::wallet::secret_key_material::BField32Bytes;
     use crate::state::wallet::secret_key_material::SecretKeyMaterial;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::transaction_output::TxOutputList;
@@ -1144,18 +1143,18 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn master_seed_is_not_sender_randomness(
-            secret in proptest_arbitrary_interop::arb::<XFieldElement>()
+            secret in proptest_arbitrary_interop::arb::<BField32Bytes>()
         ) {
             let secret_as_digest = Digest::new(
                 [
-                    secret.coefficients.to_vec(),
-                    vec![BFieldElement::new(0); Digest::LEN - EXTENSION_DEGREE],
+                    secret.0.to_vec(),
+                    vec![BFieldElement::new(0); Digest::LEN - 4],
                 ]
                 .concat()
                 .try_into()
                 .unwrap(),
             );
-            let wallet = WalletEntropy::new(SecretKeyMaterial(secret));
+            let wallet = WalletEntropy::new(SecretKeyMaterial::V1(secret));
             assert_ne!(
                 wallet.generate_sender_randomness(BlockHeight::genesis(), random()),
                 secret_as_digest
