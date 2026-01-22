@@ -165,7 +165,7 @@ pub(crate) enum HandshakeResult {
     /// This variant carries both the peer's handshake and the communication
     /// channel itself, ensuring they are never separated.
     Success {
-        handshake: HandshakeData,
+        remote_handshake: HandshakeData,
         stream: Stream,
     },
 }

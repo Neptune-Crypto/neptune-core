@@ -1,4 +1,7 @@
+use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 
@@ -149,7 +152,10 @@ impl ConnectionHandler for GatewayHandler {
                 // We move the result into the queue so 'poll' can find it.
                 self.pending_events
                     .push_back(ConnectionHandlerEvent::NotifyBehaviour(
-                        HandshakeResult::Success { handshake, stream },
+                        HandshakeResult::Success {
+                            remote_handshake: handshake,
+                            stream,
+                        },
                     ));
             }
 
@@ -162,7 +168,10 @@ impl ConnectionHandler for GatewayHandler {
                 // We move the result into the queue so 'poll' can find it.
                 self.pending_events
                     .push_back(ConnectionHandlerEvent::NotifyBehaviour(
-                        HandshakeResult::Success { handshake, stream },
+                        HandshakeResult::Success {
+                            remote_handshake: handshake,
+                            stream,
+                        },
                     ));
             }
 
@@ -199,8 +208,9 @@ impl ConnectionHandler for GatewayHandler {
             return Poll::Pending;
         }
 
-        // If we haven't asked for a handshake yet, do it now.
-        if !self.outbound_requested_already {
+        // If we haven't asked for a handshake yet, and we are the initiator,
+        // request it now.
+        if !self.outbound_requested_already && !self.connection_is_inbound {
             self.outbound_requested_already = true;
             return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
                 protocol: SubstreamProtocol::new(
@@ -241,7 +251,7 @@ pub(crate) enum GatewayEvent {
         /// The unique identity of the remote peer.
         peer_id: PeerId,
         /// The verified handshake sent by the peer.
-        handshake: HandshakeData,
+        remote_handshake: HandshakeData,
         /// The live, bidirectional stream ready for inner protocol messages.
         stream: libp2p::Stream,
     },
@@ -314,14 +324,20 @@ pub(crate) struct StreamGateway {
     /// Used for getting the handshake data
     global_state: GlobalStateLock,
 
+    upgraded_peers: Arc<Mutex<HashSet<PeerId>>>,
+
     events: VecDeque<ToSwarm<GatewayEvent, Command>>,
 }
 
 impl StreamGateway {
-    pub(crate) fn new(global_state: GlobalStateLock) -> Self {
+    pub(crate) fn new(
+        global_state: GlobalStateLock,
+        upgraded_peers: Arc<Mutex<HashSet<PeerId>>>,
+    ) -> Self {
         Self {
             global_state,
             events: VecDeque::new(),
+            upgraded_peers,
         }
     }
 
@@ -348,10 +364,17 @@ impl NetworkBehaviour for StreamGateway {
     fn handle_established_inbound_connection(
         &mut self,
         _connection_id: ConnectionId,
-        _peer: PeerId,
+        peer: PeerId,
         _local_addr: &Multiaddr,
         remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
+        {
+            let upgraded_peers = self.upgraded_peers.lock().unwrap();
+            if upgraded_peers.contains(&peer) {
+                return Err(libp2p::swarm::ConnectionDenied::new("already upgraded"));
+            }
+        }
+
         Ok(GatewayHandler {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
@@ -369,11 +392,18 @@ impl NetworkBehaviour for StreamGateway {
     fn handle_established_outbound_connection(
         &mut self,
         _connection_id: ConnectionId,
-        _peer: PeerId,
+        peer: PeerId,
         addr: &Multiaddr,
         _endpoint: libp2p::core::Endpoint,
         _port_use: PortUse,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
+        {
+            let upgraded_peers = self.upgraded_peers.lock().unwrap();
+            if upgraded_peers.contains(&peer) {
+                return Err(libp2p::swarm::ConnectionDenied::new("already upgraded"));
+            }
+        }
+
         Ok(GatewayHandler {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
@@ -444,14 +474,17 @@ impl NetworkBehaviour for StreamGateway {
         // variant so we might as well use if-let; but when someone adds new
         // variants we want to force them to add a case here.
         match event {
-            HandshakeResult::Success { handshake, stream } => {
+            HandshakeResult::Success {
+                remote_handshake,
+                stream,
+            } => {
                 // Check that connection is allowed
 
                 // This is the "Hijack" point.
                 self.events
                     .push_back(ToSwarm::GenerateEvent(GatewayEvent::HandshakeReceived {
                         peer_id,
-                        handshake,
+                        remote_handshake,
                         stream,
                     }));
             } // If we later add a HandshakeResult::Failure, we handle it here
