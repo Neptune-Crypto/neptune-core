@@ -1005,6 +1005,12 @@ impl PeerLoopHandler {
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
                     Some(b) => {
+                        if b.header().height.is_genesis() {
+                            self.punish(NegativePeerSanction::RequestForGenesisBlock)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+
                         peer.send(PeerMessage::Block(Box::new(b.try_into().unwrap())))
                             .await?;
                         Ok(KEEP_CONNECTION_ALIVE)
@@ -1015,6 +1021,12 @@ impl PeerLoopHandler {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
 
                 debug!("Got BlockRequestByHeight of height {}", block_height);
+
+                if block_height.is_genesis() {
+                    self.punish(NegativePeerSanction::RequestForGenesisBlock)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 // If a block of that height lives in archival state, send that.
                 let canonical_block_digest = self

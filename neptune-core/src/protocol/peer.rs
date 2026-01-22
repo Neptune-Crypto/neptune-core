@@ -101,6 +101,7 @@ pub enum NegativePeerSanction {
     NonFavorableBlockProposal,
     BlockProposalFromBlockedPeer,
     RequestForUnknownBlock,
+    RequestForGenesisBlock,
 
     UnwantedMessage,
 
@@ -144,6 +145,7 @@ impl Display for NegativePeerSanction {
                 "invalid start height of batch blocks"
             }
             NegativePeerSanction::RequestForUnknownBlock => "request for unknown block",
+            NegativePeerSanction::RequestForGenesisBlock => "request for genesis block",
             NegativePeerSanction::BatchBlocksUnknownRequest => "batch blocks unknown request",
             NegativePeerSanction::InvalidTransaction => "invalid transaction",
             NegativePeerSanction::UnconfirmableTransaction => "unconfirmable transaction",
@@ -230,6 +232,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::BlockProposalNotFound => -1,
             NegativePeerSanction::InvalidBlockProposal => -10,
             NegativePeerSanction::RequestForUnknownBlock => -5,
+            NegativePeerSanction::RequestForGenesisBlock => -100,
             NegativePeerSanction::UnwantedMessage => -1,
             NegativePeerSanction::NonFavorableBlockProposal => -1,
             NegativePeerSanction::BlockProposalFromBlockedPeer => -10,
