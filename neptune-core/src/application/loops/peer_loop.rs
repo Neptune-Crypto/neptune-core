@@ -1973,11 +1973,16 @@ impl PeerLoopHandler {
                 if peer_id != self.peer_id {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
+
+                peer.send(PeerMessage::Bye).await?;
+
                 self.register_peer_disconnection().await;
 
                 Ok(DISCONNECT_CONNECTION)
             }
             MainToPeerTask::DisconnectAll() => {
+                peer.send(PeerMessage::Bye).await?;
+
                 self.register_peer_disconnection().await;
 
                 Ok(DISCONNECT_CONNECTION)
