@@ -25,7 +25,6 @@ use anyhow::Result;
 use blockchain_state::BlockchainArchivalState;
 use blockchain_state::BlockchainState;
 use itertools::Itertools;
-use libp2p::PeerId;
 use light_state::LightState;
 use mempool::Mempool;
 use mining::block_proposal::BlockProposal;
@@ -720,8 +719,7 @@ impl GlobalState {
         let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;
         debug!("Got peer databases");
 
-        let peer_id = PeerId::random();
-        let net = NetworkingState::new(peer_id, peer_map, peer_databases);
+        let net = NetworkingState::new(peer_map, peer_databases);
 
         let light_state: LightState = LightState::from(latest_block);
         let chain = BlockchainArchivalState {
@@ -1646,7 +1644,7 @@ impl GlobalState {
             tip_header: *self.chain.light_state().header(),
             listen_port,
             network: self.cli().network,
-            instance_id: self.net.instance_id(),
+            instance_id: self.net.instance_id,
             version: VersionString::new_from_str(VERSION),
             // For now, all nodes are archival nodes
             is_archival_node: self.chain.is_archival_node(),

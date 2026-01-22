@@ -3,8 +3,9 @@ use std::net::IpAddr;
 use std::time::SystemTime;
 
 use anyhow::Result;
-use itertools::Itertools;
 use libp2p::PeerId;
+use rand::rng;
+use rand::Rng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -109,9 +110,8 @@ pub struct NetworkingState {
     /// progressed. This value may be updated by the main task or by peers.
     pub sync_status: SyncStatus,
 
-    /// Read-only value set at random during startup. Concides with the hash of
-    /// the libp2p public key.
-    pub peer_id: PeerId,
+    /// Read-only value set at random during startup.
+    pub instance_id: InstanceId,
 
     /// If set to `true`, no blocks, block proposals, or transactions will be
     /// sent from this client, or accepted from peers.
@@ -131,35 +131,16 @@ pub struct NetworkingState {
 }
 
 impl NetworkingState {
-    pub(crate) fn new(peer_id: PeerId, peer_map: PeerMap, peer_databases: PeerDatabases) -> Self {
+    pub(crate) fn new(peer_map: PeerMap, peer_databases: PeerDatabases) -> Self {
         Self {
             peer_map,
             peer_databases,
             sync_anchor: None,
             sync_status: SyncStatus::Unknown,
-            peer_id,
+            instance_id: rng().random(),
             freeze: false,
             disconnection_times: HashMap::new(),
         }
-    }
-
-    /// Deterministically maps the `peer_id` to an `instance_id`.
-    ///
-    /// The `peer_id` living on `Self` is a `PeerId`, which is the multihash of
-    /// a libp2p public key. However, due to legacy reasons we sometimes need a
-    /// u128 for a very similar purpose (the "instance id"). So we shoehorn the
-    /// `peer_id` into a u128 in a deterministic way.
-    pub(crate) fn instance_id(&self) -> u128 {
-        u128::from_be_bytes(
-            self.peer_id
-                .to_bytes()
-                .into_iter()
-                .chain(std::iter::repeat(0))
-                .take(16)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        )
     }
 
     /// Create databases for peer standings

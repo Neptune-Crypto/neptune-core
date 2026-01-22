@@ -1208,7 +1208,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // The last block in the list of the peers known block is the
+                // The last block in the list of the peer's known block is the
                 // earliest block, block with lowest height, the peer has
                 // requested. If it does not belong to canonical chain, none of
                 // the later will. So we can do an early abort in that case.
@@ -2218,7 +2218,7 @@ impl PeerLoopHandler {
                 .values()
                 .any(|pi| pi.instance_id() == self.peer_handshake_data.instance_id)
             {
-                bail!("Attempted to connect to already connected peer. Aborting connection.");
+                bail!("Already connected to peer with this instance ID. Aborting connection.");
             }
 
             if peer_map.len() >= cli_args.max_num_peers {
@@ -2226,9 +2226,7 @@ impl PeerLoopHandler {
             }
 
             if peer_map.contains_key(&self.peer_id) {
-                // This shouldn't be possible, unless the peer reports a different instance ID than
-                // for the other connection. Only a malignant client would do that.
-                bail!("Already connected to peer. Aborting connection");
+                bail!("Already connected to peer with this peer ID. Aborting connection.");
             }
 
             peer_map.insert(self.peer_id, new_peer);
