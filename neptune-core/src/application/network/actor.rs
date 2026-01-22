@@ -341,6 +341,8 @@ impl NetworkActor {
         let kad_config = libp2p::kad::Config::new(Self::KADEMLIA_FOR_NEPTUNE_PROTOCOL);
 
         // Build Swarm
+        let upgraded_peers = Arc::new(Mutex::new(HashSet::new()));
+        let upgraded_peers_clone = upgraded_peers.clone();
         let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
             .with_tokio()
             .with_tcp(
@@ -372,7 +374,7 @@ impl NetworkActor {
                     relay_client,
                     dcutr: libp2p::dcutr::Behaviour::new(local_peer_id),
                     kademlia,
-                    gateway: StreamGateway::new(global_state_lock.clone()),
+                    gateway: StreamGateway::new(global_state_lock.clone(), upgraded_peers_clone),
                 }
             })?
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
@@ -420,7 +422,7 @@ impl NetworkActor {
             black_list,
             sticky_peers,
             max_num_peers,
-            upgraded_peers: Arc::new(Mutex::new(HashSet::new())),
+            upgraded_peers,
         })
     }
 
@@ -921,7 +923,8 @@ impl NetworkActor {
                         local_protocol_version
                     );
 
-                    // Trigger a disconnect; we want Neptune-only.
+                    // Trigger a disconnect; we want Neptune-only, on correct
+                    // network.
                     self.swarm.disconnect_peer_id(peer_id).ok();
                     return;
                 }
@@ -1243,7 +1246,7 @@ impl NetworkActor {
     async fn handle_stream_gateway_event(&mut self, event: GatewayEvent) -> Result<(), ActorError> {
         let GatewayEvent::HandshakeReceived {
             peer_id,
-            handshake,
+            remote_handshake,
             stream,
         } = event;
 
@@ -1254,13 +1257,18 @@ impl NetworkActor {
 
         // Fetch address from carefully maintained address map.
         let Some((_timestamp, address)) = self.active_connections.get(&peer_id).cloned() else {
+            tracing::info!("Not upgrading connection because we don't have an address.");
             return Err(ActorError::NoAddressForPeer(peer_id));
         };
 
         // Spawn the consensus peer loop with the hijacked stream.
-        if let Some(loop_handle) =
-            self.spawn_peer_loop(peer_id, address.clone(), handshake, stream, from_main_rx)
-        {
+        if let Some(loop_handle) = self.spawn_peer_loop(
+            peer_id,
+            address.clone(),
+            remote_handshake,
+            stream,
+            from_main_rx,
+        ) {
             // Notify the rest of the application that a peer is ready.
             let _ = self
                 .event_tx
@@ -1834,7 +1842,7 @@ impl NetworkActor {
         &self,
         peer_id: PeerId,
         peer_address: Multiaddr,
-        handshake: HandshakeData,
+        remote_handshake: HandshakeData,
         raw_stream: libp2p::Stream,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
     ) -> Option<JoinHandle<()>> {
@@ -1865,7 +1873,7 @@ impl NetworkActor {
             self.global_state_lock.clone(),
             peer_id,
             peer_address,
-            handshake,
+            remote_handshake,
             rand::rng().random_bool(0.5f64),
             DISTANCE_TO_CONNECTED_PEER,
         );

@@ -134,6 +134,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path()).await?;
     info!("Data directory is {}", data_directory);
 
+    // Initialize global state
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let genesis = Block::genesis(cli_args.network);
