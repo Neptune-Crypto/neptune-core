@@ -17,6 +17,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use crate::api::export::Network;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
@@ -283,7 +284,7 @@ impl NetworkActor {
 
         // Create the Identify config (required for the NetworkStack)
         let network = global_state_lock.cli().network;
-        let protocol_version = format!("{NEPTUNE_PROTOCOL_STR}-{network}");
+        let protocol_version = Self::protocol_version(network);
         let identify_config = libp2p::identify::Config::new(protocol_version, local_key.public())
             .with_agent_version(format!("neptune-cash/{}", env!("CARGO_PKG_VERSION")))
             // pro-actively tell peers about new (sub-)addresses
@@ -421,6 +422,10 @@ impl NetworkActor {
             max_num_peers,
             upgraded_peers: Arc::new(Mutex::new(HashSet::new())),
         })
+    }
+
+    fn protocol_version(network: Network) -> String {
+        format!("{NEPTUNE_PROTOCOL_STR}-{network}")
     }
 
     /// Start listening for incoming libp2p connections.
@@ -906,12 +911,14 @@ impl NetworkActor {
                 tracing::debug!("Agent Version: {:?}", info.agent_version);
 
                 // Check if the peer speaks the same Neptune version as us.
-                if info.protocol_version != NEPTUNE_PROTOCOL_STR {
+                let network = self.global_state_lock.cli().network;
+                let local_protocol_version = Self::protocol_version(network);
+                if info.protocol_version != local_protocol_version {
                     tracing::warn!(
                         peer = %peer_id,
                         version = %info.protocol_version,
                         "Peer is running an incompatible protocol version. Expected: {}",
-                        NEPTUNE_PROTOCOL_STR
+                        local_protocol_version
                     );
 
                     // Trigger a disconnect; we want Neptune-only.
