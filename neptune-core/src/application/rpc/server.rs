@@ -2444,7 +2444,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.lock_guard().await.net.instance_id())
+        Ok(self.state.lock_guard().await.net.instance_id)
     }
 
     // documented in trait. do not add doc-comment.

@@ -59,8 +59,7 @@ pub(crate) async fn mock_genesis_global_state_with_block(
         let peer_id = pseudorandom_peer_id(&peer_address);
         peer_map.insert(peer_id, get_dummy_peer_outgoing(peer_address));
     }
-    let peer_id = PeerId::random();
-    let net = NetworkingState::new(peer_id, peer_map, peer_db);
+    let net = NetworkingState::new(peer_map, peer_db);
 
     // Sanity check
     assert_eq!(archival_state.genesis_block().hash(), genesis_block.hash());
