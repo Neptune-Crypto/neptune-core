@@ -1,3 +1,11 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::net::IpAddr;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
+use std::time::SystemTime;
+
 use const_format::concatcp;
 use futures::prelude::*;
 use itertools::Itertools;
@@ -8,14 +16,6 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::net::IpAddr;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::time::Duration;
-use std::time::SystemTime;
 
 use crate::api::export::Network;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
@@ -1122,10 +1122,9 @@ impl NetworkActor {
                 );
             }
             Err(e) => {
-                // Failure is logged at 'warn' or 'debug' level. In many
-                // environments, hole punching is expected to fail (e.g.,
-                // Symmetric NATs), in which case the node simply continues
-                // using the relay.
+                //  In many environments, hole punching is expected to fail
+                // (e.g., Symmetric NATs), in which case the node simply
+                // continues using the relay.
                 tracing::warn!(
                     peer_id = %remote_peer_id,
                     "Hole punch failed: {e}. Remaining on relayed connection."

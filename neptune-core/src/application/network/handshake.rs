@@ -1,18 +1,18 @@
+use std::future::Future;
+use std::pin::Pin;
+
+use futures::AsyncRead;
 use futures::AsyncReadExt;
+use futures::AsyncWrite;
 use futures::AsyncWriteExt;
 use libp2p::core::upgrade::InboundUpgrade;
 use libp2p::core::upgrade::OutboundUpgrade;
 use libp2p::core::upgrade::UpgradeInfo;
 use libp2p::Stream;
 use libp2p::StreamProtocol;
-use std::pin::Pin;
 
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::handshake_data::HandshakeValidationError;
-
-use futures::AsyncRead;
-use futures::AsyncWrite;
-use std::future::Future;
 
 /// The protocol negotiation and handshake logic for a stream.
 ///
@@ -47,12 +47,12 @@ impl HandshakeUpgrade {
     where
         C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        // Send local handshake.
+        // Send local handshake
         Self::encode_handshake(&mut socket, &self.local_handshake)
             .await
             .map_err(HandshakeError::IO)?;
 
-        // Receive peer's handshake and decode with 'ciborium' wrapper.
+        // Receive peer's handshake
         let remote_handshake = Self::decode_handshake(&mut socket)
             .await
             .map_err(HandshakeError::IO)?;
@@ -86,6 +86,7 @@ impl HandshakeUpgrade {
         // Write actual bytes
         socket.write_all(&buffer).await?;
         socket.flush().await?;
+
         Ok(())
     }
 
@@ -172,35 +173,34 @@ pub(crate) enum HandshakeResult {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use futures::io::Cursor;
     use proptest::collection::vec;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
-    #[proptest]
-    fn handshake_encoding_roundtrip(
+    use super::*;
+
+    #[proptest(cases = 10, async = "tokio")]
+    async fn handshake_encoding_roundtrip(
         #[strategy(HandshakeData::arbitrary())] handshake: HandshakeData,
     ) {
-        let decoded = tokio_test::block_on(async {
-            // 1. Prepare an in-memory "socket" (a buffer).
-            let mut buffer = Vec::new();
-            let mut write_cursor = Cursor::new(&mut buffer);
+        // 1. Prepare an in-memory "socket" (a buffer).
+        let mut buffer = Vec::new();
+        let mut write_cursor = Cursor::new(&mut buffer);
 
-            // 2. Encode the data into the buffer.
-            HandshakeUpgrade::encode_handshake(&mut write_cursor, &handshake)
-                .await
-                .expect("Failed to encode default handshake");
+        // 2. Encode the data into the buffer.
+        HandshakeUpgrade::encode_handshake(&mut write_cursor, &handshake)
+            .await
+            .expect("Failed to encode default handshake");
 
-            // 3. Prepare to read from the same buffer.
-            let mut read_cursor = Cursor::new(buffer);
+        // 3. Prepare to read from the same buffer.
+        let mut read_cursor = Cursor::new(buffer);
 
-            // 4. Decode the data back out.
-            HandshakeUpgrade::decode_handshake(&mut read_cursor)
-                .await
-                .expect("Failed to decode handshake from buffer")
-        });
+        // 4. Decode the data back out.
+        let decoded = HandshakeUpgrade::decode_handshake(&mut read_cursor)
+            .await
+            .expect("Failed to decode handshake from buffer");
 
         // 5. Verify the data is identical.
         prop_assert_eq!(
@@ -210,26 +210,25 @@ mod tests {
         );
     }
 
-    #[proptest]
-    fn handshake_encoding_cannot_crash(
+    #[proptest(cases = 10, async = "tokio")]
+    async fn handshake_encoding_cannot_crash(
         #[strategy(HandshakeData::arbitrary())] handshake: HandshakeData,
     ) {
-        tokio_test::block_on(async {
-            let mut buffer = Vec::new();
-            let mut write_cursor = Cursor::new(&mut buffer);
+        let mut buffer = Vec::new();
+        let mut write_cursor = Cursor::new(&mut buffer);
 
-            HandshakeUpgrade::encode_handshake(&mut write_cursor, &handshake)
-                .await
-                .expect("not only is encoding guaranteed to not crash, it must be successful too");
-        })
+        HandshakeUpgrade::encode_handshake(&mut write_cursor, &handshake)
+            .await
+            .expect("not only is encoding guaranteed to not crash, it must be successful too");
     }
 
-    #[proptest]
-    fn handshake_decoding_cannot_crash(#[strategy(vec(arb::<u8>(), 0..4096))] buffer: Vec<u8>) {
-        let _result = tokio_test::block_on(async {
-            let mut read_cursor = Cursor::new(buffer);
+    #[proptest(cases = 10, async = "tokio")]
+    async fn handshake_decoding_cannot_crash(
+        #[strategy(vec(arb::<u8>(), 0..4096))] buffer: Vec<u8>,
+    ) {
+        let mut read_cursor = Cursor::new(buffer);
 
-            HandshakeUpgrade::decode_handshake(&mut read_cursor).await // just not crash
-        });
+        // just not crash
+        let _ = HandshakeUpgrade::decode_handshake(&mut read_cursor).await;
     }
 }

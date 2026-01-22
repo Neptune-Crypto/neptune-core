@@ -68,6 +68,7 @@ pub(crate) struct GatewayHandler {
     /// Whether we requested a handshake.
     outbound_requested_already: bool,
 
+    /// Whether the connection was initiated by the other node.
     connection_is_inbound: bool,
 }
 
@@ -149,7 +150,6 @@ impl ConnectionHandler for GatewayHandler {
             }) => {
                 let (handshake, stream) = protocol;
 
-                // We move the result into the queue so 'poll' can find it.
                 self.pending_events
                     .push_back(ConnectionHandlerEvent::NotifyBehaviour(
                         HandshakeResult::Success {
@@ -165,7 +165,6 @@ impl ConnectionHandler for GatewayHandler {
             ) => {
                 let (handshake, stream) = protocol;
 
-                // We move the result into the queue so 'poll' can find it.
                 self.pending_events
                     .push_back(ConnectionHandlerEvent::NotifyBehaviour(
                         HandshakeResult::Success {
@@ -175,7 +174,6 @@ impl ConnectionHandler for GatewayHandler {
                     ));
             }
 
-            // Log if the handshake failed during negotiation.
             ConnectionEvent::DialUpgradeError(error) => {
                 tracing::error!("Outbound handshake failed: {:?}", error.error);
             }
@@ -316,7 +314,7 @@ pub(crate) enum Command {
 /// established, the [`GatewayHandler`] is initialized in a `paused` state if
 /// the transport is identified as a relay (containing `/p2p-circuit`).
 ///
-/// The protocol remains pause until a direct connection is verified—either
+/// The protocol remains paused until a direct connection is verified—either
 /// immediately upon creation or subsequently via a successful DCUtR hole punch.
 /// Once verified, a [`Command::Activate`] signal is dispatched to the handler,
 /// unblocking the `poll` loop to initiate the handshake.
@@ -324,6 +322,7 @@ pub(crate) struct StreamGateway {
     /// Used for getting the handshake data
     global_state: GlobalStateLock,
 
+    /// The peers whose connections were upgraded to the consensus peer loop
     upgraded_peers: Arc<Mutex<HashSet<PeerId>>>,
 
     events: VecDeque<ToSwarm<GatewayEvent, Command>>,
@@ -342,10 +341,6 @@ impl StreamGateway {
     }
 
     /// Get the handshake data for authentication a peer connection.
-    ///
-    /// Fetch the handshake data from the global state, and wrap async logic
-    /// in `spawn_blocking` so that this function can be called form synchronous
-    /// code (such as the implementation of NetworkBehaviour below).
     fn handshake_data(&self) -> HandshakeData {
         self.global_state.get_own_handshakedata_sync()
     }
@@ -369,6 +364,7 @@ impl NetworkBehaviour for StreamGateway {
         remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         {
+            // Prevent same peer from entering the peer loop multiple times
             let upgraded_peers = self.upgraded_peers.lock().unwrap();
             if upgraded_peers.contains(&peer) {
                 return Err(libp2p::swarm::ConnectionDenied::new("already upgraded"));
@@ -398,6 +394,7 @@ impl NetworkBehaviour for StreamGateway {
         _port_use: PortUse,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         {
+            // Prevent same peer from entering the peer loop multiple times
             let upgraded_peers = self.upgraded_peers.lock().unwrap();
             if upgraded_peers.contains(&peer) {
                 return Err(libp2p::swarm::ConnectionDenied::new("already upgraded"));
