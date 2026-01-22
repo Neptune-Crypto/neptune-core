@@ -120,7 +120,7 @@ impl ConnectionHandler for GatewayHandler {
         match event {
             Command::Activate => {
                 if self.pause {
-                    tracing::info!("GatewayHandler activated. Unpausing handshake logic. Proceeding with stream hijack.");
+                    tracing::debug!("GatewayHandler activated. Unpausing handshake logic. Proceeding with stream hijack.");
                     self.pause = false;
                 }
             }
@@ -142,7 +142,7 @@ impl ConnectionHandler for GatewayHandler {
             Self::OutboundOpenInfo,
         >,
     ) {
-        tracing::info!("got into on_connection_event ");
+        tracing::trace!("got into on_connection_event ");
         match event {
             // Inbound success
             ConnectionEvent::FullyNegotiatedInbound(FullyNegotiatedInbound {
@@ -175,7 +175,7 @@ impl ConnectionHandler for GatewayHandler {
             }
 
             ConnectionEvent::DialUpgradeError(error) => {
-                tracing::error!("Outbound handshake failed: {:?}", error.error);
+                tracing::debug!("Outbound handshake failed: {:?}", error.error);
             }
 
             _ => {}
@@ -420,13 +420,13 @@ impl NetworkBehaviour for StreamGateway {
         match event {
             libp2p::swarm::FromSwarm::ConnectionEstablished(info) => {
                 if info.endpoint.is_relayed() {
-                    tracing::debug!(peer=%info.peer_id, "Relayed connection: StreamGateway idling.");
+                    tracing::trace!(peer=%info.peer_id, "Relayed connection: StreamGateway idling.");
                     // Do nothing. We disallow gateway access to relayed
                     // connections.
                     return;
                 }
 
-                tracing::info!(peer=%info.peer_id, "Direct connection established: Initiating StreamGateway handshake.");
+                tracing::trace!(peer=%info.peer_id, "Direct connection established: Initiating StreamGateway handshake.");
                 self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id: info.peer_id,
                     handler: libp2p::swarm::NotifyHandler::One(info.connection_id),
@@ -438,7 +438,7 @@ impl NetworkBehaviour for StreamGateway {
                 // (already handled by `ConnectionEstablished`), or a "mere"
                 // address upgrade -- handled here.
                 if address_change.old.is_relayed() && !address_change.new.is_relayed() {
-                    tracing::info!(peer=%address_change.peer_id, "Connection upgraded to direct: Initiating StreamGateway handshake.");
+                    tracing::trace!(peer=%address_change.peer_id, "Connection upgraded to direct: Initiating StreamGateway handshake.");
                     self.events.push_back(ToSwarm::NotifyHandler {
                         peer_id: address_change.peer_id,
                         handler: libp2p::swarm::NotifyHandler::One(address_change.connection_id),
