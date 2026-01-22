@@ -5,7 +5,6 @@ use std::io::BufReader;
 use std::io::BufWriter;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use std::net::Ipv6Addr;
 use std::ops::Deref;
 use std::path::Path;
 use std::path::PathBuf;
@@ -287,10 +286,10 @@ impl AddressBook {
                 IpAddr::V4(Ipv4Addr::from_str("51.15.139.238").unwrap()),
                 9801,
             ),
-            (
-                IpAddr::V6(Ipv6Addr::from_str("2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9").unwrap()),
-                9801,
-            ),
+            // (
+            //     IpAddr::V6(Ipv6Addr::from_str("2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9").unwrap()),
+            //     9801,
+            // ),
         ]
         .into_iter()
         .map(|(ip, port)| {

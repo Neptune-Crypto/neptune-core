@@ -13,6 +13,7 @@ use futures::sink::Sink;
 use futures::sink::SinkExt;
 use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
+use futures::FutureExt;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
@@ -2245,8 +2246,29 @@ impl PeerLoopHandler {
             peer.send(PeerMessage::BlockNotificationRequest).await?;
         }
 
-        let res = self.run(peer, from_main_rx, &mut peer_state).await;
+        // Run the peer loop inside a catch-unwind, so that we can guarantee
+        // that the close-callback is run afterwards -- even in the case of
+        // panic.
+        let panic_result = std::panic::AssertUnwindSafe(async {
+            self.run(peer, from_main_rx, &mut peer_state).await
+        })
+        .catch_unwind()
+        .await;
+
         debug!("Exited peer loop for {}", self.peer_id);
+
+        let peer_loop_result = match panic_result {
+            Ok(inner_res) => inner_res,
+            Err(e) => {
+                error!(
+                    "Peer task (incoming) for {} panicked. Invoking close connection callback",
+                    self.peer_id
+                );
+                error!("{e:?}");
+
+                Ok(())
+            }
+        };
 
         close_peer_connected_callback(
             self.global_state_lock.clone(),
@@ -2259,7 +2281,7 @@ impl PeerLoopHandler {
 
         // Return any error that `run` returned. Returning and not suppressing errors is a quite nice
         // feature to have for testing purposes.
-        res
+        peer_loop_result
     }
 
     /// Register graceful peer disconnection in the global state.

@@ -8,6 +8,7 @@ use libp2p::StreamProtocol;
 use std::pin::Pin;
 
 use crate::protocol::peer::handshake_data::HandshakeData;
+use crate::protocol::peer::handshake_data::HandshakeValidationError;
 
 use futures::AsyncRead;
 use futures::AsyncWrite;
@@ -22,27 +23,47 @@ pub(crate) struct HandshakeUpgrade {
     pub(crate) local_handshake: HandshakeData,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum HandshakeError {
+    #[error("IO Error({0})")]
+    IO(#[from] std::io::Error),
+
+    #[error("ValidationError({0})")]
+    Validation(#[from] HandshakeValidationError),
+}
+
 impl HandshakeUpgrade {
     /// Perform the symmetric handshake exchange over the provided stream.
     ///
     /// This function encapsulates the core I/O logic: sending our local
-    /// handshake and receiving the remote handshake. After decoding the remove
-    /// handshake using ciborium, the remote handshake and now-verified socket
-    /// are returned.
+    /// handshake and receiving the remote handshake. After decoding the remote
+    /// handshake, the remote handshake and now-verified socket are returned.
     ///
     /// Both [`Self::upgrade_inbound`] and [`Self::upgrade_outbound`] invoke
     /// this function. Factoring out the symmetric handshake creates a single
     /// source of truth for the protocol's wire-format, and prevents logic
     /// mismatches between dialers and listeners.
-    async fn handshake<C>(&self, mut socket: C) -> Result<(HandshakeData, C), std::io::Error>
+    async fn handshake<C>(&self, mut socket: C) -> Result<(HandshakeData, C), HandshakeError>
     where
         C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         // Send local handshake.
-        Self::encode_handshake(&mut socket, &self.local_handshake).await?;
+        Self::encode_handshake(&mut socket, &self.local_handshake)
+            .await
+            .map_err(HandshakeError::IO)?;
 
         // Receive peer's handshake and decode with 'ciborium' wrapper.
-        let remote_handshake = Self::decode_handshake(&mut socket).await?;
+        let remote_handshake = Self::decode_handshake(&mut socket)
+            .await
+            .map_err(HandshakeError::IO)?;
+
+        match HandshakeData::validate(&self.local_handshake, &remote_handshake) {
+            Ok(()) => (),
+            Err(e) => {
+                tracing::warn!("Handshake failed: {e}.");
+                return Err(HandshakeError::Validation(e));
+            }
+        };
 
         // Return data and the socket. The socket is now "upgraded" and
         // ready for use.
@@ -108,7 +129,7 @@ where
     C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     type Output = (HandshakeData, C);
-    type Error = std::io::Error;
+    type Error = HandshakeError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Output, Self::Error>> + Send>>;
 
     /// Execute the handshake logic for an incoming substream.
@@ -122,7 +143,7 @@ where
     C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     type Output = (HandshakeData, C);
-    type Error = std::io::Error;
+    type Error = HandshakeError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Output, Self::Error>> + Send>>;
 
     /// Execute the handshake logic for an outgoing substream.

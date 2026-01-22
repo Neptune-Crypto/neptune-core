@@ -12,6 +12,8 @@ use tokio::task::JoinHandle;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -113,6 +115,9 @@ pub(crate) struct NetworkActor {
     /// Lookup table to find the current address of connected peers or how long
     /// they have been connected for.
     active_connections: HashMap<PeerId, (SystemTime, Multiaddr)>,
+
+    /// Peers with whom the connection was upgraded to the consensus peer loop.
+    upgraded_peers: Arc<Mutex<HashSet<PeerId>>>,
 
     /// Dictionary to find peer metadata, connected or not.
     address_book: AddressBook,
@@ -254,7 +259,7 @@ impl NetworkActor {
     const RELAY_COOLDOWN_PERIOD: Duration = Duration::from_secs(10);
 
     /// Hardcoded version strings for Kademlia.
-    const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "/kad/1.0.0");
+    const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "/kad/");
     const KADEMLIA_FOR_NEPTUNE_PROTOCOL: libp2p::StreamProtocol =
         libp2p::StreamProtocol::new(Self::KADEMLIA_FOR_NEPTUNE_STRING);
 
@@ -277,12 +282,13 @@ impl NetworkActor {
         } = channels;
 
         // Create the Identify config (required for the NetworkStack)
-        let identify_config =
-            libp2p::identify::Config::new(NEPTUNE_PROTOCOL_STR.to_owned(), local_key.public())
-                .with_agent_version(format!("neptune-cash/{}", env!("CARGO_PKG_VERSION")))
-                // pro-actively tell peers about new (sub-)addresses
-                .with_push_listen_addr_updates(true)
-                .with_interval(std::time::Duration::from_secs(300));
+        let network = global_state_lock.cli().network;
+        let protocol_version = format!("{NEPTUNE_PROTOCOL_STR}-{network}");
+        let identify_config = libp2p::identify::Config::new(protocol_version, local_key.public())
+            .with_agent_version(format!("neptune-cash/{}", env!("CARGO_PKG_VERSION")))
+            // pro-actively tell peers about new (sub-)addresses
+            .with_push_listen_addr_updates(true)
+            .with_interval(std::time::Duration::from_secs(300));
 
         // Configure Ping.
         let ping_config = libp2p::ping::Config::new()
@@ -364,7 +370,7 @@ impl NetworkActor {
                     relay_server,
                     relay_client,
                     dcutr: libp2p::dcutr::Behaviour::new(local_peer_id),
-                    kademlia,
+                    // kademlia,
                     gateway: StreamGateway::new(global_state_lock.clone()),
                 }
             })?
@@ -413,6 +419,7 @@ impl NetworkActor {
             black_list,
             sticky_peers,
             max_num_peers,
+            upgraded_peers: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -422,6 +429,12 @@ impl NetworkActor {
     /// Incoming connections will automatically undergo the handshake defined in
     /// the [`StreamGateway`].
     fn listen(&mut self, addr: Multiaddr) -> Result<(), libp2p::TransportError<std::io::Error>> {
+        // Reject commands to listen on IPv6 addresses until we know we can.
+        let is_ipv6 = addr.to_string().contains("ip6");
+        if is_ipv6 {
+            return Ok(());
+        }
+
         match self.swarm.listen_on(addr.clone()) {
             Ok(listener_id) => {
                 tracing::info!(%addr, %listener_id, "libp2p stack listening.");
@@ -443,7 +456,7 @@ impl NetworkActor {
         let initial_peers = self.address_book.select_initial_peers(10);
         tracing::debug!("Dialing {} initial peers.", initial_peers.len());
         for address in initial_peers {
-            if let Err(e) = self.swarm.dial(address.clone()) {
+            if let Err(e) = self.dial(address.clone()) {
                 tracing::warn!("Failed to dial initial peer {}: {e}", address.to_string());
                 continue;
             }
@@ -510,12 +523,12 @@ impl NetworkActor {
                 _ = refresh_kademlia_crawl.tick() => {
                     // Trigger the "One-Hop" crawl we documented earlier.
                     // Asks our current neighbors: "Who is new in the network?"
-                    if let Err(e) = self.swarm.behaviour_mut().kademlia.bootstrap() {
-                        tracing::warn!("Crawl refresh skipped: No known peers to ask. {:?}", e);
-                        self.dial_initial_peers();
-                    } else {
-                        tracing::info!("Starting periodic network crawl to maintain connectivity ...");
-                    }
+                    // if let Err(e) = self.swarm.behaviour_mut().kademlia.bootstrap() {
+                    //     tracing::warn!("Crawl refresh skipped: No known peers to ask. {:?}", e);
+                    //     self.dial_initial_peers();
+                    // } else {
+                    //     tracing::info!("Starting periodic network crawl to maintain connectivity ...");
+                    // }
                 }
 
                 // Check sticky peers.
@@ -529,9 +542,6 @@ impl NetworkActor {
                             StickyPeer::None => {
                                 *sticky_peer = StickyPeer::Dialing(now);
                                 dials.push(multiaddr.clone());
-                                if let Err(e) = self.swarm.dial(multiaddr.clone()) {
-                                    tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
-                                }
                             }
                             StickyPeer::Dialing(since_timestamp) => {
                                 // If time since dialing started is too big,
@@ -540,9 +550,6 @@ impl NetworkActor {
                                     tracing::warn!(%multiaddr, "Sticky peer seems stuck in dialing phase; trying again.");
                                     *sticky_peer = StickyPeer::Dialing(now);
                                 dials.push(multiaddr.clone());
-                                    if let Err(e) = self.swarm.dial(multiaddr.clone()) {
-                                        tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
-                                    }
                                 }
                             }
                             StickyPeer::Connected(peer_id) => {
@@ -552,9 +559,6 @@ impl NetworkActor {
                                     tracing::warn!(%peer_id, %multiaddr, "Sticky peer disconnected; attempting to re-establish connection..");
                                     *sticky_peer = StickyPeer::Dialing(now);
                                 dials.push(multiaddr.clone());
-                                    if let Err(e) = self.swarm.dial(multiaddr.clone()) {
-                                        tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
-                                    }
                                 }
                             }
                         }
@@ -576,7 +580,7 @@ impl NetworkActor {
 
                     // Issue dial commands.
                     for dial in dials {
-                        if let Err(e) = self.swarm.dial(dial.clone()) {
+                        if let Err(e) = self.dial(dial.clone()) {
                             tracing::warn!(%dial, "Could not dial peer: {e}.");
                         }
                     }
@@ -585,6 +589,24 @@ impl NetworkActor {
         }
 
         Ok(())
+    }
+
+    /// Instructs the swarm to dial an address, but only if it passes a filter.
+    fn dial(&mut self, address: Multiaddr) -> Result<(), libp2p::swarm::DialError> {
+        // Filter out IPv6 addresses until we know we can handle them.
+        let addr_str = address.to_string();
+        let is_ipv6 = addr_str.contains("ip6");
+
+        // Filter out addresses that point to ourselves.
+        let is_local = addr_str.contains("127.0.0.1")
+            || addr_str.contains("::1")
+            || addr_str.contains("/lan/");
+
+        if is_ipv6 || is_local {
+            return Ok(());
+        }
+
+        self.swarm.dial(address)
     }
 
     /// Handle an event coming from the libp2p Swarm.
@@ -618,7 +640,7 @@ impl NetworkActor {
                         self.handle_dcutr_event(*dcutr_event);
                     }
                     NetworkStackEvent::Kademlia(kademlia_event) => {
-                        self.handle_kademlia_event(*kademlia_event);
+                        // self.handle_kademlia_event(*kademlia_event);
                     }
 
                     // StreamGateway successfully hijacked a stream.
@@ -663,7 +685,7 @@ impl NetworkActor {
                         self.address_book.bump_fail_count(peer_id);
 
                         // Help Kademlia realize this peer is unreliable
-                        self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+                        // self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
                     }
                 }
             }
@@ -938,10 +960,16 @@ impl NetworkActor {
                         continue;
                     }
 
-                    self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .add_address(&peer_id, addr);
+                    // Filter out IPv6 addresses.
+                    let is_ipv6 = addr_str.contains("ip6");
+                    if is_ipv6 {
+                        continue;
+                    }
+
+                    // self.swarm
+                    //     .behaviour_mut()
+                    //     .kademlia
+                    //     .add_address(&peer_id, addr);
                 }
             }
 
@@ -1132,55 +1160,55 @@ impl NetworkActor {
     ///
     /// As the crawl progresses, our node "bubbles up" in the routing tables of
     /// others, increasing our own connectivity.
-    fn handle_kademlia_event(&mut self, event: libp2p::kad::Event) {
-        match event {
-            // The pulse: routing table grows.
-            libp2p::kad::Event::RoutingUpdated {
-                peer, is_new_peer, ..
-            } => {
-                if is_new_peer {
-                    tracing::info!(peer_id = %peer, "DHT: New peer discovered and added to buckets. Running Kademlia bootstrap.");
-                    // We perform the debug crawl in a separate block
-                    {
-                        let kad = &mut self.swarm.behaviour_mut().kademlia;
-                        let mut peer_count = 0;
-                        for bucket in kad.kbuckets() {
-                            for _entry in bucket.iter() {
-                                peer_count += 1;
-                            }
-                        }
-                        tracing::info!("DEBUG: Kademlia Routing Table size: {}", peer_count);
-                    }
-                    let random_peer = PeerId::random();
-                    self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .get_closest_peers(random_peer);
-                } else {
-                    tracing::info!(peer_id = %peer, "DHT: new addresses found for existing peer.");
-                }
-            }
+    // fn handle_kademlia_event(&mut self, event: libp2p::kad::Event) {
+    //     match event {
+    //         // The pulse: routing table grows.
+    //         libp2p::kad::Event::RoutingUpdated {
+    //             peer, is_new_peer, ..
+    //         } => {
+    //             if is_new_peer {
+    //                 tracing::info!(peer_id = %peer, "DHT: New peer discovered and added to buckets. Running Kademlia bootstrap.");
+    //                 // We perform the debug crawl in a separate block
+    //                 {
+    //                     let kad = &mut self.swarm.behaviour_mut().kademlia;
+    //                     let mut peer_count = 0;
+    //                     for bucket in kad.kbuckets() {
+    //                         for _entry in bucket.iter() {
+    //                             peer_count += 1;
+    //                         }
+    //                     }
+    //                     tracing::info!("DEBUG: Kademlia Routing Table size: {}", peer_count);
+    //                 }
+    //                 let random_peer = PeerId::random();
+    //                 self.swarm
+    //                     .behaviour_mut()
+    //                     .kademlia
+    //                     .get_closest_peers(random_peer);
+    //             } else {
+    //                 tracing::info!(peer_id = %peer, "DHT: new addresses found for existing peer.");
+    //             }
+    //         }
 
-            // The crawl: this event fires as the "one-hop" recursive search
-            // progresses. Each triggered event corresponds to one hop.
-            libp2p::kad::Event::OutboundQueryProgressed {
-                result: libp2p::kad::QueryResult::Bootstrap(Ok(status)),
-                ..
-            } => {
-                tracing::info!(
-                    remaining = status.num_remaining,
-                    "Hop! DHT bootstrap in progress..."
-                );
-            }
-            libp2p::kad::Event::OutboundQueryProgressed {
-                result: libp2p::kad::QueryResult::Bootstrap(Err(e)),
-                ..
-            } => {
-                tracing::info!("Boink! DHT bootstrap ran into error: {e}.");
-            }
-            _ => {}
-        }
-    }
+    //         // The crawl: this event fires as the "one-hop" recursive search
+    //         // progresses. Each triggered event corresponds to one hop.
+    //         libp2p::kad::Event::OutboundQueryProgressed {
+    //             result: libp2p::kad::QueryResult::Bootstrap(Ok(status)),
+    //             ..
+    //         } => {
+    //             tracing::info!(
+    //                 remaining = status.num_remaining,
+    //                 "Hop! DHT bootstrap in progress..."
+    //             );
+    //         }
+    //         libp2p::kad::Event::OutboundQueryProgressed {
+    //             result: libp2p::kad::QueryResult::Bootstrap(Err(e)),
+    //             ..
+    //         } => {
+    //             tracing::info!("Boink! DHT bootstrap ran into error: {e}.");
+    //         }
+    //         _ => {}
+    //     }
+    // }
 
     /// Process events from the `StreamGateway` subprotocol to transform a raw
     /// libp2p stream into bidirectional stream compatible with the legacy
@@ -1224,15 +1252,16 @@ impl NetworkActor {
             return Err(ActorError::NoAddressForPeer(peer_id));
         };
 
-        // Spawn the legacy loop with the hijacked stream.
-        let loop_handle =
-            self.spawn_peer_loop(peer_id, address.clone(), handshake, stream, from_main_rx);
-
-        // Notify the rest of the application that a peer is ready.
-        let _ = self
-            .event_tx
-            .send(NetworkEvent::NewPeerLoop { loop_handle })
-            .await;
+        // Spawn the consensus peer loop with the hijacked stream.
+        if let Some(loop_handle) =
+            self.spawn_peer_loop(peer_id, address.clone(), handshake, stream, from_main_rx)
+        {
+            // Notify the rest of the application that a peer is ready.
+            let _ = self
+                .event_tx
+                .send(NetworkEvent::NewPeerLoop { loop_handle })
+                .await;
+        }
 
         Ok(())
     }
@@ -1310,10 +1339,10 @@ impl NetworkActor {
                         self.cleanup_relays();
 
                         // Set Kademlia mode to server.
-                        self.swarm
-                            .behaviour_mut()
-                            .kademlia
-                            .set_mode(Some(libp2p::kad::Mode::Server));
+                        // self.swarm
+                        //     .behaviour_mut()
+                        //     .kademlia
+                        //     .set_mode(Some(libp2p::kad::Mode::Server));
                     }
                     libp2p::autonat::NatStatus::Private => {
                         // If we have external addresses, request for relays.
@@ -1324,10 +1353,10 @@ impl NetworkActor {
                         }
 
                         // Set Kademlia mode to client.
-                        self.swarm
-                            .behaviour_mut()
-                            .kademlia
-                            .set_mode(Some(libp2p::kad::Mode::Client));
+                        // self.swarm
+                        //     .behaviour_mut()
+                        //     .kademlia
+                        //     .set_mode(Some(libp2p::kad::Mode::Client));
                     }
                     libp2p::autonat::NatStatus::Unknown => {}
                 }
@@ -1436,7 +1465,7 @@ impl NetworkActor {
 
                 // We use the swarm's dial method. libp2p handles the underlying
                 // TCP/transport logic.
-                if let Err(e) = self.swarm.dial(addr.clone()) {
+                if let Err(e) = self.dial(addr.clone()) {
                     tracing::warn!("Failed to dial {}: {:?}", addr, e);
                 }
             }
@@ -1527,10 +1556,10 @@ impl NetworkActor {
                 tokio::task::yield_now().await;
 
                 // Disable peer discovery: put Kademlia into client mode.
-                self.swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .set_mode(Some(libp2p::kad::Mode::Client));
+                // self.swarm
+                //     .behaviour_mut()
+                //     .kademlia
+                //     .set_mode(Some(libp2p::kad::Mode::Client));
 
                 // Set max num peers to zero. Any incoming connection attempts
                 // will now be 'Denied'.
@@ -1803,10 +1832,22 @@ impl NetworkActor {
         handshake: HandshakeData,
         raw_stream: libp2p::Stream,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
-    ) -> JoinHandle<()> {
+    ) -> Option<JoinHandle<()>> {
         // Counts the number of hops between the node and peers it is connected
         // to. We probably don't need this for the libp2p wrapper.
         const DISTANCE_TO_CONNECTED_PEER: u8 = 1u8;
+
+        // Keep track of which peers get upgraded connections. Prevent same
+        // peer from getting upgraded multiple times.
+        {
+            let mut upgraded_peers = self.upgraded_peers.lock().unwrap();
+            if upgraded_peers.contains(&peer_id) {
+                return None;
+            }
+            upgraded_peers.insert(peer_id);
+        }
+
+        tracing::info!("Spawning peer loop from libp2p network actor");
 
         // Create immutable (across the lifetime of the connection) peer state.
         // This variable needs to be mutable because of efficient pointer reuse
@@ -1823,16 +1864,26 @@ impl NetworkActor {
 
         let peer_stream = bridge_libp2p_stream(raw_stream);
 
-        tokio::spawn(async move {
+        let upgraded = self.upgraded_peers.clone();
+        Some(tokio::spawn(async move {
             // Because 'peer_stream' implements Sink + Stream + Unpin,
             // and we have the broadcast receiver, this just works.
             peer_loop_handler
                 .run_wrapper(peer_stream, from_main_rx)
                 .await
                 .unwrap_or_else(|e| {
-                    tracing::warn!(peer = %peer_id, "Peer loop exited with error: {:?}", e);
+                    tracing::warn!(peer = %peer_id, "Peer loop exited with error: {e}");
                 });
-        })
+
+            // Remove the PeerId from the set of upgraded peers.
+            {
+                let mut upgraded_peers = upgraded
+                    .lock()
+                    .expect("We do not hold the lock ever over something that can panic.");
+                let was_present = upgraded_peers.remove(&peer_id);
+                assert!(was_present, "Peer ID must be present in upgraded set.");
+            }
+        }))
     }
 
     /// Determines if a connection is direct or proxied via a relay.

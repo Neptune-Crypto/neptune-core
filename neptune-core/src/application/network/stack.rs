@@ -3,9 +3,8 @@ use libp2p::swarm::NetworkBehaviour;
 use crate::application::network::gateway::GatewayEvent;
 use crate::application::network::gateway::StreamGateway;
 
-/// The protocol ID string, dynamically generated from the crate version, e.g.,
-/// "/neptune/0.6.0"
-pub(crate) const NEPTUNE_PROTOCOL_STR: &str = concat!("/neptune/", env!("CARGO_PKG_VERSION"));
+/// The protocol ID string
+pub(crate) const NEPTUNE_PROTOCOL_STR: &str = "/neptune/";
 
 /// The internal collection of libp2p protocols that define how this node
 /// interacts with the p2p network at the transport and discovery level.
@@ -63,8 +62,7 @@ pub(crate) struct NetworkStack {
     pub(crate) relay_server: libp2p::relay::Behaviour,
     pub(crate) relay_client: libp2p::relay::client::Behaviour,
     pub(crate) dcutr: libp2p::dcutr::Behaviour,
-    pub(crate) kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
-
+    // pub(crate) kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
     /// Custom "Hijacker" that handles the handshake and turns it into a stream.
     pub(crate) gateway: StreamGateway,
 }

@@ -61,6 +61,11 @@ pub(crate) struct GatewayHandler {
 
     /// The activity is paused until we verify that the connection is direct.
     pause: bool,
+
+    /// Whether we requested a handshake.
+    outbound_requested_already: bool,
+
+    connection_is_inbound: bool,
 }
 
 impl ConnectionHandler for GatewayHandler {
@@ -105,8 +110,8 @@ impl ConnectionHandler for GatewayHandler {
     ///
     /// When the behavior confirms the underlying transport is not a relay, it
     /// dispatches a [`Command::Activate`], which triggers this method to flip
-    /// the internal `pause` flag, allowing [`poll`](Self::poll) to initiate
-    /// the protocol handshake.
+    /// the internal `pause` flag, allowing `poll` to initiate the protocol
+    /// handshake.
     fn on_behaviour_event(&mut self, event: Self::FromBehaviour) {
         match event {
             Command::Activate => {
@@ -133,6 +138,7 @@ impl ConnectionHandler for GatewayHandler {
             Self::OutboundOpenInfo,
         >,
     ) {
+        tracing::info!("got into on_connection_event ");
         match event {
             // Inbound success
             ConnectionEvent::FullyNegotiatedInbound(FullyNegotiatedInbound {
@@ -193,13 +199,31 @@ impl ConnectionHandler for GatewayHandler {
             return Poll::Pending;
         }
 
+        // If we haven't asked for a handshake yet, do it now.
+        if !self.outbound_requested_already {
+            self.outbound_requested_already = true;
+            return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
+                protocol: SubstreamProtocol::new(
+                    HandshakeUpgrade {
+                        local_handshake: self.local_handshake,
+                    },
+                    (),
+                ),
+            });
+        }
+
         // We check our queue of events related to handshakes
         if let Some(event) = self.pending_events.pop_front() {
             // Poll::Ready(event) tells libp2p to deliver this
             // result to the Behaviour's 'on_connection_handler_event'.
             return Poll::Ready(event);
         }
+
         Poll::Pending
+    }
+
+    fn connection_keep_alive(&self) -> bool {
+        true
     }
 }
 
@@ -332,6 +356,8 @@ impl NetworkBehaviour for StreamGateway {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
             pause: !NetworkActor::is_direct(remote_addr),
+            outbound_requested_already: false,
+            connection_is_inbound: true,
         })
     }
 
@@ -352,6 +378,8 @@ impl NetworkBehaviour for StreamGateway {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
             pause: !NetworkActor::is_direct(addr),
+            connection_is_inbound: false,
+            outbound_requested_already: false,
         })
     }
 
@@ -417,6 +445,8 @@ impl NetworkBehaviour for StreamGateway {
         // variants we want to force them to add a case here.
         match event {
             HandshakeResult::Success { handshake, stream } => {
+                // Check that connection is allowed
+
                 // This is the "Hijack" point.
                 self.events
                     .push_back(ToSwarm::GenerateEvent(GatewayEvent::HandshakeReceived {
