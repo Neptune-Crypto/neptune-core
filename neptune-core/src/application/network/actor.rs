@@ -528,7 +528,7 @@ impl NetworkActor {
                         tracing::warn!("Crawl refresh skipped: No known peers to ask. {:?}", e);
                         self.dial_initial_peers();
                     } else {
-                        tracing::info!("Starting periodic network crawl to maintain connectivity ...");
+                        tracing::debug!("Starting periodic network crawl to maintain connectivity ...");
                     }
                 }
 
@@ -902,21 +902,21 @@ impl NetworkActor {
             // We received Identify info from a remote peer.
             libp2p::identify::Event::Received { peer_id, info, .. } => {
                 if peer_id == *self.swarm.local_peer_id() {
-                    tracing::error!("Received Identify event from ourselves.");
+                    tracing::trace!("Received Identify event from ourselves.");
                     return;
                 }
 
-                tracing::debug!(peer = %peer_id, "Received identify info");
-                tracing::debug!("--- Identify Diagnostic for {} ---", peer_id);
-                tracing::debug!("Protocols supported by remote: {:?}", info.protocols);
-                tracing::debug!("Observed Address: {:?}", info.observed_addr);
-                tracing::debug!("Agent Version: {:?}", info.agent_version);
+                tracing::trace!(peer = %peer_id, "Received identify info");
+                tracing::trace!("--- Identify Diagnostic for {} ---", peer_id);
+                tracing::trace!("Protocols supported by remote: {:?}", info.protocols);
+                tracing::trace!("Observed Address: {:?}", info.observed_addr);
+                tracing::trace!("Agent Version: {:?}", info.agent_version);
 
                 // Check if the peer speaks the same Neptune version as us.
                 let network = self.global_state_lock.cli().network;
                 let local_protocol_version = Self::protocol_version(network);
                 if info.protocol_version != local_protocol_version {
-                    tracing::warn!(
+                    tracing::trace!(
                         peer = %peer_id,
                         version = %info.protocol_version,
                         "Peer is running an incompatible protocol version. Expected: {}",
@@ -932,7 +932,7 @@ impl NetworkActor {
                 // The remote peer told us what our IP/port looks like from
                 // their perspective. This is useful for AutoNAT and for our own
                 // reachability logic.
-                tracing::info!(
+                tracing::debug!(
                     peer = %peer_id,
                     observed_addr = %info.observed_addr,
                     "Remote peer observed us at a specific address."
@@ -984,18 +984,18 @@ impl NetworkActor {
             // We successfully sent our Identify info to a peer in response to
             // a request.
             libp2p::identify::Event::Sent { peer_id, .. } => {
-                tracing::debug!(peer = %peer_id, "Sent identify info to peer");
+                tracing::trace!(peer = %peer_id, "Sent identify info to peer");
             }
 
             // We successfully sent our Identify info to a peer at our own
             // behest.
             libp2p::identify::Event::Pushed { peer_id, .. } => {
-                tracing::debug!(peer = %peer_id, "Pushed identify info to peer");
+                tracing::trace!(peer = %peer_id, "Pushed identify info to peer");
             }
 
             // An error occurred during the Identify exchange.
             libp2p::identify::Event::Error { peer_id, error, .. } => {
-                tracing::warn!(peer = %peer_id, "Identify error: {:?}", error);
+                tracing::debug!(peer = %peer_id, "Identify error: {:?}", error);
             }
         }
     }
@@ -1015,12 +1015,12 @@ impl NetworkActor {
         match event {
             // A peer successfully reserved a sub-address.
             libp2p::relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
-                tracing::info!(peer = %src_peer_id, "Accepted relay reservation.");
+                tracing::trace!(peer = %src_peer_id, "Accepted relay reservation.");
             }
 
             // A peer tried to reserve, but hit the `max_reservations` limit.
             libp2p::relay::Event::ReservationReqDenied { src_peer_id, .. } => {
-                tracing::warn!(peer = %src_peer_id, "Denied relay reservation (limit reached).");
+                tracing::debug!(peer = %src_peer_id, "Denied relay reservation (limit reached).");
             }
 
             // A circuit (data pipe) was actually opened between two peers.
@@ -1028,7 +1028,7 @@ impl NetworkActor {
                 src_peer_id,
                 dst_peer_id,
             } => {
-                tracing::info!(
+                tracing::debug!(
                     from = %src_peer_id,
                     to = %dst_peer_id,
                     "Relay circuit established."
@@ -1042,9 +1042,9 @@ impl NetworkActor {
                 error,
             } => {
                 if let Some(e) = error {
-                    tracing::debug!(from = %src_peer_id, to = %dst_peer_id, "Relay circuit closed with error: {:?}.", e);
+                    tracing::trace!(from = %src_peer_id, to = %dst_peer_id, "Relay circuit closed with error: {:?}.", e);
                 } else {
-                    tracing::debug!(from = %src_peer_id, to = %dst_peer_id, "Relay circuit closed gracefully.");
+                    tracing::trace!(from = %src_peer_id, to = %dst_peer_id, "Relay circuit closed gracefully.");
                 }
             }
 
@@ -1054,7 +1054,7 @@ impl NetworkActor {
                 dst_peer_id,
                 ..
             } => {
-                tracing::warn!(from = %src_peer_id, to = %dst_peer_id, "Denied relay circuit request.");
+                tracing::trace!(from = %src_peer_id, to = %dst_peer_id, "Denied relay circuit request.");
             }
 
             // Other events are not important enough to log.
@@ -1082,17 +1082,17 @@ impl NetworkActor {
                     status.activate();
                 });
 
-                tracing::info!(
+                tracing::trace!(
                     peer = %relay_peer_id,
                     "Relay reservation accepted; renewal scheduled in {:?}",
                     eighty_percent_in
                 );
             }
             libp2p::relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. } => {
-                tracing::debug!(relay = %relay_peer_id, "Outbound relayed connection established.");
+                tracing::trace!(relay = %relay_peer_id, "Outbound relayed connection established.");
             }
             libp2p::relay::client::Event::InboundCircuitEstablished { src_peer_id, .. } => {
-                tracing::debug!(relay = %src_peer_id, "Inbound relayed connection established.");
+                tracing::trace!(relay = %src_peer_id, "Inbound relayed connection established.");
             }
         }
     }
@@ -1116,7 +1116,7 @@ impl NetworkActor {
 
         match result {
             Ok(_connection_id) => {
-                tracing::info!(
+                tracing::debug!(
                     peer_id = %remote_peer_id,
                     "Hole punch succeeded \\o/ - Connection is now direct."
                 );
@@ -1125,7 +1125,7 @@ impl NetworkActor {
                 //  In many environments, hole punching is expected to fail
                 // (e.g., Symmetric NATs), in which case the node simply
                 // continues using the relay.
-                tracing::warn!(
+                tracing::trace!(
                     peer_id = %remote_peer_id,
                     "Hole punch failed: {e}. Remaining on relayed connection."
                 );
@@ -1174,7 +1174,7 @@ impl NetworkActor {
                 peer, is_new_peer, ..
             } => {
                 if is_new_peer {
-                    tracing::info!(peer_id = %peer, "DHT: New peer discovered and added to buckets. Running Kademlia bootstrap.");
+                    tracing::debug!(peer_id = %peer, "DHT: New peer discovered and added to buckets. Running Kademlia bootstrap.");
                     // We perform the debug crawl in a separate block
                     {
                         let kad = &mut self.swarm.behaviour_mut().kademlia;
@@ -1184,7 +1184,7 @@ impl NetworkActor {
                                 peer_count += 1;
                             }
                         }
-                        tracing::info!("DEBUG: Kademlia Routing Table size: {}", peer_count);
+                        tracing::debug!("DEBUG: Kademlia Routing Table size: {}", peer_count);
                     }
                     let random_peer = PeerId::random();
                     self.swarm
@@ -1192,7 +1192,7 @@ impl NetworkActor {
                         .kademlia
                         .get_closest_peers(random_peer);
                 } else {
-                    tracing::info!(peer_id = %peer, "DHT: new addresses found for existing peer.");
+                    tracing::debug!(peer_id = %peer, "DHT: new addresses found for existing peer.");
                 }
             }
 
@@ -1202,7 +1202,7 @@ impl NetworkActor {
                 result: libp2p::kad::QueryResult::Bootstrap(Ok(status)),
                 ..
             } => {
-                tracing::info!(
+                tracing::debug!(
                     remaining = status.num_remaining,
                     "Hop! DHT bootstrap in progress..."
                 );
@@ -1211,7 +1211,7 @@ impl NetworkActor {
                 result: libp2p::kad::QueryResult::Bootstrap(Err(e)),
                 ..
             } => {
-                tracing::info!("Boink! DHT bootstrap ran into error: {e}.");
+                tracing::warn!("Boink! DHT bootstrap ran into error: {e}.");
             }
             _ => {}
         }
@@ -1249,14 +1249,14 @@ impl NetworkActor {
             stream,
         } = event;
 
-        tracing::info!(peer = %peer_id, "New peer stream hijacked via StreamGateway");
+        tracing::trace!(peer = %peer_id, "New peer stream hijacked via StreamGateway");
 
         // Generate a new the receiver channel for this specific peer.
         let from_main_rx = self.main_to_peer_broadcast.subscribe();
 
         // Fetch address from carefully maintained address map.
         let Some((_timestamp, address)) = self.active_connections.get(&peer_id).cloned() else {
-            tracing::info!("Not upgrading connection because we don't have an address.");
+            tracing::trace!("Not upgrading connection because we don't have an address.");
             return Err(ActorError::NoAddressForPeer(peer_id));
         };
 
@@ -1862,7 +1862,7 @@ impl NetworkActor {
             upgraded_peers.insert(peer_id);
         }
 
-        tracing::info!("Spawning peer loop from libp2p network actor");
+        tracing::debug!("Spawning peer loop from libp2p network actor");
 
         // Create immutable (across the lifetime of the connection) peer state.
         // This variable needs to be mutable because of efficient pointer reuse
