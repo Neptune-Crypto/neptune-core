@@ -438,7 +438,7 @@ impl NetworkActor {
     fn listen(&mut self, addr: Multiaddr) -> Result<(), libp2p::TransportError<std::io::Error>> {
         match self.swarm.listen_on(addr.clone()) {
             Ok(listener_id) => {
-                tracing::info!(%addr, %listener_id, "libp2p stack listening.");
+                tracing::debug!(%addr, %listener_id, "libp2p stack listening.");
                 // Keeping track of listeners allows for a graceful shutdown: by
                 // explicitly removing them at shutdown time, we trigger the
                 // UPnP behavior to send 'DeletePortMapping' requests to
@@ -461,7 +461,7 @@ impl NetworkActor {
                 tracing::warn!("Failed to dial initial peer {}: {e}", address.to_string());
                 continue;
             }
-            tracing::info!("Dialed initial peer {}.", address.to_string());
+            tracing::debug!("Dialed initial peer {}.", address.to_string());
         }
     }
 
@@ -650,12 +650,12 @@ impl NetworkActor {
             }
 
             SwarmEvent::NewListenAddr { address, .. } => {
-                tracing::info!("Node is listening on {:?}", address);
+                tracing::debug!("Node is listening on {:?}", address);
             }
 
             SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                 if let Some((_timestamp, address)) = self.active_connections.remove(&peer_id) {
-                    tracing::info!("Connection to peer {peer_id} at {address} closed.");
+                    tracing::debug!("Connection to peer {peer_id} at {address} closed.");
                 } else {
                     tracing::warn!(peer = %peer_id, "Connection closed abruptly: {:?}", cause);
                 }
@@ -676,7 +676,7 @@ impl NetworkActor {
                 match error {
                     // Bouncer says, "We're already talking to this PeerID!"
                     libp2p::swarm::DialError::Denied { .. } => {
-                        tracing::info!(peer = %peer_id, "Dial vetoed: Already have a diverse connection to this peer.");
+                        tracing::debug!(peer = %peer_id, "Dial vetoed: Already have a diverse connection to this peer.");
                     }
                     // Actual network/transport failures
                     _ => {
@@ -701,7 +701,7 @@ impl NetworkActor {
                 match error {
                     // This is the bouncer (Connection Limits) doing its job.
                     libp2p::swarm::ListenError::Denied { cause } => {
-                        tracing::info!(
+                        tracing::debug!(
                             peer = ?peer_id.map(|p| p.to_string()).unwrap_or_else(|| "Unknown".to_string()),
                             %cause,
                             "Incoming connection bounced: Diversity or Capacity limit reached."
@@ -817,7 +817,7 @@ impl NetworkActor {
                 } else {
                     "Inbound"
                 };
-                tracing::info!("{direction} connection established with {peer_id} at {address}.");
+                tracing::debug!("{direction} connection established with {peer_id} at {address}.");
 
                 // If this address belongs to one of our sticky peers (`--peer`
                 // CLI arguments) then make sure we record the `PeerId`.
@@ -825,12 +825,12 @@ impl NetworkActor {
                     self.sticky_peers.entry(address.clone()).and_modify(|p| {
                         match p {
                             StickyPeer::None | StickyPeer::Dialing(_) => {
-                                tracing::info!(%peer_id, "Found peer id of sticky peer {address}.");
+                                tracing::debug!(%peer_id, "Found peer id of sticky peer {address}.");
                                 *p = StickyPeer::Connected(peer_id);
                             },
                             StickyPeer::Connected(pid) => {
                                 if *pid != peer_id {
-                                    tracing::info!(%peer_id, "Found *new* peer id of sticky peer {address}.");
+                                    tracing::debug!(%peer_id, "Found *new* peer id of sticky peer {address}.");
                                     *pid = peer_id;
                                 }
                             },
@@ -846,7 +846,7 @@ impl NetworkActor {
                     .and_modify(|(_timestamp, addr)| {
                         tracing::debug!("Overwriting old address {} in favor of new address {} in active connections map.", *addr, address.clone());
                         if !Self::is_direct(addr) && Self::is_direct(&address) {
-                            tracing::info!("New address is direct whereas old address was not. Good!");
+                            tracing::debug!("New address is direct whereas old address was not. Good!");
                         }
                         *addr = address.clone();
                     })
@@ -1442,7 +1442,7 @@ impl NetworkActor {
     async fn handle_command(&mut self, command: NetworkActorCommand) -> Result<bool, ActorError> {
         match command {
             NetworkActorCommand::Dial(addr) => {
-                tracing::info!("Manual dial requested for address: {}", addr);
+                tracing::debug!("Manual dial requested for address: {}", addr);
 
                 // If the peer was banned as a result of poor standing, then the
                 // Dial overturns that ban. If the peer is banned as a result of
@@ -1478,17 +1478,17 @@ impl NetworkActor {
                 // We use the swarm's dial method. libp2p handles the underlying
                 // TCP/transport logic.
                 if let Err(e) = self.dial(addr.clone()) {
-                    tracing::warn!("Failed to dial {}: {:?}", addr, e);
+                    tracing::warn!("Failed to dial {addr}: {e}");
                 }
             }
 
             NetworkActorCommand::Listen(addr) => {
-                tracing::info!(%addr, "Received command to listen");
+                tracing::debug!(%addr, "Received command to listen");
                 if let Err(e) = self.listen(addr.clone()) {
                     tracing::error!(%addr, error = %e, "Failed to start listening");
                     // Optional: notify main loop of failure via event_tx
                 } else {
-                    tracing::info!(%addr, "Successfully bound to address");
+                    tracing::debug!(%addr, "Successfully bound to address");
                 }
             }
 
@@ -1552,7 +1552,7 @@ impl NetworkActor {
             }
 
             NetworkActorCommand::Shutdown => {
-                tracing::info!("Network Actor shutting down Swarm...");
+                tracing::debug!("Network Actor shutting down Swarm...");
 
                 // Trigger UPnP DeletePortMapping
                 // By explicitly removing these listeners, we trigger the UPnP
@@ -1604,7 +1604,7 @@ impl NetworkActor {
                 return Ok(!Self::KEEP_ALIVE);
             }
             NetworkActorCommand::ProbeNat => {
-                tracing::info!("Triggering NAT probe...");
+                tracing::debug!("Triggering NAT probe...");
                 // Call `autonat.probe_address` with a good guess at our own
                 // public address. Where to get that good guess from?
                 //  1. external addresses confirmed by the swarm;
@@ -1636,7 +1636,7 @@ impl NetworkActor {
                 }
             }
             NetworkActorCommand::ResetRelayReservations => {
-                tracing::info!("Resetting relay reservations ...");
+                tracing::debug!("Resetting relay reservations ...");
 
                 for (peer_id, status) in self.relays.drain() {
                     tracing::debug!(%peer_id, "Evicting relay to force re-reservation.");
@@ -1665,7 +1665,7 @@ impl NetworkActor {
     /// `Public`, as maintaining relay reservations is unnecessary and consumes
     /// resources on both this node and the remote relay servers.
     fn cleanup_relays(&mut self) {
-        tracing::info!("Cleaning up relay reservations.");
+        tracing::debug!("Cleaning up relay reservations.");
 
         for (_peer_id, status) in self.relays.drain() {
             if let Some(listener_id) = status.listener_id() {
@@ -1747,7 +1747,7 @@ impl NetworkActor {
         }
 
         // Request new relays to replace about-to-expire and closed relays.
-        tracing::info!("Requesting relays to replace {num_expired_relays} expired relays and {num_closed_relays} abruptly closed ones.");
+        tracing::debug!("Requesting relays to replace {num_expired_relays} expired relays and {num_closed_relays} abruptly closed ones.");
         self.request_peer_relays(num_expired_relays + num_closed_relays);
     }
 
@@ -1788,7 +1788,7 @@ impl NetworkActor {
                 continue;
             }
 
-            tracing::info!(%peer_id, "Attempting relay reservation at {}", addr);
+            tracing::debug!(%peer_id, "Attempting relay reservation at {}", addr);
 
             // Construct the circuit address.
             // Format: /ip4/RELAY_IP/tcp/PORT/p2p/RELAY_ID/p2p-circuit
@@ -1797,7 +1797,7 @@ impl NetworkActor {
                 .with(libp2p::multiaddr::Protocol::P2p(peer_id))
                 .with(libp2p::multiaddr::Protocol::P2pCircuit);
 
-            tracing::info!(%peer_id, "Attempting relay reservation by listening on {}.", circuit_addr);
+            tracing::debug!(%peer_id, "Attempting relay reservation by listening on {}.", circuit_addr);
 
             // Listen on the circuit address. This activity triggers the
             // reservation, so catch and record the listener id. We will catch
@@ -1854,7 +1854,7 @@ impl NetworkActor {
         {
             let mut upgraded_peers = self.upgraded_peers.lock().unwrap();
             if upgraded_peers.contains(&peer_id) {
-                tracing::info!(
+                tracing::debug!(
                     "Aborting connection upgrade because this peer was already upgraded."
                 );
                 return None;
@@ -1958,7 +1958,7 @@ impl NetworkActor {
             .map(|(peer_id, _)| *peer_id);
 
         if let Some(peer_id) = oldest_peer {
-            tracing::info!(%peer_id, "Disconnecting from longest-lived peer.");
+            tracing::debug!(%peer_id, "Disconnecting from longest-lived peer.");
 
             // Signal the swarm to drop the connection
             if self.swarm.disconnect_peer_id(peer_id).is_err() {
