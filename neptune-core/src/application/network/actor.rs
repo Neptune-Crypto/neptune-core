@@ -1370,12 +1370,8 @@ impl NetworkActor {
                             .set_mode(Some(libp2p::kad::Mode::Server));
                     }
                     libp2p::autonat::NatStatus::Private => {
-                        // If we have external addresses, request for relays.
-                        if self.swarm.external_addresses().count() > 0 {
-                            self.request_peer_relays(3);
-                        } else {
-                            tracing::debug!("AutoNAT says Private, but waiting for Identify/UPnP to confirm an external address before requesting relay.");
-                        }
+                        tracing::debug!("NAT status set to private: requesting relays.");
+                        self.request_peer_relays(3);
 
                         // Set Kademlia mode to client.
                         self.swarm
