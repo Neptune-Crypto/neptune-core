@@ -238,7 +238,7 @@ impl AddressBook {
 
         self.book.retain(|id, _| keys_to_keep.contains(id));
 
-        tracing::info!(
+        tracing::debug!(
             target = target_length,
             remaining = self.book.len(),
             "Address book pruned."
@@ -319,7 +319,7 @@ impl AddressBook {
         // becomes an issue.
         serde_json::to_writer_pretty(writer, &self.book)?;
 
-        tracing::info!("Address book persisted to disk.");
+        tracing::debug!("Address book persisted to disk.");
         Ok(())
     }
 
@@ -341,7 +341,7 @@ impl AddressBook {
         let reader = BufReader::new(file);
         let book: HashMap<PeerId, Peer> = serde_json::from_reader(reader)?;
 
-        tracing::info!(peer_count = book.len(), "Address book loaded from disk.");
+        tracing::debug!(peer_count = book.len(), "Address book loaded from disk.");
 
         Ok(AddressBook {
             book,
