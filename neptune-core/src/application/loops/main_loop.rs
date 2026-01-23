@@ -908,7 +908,7 @@ impl MainLoopHandler {
                     // Pause miner.
                     self.main_to_miner_tx.send(MainToMiner::StartSyncing);
 
-                    // Ask the peer about their block at the height of ouw own
+                    // Ask the peer about their block at the height of our own
                     // tip. Either the peer is on the same fork as us and is
                     // just further ahead; or else the peer is on a different
                     // fork altogether. In the former case we can safely
@@ -918,10 +918,12 @@ impl MainLoopHandler {
                     // to find LUCA, and that happens as a side effect of the
                     // sync loop querying random blocks. When those random
                     // blocks come in, we fast-forward if we can.
-                    self.main_to_peer_broadcast(MainToPeerTask::RequestBlockByHeight {
-                        target_peer: peer_id,
-                        height: current_tip.header().height,
-                    });
+                    if !current_tip.header().height.is_genesis() {
+                        self.main_to_peer_broadcast(MainToPeerTask::RequestBlockByHeight {
+                            target_peer: peer_id,
+                            height: current_tip.header().height,
+                        });
+                    }
                 }
             }
             PeerTaskToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {

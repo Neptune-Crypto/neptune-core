@@ -1942,6 +1942,11 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                if height.is_genesis() {
+                    error!("Requested the genesis block from another peer. This should never happen. Programmer error.");
+                    std::process::exit(255);
+                }
+
                 peer.send(PeerMessage::BlockRequestByHeight(height)).await?;
 
                 debug!("sent block-request-by-height ({height}) to peer {target_peer}");
