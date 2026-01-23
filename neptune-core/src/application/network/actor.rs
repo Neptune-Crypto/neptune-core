@@ -992,6 +992,33 @@ impl NetworkActor {
                             .add_address(&peer_id, addr);
                     }
                 }
+
+                // If we are behind a NAT, then we have no public addresses that
+                // we are reachable on. But the peer is still seeing us at some
+                // address, it's just that this address is not reachable to
+                // anyone else.
+                // Advertise that we might be reachable there; that's certainly
+                // true for the peer in question and that fact might be enough
+                // to proceed to establish a relay. Other peers will fail to
+                // reach us here and that's okay because they will fail to reach
+                // us anywhere.
+                let node_is_behind_nat = self.swarm.behaviour().autonat.nat_status()
+                    == libp2p::autonat::NatStatus::Private;
+                let observed_addr_is_global = info.observed_addr.iter().any(|proto| match proto {
+                    libp2p::multiaddr::Protocol::Ip4(ip) => {
+                        !ip.is_loopback()
+                            && !ip.is_private()
+                            && !ip.is_link_local()
+                            && !ip.is_unspecified()
+                    }
+                    libp2p::multiaddr::Protocol::Ip6(ip) => {
+                        !ip.is_loopback() && !ip.is_unicast_link_local() && !ip.is_unspecified()
+                    }
+                    _ => false,
+                });
+                if node_is_behind_nat && observed_addr_is_global {
+                    self.swarm.add_external_address(info.observed_addr);
+                }
             }
 
             // We successfully sent our Identify info to a peer in response to
@@ -1402,6 +1429,7 @@ impl NetworkActor {
     fn handle_upnp_event(&mut self, event: libp2p::upnp::Event) {
         match event {
             libp2p::upnp::Event::NewExternalAddr(addr) => {
+                self.swarm.add_external_address(addr.clone());
                 tracing::info!("UPnP: Successfully mapped a new external address: {addr}");
             }
 
