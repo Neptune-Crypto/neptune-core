@@ -436,12 +436,6 @@ impl NetworkActor {
     /// Incoming connections will automatically undergo the handshake defined in
     /// the [`StreamGateway`].
     fn listen(&mut self, addr: Multiaddr) -> Result<(), libp2p::TransportError<std::io::Error>> {
-        // Reject commands to listen on IPv6 addresses until we know we can.
-        let is_ipv6 = addr.to_string().contains("ip6");
-        if is_ipv6 {
-            return Ok(());
-        }
-
         match self.swarm.listen_on(addr.clone()) {
             Ok(listener_id) => {
                 tracing::info!(%addr, %listener_id, "libp2p stack listening.");
@@ -600,16 +594,14 @@ impl NetworkActor {
 
     /// Instructs the swarm to dial an address, but only if it passes a filter.
     fn dial(&mut self, address: Multiaddr) -> Result<(), libp2p::swarm::DialError> {
-        // Filter out IPv6 addresses until we know we can handle them.
         let addr_str = address.to_string();
-        let is_ipv6 = addr_str.contains("ip6");
 
         // Filter out addresses that point to ourselves.
         let is_local = addr_str.contains("127.0.0.1")
             || addr_str.contains("::1")
             || addr_str.contains("/lan/");
 
-        if is_ipv6 || is_local {
+        if is_local {
             return Ok(());
         }
 
@@ -967,12 +959,6 @@ impl NetworkActor {
                         || addr_str.contains("::1")
                         || addr_str.contains("/lan/");
                     if is_local {
-                        continue;
-                    }
-
-                    // Filter out IPv6 addresses.
-                    let is_ipv6 = addr_str.contains("ip6");
-                    if is_ipv6 {
                         continue;
                     }
 
@@ -1856,6 +1842,9 @@ impl NetworkActor {
         {
             let mut upgraded_peers = self.upgraded_peers.lock().unwrap();
             if upgraded_peers.contains(&peer_id) {
+                tracing::info!(
+                    "Aborting connection upgrade because this peer was already upgraded."
+                );
                 return None;
             }
             upgraded_peers.insert(peer_id);
