@@ -382,13 +382,16 @@ impl NetworkActor {
 
         // Load or build address book
         let address_book_file = config.address_book_file();
-        let address_book = AddressBook::load_or_new(&address_book_file).unwrap_or_else(|e| {
-            tracing::warn!(
-                "Failed to load address book from '{}': {e}.",
-                address_book_file.to_string_lossy()
-            );
-            AddressBook::new_empty(address_book_file)
-        });
+        let address_book =
+            AddressBook::load_or_new(network, &address_book_file).unwrap_or_else(|e| {
+                // If loading fails, assume address book is corrupted; just make
+                // a new one.
+                tracing::warn!(
+                    "Failed to load address book from '{}': {e}.",
+                    address_book_file.to_string_lossy()
+                );
+                AddressBook::new_empty(network, address_book_file)
+            });
 
         // Load or build black list
         let black_list_file = config.blacklist_file();
@@ -426,7 +429,7 @@ impl NetworkActor {
         })
     }
 
-    fn protocol_version(network: Network) -> String {
+    pub(crate) fn protocol_version(network: Network) -> String {
         format!("{NEPTUNE_PROTOCOL_STR}-{network}")
     }
 

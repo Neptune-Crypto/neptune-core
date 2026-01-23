@@ -20,6 +20,7 @@ use libp2p::StreamProtocol;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::application::config::network::Network;
 use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
 
 pub(crate) const ADDRESS_BOOK_MAX_SIZE: usize = 1000_usize;
@@ -35,7 +36,7 @@ pub(crate) struct Peer {
     /// Useful for telemetry and identifying "heavy" or "light" nodes.
     pub(crate) agent_version: String,
 
-    /// The protocol version (e.g., "/neptune/0.6.0").
+    /// The protocol version (e.g., "/neptune/-main").
     /// Essential for ensuring you don't sync with incompatible forks.
     pub(crate) protocol_version: String,
 
@@ -77,8 +78,11 @@ impl GetSize for Peer {
 /// Enables `serde` to encode and decode `Vec<StreamProtocol>` as though it were
 /// `Vec<String>`.
 mod protocol_vec_serde {
+    use serde::Deserialize;
+    use serde::Deserializer;
+    use serde::Serializer;
+
     use super::*;
-    use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(vec: &[StreamProtocol], serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -118,6 +122,7 @@ mod protocol_vec_serde {
 pub(crate) struct AddressBook {
     pub(super) book: HashMap<PeerId, Peer>,
     pub(super) filename: PathBuf,
+    pub(super) network: Network,
 }
 
 impl Deref for AddressBook {
@@ -130,10 +135,11 @@ impl Deref for AddressBook {
 
 impl AddressBook {
     /// Create a new *empty* (except for the file name) [`AddressBook`].
-    pub(super) fn new_empty<P: AsRef<Path>>(filename: P) -> Self {
+    pub(super) fn new_empty<P: AsRef<Path>>(network: Network, file_path: P) -> Self {
         Self {
             book: HashMap::<PeerId, Peer>::new(),
-            filename: filename.as_ref().to_path_buf(),
+            filename: file_path.as_ref().to_path_buf(),
+            network,
         }
     }
 
@@ -153,7 +159,7 @@ impl AddressBook {
     ///    listening on.
     ///  * `agent_version` - The specific software version string of the client.
     ///  * `protocol_version` - The Neptune protocol version (e.g.,
-    ///    `/neptune/0.6.0`).
+    ///    `/neptune/`).
     ///  * `supported_protocols` - The list of all libp2p protocols the peer
     ///    supports.
     pub(crate) fn insert_or_update(
@@ -278,22 +284,38 @@ impl AddressBook {
         scores.sort_by(|(a, _), (b, _)| b.cmp(a));
 
         // Insert bootstrap nodes if list is under-populated.
-        let hardcoded_bootstrap_nodes = [
-            (
-                IpAddr::V4(Ipv4Addr::from_str("139.162.193.206").unwrap()),
-                9801,
-            ),
-            (
-                IpAddr::V4(Ipv4Addr::from_str("51.15.139.238").unwrap()),
-                9801,
-            ),
-            (
-                IpAddr::V6(Ipv6Addr::from_str("2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9").unwrap()),
-                9801,
-            ),
-        ]
-        .into_iter()
-        .map(|(ip, port)| {
+        let hardcoded_bootstrap_nodes = match self.network {
+            Network::Main => vec![
+                (
+                    IpAddr::V4(Ipv4Addr::from_str("139.162.193.206").unwrap()),
+                    9801,
+                ),
+                (
+                    IpAddr::V4(Ipv4Addr::from_str("51.15.139.238").unwrap()),
+                    9801,
+                ),
+                (
+                    IpAddr::V6(
+                        Ipv6Addr::from_str("2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9").unwrap(),
+                    ),
+                    9801,
+                ),
+            ],
+            Network::Testnet(0) => vec![
+                (
+                    IpAddr::V4(Ipv4Addr::from_str("51.15.139.238").unwrap()),
+                    19801,
+                ),
+                (
+                    IpAddr::V6(
+                        Ipv6Addr::from_str("2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9").unwrap(),
+                    ),
+                    19801,
+                ),
+            ],
+            _ => vec![],
+        };
+        let hardcoded_bootstrap_nodes = hardcoded_bootstrap_nodes.into_iter().map(|(ip, port)| {
             let mut multiaddr = Multiaddr::from(ip);
             multiaddr.push(libp2p::multiaddr::Protocol::Tcp(port));
             multiaddr
@@ -332,20 +354,21 @@ impl AddressBook {
     ///  - `Ok(empty_address_book)` if the file does not exist.
     ///  - `Ok(address_book)` if the file does exist and everything succeeded.
     ///  - `Err(e)` if there was a decoding or file operations error.
-    pub(crate) fn load_or_new<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+    pub(crate) fn load_or_new<P: AsRef<Path>>(network: Network, path: P) -> anyhow::Result<Self> {
         if !path.as_ref().exists() {
-            return Ok(Self::new_empty(path));
+            return Ok(Self::new_empty(network, path));
         }
 
         let file = File::open(&path)?;
         let reader = BufReader::new(file);
         let book: HashMap<PeerId, Peer> = serde_json::from_reader(reader)?;
 
-        tracing::debug!(peer_count = book.len(), "Address book loaded from disk.");
+        tracing::trace!(peer_count = book.len(), "Address book loaded from disk.");
 
         Ok(AddressBook {
             book,
             filename: path.as_ref().to_path_buf(),
+            network,
         })
     }
 }
@@ -406,20 +429,22 @@ mod tests {
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
-    use crate::application::network::arbitrary::arb_peer_id;
-
     use super::*;
+    use crate::application::network::actor::NetworkActor;
+    use crate::application::network::arbitrary::arb_peer_id;
 
     impl AddressBook {
         /// Create a new [`AddressBook`] with the given fields.
-        fn new<P: AsRef<Path>>(book: HashMap<PeerId, Peer>, filename: P) -> Self {
+        fn new<P: AsRef<Path>>(network: Network, book: HashMap<PeerId, Peer>, filename: P) -> Self {
             Self {
                 book,
                 filename: filename.as_ref().to_path_buf(),
+                network,
             }
         }
 
         pub(crate) fn arbitrary() -> BoxedStrategy<Self> {
+            let network = Network::Main;
             ((0usize..20), any::<String>())
                 .prop_flat_map(move |(num_entries, filename)| {
                     let filename = filename.clone();
@@ -430,7 +455,7 @@ mod tests {
                         .prop_map(move |(peer_ids, entries)| {
                             let hash_map: HashMap<PeerId, Peer> =
                                 peer_ids.into_iter().zip(entries).collect();
-                            AddressBook::new(hash_map, filename.clone())
+                            AddressBook::new(network, hash_map, filename.clone())
                         })
                 })
                 .boxed()
@@ -442,13 +467,14 @@ mod tests {
         #[strategy(AddressBook::arbitrary())] mut address_book: AddressBook,
         #[strategy(arb::<u64>())] file_id: u64,
     ) {
+        let network = Network::Main;
         let mut path = env::temp_dir();
         path.push(format!("address_book_test_{}.json", file_id));
         address_book.filename = path.clone();
 
         address_book.save_to_disk().unwrap();
 
-        let loaded_book = AddressBook::load_or_new(&path).unwrap();
+        let loaded_book = AddressBook::load_or_new(network, &path).unwrap();
 
         prop_assert_eq!(address_book, loaded_book);
 
@@ -457,13 +483,15 @@ mod tests {
 
     #[test]
     fn can_select_bootstrap_peers() {
-        let address_book = AddressBook::new(HashMap::new(), "not-loaded.file");
+        let network = Network::Main;
+        let address_book = AddressBook::new(network, HashMap::new(), "not-loaded.file");
         let bootstrap_peers = address_book.select_initial_peers(10); // no crash
         assert!(!bootstrap_peers.is_empty());
     }
 
     #[test]
     fn test_peer_score_hierarchy_with_fail_count() {
+        let network = Network::Main;
         let now = SystemTime::now();
         let one_hour_ago = now - Duration::from_secs(3600);
         let two_hours_ago = now - Duration::from_secs(2 * 3600);
@@ -473,7 +501,7 @@ mod tests {
         let p0 = Peer {
             listen_addresses: vec![],
             agent_version: "".to_string(),
-            protocol_version: NEPTUNE_PROTOCOL_STR.to_string(),
+            protocol_version: NetworkActor::protocol_version(network),
             supported_protocols: vec![libp2p::StreamProtocol::new(NEPTUNE_PROTOCOL_STR)],
             first_seen: three_hours_ago,
             last_seen: now,
