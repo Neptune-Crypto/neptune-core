@@ -1020,10 +1020,10 @@ impl NetworkActor {
     /// primarily provides telemetry for monitoring the load and health of the
     /// relay service. In other words, its main function is logging.
     ///
-    /// Under a "Direct Connection Utility for Traversal" (DCUtR) strategy, this
-    /// relay should only be used briefly to coordinate a hole-punch. Long-lived
-    /// circuits or high volumes of denied requests may indicate either a surge
-    /// in private nodes or peers failing to establish direct connections.
+    /// This relay should only be used briefly to coordinate a hole-punch.
+    /// Long-lived circuits or high volumes of denied requests may indicate
+    /// either a surge in private nodes or peers failing to establish direct
+    /// connections.
     fn handle_relay_server_event(&mut self, event: libp2p::relay::Event) {
         match event {
             // A peer successfully reserved a sub-address.
@@ -1771,13 +1771,6 @@ impl NetworkActor {
     /// instance if there are not enough active connections without on-going
     /// relay commitments.
     fn request_peer_relays(&mut self, num_relays: usize) {
-        // Delay requesting relay reservations until we have at least one
-        // confirmed external address.
-        if self.swarm.external_addresses().next().is_none() {
-            tracing::debug!("Skipping relay reservation: No confirmed external addresses yet.");
-            return;
-        }
-
         let current_relays = self.relays.keys().collect::<HashSet<_>>();
         let mut available_peers = self
             .active_connections
