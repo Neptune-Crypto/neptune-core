@@ -16,6 +16,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 use crate::api::export::Network;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
@@ -488,8 +489,14 @@ impl NetworkActor {
         // Timer for renewing relays.
         let mut check_relay_reservations = tokio::time::interval(Duration::from_secs(10));
 
+        // Timer for reporting on Kademlia DHT health.
+        let mut kademlia_report_health = tokio::time::interval(Duration::from_secs(5));
+
         // Timer for refreshing the Kademlia crawl.
-        let mut refresh_kademlia_crawl = tokio::time::interval(Duration::from_mins(10));
+        let mut refresh_kademlia_crawl = tokio::time::interval_at(
+            Instant::now() + Duration::from_secs(7),
+            Duration::from_mins(3),
+        );
 
         // Timer for checking that we are still connected to sticky peers.
         let mut check_sticky_peers = tokio::time::interval(Duration::from_secs(30));
@@ -533,6 +540,11 @@ impl NetworkActor {
                     } else {
                         tracing::debug!("Starting periodic network crawl to maintain connectivity ...");
                     }
+                }
+
+                // Report on Kademlia DHT health
+                _ = kademlia_report_health.tick() => {
+                    self.check_dht_health();
                 }
 
                 // Check sticky peers.
@@ -844,16 +856,14 @@ impl NetworkActor {
                 // Store the new connection. If the new connection is a direct
                 // one and the old connection was relayed, then the relayed
                 // address will be overwritten in favor of the direct one.
-                self.active_connections
-                    .entry(peer_id)
-                    .and_modify(|(_timestamp, addr)| {
-                        tracing::debug!("Overwriting old address {} in favor of new address {} in active connections map.", *addr, address.clone());
-                        if !Self::is_direct(addr) && Self::is_direct(&address) {
-                            tracing::debug!("New address is direct whereas old address was not. Good!");
-                        }
-                        *addr = address.clone();
-                    })
-                    .or_insert_with(|| (SystemTime::now(), address.clone()));
+                let insert = self
+                    .active_connections
+                    .get(&peer_id)
+                    .is_none_or(|(_, old_addr)| *old_addr != address);
+                if insert {
+                    self.active_connections
+                        .insert(peer_id, (SystemTime::now(), address));
+                }
 
                 // Note: Identify and Kademlia will now automatically start
                 // their handshakes over this new "open line."
@@ -1841,7 +1851,7 @@ impl NetworkActor {
     /// The task terminates automatically if the stream is closed or a shutdown
     /// signal is received from the main loop.
     fn spawn_peer_loop(
-        &self,
+        &mut self,
         peer_id: PeerId,
         peer_address: Multiaddr,
         remote_handshake: HandshakeData,
@@ -1854,7 +1864,7 @@ impl NetworkActor {
 
         // Keep track of which peers get upgraded connections. Prevent same
         // peer from getting upgraded multiple times.
-        {
+        let num_upgraded_peers = {
             let mut upgraded_peers = self.upgraded_peers.lock().unwrap();
             if upgraded_peers.contains(&peer_id) {
                 tracing::debug!(
@@ -1863,6 +1873,13 @@ impl NetworkActor {
                 return None;
             }
             upgraded_peers.insert(peer_id);
+            upgraded_peers.len()
+        };
+
+        // On the 1st connection, bootstrap kademlia in order to find new peers.
+        if num_upgraded_peers == 1 {
+            tracing::debug!("First peer connected. Triggering initial DHT bootstrap.");
+            self.swarm.behaviour_mut().kademlia.bootstrap().ok();
         }
 
         tracing::debug!("Spawning peer loop from libp2p network actor");
@@ -2004,6 +2021,35 @@ impl NetworkActor {
 
             address_book_size,
             num_banned_peers,
+        }
+    }
+
+    /// Inspects the internal Kademlia routing table and logs health metrics.
+    ///
+    /// Kademlia is often silent. This function looks at the *state* rather than the
+    /// *events*.
+    pub fn check_dht_health(&mut self) {
+        let mut total_peers = 0;
+        let mut non_empty_buckets = 0;
+
+        // The `kbuckets()` iterator only yields buckets that contain at least
+        // one entry (peer).
+        for bucket in self.swarm.behaviour_mut().kademlia.kbuckets() {
+            let bucket_size = bucket.num_entries();
+            if bucket_size > 0 {
+                non_empty_buckets += 1;
+                total_peers += bucket_size;
+            }
+        }
+
+        if total_peers == 0 {
+            tracing::debug!("Kademlia Health: Routing table is empty. Peer discovery is stagnant.");
+        } else {
+            tracing::trace!(
+                "Kademlia Health: {} verified peers across {} k-buckets.",
+                total_peers,
+                non_empty_buckets
+            );
         }
     }
 }
