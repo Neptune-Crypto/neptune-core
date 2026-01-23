@@ -261,7 +261,7 @@ impl NetworkActor {
     const RELAY_COOLDOWN_PERIOD: Duration = Duration::from_secs(10);
 
     /// Hardcoded version strings for Kademlia.
-    const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "/kad/");
+    const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "kad/1.0.0");
     const KADEMLIA_FOR_NEPTUNE_PROTOCOL: libp2p::StreamProtocol =
         libp2p::StreamProtocol::new(Self::KADEMLIA_FOR_NEPTUNE_STRING);
 
