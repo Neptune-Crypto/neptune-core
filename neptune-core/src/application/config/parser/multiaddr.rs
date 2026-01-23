@@ -1,6 +1,8 @@
+use std::net::IpAddr;
+use std::net::SocketAddr;
+
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
-use std::net::{IpAddr, SocketAddr};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum MultiaddrParseError {
@@ -9,11 +11,20 @@ pub(crate) enum MultiaddrParseError {
 }
 
 pub(crate) fn parse_to_multiaddr(s: &str) -> Result<Multiaddr, MultiaddrParseError> {
-    // Try direct Multiaddr first
+    // 1. Try direct Multiaddr first
     if let Ok(m) = s.parse::<Multiaddr>() {
         return Ok(m);
     }
-    // Fallback to SocketAddr → Multiaddr
+
+    // 2. Bare IP
+    if let Ok(ip) = s.parse::<IpAddr>() {
+        return Ok(match ip {
+            IpAddr::V4(v4) => Multiaddr::from(Protocol::Ip4(v4)),
+            IpAddr::V6(v6) => Multiaddr::from(Protocol::Ip6(v6)),
+        });
+    }
+
+    // 3. SocketAddr
     let Ok(socket_addr) = s.parse() else {
         return Err(MultiaddrParseError::Invalid);
     };
@@ -68,17 +79,19 @@ pub mod tests {
     use proptest::prop_assert_eq;
     use test_strategy::proptest;
 
+    use super::*;
     use crate::tests::shared::globalstate::get_dummy_socket_address;
 
-    use super::*;
+    #[test]
+    fn can_convert_socketaddrs_to_multiaddrs() {
+        assert!(parse_to_multiaddr(&"139.162.193.206:9798").is_ok());
+        assert!(parse_to_multiaddr(&"[2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798").is_ok());
+    }
 
     #[test]
-    fn can_convert_ips_to_multiaddrs() {
-        let ipv4 = "139.162.193.206:9798".to_string();
-        let ipv6 = "[2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798".to_string();
-
-        assert!(parse_to_multiaddr(&ipv4).is_ok());
-        assert!(parse_to_multiaddr(&ipv6).is_ok());
+    fn can_convert_ips_to_multiadds() {
+        assert!(parse_to_multiaddr("139.162.193.206").is_ok());
+        assert!(parse_to_multiaddr("2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9").is_ok());
     }
 
     #[test]
