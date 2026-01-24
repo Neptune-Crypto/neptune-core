@@ -153,6 +153,10 @@ pub(crate) struct NetworkActor {
     /// Tracks the state in regards to whether we are publicly reachable or our
     /// strategy for becoming publicly reachable.
     reachability_state: ReachabilityState,
+
+    /// Tracks which protocols this node actually supports, as reported to other
+    /// peers in Identify.
+    active_protocols: Option<HashSet<libp2p::StreamProtocol>>,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -434,6 +438,7 @@ impl NetworkActor {
             max_num_peers,
             upgraded_peers,
             reachability_state: Default::default(),
+            active_protocols: None,
         })
     }
 
@@ -971,6 +976,28 @@ impl NetworkActor {
                     return;
                 }
 
+                // If the sets of supported subprotocols differ, log a warning
+                // message.
+                if let Some(local_protocols) = &self.active_protocols {
+                    let remote_protocols: HashSet<_> = info.protocols.iter().cloned().collect();
+                    let missing_in_remote: Vec<_> =
+                        local_protocols.difference(&remote_protocols).collect();
+                    let extra_in_remote: Vec<_> =
+                        remote_protocols.difference(local_protocols).collect();
+
+                    if !missing_in_remote.is_empty() || !extra_in_remote.is_empty() {
+                        tracing::warn!(
+                            "Protocol mismatch with peer {peer_id}. Missing: [{}], Extra: [{}]",
+                            missing_in_remote.iter().copied().join(", "),
+                            extra_in_remote.iter().copied().join(", "),
+                        );
+                    } else {
+                        tracing::debug!(
+                            "Supported protocols are identical between local and remote."
+                        );
+                    }
+                }
+
                 // The remote peer told us what our IP/port looks like from
                 // their perspective. This is useful for AutoNAT and for our own
                 // reachability logic.
@@ -1067,8 +1094,11 @@ impl NetworkActor {
 
             // We successfully sent our Identify info to a peer at our own
             // behest.
-            libp2p::identify::Event::Pushed { peer_id, .. } => {
-                tracing::trace!(peer = %peer_id, "Pushed identify info to peer");
+            libp2p::identify::Event::Pushed { peer_id, info, .. } => {
+                tracing::debug!(peer = %peer_id, "Pushed identify info to peer");
+
+                // Cache the list of supported protocols for later comparison.
+                self.active_protocols = Some(info.protocols.into_iter().collect());
             }
 
             // An error occurred during the Identify exchange.
