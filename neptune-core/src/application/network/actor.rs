@@ -1256,7 +1256,7 @@ impl NetworkActor {
 
         match result {
             Ok(_connection_id) => {
-                tracing::debug!(
+                tracing::info!(
                     peer_id = %remote_peer_id,
                     "Hole punch succeeded \\o/ - Connection is now direct."
                 );
