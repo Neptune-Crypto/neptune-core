@@ -6,6 +6,8 @@ use libp2p::autonat::NatStatus;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 
+use crate::application::network::reachability::ReachabilityState;
+
 /// Shadow enum to avoid Serialize / Deserialize problems for [`NatStatus`].
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "NatStatus")]
@@ -24,6 +26,7 @@ pub struct NetworkOverview {
     // Reachability
     #[serde(with = "NatStatusDef")]
     pub nat_status: NatStatus,
+    pub reachability_state: ReachabilityState,
     pub external_addresses: Vec<Multiaddr>,
 
     // Connection Capacity
@@ -84,6 +87,10 @@ mod arbitrary {
         fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
             let mut runner = TestRunner::deterministic();
             let peer_id = arb_peer_id().new_tree(&mut runner).unwrap().current();
+            let reachability_state = ReachabilityState::arbitrary()
+                .new_tree(&mut runner)
+                .unwrap()
+                .current();
             let mut get_multiaddr = || arb_multiaddr().new_tree(&mut runner).unwrap().current();
 
             let connection_limit = u.int_in_range(10..=1000)?;
@@ -108,6 +115,7 @@ mod arbitrary {
                 num_active_relays,
                 address_book_size,
                 num_banned_peers,
+                reachability_state,
             })
         }
     }
@@ -140,6 +148,7 @@ impl rand::distr::Distribution<NetworkOverview> for rand::distr::StandardUniform
             }
             _ => unreachable!(),
         };
+        let reachability_state = rng.random::<ReachabilityState>();
         let connection_limit = rng.random_range(0usize..=10);
         let connection_count = rng.random_range(0..=connection_limit);
 
@@ -157,6 +166,7 @@ impl rand::distr::Distribution<NetworkOverview> for rand::distr::StandardUniform
             num_active_relays,
             address_book_size,
             num_banned_peers,
+            reachability_state,
         }
     }
 }

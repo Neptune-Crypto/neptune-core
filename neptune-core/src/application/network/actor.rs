@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -32,6 +33,7 @@ use crate::application::network::config::NetworkConfig;
 use crate::application::network::gateway::GatewayEvent;
 use crate::application::network::gateway::StreamGateway;
 use crate::application::network::overview::NetworkOverview;
+use crate::application::network::reachability::ReachabilityState;
 use crate::application::network::stack::NetworkStack;
 use crate::application::network::stack::NetworkStackEvent;
 use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
@@ -147,6 +149,10 @@ pub(crate) struct NetworkActor {
 
     /// Limits the total number of connections.
     max_num_peers: usize,
+
+    /// Tracks the state in regards to whether we are publicly reachable or our
+    /// strategy for becoming publicly reachable.
+    reachability_state: ReachabilityState,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -427,6 +433,7 @@ impl NetworkActor {
             sticky_peers,
             max_num_peers,
             upgraded_peers,
+            reachability_state: Default::default(),
         })
     }
 
@@ -666,6 +673,28 @@ impl NetworkActor {
 
             SwarmEvent::NewListenAddr { address, .. } => {
                 tracing::debug!("Node is listening on {:?}", address);
+
+                // If the address is a circuit address, modify state
+                // accordingly.
+                // The reason why this state update is does not live in
+                // `handle_relay_client_event` is because there may be silent
+                // failures in between the events triggered there (which
+                // indicate protocol success) and this event (which indicates
+                // transport success). This success event is the final boss
+                // that trumps all predecessors.
+                let is_circuit = address
+                    .iter()
+                    .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit));
+                if is_circuit {
+                    self.reachability_state.handle_relay_confirmed(address);
+
+                    // Once relayed, we can act as a Kademlia Server
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .set_mode(Some(libp2p::kad::Mode::Server));
+                    tracing::info!("Connectivity established via relay.");
+                }
             }
 
             SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -707,8 +736,8 @@ impl NetworkActor {
             // Failed incoming connections.
             //
             // We specifically watch for `ListenError::Denied`. This isn't a
-            // failure in the traditional sense; it's our ConnectionLimits
-            // behavior enforcing the bouncer's (`limits`'s) rules.
+            // failure in the traditional sense; it's our bouncer enforcing
+            // the `max_num_peers` limit.
             //
             // Seeing this log confirms that our 'Diversity Policy' is active,
             // protecting our 50 slots for unique one-hop neighbors.
@@ -724,7 +753,7 @@ impl NetworkActor {
                     }
                     // Other errors (Transport noise, TLS fails, timeouts)
                     _ => {
-                        tracing::trace!(peer = ?peer_id, "Incoming connection failed during handshake: {:?}", error);
+                        tracing::debug!(peer = ?peer_id, "Incoming connection failed during handshake: {:?}", error);
                     }
                 }
             }
@@ -1017,7 +1046,16 @@ impl NetworkActor {
                     _ => false,
                 });
                 if node_is_behind_nat && observed_addr_is_global {
-                    self.swarm.add_external_address(info.observed_addr);
+                    self.swarm.add_external_address(info.observed_addr.clone());
+
+                    // Advance the reachability state machine with this info and
+                    // act accordingly.
+                    self.reachability_state
+                        .handle_external_address(info.observed_addr);
+                    if let Some(external_address) = self.reachability_state.is_pending() {
+                        tracing::debug!("Requesting relay reservations because reachability state is Pending with external address {external_address}.");
+                        self.request_peer_relays(3);
+                    }
                 }
             }
 
@@ -1381,7 +1419,7 @@ impl NetworkActor {
                 // (And no we cannot integrate this match statement into the
                 // match statement above because then the order of the log
                 // messages will make no sense.)
-                match new {
+                match new.clone() {
                     libp2p::autonat::NatStatus::Public(multiaddr) => {
                         // Tell the Swarm to announce this address in future
                         // Identify handshakes.
@@ -1397,16 +1435,34 @@ impl NetworkActor {
                             .set_mode(Some(libp2p::kad::Mode::Server));
                     }
                     libp2p::autonat::NatStatus::Private => {
-                        tracing::debug!("NAT status set to private: requesting relays.");
-                        self.request_peer_relays(3);
-
                         // Set Kademlia mode to client.
-                        self.swarm
-                            .behaviour_mut()
-                            .kademlia
-                            .set_mode(Some(libp2p::kad::Mode::Client));
+                        // self.swarm
+                        //     .behaviour_mut()
+                        //     .kademlia
+                        //     .set_mode(Some(libp2p::kad::Mode::Client));
                     }
                     libp2p::autonat::NatStatus::Unknown => {}
+                }
+
+                // Advance the reachability state machine with this new info and
+                // act accordingly.
+                self.reachability_state.handle_new_nat_status(new);
+                if let Some(external_address) = self.reachability_state.is_pending() {
+                    tracing::debug!("Requesting relay reservations because reachability state is Pending with external address {external_address}.");
+                    self.request_peer_relays(3);
+                } else if self.reachability_state.is_private_and_waiting() {
+                    tracing::debug!(
+                        "Advanced reachability state with new NAT status (private) and now waiting \
+                        for external address. Provoking {} peers with Idenfity to extract observed \
+                        address.",
+                        self.active_connections.len()
+                    );
+                    for peer_id in self.active_connections.keys() {
+                        self.swarm
+                            .behaviour_mut()
+                            .identify
+                            .push(std::iter::once(*peer_id));
+                    }
                 }
             }
         }
@@ -1417,24 +1473,31 @@ impl NetworkActor {
     /// UPnP proactively attempts to map local ports to external ones on the
     /// gateway (router). This is a "best-effort" protocol; success allows the
     /// node to become publicly reachable, while failure simply leaves the node
-    /// in a 'Private' state, in which case it falls back to DCUtR (Hole
-    /// Punching).
+    /// in the `NatStatus::Private` state. From here, the
+    /// [`RelayStrategy`](super::reachability::RelayStrategy) of
+    /// [`ReachabilityState::Private`](super::reachability::ReachabilityState::Private)
+    /// is activated, which ultimately culminates in DCUtR (Hole Punching).
     ///
     /// # Protocol Interactions
     ///
-    /// - **Identify**: New external addresses are automatically added to the
-    ///   Swarm's address list and shared with peers via Identify.
+    /// - **Identify**: New external addresses are added to the Swarm's address
+    ///   list so they can be shared with peers via Identify.
     /// - **AutoNAT**: Will eventually dial these external addresses to verify
-    ///   if the mapping actually allows inbound traffic.
+    ///   that the mapping actually allows inbound traffic (to account for lying
+    ///   NATs or routers).
     fn handle_upnp_event(&mut self, event: libp2p::upnp::Event) {
         match event {
             libp2p::upnp::Event::NewExternalAddr(addr) => {
+                tracing::info!("UPnP: NAT successfully mapped a new external address: {addr}");
                 self.swarm.add_external_address(addr.clone());
-                tracing::info!("UPnP: Successfully mapped a new external address: {addr}");
+                self.reachability_state.handle_upnp_success(addr);
+                self.cleanup_relays();
             }
 
             libp2p::upnp::Event::ExpiredExternalAddr(addr) => {
                 tracing::debug!("UPnP: External mapping for {addr} has expired or was removed.");
+                self.reachability_state.reset();
+                self.swarm.behaviour_mut().autonat.probe_address(addr);
             }
 
             libp2p::upnp::Event::GatewayNotFound => {
@@ -1685,7 +1748,7 @@ impl NetworkActor {
                 }
             }
             NetworkActorCommand::GetNetworkOverview(channel) => {
-                tracing::debug!("Assembling network overview ...");
+                tracing::trace!("Assembling network overview ...");
                 let overview = self.assemble_overview();
                 if channel.send(overview).is_err() {
                     tracing::error!("Cannot send NetworkOverview from NetworkActor over one-shot.");
@@ -2021,7 +2084,13 @@ impl NetworkActor {
     /// health-check diagnostics.
     pub(crate) fn assemble_overview(&self) -> NetworkOverview {
         let nat_status = self.swarm.behaviour().autonat.nat_status();
-        let external_addresses = self.swarm.external_addresses().cloned().collect();
+        let mut external_addresses: VecDeque<libp2p::Multiaddr> =
+            self.swarm.external_addresses().cloned().collect();
+        if let Some(preferred_external_address) = self.reachability_state.external_address() {
+            if !external_addresses.contains(&preferred_external_address) {
+                external_addresses.push_front(preferred_external_address);
+            }
+        }
         let num_active_relays = self.relays.len();
         let address_book_size = self.address_book.len();
         let num_banned_peers = self.black_list.list.len();
@@ -2029,7 +2098,8 @@ impl NetworkActor {
         NetworkOverview {
             peer_id: *self.swarm.local_peer_id(),
             nat_status,
-            external_addresses,
+            reachability_state: self.reachability_state.clone(),
+            external_addresses: external_addresses.into(),
 
             connection_count: self.active_connections.len(),
             connection_limit: self.max_num_peers,

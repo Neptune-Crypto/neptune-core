@@ -7,6 +7,7 @@ pub(crate) mod config;
 pub(crate) mod gateway;
 pub(crate) mod handshake;
 pub mod overview;
+pub(crate) mod reachability;
 pub(crate) mod stack;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]

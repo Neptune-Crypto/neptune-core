@@ -422,6 +422,13 @@ impl Widget for OverviewScreen {
                 .unwrap_or("-")
         ));
         lines.push(format!(
+            "reachability: {}",
+            data.network_overview
+                .as_ref()
+                .map(|no| format!("{}", no.reachability_state))
+                .unwrap_or("-".to_string())
+        ));
+        lines.push(format!(
             "external address(es): (0/{}) {}",
             dashifnotset!(data
                 .network_overview
