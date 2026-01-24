@@ -251,12 +251,17 @@ impl AddressBook {
         );
     }
 
-    /// Increment by one the `fail_count` variable which tracks how often a
-    /// connection attempt has failed since the last success.
-    pub(crate) fn bump_fail_count(&mut self, peer_id: PeerId) {
+    /// Increment by one the `fail_count`. Return the new count.
+    ///
+    /// This variable which tracks how often a connection attempt has failed
+    /// since the last success.
+    pub(crate) fn bump_fail_count(&mut self, peer_id: PeerId) -> u32 {
         if let Some(peer) = self.book.get_mut(&peer_id) {
             peer.fail_count = peer.fail_count.saturating_add(1);
+            return peer.fail_count;
         }
+
+        0
     }
 
     /// Reset to 0 the `fail_count` variable, which tracks how often a

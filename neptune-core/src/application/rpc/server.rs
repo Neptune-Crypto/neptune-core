@@ -2389,7 +2389,7 @@ impl NeptuneRPCServer {
             })?;
 
         // Await receipt.
-        match tokio::time::timeout(Duration::from_secs(1), rx).await {
+        match tokio::time::timeout(Duration::from_secs(2), rx).await {
             Ok(Ok(overview)) => Ok(overview),
             Ok(Err(e)) => Err(RpcError::SendError(format!("NetworkActor dropped: {e}."))),
             Err(e) => Err(RpcError::Failed(format!(

@@ -37,6 +37,8 @@ use crate::application::network::reachability::ReachabilityState;
 use crate::application::network::stack::NetworkStack;
 use crate::application::network::stack::NetworkStackEvent;
 use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
+use crate::macros::fn_name;
+use crate::macros::log_slow_scope;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::state::GlobalStateLock;
 
@@ -677,6 +679,16 @@ impl NetworkActor {
             }
 
             SwarmEvent::NewListenAddr { address, .. } => {
+                // Filter out loopback addresses. Not valid listen addresses.
+                let is_loopback = address.iter().any(|p| match p {
+                    libp2p::multiaddr::Protocol::Ip4(ip) => ip.is_loopback(),
+                    libp2p::multiaddr::Protocol::Ip6(ip) => ip.is_loopback(),
+                    _ => false,
+                });
+                if is_loopback {
+                    return Ok(());
+                }
+
                 tracing::debug!("Node is listening on {:?}", address);
 
                 // If the address is a circuit address, modify state
@@ -702,14 +714,6 @@ impl NetworkActor {
                 }
             }
 
-            SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-                if let Some((_timestamp, address)) = self.active_connections.remove(&peer_id) {
-                    tracing::debug!("Connection to peer {peer_id} at {address} closed.");
-                } else {
-                    tracing::warn!(peer = %peer_id, "Connection closed abruptly: {:?}", cause);
-                }
-            }
-
             // Handle failed outgoing dials.
             //
             // 1. If the dial was `Denied`, it's just our Diversity Policy
@@ -729,11 +733,13 @@ impl NetworkActor {
                     }
                     // Actual network/transport failures
                     _ => {
-                        tracing::debug!(peer = %peer_id, %error, "Dial failed, updating address book.");
-                        self.address_book.bump_fail_count(peer_id);
+                        tracing::trace!(peer = %peer_id, %error, "Dial failed, updating address book.");
+                        if self.address_book.bump_fail_count(peer_id) > 5 {
+                            tracing::debug!("Connection attempts exceed threshold, removing peer from Kademlia.");
 
-                        // Help Kademlia realize this peer is unreliable
-                        self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+                            // Help Kademlia realize this peer is unreliable
+                            self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+                        }
                     }
                 }
             }
@@ -761,15 +767,6 @@ impl NetworkActor {
                         tracing::debug!(peer = ?peer_id, "Incoming connection failed during handshake: {:?}", error);
                     }
                 }
-            }
-
-            // Low-level connection failure
-            SwarmEvent::OutgoingConnectionError {
-                peer_id: None,
-                error,
-                ..
-            } => {
-                tracing::debug!(%error, "Connection failed.");
             }
 
             // Non-fatal error.
@@ -839,6 +836,28 @@ impl NetworkActor {
                 }
             }
 
+            // Orderly or abrupt closure.
+            SwarmEvent::ConnectionClosed {
+                peer_id,
+                cause,
+                connection_id,
+                ..
+            } => {
+                if self.swarm.is_connected(&peer_id) {
+                    tracing::debug!("Redundant connection {connection_id} to {peer_id} closed.");
+                    // Do nothing: other connections continue.
+                } else if let Some((_timestamp, multiaddr)) =
+                    self.active_connections.get(&peer_id).cloned()
+                {
+                    // Book-keep.
+                    self.active_connections.remove(&peer_id);
+                    tracing::debug!("Connection to peer {peer_id} at {multiaddr} closed.");
+                } else {
+                    tracing::warn!(peer = %peer_id, "Connection closed abruptly: {:?}", cause);
+                    // Do nothing: nothing to remove.
+                }
+            }
+
             // Handle successful connections.
             SwarmEvent::ConnectionEstablished {
                 peer_id,
@@ -846,6 +865,18 @@ impl NetworkActor {
                 connection_id,
                 ..
             } => {
+                // Gatekeep: one connection per peer.
+                // We allow the duplicate connection to remain because libp2p
+                // deals with that and we do not want to interfere with that
+                // logic. However, we should avoid repeating our own
+                // state-keeping.
+                if self.active_connections.contains_key(&peer_id) {
+                    tracing::debug!(
+                        "Established duplicate {connection_id} to peer {peer_id}; ignoring.",
+                    );
+                    return Ok(());
+                }
+
                 let address = endpoint.get_remote_address().clone();
 
                 // Check for banned IPs again. The catch above in
@@ -856,6 +887,7 @@ impl NetworkActor {
                 if self.bounce(&address) {
                     tracing::warn!(%address, %connection_id, "Bouncing established connection.");
                     self.swarm.close_connection(connection_id);
+                    return Ok(());
                 }
 
                 // Connection was successfully established, so erase information
@@ -909,7 +941,7 @@ impl NetworkActor {
         Ok(())
     }
 
-    /// Check if the address is on the black list.
+    /// Check if a connection to the given address should be allowed.
     ///
     /// This function enforces three things:
     ///  1. The `max_num_peers` limit on the number of connections.
@@ -1021,8 +1053,8 @@ impl NetworkActor {
 
                 // Activate the Kademlia "Bridge": feed the addresses to
                 // Kademlia. Filter out local addresses.
-                for addr in info.listen_addrs {
-                    let is_routable = addr.iter().any(|protocol| {
+                let is_global = |multiaddr: &Multiaddr| {
+                    multiaddr.iter().any(|protocol| {
                         // Disallow addresses not globally reachable
                         match protocol {
                             libp2p::multiaddr::Protocol::Ip4(ip) => {
@@ -1039,9 +1071,10 @@ impl NetworkActor {
                             }
                             _ => false,
                         }
-                    });
-
-                    if is_routable {
+                    })
+                };
+                for addr in info.listen_addrs {
+                    if is_global(&addr) {
                         self.swarm
                             .behaviour_mut()
                             .kademlia
@@ -1049,39 +1082,30 @@ impl NetworkActor {
                     }
                 }
 
-                // If we are behind a NAT, then we have no public addresses that
-                // we are reachable on. But the peer is still seeing us at some
-                // address, it's just that this address is not reachable to
-                // anyone else.
-                // Advertise that we might be reachable there; that's certainly
-                // true for the peer in question and that fact might be enough
-                // to proceed to establish a relay. Other peers will fail to
-                // reach us here and that's okay because they will fail to reach
-                // us anywhere.
-                let node_is_behind_nat = self.swarm.behaviour().autonat.nat_status()
-                    == libp2p::autonat::NatStatus::Private;
-                let observed_addr_is_global = info.observed_addr.iter().any(|proto| match proto {
-                    libp2p::multiaddr::Protocol::Ip4(ip) => {
-                        !ip.is_loopback()
-                            && !ip.is_private()
-                            && !ip.is_link_local()
-                            && !ip.is_unspecified()
-                    }
-                    libp2p::multiaddr::Protocol::Ip6(ip) => {
-                        !ip.is_loopback() && !ip.is_unicast_link_local() && !ip.is_unspecified()
-                    }
-                    _ => false,
-                });
-                if node_is_behind_nat && observed_addr_is_global {
-                    self.swarm.add_external_address(info.observed_addr.clone());
-
-                    // Advance the reachability state machine with this info and
-                    // act accordingly.
+                // If the address is global, that might be important info. So
+                // use and remember it.
+                if is_global(&info.observed_addr) {
+                    // Advance the reachability state machine and act
+                    // accordingly.
                     self.reachability_state
                         .handle_external_address(info.observed_addr);
                     if let Some(external_address) = self.reachability_state.is_pending() {
+                        // We know we are behind a NAT. Add the external address
+                        // to the list of advertised addresses anyway so that
+                        // the relay server knows how to find us. Other peers
+                        // might not be able to reach us here but that's the
+                        // cost of doing business.
                         tracing::debug!("Requesting relay reservations because reachability state is Pending with external address {external_address}.");
+                        self.swarm.add_external_address(external_address);
                         self.request_peer_relays(3);
+                    } else if let ReachabilityState::UnknownWithExternalAddress(external_address) =
+                        &self.reachability_state
+                    {
+                        // If the NAT status is not yet known, add the external
+                        // address to the swarm to be advertised to the rest of
+                        // the world. Then AutoNAT will trial it and determine
+                        // whether it is publicly reachable or not.
+                        self.swarm.add_external_address(external_address.clone());
                     }
                 }
             }
@@ -1478,21 +1502,16 @@ impl NetworkActor {
                 // act accordingly.
                 self.reachability_state.handle_new_nat_status(new);
                 if let Some(external_address) = self.reachability_state.is_pending() {
-                    tracing::debug!("Requesting relay reservations because reachability state is Pending with external address {external_address}.");
+                    tracing::debug!(
+                        "Requesting relay reservations because reachability state is Pending with \
+                        external address {external_address}."
+                    );
                     self.request_peer_relays(3);
                 } else if self.reachability_state.is_private_and_waiting() {
                     tracing::debug!(
                         "Advanced reachability state with new NAT status (private) and now waiting \
-                        for external address. Provoking {} peers with Idenfity to extract observed \
-                        address.",
-                        self.active_connections.len()
+                        for external address."
                     );
-                    for peer_id in self.active_connections.keys() {
-                        self.swarm
-                            .behaviour_mut()
-                            .identify
-                            .push(std::iter::once(*peer_id));
-                    }
                 }
             }
         }
@@ -1546,7 +1565,7 @@ impl NetworkActor {
     fn handle_ping_event(&mut self, event: libp2p::ping::Event) {
         match event.result {
             Ok(duration) => {
-                tracing::debug!("Ping: RTT to {} is {:?}", event.peer, duration);
+                tracing::trace!("Ping: RTT to {} is {:?}", event.peer, duration);
             }
             Err(e) => {
                 tracing::warn!("Ping: Failure with peer {}: {:?}", event.peer, e);
@@ -1778,6 +1797,8 @@ impl NetworkActor {
                 }
             }
             NetworkActorCommand::GetNetworkOverview(channel) => {
+                log_slow_scope!(fn_name!() + "::NetworkActorCommand::GetNetworkOverview");
+
                 tracing::trace!("Assembling network overview ...");
                 let overview = self.assemble_overview();
                 if channel.send(overview).is_err() {
