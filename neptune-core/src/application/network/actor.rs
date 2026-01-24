@@ -703,15 +703,23 @@ impl NetworkActor {
                     .iter()
                     .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit));
                 if is_circuit {
-                    self.reachability_state.handle_relay_confirmed(address);
+                    self.reachability_state
+                        .handle_relay_confirmed(address.clone());
+                    self.swarm.add_external_address(address.clone());
 
                     // Once relayed, we can act as a Kademlia Server
                     self.swarm
                         .behaviour_mut()
                         .kademlia
                         .set_mode(Some(libp2p::kad::Mode::Server));
-                    tracing::info!("Connectivity established via relay.");
+                    tracing::debug!("Connectivity established via relay.");
                 }
+            }
+
+            SwarmEvent::ExpiredListenAddr { address, .. } => {
+                // Quit announcing to the rest of the world that we are
+                // reachable here; we are not.
+                self.swarm.remove_external_address(&address);
             }
 
             // Handle failed outgoing dials.
@@ -817,7 +825,7 @@ impl NetworkActor {
                         .and_modify(|status| *status = RelayStatus::Closed(SystemTime::now()));
 
                     // Finding a replacement happens automatically in the
-                    // regular maintenance task `check_relays`.
+                    // regular maintenance task `check_relays_reservations`.
                 }
             }
 
@@ -1316,7 +1324,7 @@ impl NetworkActor {
                                 peer_count += 1;
                             }
                         }
-                        tracing::debug!("DEBUG: Kademlia Routing Table size: {}", peer_count);
+                        tracing::trace!("Kademlia Routing Table size: {}", peer_count);
                     }
                     let random_peer = PeerId::random();
                     self.swarm
@@ -1489,11 +1497,12 @@ impl NetworkActor {
                             .set_mode(Some(libp2p::kad::Mode::Server));
                     }
                     libp2p::autonat::NatStatus::Private => {
-                        // Set Kademlia mode to client.
-                        // self.swarm
-                        //     .behaviour_mut()
-                        //     .kademlia
-                        //     .set_mode(Some(libp2p::kad::Mode::Client));
+                        // Set Kademlia mode to client. It is not reachable
+                        // until we have relays.
+                        self.swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .set_mode(Some(libp2p::kad::Mode::Client));
                     }
                     libp2p::autonat::NatStatus::Unknown => {}
                 }
@@ -1832,16 +1841,10 @@ impl NetworkActor {
     /// Triggers renewals for those relays nearing expiration, and re-launches
     /// relays to replace those that were closed abruptly.
     ///
-    /// This function compares the timestamp calculated at the time the
-    /// reservation is accepted against the current system time. If a
-    /// reservation has passed the 80% mark, it is removed from the relay
-    /// set.
+    /// "Nearing expiration" means beyond 80% of their lifetime.
     ///
-    /// The closed relays, whose closure timestamps exceed now by more than the
-    /// cooldown period, are counted and removed from the relay set.
-    ///
-    /// Finally [Self::request_peer_relays] is called to secure replacement
-    /// reservation for all duly and abruptly closed reservations.
+    /// [Self::request_peer_relays] is called to secure replacement reservation
+    /// for all orderly and abruptly closed reservations.
     ///
     /// By refreshing slightly before the actual expiration, the node remains
     /// reachable throughout (under normal conditions).
