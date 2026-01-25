@@ -12,6 +12,8 @@ use tokio::task::JoinHandle;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -113,6 +115,9 @@ pub(crate) struct NetworkActor {
     /// Lookup table to find the current address of connected peers or how long
     /// they have been connected for.
     active_connections: HashMap<PeerId, (SystemTime, Multiaddr)>,
+
+    /// Peers with whom the connection was upgraded to the consensus peer loop.
+    upgraded_peers: Arc<Mutex<HashSet<PeerId>>>,
 
     /// Dictionary to find peer metadata, connected or not.
     address_book: AddressBook,
@@ -414,6 +419,7 @@ impl NetworkActor {
             black_list,
             sticky_peers,
             max_num_peers,
+            upgraded_peers: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -1805,10 +1811,25 @@ impl NetworkActor {
         handshake: HandshakeData,
         raw_stream: libp2p::Stream,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
-    ) -> JoinHandle<()> {
+    ) -> Option<JoinHandle<()>> {
         // Counts the number of hops between the node and peers it is connected
         // to. We probably don't need this for the libp2p wrapper.
         const DISTANCE_TO_CONNECTED_PEER: u8 = 1u8;
+
+        // Keep track of which peers get upgraded connections. Prevent same
+        // peer from getting upgraded multiple times.
+        {
+            let mut upgraded_peers = self.upgraded_peers.lock().unwrap();
+            if upgraded_peers.contains(&peer_id) {
+                tracing::info!(
+                    "Aborting connection upgrade because this peer was already upgraded."
+                );
+                return None;
+            }
+            upgraded_peers.insert(peer_id);
+        }
+
+        tracing::info!("Spawning peer loop from libp2p network actor");
 
         // Create immutable (across the lifetime of the connection) peer state.
         // This variable needs to be mutable because of efficient pointer reuse
@@ -1825,6 +1846,7 @@ impl NetworkActor {
 
         let peer_stream = bridge_libp2p_stream(raw_stream);
 
+        let upgraded = self.upgraded_peers.clone();
         Some(tokio::spawn(async move {
             // Because 'peer_stream' implements Sink + Stream + Unpin,
             // and we have the broadcast receiver, this just works.
@@ -1835,6 +1857,15 @@ impl NetworkActor {
                     tracing::warn!(peer = %peer_id, "Peer loop exited with error: {e}");
                 });
 
+            // Remove the PeerId from the set of upgraded peers.
+            {
+                let mut upgraded_peers = upgraded
+                    .lock()
+                    .expect("We do not hold the lock ever over something that can panic.");
+                let was_present = upgraded_peers.remove(&peer_id);
+                assert!(was_present, "Peer ID must be present in upgraded set.");
+            }
+        }))
     }
 
     /// Determines if a connection is direct or proxied via a relay.
