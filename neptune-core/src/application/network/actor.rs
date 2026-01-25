@@ -450,7 +450,7 @@ impl NetworkActor {
         let initial_peers = self.address_book.select_initial_peers(10);
         tracing::debug!("Dialing {} initial peers.", initial_peers.len());
         for address in initial_peers {
-            if let Err(e) = self.swarm.dial(address.clone()) {
+            if let Err(e) = self.dial(address.clone()) {
                 tracing::warn!("Failed to dial initial peer {}: {e}", address.to_string());
                 continue;
             }
@@ -536,9 +536,6 @@ impl NetworkActor {
                             StickyPeer::None => {
                                 *sticky_peer = StickyPeer::Dialing(now);
                                 dials.push(multiaddr.clone());
-                                if let Err(e) = self.swarm.dial(multiaddr.clone()) {
-                                    tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
-                                }
                             }
                             StickyPeer::Dialing(since_timestamp) => {
                                 // If time since dialing started is too big,
@@ -547,9 +544,6 @@ impl NetworkActor {
                                     tracing::warn!(%multiaddr, "Sticky peer seems stuck in dialing phase; trying again.");
                                     *sticky_peer = StickyPeer::Dialing(now);
                                 dials.push(multiaddr.clone());
-                                    if let Err(e) = self.swarm.dial(multiaddr.clone()) {
-                                        tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
-                                    }
                                 }
                             }
                             StickyPeer::Connected(peer_id) => {
@@ -559,9 +553,6 @@ impl NetworkActor {
                                     tracing::warn!(%peer_id, %multiaddr, "Sticky peer disconnected; attempting to re-establish connection..");
                                     *sticky_peer = StickyPeer::Dialing(now);
                                 dials.push(multiaddr.clone());
-                                    if let Err(e) = self.swarm.dial(multiaddr.clone()) {
-                                        tracing::warn!(%multiaddr, "Could not dial sticky peer: {e}.");
-                                    }
                                 }
                             }
                         }
@@ -583,7 +574,7 @@ impl NetworkActor {
 
                     // Issue dial commands.
                     for dial in dials {
-                        if let Err(e) = self.swarm.dial(dial.clone()) {
+                        if let Err(e) = self.dial(dial.clone()) {
                             tracing::warn!(%dial, "Could not dial peer: {e}.");
                         }
                     }
@@ -592,6 +583,22 @@ impl NetworkActor {
         }
 
         Ok(())
+    }
+
+    /// Instructs the swarm to dial an address, but only if it passes a filter.
+    fn dial(&mut self, address: Multiaddr) -> Result<(), libp2p::swarm::DialError> {
+        let addr_str = address.to_string();
+
+        // Filter out addresses that point to ourselves.
+        let is_local = addr_str.contains("127.0.0.1")
+            || addr_str.contains("::1")
+            || addr_str.contains("/lan/");
+
+        if is_local {
+            return Ok(());
+        }
+
+        self.swarm.dial(address)
     }
 
     /// Handle an event coming from the libp2p Swarm.
@@ -1444,7 +1451,7 @@ impl NetworkActor {
 
                 // We use the swarm's dial method. libp2p handles the underlying
                 // TCP/transport logic.
-                if let Err(e) = self.swarm.dial(addr.clone()) {
+                if let Err(e) = self.dial(addr.clone()) {
                     tracing::warn!("Failed to dial {}: {:?}", addr, e);
                 }
             }
