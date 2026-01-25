@@ -12,7 +12,6 @@ use anyhow::Result;
 use bincode::Options;
 use chrono::DateTime;
 use chrono::Utc;
-use futures::FutureExt;
 use futures::SinkExt;
 use futures::TryStreamExt;
 use libp2p::multiaddr::Protocol;
@@ -331,38 +330,16 @@ pub(crate) async fn answer_peer<S>(
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
-    let state_lock_clone = state_lock.clone();
-    let peer_task_to_main_tx_clone = peer_task_to_main_tx.clone();
-    let mut inner_ret: anyhow::Result<()> = Ok(());
-
-    let panic_result = std::panic::AssertUnwindSafe(async {
-        inner_ret = answer_peer_inner(
-            stream,
-            state_lock_clone,
-            peer_address,
-            main_to_peer_task_rx,
-            peer_task_to_main_tx,
-            own_handshake_data,
-            handshake_permit,
-        )
-        .await;
-    })
-    .catch_unwind()
+    let inner_ret = answer_peer_inner(
+        stream,
+        state_lock.clone(),
+        peer_address,
+        main_to_peer_task_rx,
+        peer_task_to_main_tx,
+        own_handshake_data,
+        handshake_permit,
+    )
     .await;
-
-    match panic_result {
-        Ok(_) => (),
-        Err(_err) => {
-            error!("Peer task (incoming) for {peer_address} panicked. Invoking close connection callback");
-            let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
-            close_peer_connected_callback(
-                state_lock.clone(),
-                peer_multiaddr,
-                &peer_task_to_main_tx_clone,
-            )
-            .await;
-        }
-    }
 
     inner_ret
 }
@@ -525,68 +502,48 @@ pub(crate) async fn call_peer(
     own_handshake_data: HandshakeData,
     peer_distance: u8,
 ) {
-    let state_clone: GlobalStateLock = state.clone();
-    let peer_task_to_main_tx_clone = peer_task_to_main_tx.clone();
-    let panic_result = std::panic::AssertUnwindSafe(async {
-        debug!("Attempting to initiate connection to {peer_address}");
-        match tokio::net::TcpStream::connect(peer_address).await {
-            Err(e) => {
-                let msg = format!("Failed to establish TCP connection to {peer_address}: {e}");
-                if peer_distance == 1 {
+    debug!("Attempting to initiate connection to {peer_address}");
+    match tokio::net::TcpStream::connect(peer_address).await {
+        Err(e) => {
+            let msg = format!("Failed to establish TCP connection to {peer_address}: {e}");
+            if peer_distance == 1 {
+                // outgoing connection to peer of distance 1 means user has
+                // requested a connection to this peer through CLI
+                // arguments, and should be warned if this fails.
+                warn!("{msg}");
+            } else {
+                debug!("{msg}");
+            }
+        }
+        Ok(stream) => {
+            match call_peer_inner(
+                stream,
+                state,
+                peer_address,
+                main_to_peer_task_rx,
+                peer_task_to_main_tx,
+                &own_handshake_data,
+                peer_distance,
+            )
+            .await
+            {
+                Ok(()) => (),
+                Err(e) => {
+                    let msg = format!("{e}. Failed to establish connection.");
                     // outgoing connection to peer of distance 1 means user has
                     // requested a connection to this peer through CLI
                     // arguments, and should be warned if this fails.
-                    warn!("{msg}");
-                } else {
-                    debug!("{msg}");
-                }
-            }
-            Ok(stream) => {
-                match call_peer_inner(
-                    stream,
-                    state,
-                    peer_address,
-                    main_to_peer_task_rx,
-                    peer_task_to_main_tx,
-                    &own_handshake_data,
-                    peer_distance,
-                )
-                .await
-                {
-                    Ok(()) => (),
-                    Err(e) => {
-                        let msg = format!("{e}. Failed to establish connection.");
-                        // outgoing connection to peer of distance 1 means user has
-                        // requested a connection to this peer through CLI
-                        // arguments, and should be warned if this fails.
-                        if peer_distance == 1 {
-                            warn!("{msg}");
-                        } else {
-                            debug!("{msg}");
-                        }
+                    if peer_distance == 1 {
+                        warn!("{msg}");
+                    } else {
+                        debug!("{msg}");
                     }
                 }
             }
-        };
-
-        info!("Connection to {peer_address} closing");
-    })
-    .catch_unwind()
-    .await;
-
-    match panic_result {
-        Ok(_) => (),
-        Err(_) => {
-            error!("Peer task (outgoing) for {peer_address} panicked. Invoking close connection callback");
-            let peer_multiaddress = socketaddr_to_multiaddr(peer_address);
-            close_peer_connected_callback(
-                state_clone,
-                peer_multiaddress,
-                &peer_task_to_main_tx_clone,
-            )
-            .await;
         }
-    }
+    };
+
+    info!("Connection to {peer_address} closing");
 }
 
 /// Legacy peer-to-peer stack.

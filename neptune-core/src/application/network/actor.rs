@@ -1225,15 +1225,16 @@ impl NetworkActor {
             return Err(ActorError::NoAddressForPeer(peer_id));
         };
 
-        // Spawn the legacy loop with the hijacked stream.
-        let loop_handle =
-            self.spawn_peer_loop(peer_id, address.clone(), handshake, stream, from_main_rx);
-
-        // Notify the rest of the application that a peer is ready.
-        let _ = self
-            .event_tx
-            .send(NetworkEvent::NewPeerLoop { loop_handle })
-            .await;
+        // Spawn the consensus peer loop with the hijacked stream.
+        if let Some(loop_handle) =
+            self.spawn_peer_loop(peer_id, address.clone(), handshake, stream, from_main_rx)
+        {
+            // Notify the rest of the application that a peer is ready.
+            let _ = self
+                .event_tx
+                .send(NetworkEvent::NewPeerLoop { loop_handle })
+                .await;
+        }
 
         Ok(())
     }
@@ -1824,16 +1825,16 @@ impl NetworkActor {
 
         let peer_stream = bridge_libp2p_stream(raw_stream);
 
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             // Because 'peer_stream' implements Sink + Stream + Unpin,
             // and we have the broadcast receiver, this just works.
             peer_loop_handler
                 .run_wrapper(peer_stream, from_main_rx)
                 .await
                 .unwrap_or_else(|e| {
-                    tracing::warn!(peer = %peer_id, "Peer loop exited with error: {:?}", e);
+                    tracing::warn!(peer = %peer_id, "Peer loop exited with error: {e}");
                 });
-        })
+
     }
 
     /// Determines if a connection is direct or proxied via a relay.
