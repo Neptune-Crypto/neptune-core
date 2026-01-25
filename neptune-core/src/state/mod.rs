@@ -1647,10 +1647,7 @@ impl GlobalState {
             listen_port,
             network: self.cli().network,
             instance_id: self.net.instance_id(),
-            version: VersionString::try_from_str(VERSION).unwrap_or_else(|_| {
-                panic!(
-                "Must be able to convert own version number to fixed-size string. Got {VERSION}")
-            }),
+            version: VersionString::new_from_str(VERSION),
             // For now, all nodes are archival nodes
             is_archival_node: self.chain.is_archival_node(),
             is_bootstrapper_node: self.cli().bootstrap,

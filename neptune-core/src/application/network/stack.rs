@@ -3,9 +3,8 @@ use libp2p::swarm::NetworkBehaviour;
 use crate::application::network::gateway::GatewayEvent;
 use crate::application::network::gateway::StreamGateway;
 
-/// The protocol ID string, dynamically generated from the crate version, e.g.,
-/// "/neptune/0.6.0"
-pub(crate) const NEPTUNE_PROTOCOL_STR: &str = concat!("/neptune/", env!("CARGO_PKG_VERSION"));
+/// The protocol ID string
+pub(crate) const NEPTUNE_PROTOCOL_STR: &str = "/neptune/";
 
 /// The internal collection of libp2p protocols that define how this node
 /// interacts with the p2p network at the transport and discovery level.

@@ -251,7 +251,7 @@ pub(crate) fn get_dummy_peer_outgoing(address: SocketAddr) -> PeerInfo {
 }
 
 pub fn get_dummy_version() -> VersionString {
-    VersionString::try_from_str(VERSION).unwrap()
+    VersionString::new_from_str(VERSION)
 }
 
 /// Return a handshake object with a randomly set instance ID

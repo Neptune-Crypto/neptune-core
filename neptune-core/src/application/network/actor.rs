@@ -254,7 +254,7 @@ impl NetworkActor {
     const RELAY_COOLDOWN_PERIOD: Duration = Duration::from_secs(10);
 
     /// Hardcoded version strings for Kademlia.
-    const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "/kad/1.0.0");
+    const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "/kad/");
     const KADEMLIA_FOR_NEPTUNE_PROTOCOL: libp2p::StreamProtocol =
         libp2p::StreamProtocol::new(Self::KADEMLIA_FOR_NEPTUNE_STRING);
 
@@ -277,12 +277,13 @@ impl NetworkActor {
         } = channels;
 
         // Create the Identify config (required for the NetworkStack)
-        let identify_config =
-            libp2p::identify::Config::new(NEPTUNE_PROTOCOL_STR.to_owned(), local_key.public())
-                .with_agent_version(format!("neptune-cash/{}", env!("CARGO_PKG_VERSION")))
-                // pro-actively tell peers about new (sub-)addresses
-                .with_push_listen_addr_updates(true)
-                .with_interval(std::time::Duration::from_secs(300));
+        let network = global_state_lock.cli().network;
+        let protocol_version = format!("{NEPTUNE_PROTOCOL_STR}-{network}");
+        let identify_config = libp2p::identify::Config::new(protocol_version, local_key.public())
+            .with_agent_version(format!("neptune-cash/{}", env!("CARGO_PKG_VERSION")))
+            // pro-actively tell peers about new (sub-)addresses
+            .with_push_listen_addr_updates(true)
+            .with_interval(std::time::Duration::from_secs(300));
 
         // Configure Ping.
         let ping_config = libp2p::ping::Config::new()

@@ -58,6 +58,8 @@ pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 500 * 1024 * 1024;
 /// Only accept connections where peer's reported timestamp deviates from our
 /// by less than this value.
 const PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS: u128 = 90;
+pub(crate) const PEER_TIME_DIFFERENCE_THRESHOLD: Duration =
+    Duration::from_secs(PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS as u64);
 
 /// Use this function to ensure that the same rules apply for both
 /// ingoing and outgoing connections. This limits the size of messages
@@ -1315,12 +1317,8 @@ mod tests {
         let mut own_handshake = state.get_own_handshakedata();
 
         // Set reported versions to something incompatible
-        VersionString::try_from_str("0.0.3")
-            .unwrap()
-            .clone_into(&mut own_handshake.version);
-        VersionString::try_from_str("0.0.0")
-            .unwrap()
-            .clone_into(&mut other_handshake.version);
+        VersionString::new_from_str("0.0.3").clone_into(&mut own_handshake.version);
+        VersionString::new_from_str("0.0.0").clone_into(&mut other_handshake.version);
 
         let peer_address = get_dummy_socket_address(55);
         let connection_status = check_if_connection_is_allowed(
