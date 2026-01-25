@@ -943,19 +943,31 @@ impl NetworkActor {
                 // Activate the Kademlia "Bridge": feed the addresses to
                 // Kademlia. Filter out local addresses.
                 for addr in info.listen_addrs {
-                    // Filter out local addresses.
-                    let addr_str = addr.to_string();
-                    let is_local = addr_str.contains("127.0.0.1")
-                        || addr_str.contains("::1")
-                        || addr_str.contains("/lan/");
-                    if is_local {
-                        continue;
-                    }
+                    let is_routable = addr.iter().any(|protocol| {
+                        // Disallow addresses not globally reachable
+                        match protocol {
+                            libp2p::multiaddr::Protocol::Ip4(ip) => {
+                                !ip.is_link_local()
+                                    && !ip.is_loopback()
+                                    && !ip.is_private()
+                                    && !ip.is_unspecified()
+                            }
+                            libp2p::multiaddr::Protocol::Ip6(ip) => {
+                                !ip.is_loopback()
+                                    && !ip.is_unspecified()
+                                    && !ip.is_unicast_link_local()
+                                    && !ip.is_unique_local()
+                            }
+                            _ => false,
+                        }
+                    });
 
-                    self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .add_address(&peer_id, addr);
+                    if is_routable {
+                        self.swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .add_address(&peer_id, addr);
+                    }
                 }
             }
 
@@ -1135,7 +1147,7 @@ impl NetworkActor {
     ///
     /// We contribute to network health by sharing what we know.
     ///
-    /// By adding peers from `Identify` into Kademlia, we aren't just helping
+    /// By adding peers from `Identify` into `Kademlia`, we aren't just helping
     /// ourselves; we are making those peers discoverable to the rest of the
     /// Neptune Cash network through our own routing table.
     ///

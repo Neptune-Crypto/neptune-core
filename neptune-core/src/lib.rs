@@ -238,7 +238,12 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     task_join_handles.push(actor_handle);
 
     // Tell libp2p network Actor to listen up.
-    for own_listen_address in cli_args.own_listen_addresses() {
+    let own_listen_addresses = cli_args.own_listen_addresses();
+    debug!(
+        "own_listen_address: {}",
+        own_listen_addresses.iter().join("; ")
+    );
+    for own_listen_address in own_listen_addresses {
         if let Err(e) = network_command_tx
             .send(NetworkActorCommand::Listen(own_listen_address))
             .await
