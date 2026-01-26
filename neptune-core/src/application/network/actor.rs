@@ -995,6 +995,7 @@ impl NetworkActor {
     /// start.
     fn bounce(&self, address: &Multiaddr) -> bool {
         if self.active_connections.len() >= self.max_num_peers {
+            tracing::debug!("Max active connections reached");
             return true;
         }
         if let Some(ip) = address.iter().find_map(|protocol| match protocol {
@@ -1003,11 +1004,13 @@ impl NetworkActor {
             _ => None,
         }) {
             if self.black_list.is_banned(&ip) {
+                tracing::debug!("IP is banned");
                 return true;
             }
         }
         // In this `else` case, we have a peer `Multiaddr` but no IP.
         else {
+            tracing::debug!("No IP address found in MultiAddr");
             return true;
         }
 
