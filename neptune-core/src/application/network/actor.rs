@@ -1937,7 +1937,8 @@ impl NetworkActor {
             // Format: /ip4/RELAY_IP/tcp/PORT/p2p/RELAY_ID/p2p-circuit
             let circuit_addr = addr
                 .clone()
-                .with(libp2p::multiaddr::Protocol::P2p(peer_id))
+                .with_p2p(peer_id)
+                .unwrap_or_else(|already_qualified_addr| already_qualified_addr)
                 .with(libp2p::multiaddr::Protocol::P2pCircuit);
 
             tracing::debug!(%peer_id, "Attempting relay reservation by listening on {}.", circuit_addr);
