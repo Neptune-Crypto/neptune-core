@@ -693,7 +693,7 @@ impl NetworkActor {
 
                 // If the address is a circuit address, modify state
                 // accordingly.
-                // The reason why this state update is does not live in
+                // The reason why this state update does not live in
                 // `handle_relay_client_event` is because there may be silent
                 // failures in between the events triggered there (which
                 // indicate protocol success) and this event (which indicates
@@ -1028,12 +1028,8 @@ impl NetworkActor {
                     if !missing_in_remote.is_empty() || !extra_in_remote.is_empty() {
                         tracing::warn!(
                             "Protocol mismatch with peer {peer_id}. Missing: [{}], Extra: [{}]",
-                            missing_in_remote.iter().copied().join(", "),
-                            extra_in_remote.iter().copied().join(", "),
-                        );
-                    } else {
-                        tracing::debug!(
-                            "Supported protocols are identical between local and remote."
+                            missing_in_remote.iter().join(", "),
+                            extra_in_remote.iter().join(", "),
                         );
                     }
                 }
@@ -1090,8 +1086,8 @@ impl NetworkActor {
                     }
                 }
 
-                // If the address is global, that might be important info. So
-                // use and remember it.
+                // If the address that the peer sees us at is global, that might
+                // be important info. So use and remember it.
                 if is_global(&info.observed_addr) {
                     // Advance the reachability state machine and act
                     // accordingly.
