@@ -68,8 +68,8 @@ pub(crate) struct GatewayHandler {
     /// Whether we requested a handshake.
     outbound_requested_already: bool,
 
-    /// Whether the connection was initiated by the other node.
-    connection_is_inbound: bool,
+    local_peer_id: libp2p::PeerId,
+    remote_peer_id: libp2p::PeerId,
 }
 
 impl ConnectionHandler for GatewayHandler {
@@ -208,7 +208,8 @@ impl ConnectionHandler for GatewayHandler {
 
         // If we haven't asked for a handshake yet, and we are the initiator,
         // request it now.
-        if !self.outbound_requested_already && !self.connection_is_inbound {
+        let we_are_initiator = self.local_peer_id < self.remote_peer_id;
+        if !self.outbound_requested_already && we_are_initiator {
             self.outbound_requested_already = true;
             return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
                 protocol: SubstreamProtocol::new(
@@ -326,17 +327,21 @@ pub(crate) struct StreamGateway {
     upgraded_peers: Arc<Mutex<HashSet<PeerId>>>,
 
     events: VecDeque<ToSwarm<GatewayEvent, Command>>,
+
+    local_peer_id: PeerId,
 }
 
 impl StreamGateway {
     pub(crate) fn new(
         global_state: GlobalStateLock,
         upgraded_peers: Arc<Mutex<HashSet<PeerId>>>,
+        local_peer_id: PeerId,
     ) -> Self {
         Self {
             global_state,
             events: VecDeque::new(),
             upgraded_peers,
+            local_peer_id,
         }
     }
 
@@ -376,7 +381,8 @@ impl NetworkBehaviour for StreamGateway {
             pending_events: VecDeque::new(),
             pause: !NetworkActor::is_direct(remote_addr),
             outbound_requested_already: false,
-            connection_is_inbound: true,
+            local_peer_id: self.local_peer_id,
+            remote_peer_id: peer,
         })
     }
 
@@ -405,8 +411,9 @@ impl NetworkBehaviour for StreamGateway {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
             pause: !NetworkActor::is_direct(addr),
-            connection_is_inbound: false,
             outbound_requested_already: false,
+            local_peer_id: self.local_peer_id,
+            remote_peer_id: peer,
         })
     }
 

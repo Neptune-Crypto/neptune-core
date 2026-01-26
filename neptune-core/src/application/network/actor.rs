@@ -390,7 +390,11 @@ impl NetworkActor {
                     relay_client,
                     dcutr: libp2p::dcutr::Behaviour::new(local_peer_id),
                     kademlia,
-                    gateway: StreamGateway::new(global_state_lock.clone(), upgraded_peers_clone),
+                    gateway: StreamGateway::new(
+                        global_state_lock.clone(),
+                        upgraded_peers_clone,
+                        local_peer_id,
+                    ),
                 }
             })?
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
