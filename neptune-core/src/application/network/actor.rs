@@ -689,7 +689,43 @@ impl NetworkActor {
                     return Ok(());
                 }
 
+                // Reject multi-hop circuits.
+                let is_multihop = address
+                    .iter()
+                    .filter(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+                    .count()
+                    > 1;
+                if is_multihop {
+                    tracing::warn!(
+                        "Rejecting multi-hop listen address {address} because multi-hop."
+                    );
+                    return Ok(());
+                }
+
                 tracing::debug!("Node is listening on {:?}", address);
+
+                // If the address is a circuit address, tell the swarm we are
+                // listening there and tell Kademlia that we live there.
+                // We do not want to wait until `ExternalAddrConfirmed` because
+                // we want to react quickly.
+                let is_circuit = address
+                    .iter()
+                    .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit));
+                if is_circuit {
+                    self.swarm.add_external_address(address.clone());
+
+                    // Once relayed, we can act as a Kademlia Server
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .set_mode(Some(libp2p::kad::Mode::Server));
+                    tracing::debug!("Connectivity established via relay.");
+                }
+            }
+
+            // The packet made it across the network and back.
+            SwarmEvent::ExternalAddrConfirmed { address } => {
+                self.swarm.add_external_address(address.clone());
 
                 // If the address is a circuit address, modify state
                 // accordingly.
@@ -699,20 +735,16 @@ impl NetworkActor {
                 // indicate protocol success) and this event (which indicates
                 // transport success). This success event is the final boss
                 // that trumps all predecessors.
+                // The reason why this state update does not live in the handler
+                // for `NewListenAddr` is because we want *certainty* before
+                // updating the state machine. We get an early but fallible
+                // indication of success from `NewListenAddr`.
                 let is_circuit = address
                     .iter()
                     .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit));
                 if is_circuit {
                     self.reachability_state
                         .handle_relay_confirmed(address.clone());
-                    self.swarm.add_external_address(address.clone());
-
-                    // Once relayed, we can act as a Kademlia Server
-                    self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .set_mode(Some(libp2p::kad::Mode::Server));
-                    tracing::debug!("Connectivity established via relay.");
                 }
             }
 
