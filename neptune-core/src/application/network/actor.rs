@@ -329,7 +329,10 @@ impl NetworkActor {
                 ..Default::default()
             }
         } else {
-            libp2p::autonat::Config::default()
+            libp2p::autonat::Config {
+                confidence_max: 2,
+                ..Default::default()
+            }
         };
 
         // Configure yamux (stream multiplexer)
