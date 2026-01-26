@@ -14,6 +14,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use get_size2::GetSize;
+use itertools::Itertools;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use libp2p::StreamProtocol;
@@ -175,6 +176,32 @@ impl AddressBook {
             tracing::warn!(%peer_id, "Rejected peer: too many data items.");
             return;
         }
+
+        // Filter out non-global addresses and circuit addresses.
+        let listen_addresses = listen_addresses
+            .into_iter()
+            .filter(|addr| {
+                addr.iter().all(|proto| match proto {
+                    libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => {
+                        !ipv4_addr.is_link_local()
+                            && !ipv4_addr.is_loopback()
+                            && !ipv4_addr.is_private()
+                            && !ipv4_addr.is_unspecified()
+                    }
+                    libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => {
+                        !ipv6_addr.is_loopback()
+                            && !ipv6_addr.is_unicast_link_local()
+                            && !ipv6_addr.is_unspecified()
+                    }
+                    libp2p::multiaddr::Protocol::P2pCircuit => false,
+                    _ => true,
+                })
+            })
+            .collect_vec();
+        if listen_addresses.is_empty() {
+            return;
+        }
+
         // Total size of all data should not exceed a reasonable limit.
         let mut total_size: usize = 0;
         total_size += peer_id.to_bytes().len();
