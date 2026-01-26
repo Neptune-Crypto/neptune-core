@@ -42,7 +42,10 @@ impl Display for ReachabilityState {
 
 /// Tracks the state of the reachability machine.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(strum::EnumCount))]
+#[cfg_attr(
+    any(test, feature = "arbitrary-impls", feature = "mock-rpc"),
+    derive(strum::EnumCount)
+)]
 pub enum RelayStrategy {
     /// We know we are private, but Identify hasn't given us an external IP yet.
     #[default]
