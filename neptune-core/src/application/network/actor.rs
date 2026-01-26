@@ -982,17 +982,6 @@ impl NetworkActor {
     }
 
     /// Check if a connection to the given address should be allowed.
-    ///
-    /// This function enforces three things:
-    ///  1. The `max_num_peers` limit on the number of connections.
-    ///  2. Bans.
-    ///  3. The IP requirement.
-    ///
-    /// In the future, we can accept alternative, non-IP addresses, but *as long
-    /// as they can be soundly banned* -- because otherwise they expose the node
-    /// to DoS attacks. Since we have no mechanism to ban generic `Multiaddr`s,
-    /// the default behavior should be to treat such peers as banned from the
-    /// start.
     fn bounce(&self, address: &Multiaddr) -> bool {
         if self.active_connections.len() >= self.max_num_peers {
             tracing::debug!("Max active connections reached");
@@ -1007,10 +996,14 @@ impl NetworkActor {
                 tracing::debug!("IP is banned");
                 return true;
             }
-        }
-        // In this `else` case, we have a peer `Multiaddr` but no IP.
-        else {
-            tracing::debug!("No IP address found in MultiAddr");
+        } else if address
+            .iter()
+            .all(|proto| matches!(proto, libp2p::multiaddr::Protocol::P2p(_)))
+        {
+            // Accept incoming connections via single-hop circuits.
+            return false;
+        } else {
+            tracing::debug!("No IP address and not bare p2p");
             return true;
         }
 
