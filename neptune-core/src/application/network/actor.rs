@@ -1947,7 +1947,7 @@ impl NetworkActor {
             // reservation, so catch and record the listener id. We will catch
             // the matching success event (`ReservationReqAccepted`) to activate
             // the relay with an accurate timestamp at that time.
-            match self.swarm.listen_on(circuit_addr) {
+            match self.swarm.listen_on(circuit_addr.clone()) {
                 Ok(listener_id) => {
                     self.relays
                         .insert(peer_id, RelayStatus::Waiting(listener_id));
@@ -1958,7 +1958,7 @@ impl NetworkActor {
                     }
                 }
                 Err(e) => {
-                    tracing::error!("Failed to initiate relay reservation: {:?}", e);
+                    tracing::error!(%circuit_addr, "Failed to initiate relay reservation: {:?}", e);
                 }
             };
         }
