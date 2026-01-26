@@ -431,16 +431,20 @@ impl Widget for OverviewScreen {
                 .unwrap_or("-".to_string())
         ));
         lines.push(format!(
-            "external address(es): (0/{}) {}",
+            "external address(es): ({})",
             dashifnotset!(data
                 .network_overview
                 .as_ref()
                 .map(|no| no.external_addresses.len())),
-            dashifnotset!(data
-                .network_overview
-                .as_ref()
-                .and_then(|no| no.external_addresses.first())),
         ));
+        for external_address in data
+            .network_overview
+            .as_ref()
+            .into_iter()
+            .flat_map(|no| no.external_addresses.clone())
+        {
+            lines.push(format!(" - {external_address}"));
+        }
         lines.push(format!(
             "# peers: {}({}) / {}",
             data.network_overview
@@ -471,7 +475,7 @@ impl Widget for OverviewScreen {
                 .as_ref()
                 .map(|no| no.address_book_size))
         ));
-        Self::report(&lines, "Peers")
+        Self::report(&lines, "Network")
             .style(style)
             .render(vrecter.next(2 + lines.len() as u16), buf);
 
