@@ -1054,6 +1054,7 @@ impl NetworkActor {
                 tracing::trace!("Protocols supported by remote: {:?}", info.protocols);
                 tracing::trace!("Observed Address: {:?}", info.observed_addr);
                 tracing::trace!("Agent Version: {:?}", info.agent_version);
+                tracing::trace!("Addresses: [{}]", info.listen_addrs.iter().join(", "));
 
                 // Check if the peer speaks the same Neptune version as us.
                 let network = self.global_state_lock.cli().network;
