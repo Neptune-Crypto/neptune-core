@@ -1994,6 +1994,14 @@ impl NetworkActor {
         let mut rng = rand::rng().clone();
         available_peers.shuffle(&mut rng);
 
+        tracing::trace!(
+            "Requesting {num_relays} relays out of {} peers. Number of current \
+            relays: {} / number of available peers: {}",
+            self.active_connections.len(),
+            self.relays.len(),
+            available_peers.len()
+        );
+
         let mut counter = 0;
         // Problem: this skip ends up skipping over active peers that happen
         // to have announced a circuit address later than a non-circuit
@@ -2007,8 +2015,8 @@ impl NetworkActor {
             // Address must have physical transport path (socket address). Just
             // a PeerId is not enough. Will error `MissingRelayAddr` otherwise.
             let has_physical_transport_path = |address: &Multiaddr| {
-                address.iter().all(|proto| {
-                    !matches!(
+                address.iter().any(|proto| {
+                    matches!(
                         proto,
                         libp2p::multiaddr::Protocol::Ip4(_) | libp2p::multiaddr::Protocol::Ip6(_)
                     )
@@ -2037,7 +2045,6 @@ impl NetworkActor {
             }
             let index = rand::rng().random_range(0..num_suitable_addresses);
             let address = suitable_addresses[index].clone();
-            tracing::debug!(%peer_id, "Attempting relay reservation at {address} out of {num_suitable_addresses} options.");
 
             // Construct the circuit address.
             // Format: /ip4/RELAY_IP/tcp/PORT/p2p/RELAY_ID/p2p-circuit
