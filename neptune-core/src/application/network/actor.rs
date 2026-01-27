@@ -2029,9 +2029,13 @@ impl NetworkActor {
                 .collect_vec();
 
             // Select random.
-            let index = rand::rng().random_range(0..suitable_addresses.len());
+            let num_suitable_addresses = suitable_addresses.len();
+            if num_suitable_addresses == 0 {
+                continue;
+            }
+            let index = rand::rng().random_range(0..num_suitable_addresses);
             let address = suitable_addresses[index].clone();
-            tracing::debug!(%peer_id, "Attempting relay reservation at {address} out of {} options.", suitable_addresses.len());
+            tracing::debug!(%peer_id, "Attempting relay reservation at {address} out of {num_suitable_addresses} options.");
 
             // Construct the circuit address.
             // Format: /ip4/RELAY_IP/tcp/PORT/p2p/RELAY_ID/p2p-circuit
