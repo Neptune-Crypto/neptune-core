@@ -1950,8 +1950,14 @@ impl NetworkActor {
         }
 
         // Request new relays to replace about-to-expire and closed relays.
-        tracing::debug!("Requesting relays to replace {num_expired_relays} expired relays and {num_closed_relays} abruptly closed ones.");
-        self.request_peer_relays(num_expired_relays + num_closed_relays);
+        let num_requested = num_expired_relays + num_closed_relays;
+        tracing::debug!(
+            "Requesting {num_requested} relays to replace {num_expired_relays} \
+            expired relays and {num_closed_relays} abruptly closed ones, out \
+            of {} total relays.",
+            self.relays.len()
+        );
+        self.request_peer_relays(num_requested);
     }
 
     /// Make a random selection of k peers from the set of active connections
@@ -1981,6 +1987,17 @@ impl NetworkActor {
                 .iter()
                 .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
             {
+                continue;
+            }
+
+            // The peer's Multiaddr must have a physical path (socket address);
+            // just a PeerId is not enough!
+            if addr.iter().all(|proto| {
+                !matches!(
+                    proto,
+                    libp2p::multiaddr::Protocol::Ip4(_) | libp2p::multiaddr::Protocol::Ip6(_)
+                )
+            }) {
                 continue;
             }
 
