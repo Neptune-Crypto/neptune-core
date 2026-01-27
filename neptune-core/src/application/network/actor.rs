@@ -311,6 +311,7 @@ impl NetworkActor {
             .with_agent_version(format!("neptune-cash/{}", env!("CARGO_PKG_VERSION")))
             // pro-actively tell peers about new (sub-)addresses
             .with_push_listen_addr_updates(true)
+            .with_hide_listen_addrs(true)
             .with_interval(std::time::Duration::from_secs(300));
 
         // Configure Ping.
