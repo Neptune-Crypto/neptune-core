@@ -28,6 +28,8 @@ pub(crate) struct NetworkConfig {
 
     /// The max. number of peers to connect to.
     pub(super) max_num_peers: usize,
+
+    external_addresses: Vec<Multiaddr>,
 }
 
 impl Default for NetworkConfig {
@@ -41,6 +43,7 @@ impl Default for NetworkConfig {
             banned_peers: vec![],
             sticky_peers: vec![],
             max_num_peers: 10,
+            external_addresses: vec![],
         }
     }
 }
@@ -68,6 +71,12 @@ impl NetworkConfig {
 
     pub(crate) fn with_cli_peers(mut self, sticky_peers: Vec<Multiaddr>) -> Self {
         self.sticky_peers.extend(sticky_peers);
+        self
+    }
+
+    /// Overwrite the `external_addresses` field.
+    pub(crate) fn with_external_addresses(mut self, external_addresses: Vec<Multiaddr>) -> Self {
+        self.external_addresses = external_addresses;
         self
     }
 
@@ -112,5 +121,9 @@ impl NetworkConfig {
                 })
             })
             .collect()
+    }
+
+    pub(crate) fn external_addresses(&self) -> Vec<Multiaddr> {
+        self.external_addresses.clone()
     }
 }

@@ -357,16 +357,30 @@ pub struct Args {
 
     /// Port on which to listen for libp2p QUIC peer connections.
     #[clap(long, default_value = "9800", value_name = "PORT")]
-    pub libp2p_quic: u16,
+    pub quic_port: u16,
 
     /// Port on which to listen for libp2p TCP peer connections.
     #[clap(long, default_value = "9801", value_name = "PORT")]
-    pub libp2p_tcp: u16,
+    pub tcp_port: u16,
 
     /// IP on which to listen for peer connections. Will default to all network
     /// interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
     pub peer_listen_addr: IpAddr,
+
+    /// Public IP where the node is reachable.
+    ///
+    /// Only use for globally accessible IPs. Setting this value overrides
+    /// libp2p AutoNAT behaviour [sic]. If no public IPs are set, libp2p's
+    /// AutoNAT protocol will automatically try to guess the NAT status and
+    /// external addresses.
+    ///
+    /// Examples:
+    /// ```text
+    /// --public-ip 93.7.1.1 --public-ip 2001:db8::1428:57ab
+    /// ```
+    #[structopt(long = "public-ip")]
+    pub public_ips: Vec<IpAddr>,
 
     /// Maximum number of blocks that the client can catch up to without going
     /// into sync mode.
@@ -905,12 +919,36 @@ impl Args {
         for ip in ips {
             // Add TCP Multiaddr
             let mut tcp_addr = Multiaddr::from(ip);
-            tcp_addr.push(Protocol::Tcp(self.libp2p_tcp));
+            tcp_addr.push(Protocol::Tcp(self.tcp_port));
             addrs.push(tcp_addr);
 
             // Add QUIC Multiaddr (QUIC runs over UDP)
             let mut quic_addr = Multiaddr::from(ip);
-            quic_addr.push(Protocol::Udp(self.libp2p_quic));
+            quic_addr.push(Protocol::Udp(self.quic_port));
+            quic_addr.push(Protocol::QuicV1);
+            addrs.push(quic_addr);
+        }
+
+        addrs
+    }
+
+    /// List of publicly reachable Multiaddrs with embedded IPv{4,6} defined by
+    /// the user.
+    ///
+    /// If non-empty, this list overrides libp2p's AutoNAT behaviour and informs
+    /// libp2p of the external addresses this node is reachable on.
+    pub(crate) fn own_public_addresses(&self) -> Vec<Multiaddr> {
+        let mut addrs = Vec::new();
+
+        for ip in &self.public_ips {
+            // Add TCP Multiaddr
+            let mut tcp_addr = Multiaddr::from(*ip);
+            tcp_addr.push(Protocol::Tcp(self.tcp_port));
+            addrs.push(tcp_addr);
+
+            // Add QUIC Multiaddr (QUIC runs over UDP)
+            let mut quic_addr = Multiaddr::from(*ip);
+            quic_addr.push(Protocol::Udp(self.quic_port));
             quic_addr.push(Protocol::QuicV1);
             addrs.push(quic_addr);
         }

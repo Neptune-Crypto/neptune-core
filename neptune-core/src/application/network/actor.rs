@@ -159,6 +159,13 @@ pub(crate) struct NetworkActor {
     /// Tracks which protocols this node actually supports, as reported to other
     /// peers in Identify.
     active_protocols: Option<HashSet<libp2p::StreamProtocol>>,
+
+    /// Whether to inform the swarm about new potential external addresses.
+    ///
+    /// During normal libp2p operations, new incoming connections inform the
+    /// swarm about the external addresses on which the node was dialed. If set,
+    /// this information is allowed.
+    accept_new_external_addresses: bool,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -313,7 +320,10 @@ impl NetworkActor {
         let max_num_peers = config.max_num_peers;
 
         // Configure autoNAT
-        let autonat_config = if config.network.is_reg_test() {
+        let neuter_autonat = !config.external_addresses().is_empty();
+
+        let mut autonat_config = libp2p::autonat::Config::default();
+        if config.network.is_reg_test() {
             // Flag `only_global_ips` determines whether to ignore
             // addresses reported by peers when those addresses are
             // local, e.g., 192.168.0.15. On main net we cannot use
@@ -324,16 +334,12 @@ impl NetworkActor {
             // want to trigger all usual actions and sequences for the
             // purpose of testing them. Therefore, on regtest we do not
             // ignore local IPs.
-            libp2p::autonat::Config {
-                only_global_ips: false,
-                ..Default::default()
-            }
-        } else {
-            libp2p::autonat::Config {
-                confidence_max: 2,
-                ..Default::default()
-            }
-        };
+            autonat_config.only_global_ips = false;
+        }
+        if neuter_autonat {
+            const TEN_THOUSAND_DAYS: Duration = Duration::from_hours(24 * 10_000);
+            autonat_config.boot_delay = TEN_THOUSAND_DAYS;
+        }
 
         // Configure yamux (stream multiplexer)
         let yamux_tuner = || {
@@ -359,7 +365,7 @@ impl NetworkActor {
         // Build Swarm
         let upgraded_peers = Arc::new(Mutex::new(HashSet::new()));
         let upgraded_peers_clone = upgraded_peers.clone();
-        let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
+        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
             .with_tokio()
             .with_tcp(
                 libp2p::tcp::Config::default(),
@@ -400,6 +406,10 @@ impl NetworkActor {
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
 
+        for external_address in config.external_addresses() {
+            swarm.add_external_address(external_address);
+        }
+
         // Load or build address book
         let address_book_file = config.address_book_file();
         let address_book =
@@ -431,6 +441,13 @@ impl NetworkActor {
             .map(|ma| (ma.clone(), StickyPeer::None))
             .collect();
 
+        let reachability_state = config
+            .external_addresses()
+            .first()
+            .cloned()
+            .map(ReachabilityState::Public)
+            .unwrap_or_default();
+
         Ok(Self {
             swarm,
             peer_to_main_loop_tx,
@@ -446,8 +463,9 @@ impl NetworkActor {
             sticky_peers,
             max_num_peers,
             upgraded_peers,
-            reachability_state: Default::default(),
+            reachability_state,
             active_protocols: None,
+            accept_new_external_addresses: !neuter_autonat,
         })
     }
 
@@ -719,7 +737,7 @@ impl NetworkActor {
                     .iter()
                     .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit));
                 if is_circuit {
-                    self.swarm.add_external_address(address.clone());
+                    self.add_external_address(address.clone());
 
                     // Once relayed, we can act as a Kademlia Server
                     self.swarm
@@ -732,7 +750,7 @@ impl NetworkActor {
 
             // The packet made it across the network and back.
             SwarmEvent::ExternalAddrConfirmed { address } => {
-                self.swarm.add_external_address(address.clone());
+                self.add_external_address(address.clone());
 
                 // If the address is a circuit address, modify state
                 // accordingly.
@@ -1135,7 +1153,7 @@ impl NetworkActor {
                         // might not be able to reach us here but that's the
                         // cost of doing business.
                         tracing::debug!("Requesting relay reservations because reachability state is Pending with external address {external_address}.");
-                        self.swarm.add_external_address(external_address);
+                        self.add_external_address(external_address);
                         self.request_peer_relays(3);
                     } else if let ReachabilityState::UnknownWithExternalAddress(external_address) =
                         &self.reachability_state
@@ -1144,7 +1162,7 @@ impl NetworkActor {
                         // address to the swarm to be advertised to the rest of
                         // the world. Then AutoNAT will trial it and determine
                         // whether it is publicly reachable or not.
-                        self.swarm.add_external_address(external_address.clone());
+                        self.add_external_address(external_address.clone());
                     }
                 }
             }
@@ -1516,7 +1534,7 @@ impl NetworkActor {
                     libp2p::autonat::NatStatus::Public(multiaddr) => {
                         // Tell the Swarm to announce this address in future
                         // Identify handshakes.
-                        self.swarm.add_external_address(multiaddr.clone());
+                        self.add_external_address(multiaddr.clone());
 
                         // If we were using proxy addresses, clean them up.
                         self.cleanup_relays();
@@ -1578,7 +1596,7 @@ impl NetworkActor {
         match event {
             libp2p::upnp::Event::NewExternalAddr(addr) => {
                 tracing::info!("UPnP: NAT successfully mapped a new external address: {addr}");
-                self.swarm.add_external_address(addr.clone());
+                self.add_external_address(addr.clone());
                 self.reachability_state.handle_upnp_success(addr);
                 self.cleanup_relays();
             }
@@ -2156,6 +2174,17 @@ impl NetworkActor {
             self.active_connections.remove(&peer_id);
         } else {
             tracing::debug!("No peers available to disconnect from.");
+        }
+    }
+
+    /// Informs the swarm about a new external address, if allowed.
+    ///
+    /// If the NetworkActor is configured with a non-empty set of public,
+    /// external addresses, then those addresses are used and nothing else is
+    /// allowed to go to the swarm.
+    pub(crate) fn add_external_address(&mut self, address: Multiaddr) {
+        if self.accept_new_external_addresses {
+            self.swarm.add_external_address(address);
         }
     }
 

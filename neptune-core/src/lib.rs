@@ -206,7 +206,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         .with_network(cli_args.network)
         .with_max_num_peers(cli_args.max_num_peers)
         .with_cli_bans(cli_args.bans.clone())
-        .with_cli_peers(cli_peers_for_network_actor);
+        .with_cli_peers(cli_peers_for_network_actor)
+        .with_external_addresses(cli_args.own_public_addresses());
     let identity = resolve_identity(
         cli_args
             .identity_file
