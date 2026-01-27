@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -120,7 +121,8 @@ pub(crate) struct NetworkActor {
 
     /// Lookup table to find the current address of connected peers or how long
     /// they have been connected for.
-    active_connections: HashMap<PeerId, (SystemTime, Multiaddr)>,
+    active_connections:
+        HashMap<PeerId, (SystemTime, HashMap<libp2p::swarm::ConnectionId, Multiaddr>)>,
 
     /// Peers with whom the connection was upgraded to the consensus peer loop.
     upgraded_peers: Arc<Mutex<HashSet<PeerId>>>,
@@ -910,13 +912,18 @@ impl NetworkActor {
             } => {
                 if self.swarm.is_connected(&peer_id) {
                     tracing::debug!("Redundant connection {connection_id} to {peer_id} closed.");
-                    // Do nothing: other connections continue.
-                } else if let Some((_timestamp, multiaddr)) =
-                    self.active_connections.get(&peer_id).cloned()
+
+                    // Remove connection
+                    self.active_connections.entry(peer_id).and_modify(
+                        |(_timestamp, address_map)| {
+                            address_map.remove(&connection_id);
+                        },
+                    );
+                } else if let Some((_timestamp, _)) = self.active_connections.get(&peer_id).cloned()
                 {
                     // Book-keep.
                     self.active_connections.remove(&peer_id);
-                    tracing::debug!("Connection to peer {peer_id} at {multiaddr} closed.");
+                    tracing::debug!("Connection to peer {peer_id} closed.",);
                 } else {
                     tracing::warn!(peer = %peer_id, "Connection closed abruptly: {:?}", cause);
                     // Do nothing: nothing to remove.
@@ -984,17 +991,13 @@ impl NetworkActor {
                     });
                 }
 
-                // Store the new connection. If the new connection is a direct
-                // one and the old connection was relayed, then the relayed
-                // address will be overwritten in favor of the direct one.
-                let insert = self
-                    .active_connections
-                    .get(&peer_id)
-                    .is_none_or(|(_, old_addr)| *old_addr != address);
-                if insert {
-                    self.active_connections
-                        .insert(peer_id, (SystemTime::now(), address));
-                }
+                // Store the new connection.
+                self.active_connections
+                    .entry(peer_id)
+                    .and_modify(|(_timestamp, address_map)| {
+                        address_map.insert(connection_id, address.clone());
+                    })
+                    .or_insert((SystemTime::now(), HashMap::from([(connection_id, address)])));
 
                 // Note: Identify and Kademlia will now automatically start
                 // their handshakes over this new "open line."
@@ -1449,10 +1452,14 @@ impl NetworkActor {
             return Err(ActorError::NoAddressForPeer(peer_id));
         };
 
-        // Spawn the consensus peer loop with the hijacked stream.
+        // Spawn the blockchain peer loop with the hijacked stream.
         if let Some(loop_handle) = self.spawn_peer_loop(
             peer_id,
-            address.clone(),
+            address
+                .values()
+                .next()
+                .cloned()
+                .unwrap_or_else(|| Multiaddr::from(Ipv4Addr::new(127, 0, 0, 1))),
             remote_handshake,
             stream,
             from_main_rx,
@@ -1710,13 +1717,22 @@ impl NetworkActor {
                             .get(&malicious_peer_id)
                             .cloned()
                             .into_iter()
-                            .map(|(_ts, ad)| ad);
+                            .flat_map(|(_ts, adm)| adm.values().cloned().collect_vec());
                         let address_book_addresses = self
                             .address_book
                             .get(&malicious_peer_id)
                             .into_iter()
                             .flat_map(|peer| peer.listen_addresses.clone());
                         for address in active_connection_address.chain(address_book_addresses) {
+                            // Ignore relay addresses: avoid banning relay
+                            // servers.
+                            if address.iter().any(|proto| {
+                                matches!(proto, libp2p::multiaddr::Protocol::P2pCircuit)
+                            }) {
+                                continue;
+                            }
+
+                            // Extract IP addresses.
                             if let Some(ip) = address.iter().find_map(|protocol| match protocol {
                                 libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
                                 libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
@@ -1977,35 +1993,49 @@ impl NetworkActor {
         available_peers.shuffle(&mut rng);
 
         let mut counter = 0;
+        // Problem: this skip ends up skipping over active peers that happen
+        // to have announced a circuit address later than a non-circuit
+        // address.
         for &peer_id in available_peers {
-            let Some((_timestamp, addr)) = self.active_connections.get(&peer_id).cloned() else {
+            let Some((_timestamp, addresses)) = self.active_connections.get(&peer_id).cloned()
+            else {
                 continue;
             };
 
-            // Skip addresses that already contain a p2p-circuit.
-            if addr
-                .iter()
-                .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
-            {
-                continue;
-            }
+            // Address must have physical transport path (socket address). Just
+            // a PeerId is not enough. Will error `MissingRelayAddr` otherwise.
+            let has_physical_transport_path = |address: &Multiaddr| {
+                address.iter().all(|proto| {
+                    !matches!(
+                        proto,
+                        libp2p::multiaddr::Protocol::Ip4(_) | libp2p::multiaddr::Protocol::Ip6(_)
+                    )
+                })
+            };
 
-            // The peer's Multiaddr must have a physical path (socket address);
-            // just a PeerId is not enough!
-            if addr.iter().all(|proto| {
-                !matches!(
-                    proto,
-                    libp2p::multiaddr::Protocol::Ip4(_) | libp2p::multiaddr::Protocol::Ip6(_)
-                )
-            }) {
-                continue;
-            }
+            // Disallow multi-hops. So filter out addresses that already contain
+            // a p2p-circuit.
+            let is_already_circuit = |address: &Multiaddr| {
+                address
+                    .iter()
+                    .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+            };
 
-            tracing::debug!(%peer_id, "Attempting relay reservation at {}", addr);
+            // Apply filters.
+            let suitable_addresses = addresses
+                .values()
+                .filter(|multiaddr| has_physical_transport_path(multiaddr))
+                .filter(|multiaddr| !is_already_circuit(multiaddr))
+                .collect_vec();
+
+            // Select random.
+            let index = rand::rng().random_range(0..suitable_addresses.len());
+            let address = suitable_addresses[index].clone();
+            tracing::debug!(%peer_id, "Attempting relay reservation at {address} out of {} options.", suitable_addresses.len());
 
             // Construct the circuit address.
             // Format: /ip4/RELAY_IP/tcp/PORT/p2p/RELAY_ID/p2p-circuit
-            let circuit_addr = addr
+            let circuit_addr = address
                 .clone()
                 .with_p2p(peer_id)
                 .unwrap_or_else(|already_qualified_addr| already_qualified_addr)
