@@ -1515,23 +1515,7 @@ impl NetworkActor {
                     libp2p::autonat::NatStatus::Public(multiaddr) => {
                         format!("Public({})", multiaddr)
                     }
-
-                    // Lost public status.
-                    libp2p::autonat::NatStatus::Private => {
-                        // Be a responsible node and clear external addresses so
-                        // we don't lead peers into a "dial timeout" trap.
-                        // Since we can't call 'clear_all' on an iterator, we
-                        // iterate over current external addresses.
-                        let mut to_remove = Vec::new();
-                        for addr in self.swarm.external_addresses() {
-                            to_remove.push(addr.clone());
-                        }
-                        for addr in to_remove {
-                            self.swarm.remove_external_address(&addr);
-                        }
-
-                        "Private".to_string()
-                    }
+                    libp2p::autonat::NatStatus::Private => "Private".to_string(),
                     libp2p::autonat::NatStatus::Unknown => "Unknown".to_string(),
                 };
                 tracing::info!("New NAT status: {status}");
