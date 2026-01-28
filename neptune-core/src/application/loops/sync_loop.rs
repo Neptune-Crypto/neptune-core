@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -48,7 +47,7 @@ const PEER_RESPONSE_PUNISHMENT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Time between successive ticks of the event loop's internal clock.
 const TICK_PERIOD: Duration = Duration::from_micros(100);
 
-type PeerHandle = SocketAddr;
+type PeerHandle = libp2p::PeerId;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PeerSyncState {
@@ -229,7 +228,7 @@ impl SyncLoop {
                             );
 
                             // Store block and update download state.
-                            tracing::debug!("storing block ...");
+                            tracing::trace!("storing block ...");
                             if let Err(e) = self.download_state.receive_block(&block).await
                             {
                                 tracing::warn!(
@@ -240,7 +239,7 @@ impl SyncLoop {
                             }
 
                             // Track last seen state.
-                            tracing::debug!("tracking state ...");
+                            tracing::trace!("tracking state ...");
                             let now = SystemTime::now();
                             self.peers.lock().await.entry(peer_handle).and_modify(|e|{
                                 e.last_response = Some(now);
@@ -249,7 +248,7 @@ impl SyncLoop {
 
                             // Update tip to available successors.
                             if maybe_successors_subtask.is_none() && block.header().height == self.tip.header().height.next() {
-                                tracing::debug!("Starting new successors subtask in response to received block ...");
+                                tracing::trace!("Starting new successors subtask in response to received block ...");
                                 let moved_tip = self.tip.clone();
                                 let moved_download_state = self.download_state.clone();
                                 let moved_main_channel_sender = self.main_channel_sender.clone();
@@ -489,7 +488,7 @@ impl SyncLoop {
                         // Flush queue of pending block requests. But do this in
                         // another task so control passes back to the loop.
                         if !pending_block_requests.is_empty() {
-                            tracing::debug!("sync loop is starting a new random blocks request");
+                            tracing::trace!("sync loop is starting a new random blocks request");
                             let moved_pending_block_requests = pending_block_requests.clone();
                             let moved_coverage = self.download_state.coverage();
                             let moved_peers = self.peers.clone();
@@ -506,7 +505,7 @@ impl SyncLoop {
                         // If there are timeouts warranting punishments, tell
                         // the main loop to punish the perpetrators.
                         if !punishments.is_empty() {
-                            tracing::debug!("sync loop is punishing ...");
+                            tracing::trace!("sync loop is punishing ...");
                             if let Err(e) = self.main_channel_sender.try_send(SyncToMain::Punish(punishments.clone())) {
                                 tracing::warn!("Failed to send punish message to main loop: {e}.");
                             }
@@ -669,7 +668,7 @@ impl SyncLoop {
             return;
         }
 
-        tracing::debug!("Sync loop: sampling missing block heights ...");
+        tracing::trace!("Sync loop: sampling missing block heights ...");
         let moved_peers = peers.lock().await.clone();
         let moved_peer_handles = peer_handles.to_vec();
         let Ok(block_requests) = tokio::task::spawn_blocking(move || {
@@ -743,7 +742,7 @@ impl SyncLoop {
             match channel_to_main.try_send(SyncToMain::TipSuccessor(Box::new(successor.clone()))) {
                 Ok(_) => {
                     if i > 1 {
-                        tracing::debug!("succeeded sending tip-successorblock to main");
+                        tracing::debug!("succeeded sending tip-successor block to main");
                     }
                     return true;
                 }
@@ -841,7 +840,6 @@ impl SyncLoop {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
     use std::sync::Arc;
 
     use macro_rules_attr::apply;
@@ -1183,10 +1181,7 @@ mod tests {
     }
 
     fn random_peer_handle() -> PeerHandle {
-        PeerHandle::new(
-            std::net::IpAddr::V6(Ipv6Addr::from_bits(rng().random())),
-            rng().random(),
-        )
+        libp2p::PeerId::random()
     }
 
     #[tracing_test::traced_test]

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -11,9 +12,10 @@ use anyhow::Result;
 use bincode::Options;
 use chrono::DateTime;
 use chrono::Utc;
-use futures::FutureExt;
 use futures::SinkExt;
 use futures::TryStreamExt;
+use libp2p::multiaddr::Protocol;
+use libp2p::Multiaddr;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
@@ -30,9 +32,12 @@ use tracing::info;
 use tracing::warn;
 
 use crate::application::config::cli_args;
+use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
+use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
+use crate::protocol::peer::peer_info::pseudorandom_peer_id;
 use crate::protocol::peer::ConnectionRefusedReason;
 use crate::protocol::peer::InternalConnectionStatus;
 use crate::protocol::peer::NegativePeerSanction;
@@ -52,11 +57,13 @@ pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 500 * 1024 * 1024;
 /// Only accept connections where peer's reported timestamp deviates from our
 /// by less than this value.
 const PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS: u128 = 90;
+pub(crate) const PEER_TIME_DIFFERENCE_THRESHOLD: Duration =
+    Duration::from_secs(PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS as u64);
 
 /// Use this function to ensure that the same rules apply for both
 /// ingoing and outgoing connections. This limits the size of messages
 /// peers can send.
-fn get_codec_rules() -> LengthDelimitedCodec {
+pub(crate) fn get_codec_rules() -> LengthDelimitedCodec {
     let mut codec_rules = LengthDelimitedCodec::new();
     codec_rules.set_max_frame_length(MAX_PEER_FRAME_LENGTH_IN_BYTES);
     codec_rules
@@ -136,7 +143,12 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
         },
     };
     if cli.restrict_peers_to_list {
-        let allowed_ips: Vec<std::net::IpAddr> = cli.peers.iter().map(|p| p.ip()).collect();
+        let allowed_ips: Vec<std::net::IpAddr> = cli
+            .peers
+            .iter()
+            .filter_map(multiaddr_to_socketaddr)
+            .map(|p| p.ip())
+            .collect();
         let is_allowed = allowed_ips.contains(&connecting_ip);
         if !is_allowed {
             debug!("Rejecting incoming connection from unlisted peer {connecting_ip} due to --restrict-peers-to-list",);
@@ -144,7 +156,7 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
         }
     }
 
-    if cli.ban.contains(&connecting_ip) {
+    if cli.banned_ips().contains(&connecting_ip) {
         debug!("Rejecting incoming connection because it's explicitly banned");
         return false;
     }
@@ -159,7 +171,11 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
 
 /// Check if connection is allowed. Used for both ingoing and outgoing connections.
 ///
-/// Locking:
+/// Note: this function is part of the legacy peer-to-peer stack. Therefore it
+/// is okay to use [`SocketAddr`] and
+/// [`pseudorandom_peer_id`].
+///
+/// # Locking
 ///   * acquires `global_state_lock` for read
 async fn check_if_connection_is_allowed(
     global_state_lock: GlobalStateLock,
@@ -171,7 +187,7 @@ async fn check_if_connection_is_allowed(
     let global_state = global_state_lock.lock_guard().await;
 
     // Disallow connection if peer is banned via CLI arguments
-    if cli_arguments.ban.contains(&peer_address.ip()) {
+    if cli_arguments.banned_ips().contains(&peer_address.ip()) {
         let ip = peer_address.ip();
         debug!("Peer {ip}, banned via CLI argument, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
@@ -198,7 +214,12 @@ async fn check_if_connection_is_allowed(
         .await;
 
     // (But ignore bad standing if the peer is a CLI argument.)
-    if standing.is_some_and(|s| s.is_bad()) && !cli_arguments.peers.contains(peer_address) {
+    let cli_peers = cli_arguments
+        .peers
+        .iter()
+        .filter_map(multiaddr_to_socketaddr)
+        .collect::<HashSet<_>>();
+    if standing.is_some_and(|s| s.is_bad()) && !cli_peers.contains(peer_address) {
         let ip = peer_address.ip();
         debug!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
@@ -241,7 +262,7 @@ async fn check_if_connection_is_allowed(
     // Disallow connection to already connected peer.
     if global_state.net.peer_map.values().any(|peer| {
         peer.instance_id() == other_handshake.instance_id
-            || *peer_address == peer.connected_address()
+            || multiaddr_to_socketaddr(&peer.address()).is_some_and(|sa| sa == *peer_address)
     }) {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
     }
@@ -252,9 +273,9 @@ async fn check_if_connection_is_allowed(
         let num_connections_to_this_ip = global_state
             .net
             .peer_map
-            .keys()
-            .map(|x| x.ip())
-            .filter(|ip| *ip == peer_ip)
+            .values()
+            .filter_map(|info| multiaddr_to_socketaddr(&info.address()))
+            .filter(|sa| sa.ip() == peer_ip)
             .count();
         if num_connections_to_this_ip >= max_connections_per_ip {
             return InternalConnectionStatus::Refused(
@@ -309,43 +330,21 @@ pub(crate) async fn answer_peer<S>(
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
-    let state_lock_clone = state_lock.clone();
-    let peer_task_to_main_tx_clone = peer_task_to_main_tx.clone();
-    let mut inner_ret: anyhow::Result<()> = Ok(());
-
-    let panic_result = std::panic::AssertUnwindSafe(async {
-        inner_ret = answer_peer_inner(
-            stream,
-            state_lock_clone,
-            peer_address,
-            main_to_peer_task_rx,
-            peer_task_to_main_tx,
-            own_handshake_data,
-            handshake_permit,
-        )
-        .await;
-    })
-    .catch_unwind()
+    let inner_ret = answer_peer_inner(
+        stream,
+        state_lock.clone(),
+        peer_address,
+        main_to_peer_task_rx,
+        peer_task_to_main_tx,
+        own_handshake_data,
+        handshake_permit,
+    )
     .await;
-
-    match panic_result {
-        Ok(_) => (),
-        Err(_err) => {
-            error!("Peer task (incoming) for {peer_address} panicked. Invoking close connection callback");
-            close_peer_connected_callback(
-                state_lock.clone(),
-                peer_address,
-                &peer_task_to_main_tx_clone,
-            )
-            .await;
-        }
-    }
 
     inner_ret
 }
 
-/// Handles all incoming connections. Returns when the connection is closed.
-///
+/// Handles all* incoming connections. Returns when the connection is closed.
 ///
 /// A returned `Result::Error` always indicates that the connection was closed
 /// through some networking error, either in this function or in the peer loop
@@ -358,6 +357,13 @@ where
 ///
 /// The `handshake_permit` is dropped after handshake completes to release the
 /// semaphore slot for new incoming connection attempts.
+///
+/// *: This function belongs to the legacy peer-to-peer stack, meaning in
+/// particular that it is okay to use [`SocketAddr`]. However, this function
+/// does not handle *all* incoming connections: connections coming in over the
+/// libp2p network stack are handled by the
+/// [`NetworkActor`](crate::application::network::actor::NetworkActor) and the
+/// [`StreamGateway`](crate::application::network::gateway::StreamGateway).
 async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -457,21 +463,14 @@ where
             .await?;
     }
 
-    // If we are syncing, notify the peer loop that we have a new peer.
-    if state.lock_guard().await.net.sync_anchor.is_some() {
-        debug!(
-            "We are syncing, so sending information about new peer {peer_address} to sync loop."
-        );
-        peer_task_to_main_tx
-            .send(PeerTaskToMain::NewPeer(peer_address))
-            .await?;
-    }
-
     let peer_distance = 1; // All incoming connections have distance 1
+    let peer_id = pseudorandom_peer_id(&peer_address);
+    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state,
-        peer_address,
+        peer_id,
+        peer_multiaddr,
         *peer_handshake,
         true,
         peer_distance,
@@ -488,7 +487,13 @@ where
 /// Perform handshake and establish connection to a new peer while handling any
 /// panics in the peer task gracefully.
 ///
-/// All outgoing connections to peers must go through this function.
+/// All* outgoing connections to peers must go through this function.
+///
+/// *: This function belongs to the legacy peer-to-peer stack, which is in the
+/// process of being deprecated. Since it is part of the legacy stack, it is
+/// okay to use [`SocketAddr`]. However, the new libp2p network stack offers an
+/// alternative way to call new peers, see
+/// [`NetworkActorCommand::Dial`](crate::application::network::channel::NetworkActorCommand::Dial).
 pub(crate) async fn call_peer(
     peer_address: std::net::SocketAddr,
     state: GlobalStateLock,
@@ -497,65 +502,51 @@ pub(crate) async fn call_peer(
     own_handshake_data: HandshakeData,
     peer_distance: u8,
 ) {
-    let state_clone = state.clone();
-    let peer_task_to_main_tx_clone = peer_task_to_main_tx.clone();
-    let panic_result = std::panic::AssertUnwindSafe(async {
-        debug!("Attempting to initiate connection to {peer_address}");
-        match tokio::net::TcpStream::connect(peer_address).await {
-            Err(e) => {
-                let msg = format!("Failed to establish TCP connection to {peer_address}: {e}");
-                if peer_distance == 1 {
+    debug!("Attempting to initiate connection to {peer_address}");
+    match tokio::net::TcpStream::connect(peer_address).await {
+        Err(e) => {
+            let msg = format!("Failed to establish TCP connection to {peer_address}: {e}");
+            if peer_distance == 1 {
+                // outgoing connection to peer of distance 1 means user has
+                // requested a connection to this peer through CLI
+                // arguments, and should be warned if this fails.
+                warn!("{msg}");
+            } else {
+                debug!("{msg}");
+            }
+        }
+        Ok(stream) => {
+            match call_peer_inner(
+                stream,
+                state,
+                peer_address,
+                main_to_peer_task_rx,
+                peer_task_to_main_tx,
+                &own_handshake_data,
+                peer_distance,
+            )
+            .await
+            {
+                Ok(()) => (),
+                Err(e) => {
+                    let msg = format!("{e}. Failed to establish connection.");
                     // outgoing connection to peer of distance 1 means user has
                     // requested a connection to this peer through CLI
                     // arguments, and should be warned if this fails.
-                    warn!("{msg}");
-                } else {
-                    debug!("{msg}");
-                }
-            }
-            Ok(stream) => {
-                match call_peer_inner(
-                    stream,
-                    state,
-                    peer_address,
-                    main_to_peer_task_rx,
-                    peer_task_to_main_tx,
-                    &own_handshake_data,
-                    peer_distance,
-                )
-                .await
-                {
-                    Ok(()) => (),
-                    Err(e) => {
-                        let msg = format!("{e}. Failed to establish connection.");
-                        // outgoing connection to peer of distance 1 means user has
-                        // requested a connection to this peer through CLI
-                        // arguments, and should be warned if this fails.
-                        if peer_distance == 1 {
-                            warn!("{msg}");
-                        } else {
-                            debug!("{msg}");
-                        }
+                    if peer_distance == 1 {
+                        warn!("{msg}");
+                    } else {
+                        debug!("{msg}");
                     }
                 }
             }
-        };
-
-        info!("Connection to {peer_address} closing");
-    })
-    .catch_unwind()
-    .await;
-
-    match panic_result {
-        Ok(_) => (),
-        Err(_) => {
-            error!("Peer task (outgoing) for {peer_address} panicked. Invoking close connection callback");
-            close_peer_connected_callback(state_clone, peer_address, &peer_task_to_main_tx_clone)
-                .await;
         }
-    }
+    };
+
+    info!("Connection to {peer_address} closing");
 }
 
+/// Legacy peer-to-peer stack.
 async fn call_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
@@ -634,24 +625,19 @@ where
         bail!("Attempted to connect to peer ({peer_address}) that was not allowed. This connection attempt should not have been made.");
     }
 
-    // If in sync mode, tell sync loop about new peer.
-    if state.lock_guard().await.net.sync_anchor.is_some() {
-        debug!("We are syncing, so tell the sync loop about the new peer.");
-        peer_task_to_main_tx
-            .send(PeerTaskToMain::NewPeer(peer_address))
-            .await?;
-    }
-
     // By default, start by asking the peer for its peers. In an adversarial
     // context, we want the network topology to be as robust as possible.
     // Blockchain data can be obtained from other peers, if this connection
     // fails.
     peer.send(PeerMessage::PeerListRequest).await?;
 
+    let peer_id = pseudorandom_peer_id(&peer_address);
+    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state.clone(),
-        peer_address,
+        peer_id,
+        peer_multiaddr,
         *other_handshake,
         false,
         peer_distance,
@@ -671,18 +657,34 @@ where
 /// a peer is disconnected. Whether this happens through a panic
 /// in the peer task or through a regular disconnect.
 ///
+/// This function is shared between the legacy peer-to-peer stack and the libp2p
+/// network stack.
+///
 /// Locking:
 ///   * acquires `global_state_lock` for write
 pub(crate) async fn close_peer_connected_callback(
     mut global_state_lock: GlobalStateLock,
-    peer_address: SocketAddr,
+    peer_address: Multiaddr,
     to_main_tx: &mpsc::Sender<PeerTaskToMain>,
 ) {
     let cli_arguments = global_state_lock.cli().clone();
     let mut global_state_mut = global_state_lock.lock_guard_mut().await;
 
+    // Find the matching peer id
+    let Some(peer_id) = global_state_mut
+        .net
+        .peer_map
+        .iter()
+        .find(|(_peer_id, peer_info)| peer_info.address() == peer_address)
+        .map(|(peer_id, _)| peer_id)
+        .copied()
+    else {
+        error!("Could not find peer id for {peer_address}");
+        return;
+    };
+
     // Store any new peer-standing to database
-    let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_address);
+    let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_id);
     let new_standing = if let Some(new) = peer_info_writeback {
         new.standing()
     } else {
@@ -699,10 +701,18 @@ pub(crate) async fn close_peer_connected_callback(
     };
     debug!("Fetched peer info standing {new_standing} for peer {peer_address}");
 
-    global_state_mut
-        .net
-        .write_peer_standing_on_decrease(peer_address.ip(), new_standing)
-        .await;
+    let maybe_ip = peer_address.iter().find_map(|p| match p {
+        Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+        Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+        _ => None,
+    });
+    if let Some(ip) = maybe_ip {
+        global_state_mut
+            .net
+            .write_peer_standing_on_decrease(ip, new_standing)
+            .await;
+    }
+
     let sync_mode_is_active = global_state_mut.net.sync_anchor.is_some();
     drop(global_state_mut); // avoid holding across mpsc::Sender::send()
     debug!("Stored peer info standing {new_standing} for peer {peer_address}");
@@ -710,7 +720,7 @@ pub(crate) async fn close_peer_connected_callback(
     // If in sync mode, tell sync loop about dropped peer.
     if sync_mode_is_active {
         to_main_tx
-            .send(PeerTaskToMain::DroppedPeer(peer_address))
+            .send(PeerTaskToMain::DroppedPeer(peer_id))
             .await
             .expect("channel to main should exist");
     }
@@ -734,6 +744,7 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
+    use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
     use crate::protocol::peer::handshake_data::VersionString;
     use crate::protocol::peer::peer_info::PeerInfo;
     use crate::protocol::peer::InternalConnectionStatus;
@@ -784,7 +795,7 @@ mod tests {
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         call_peer_inner(
             mock,
@@ -837,12 +848,13 @@ mod tests {
     fn precheck_incoming_connection_is_allowed_test() {
         let mut cli = cli_args::Args::default();
         let socket_address = get_dummy_socket_address(0);
+
         assert!(
             precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
             "Default behavior: connection allowed"
         );
 
-        cli.peers.push(socket_address);
+        cli.peers.push(socketaddr_to_multiaddr(socket_address));
         assert!(
             precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
             "Incoming allowed when incoming is specified peer"
@@ -861,7 +873,7 @@ mod tests {
         );
 
         cli.restrict_peers_to_list = false;
-        cli.ban.push(socket_address.ip());
+        cli.bans.push(Multiaddr::from(socket_address.ip()));
         assert!(
             !precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
             "Incoming disallowed when peer is banned via CLI argument"
@@ -872,7 +884,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Main;
-        let (_, _, _, _, mut state_lock, own_handshake) =
+        let (_, _, _, _, _, _, mut state_lock, own_handshake) =
             get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
 
         // Get an address for a peer that's not already connected
@@ -939,7 +951,7 @@ mod tests {
         );
 
         // pretend --ban <peer_sa>
-        cli.ban.push(peer_sa.ip());
+        cli.bans.push(Multiaddr::from(peer_sa.ip()));
         state_lock.set_cli(cli.clone()).await;
 
         // Verify that banned peers are rejected by this check
@@ -957,7 +969,7 @@ mod tests {
         );
 
         // pretend --ban ""
-        cli.ban.pop();
+        cli.bans.pop();
         state_lock.set_cli(cli.clone()).await;
 
         status = check_if_connection_is_allowed(
@@ -1006,7 +1018,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn refuse_connection_bad_timestamp() {
         let network = Network::Main;
-        let (_, _, _, _, state_lock, own_handshake) =
+        let (_, _, _, _, _, _, state_lock, own_handshake) =
             get_test_genesis_setup(network, 1, cli_args::Args::default())
                 .await
                 .unwrap();
@@ -1055,7 +1067,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (broadcast_tx, _broadcast_rx, to_main_tx, _to_main_rx, mut state_lock, handshake) =
+        let (broadcast_tx, _broadcast_rx, to_main_tx, _to_main_rx, _, _, mut state_lock, handshake) =
             get_test_genesis_setup(network, 0, args).await?;
 
         // fake a graceful disconnect
@@ -1147,8 +1159,16 @@ mod tests {
             ))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            _,
+            _,
+            state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         answer_peer_inner(
             mock,
             state_lock.clone(),
@@ -1182,7 +1202,7 @@ mod tests {
             })?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
 
         let answer = answer_peer_inner(
@@ -1216,7 +1236,7 @@ mod tests {
             })?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
             get_test_genesis_setup(Network::Testnet(1), 0, cli_args::Args::default()).await?;
 
         let answer = answer_peer_inner(
@@ -1238,20 +1258,24 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn test_incoming_connection_fail_bad_version() {
         let mut other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet(0));
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Main, 0, cli_args::Args::default())
-                .await
-                .unwrap();
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            _,
+            _,
+            state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(Network::Main, 0, cli_args::Args::default())
+            .await
+            .unwrap();
         let state = state_lock.lock_guard().await;
         let mut own_handshake = state.get_own_handshakedata();
 
         // Set reported versions to something incompatible
-        VersionString::try_from_str("0.0.3")
-            .unwrap()
-            .clone_into(&mut own_handshake.version);
-        VersionString::try_from_str("0.0.0")
-            .unwrap()
-            .clone_into(&mut other_handshake.version);
+        VersionString::new_from_str("0.0.3").clone_into(&mut own_handshake.version);
+        VersionString::new_from_str("0.0.0").clone_into(&mut other_handshake.version);
 
         let peer_address = get_dummy_socket_address(55);
         let connection_status = check_if_connection_is_allowed(
@@ -1334,6 +1358,8 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             _to_main_rx1,
+            _,
+            _,
             mut state_lock,
             _hsd,
         ) = get_test_genesis_setup(network, 2, cli_args::Args::default()).await?;
@@ -1369,6 +1395,8 @@ mod tests {
             _from_main_rx_clone,
             _to_main_tx,
             _to_main_rx1,
+            _,
+            _,
             mut state_lock,
             _hsd,
         ) = get_test_genesis_setup(Network::Main, 0, allow_5_connections_from_same_ip)
@@ -1399,7 +1427,7 @@ mod tests {
                 .await
                 .net
                 .peer_map
-                .insert(peer_address, peer_info.clone());
+                .insert(pseudorandom_peer_id(&peer_address), peer_info.clone());
         }
 
         // The next connection from the same IP is rejected, as the limit per
@@ -1468,6 +1496,8 @@ mod tests {
             from_main_rx_clone,
             to_main_tx,
             _to_main_rx1,
+            _,
+            _,
             mut state_lock,
             _hsd,
         ) = get_test_genesis_setup(

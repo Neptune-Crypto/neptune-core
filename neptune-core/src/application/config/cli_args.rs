@@ -1,4 +1,6 @@
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::num::NonZero;
 use std::ops::RangeInclusive;
@@ -11,12 +13,15 @@ use clap::builder::RangedI64ValueParser;
 use clap::builder::TypedValueParser;
 use clap::Parser;
 use itertools::Itertools;
+use libp2p::multiaddr::Protocol;
+use libp2p::Multiaddr;
 use num_traits::Zero;
 use sysinfo::System;
 use tracing::error;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
+use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::json_rpc::core::api::ops::Namespace;
@@ -80,15 +85,14 @@ pub struct Args {
     /// used here may not contain spaces.
     pub(crate) block_notify: Option<String>,
 
-    /// Ban connections to this node from IP address.
+    /// Ban connections to and from the given IP address.
     ///
-    /// This node can still make outgoing connections to IP address.
+    /// If a libp2p Multiaddr is supplied, the underlying IP address will be
+    /// exctracted.
     ///
-    /// To do this, see `--peer`.
-    ///
-    /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8
-    #[clap(long, value_name = "IP")]
-    pub(crate) ban: Vec<IpAddr>,
+    /// E.g.: --ban 1.2.3.4 --ban /ip4/8.8.4.4/udp/1337/quic-v1
+    #[structopt(long = "ban", value_parser(parse_to_multiaddr))]
+    pub(crate) bans: Vec<Multiaddr>,
 
     /// The threshold at which a peer's standing is considered “bad”. Current
     /// connections to peers in bad standing are terminated. Connection attempts
@@ -343,7 +347,7 @@ pub struct Args {
     #[clap(long, default_value = "1G", value_name = "SIZE")]
     pub(crate) max_mempool_size: ByteSize,
 
-    /// Port on which to listen for peer connections.
+    /// Port on which to listen for standard (AKA. legacy) TCP peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
     pub peer_port: u16,
 
@@ -351,9 +355,32 @@ pub struct Args {
     #[clap(long, default_value = "9799", value_name = "PORT")]
     pub rpc_port: u16,
 
-    /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
+    /// Port on which to listen for libp2p QUIC peer connections.
+    #[clap(long, default_value = "9800", value_name = "PORT")]
+    pub quic_port: u16,
+
+    /// Port on which to listen for libp2p TCP peer connections.
+    #[clap(long, default_value = "9801", value_name = "PORT")]
+    pub tcp_port: u16,
+
+    /// IP on which to listen for peer connections. Will default to all network
+    /// interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
     pub peer_listen_addr: IpAddr,
+
+    /// Public IP where the node is reachable.
+    ///
+    /// Only use for globally accessible IPs. Setting this value overrides
+    /// libp2p AutoNAT behaviour [sic]. If no public IPs are set, libp2p's
+    /// AutoNAT protocol will automatically try to guess the NAT status and
+    /// external addresses.
+    ///
+    /// Examples:
+    /// ```text
+    /// --public-ip 93.7.1.1 --public-ip 2001:db8::1428:57ab
+    /// ```
+    #[structopt(long = "public-ip")]
+    pub public_ips: Vec<IpAddr>,
 
     /// Maximum number of blocks that the client can catch up to without going
     /// into sync mode.
@@ -377,9 +404,38 @@ pub struct Args {
     #[clap(long)]
     pub(crate) no_resume_sync: bool,
 
-    /// IPs of nodes to connect to, e.g.: --peer 8.8.8.8:9798 --peer 8.8.4.4:1337.
-    #[structopt(long = "peer")]
-    pub peers: Vec<SocketAddr>,
+    /// Multiaddrs (or IPs) of nodes to connect to, e.g.:
+    /// ```text
+    /// --peer /ip4/8.8.8.8 \
+    /// --peer /ip4/8.8.4.4/udp/1337/quic-v1 \
+    /// --peer 139.162.193.206:9798 \
+    /// --peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798
+    /// ```
+    ///
+    /// It's easier to connect without `/p2p/...` in the end of the address.
+    ///
+    /// The trust assumptions are interpreted in spirit of libp2p Multiaddr.
+    ///
+    /// - without `/p2p/...` it will be adding any peer found on the endpoint;
+    /// - with `/p2p/...` connections to the given endpoint will fail if the
+    ///   `PeerId` there had changed; and it will continue to try to reach this
+    ///   peer indefinitely.
+    #[structopt(long = "peer", value_parser(parse_to_multiaddr))]
+    pub peers: Vec<Multiaddr>,
+
+    /// Generate a fresh identity for this session only.
+    #[clap(long)]
+    pub(crate) incognito: bool,
+
+    /// Generate a new identity to use going forward.
+    ///
+    /// Back up the old identity file.
+    #[clap(long)]
+    pub(crate) new_identity: bool,
+
+    /// Use the identity contained in the given file.
+    #[clap(long)]
+    pub(crate) identity_file: Option<String>,
 
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "main", short)]
@@ -724,11 +780,23 @@ impl Args {
     /// Check if block proposal should be accepted from this IP address.
     pub(crate) fn accept_block_proposal_from(
         &self,
-        ip_address: IpAddr,
+        address: &Multiaddr,
     ) -> Result<(), BlockProposalRejectError> {
         if self.ignore_foreign_compositions {
             return Err(BlockProposalRejectError::IgnoreAllForeign);
         }
+        if self.whitelisted_composers.is_empty() {
+            return Ok(());
+        }
+
+        let ip_address = address
+            .iter()
+            .find_map(|proto| match proto {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .ok_or(BlockProposalRejectError::NotWhiteListed)?;
 
         let ip_address = match ip_address {
             IpAddr::V4(_) => ip_address,
@@ -737,9 +805,7 @@ impl Args {
                 None => ip_address,
             },
         };
-        if !self.whitelisted_composers.is_empty()
-            && !self.whitelisted_composers.contains(&ip_address)
-        {
+        if !self.whitelisted_composers.contains(&ip_address) {
             return Err(BlockProposalRejectError::NotWhiteListed);
         }
 
@@ -813,6 +879,99 @@ impl Args {
             TransactionProofQuality::SingleProof => true,
         }
     }
+
+    /// Generates the set of local addresses the node should bind to.
+    ///
+    /// This method expands [`Self::peer_listen_addr`] into a list of
+    /// [`Multiaddr`] strings covering both TCP and QUIC transports.
+    ///
+    /// ### Protocol Expansion
+    ///
+    /// - If [`Self::peer_listen_addr`] is set to the unspecified address
+    ///   (`::` or `0.0.0.0`), this returns addresses for **both** IPv4 and IPv6
+    ///   interfaces to ensure maximum reachability.
+    /// - For each IP, it generates a TCP multiaddr on
+    ///   [`libp2p_tcp`](libp2p::tcp) and a QUIC-v1 multiaddr on
+    ///   [`libp2p_quic`](libp2p::quic).
+    ///
+    /// This list specifically excludes [`Self::peer_port`] (Legacy TCP), as
+    /// that port is managed by the legacy networking stack and should not be
+    /// bound by the libp2p [`Swarm`](libp2p::Swarm).
+    ///
+    /// # Return Value
+    ///
+    /// A `Vec<Multiaddr>` in the format:
+    /// - `/ip4/<addr>/tcp/<port>`
+    /// - `/ip4/<addr>/udp/<port>/quic-v1`
+    pub fn own_listen_addresses(&self) -> Vec<Multiaddr> {
+        let mut addrs = Vec::new();
+
+        // Determine if we need to expand "::" into both 0.0.0.0 and ::
+        let ips = if self.peer_listen_addr.is_unspecified() {
+            vec![
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            ]
+        } else {
+            vec![self.peer_listen_addr]
+        };
+
+        for ip in ips {
+            // Add TCP Multiaddr
+            let mut tcp_addr = Multiaddr::from(ip);
+            tcp_addr.push(Protocol::Tcp(self.tcp_port));
+            addrs.push(tcp_addr);
+
+            // Add QUIC Multiaddr (QUIC runs over UDP)
+            let mut quic_addr = Multiaddr::from(ip);
+            quic_addr.push(Protocol::Udp(self.quic_port));
+            quic_addr.push(Protocol::QuicV1);
+            addrs.push(quic_addr);
+        }
+
+        addrs
+    }
+
+    /// List of publicly reachable Multiaddrs with embedded IPv{4,6} defined by
+    /// the user.
+    ///
+    /// If non-empty, this list overrides libp2p's AutoNAT behaviour and informs
+    /// libp2p of the external addresses this node is reachable on.
+    pub(crate) fn own_public_addresses(&self) -> Vec<Multiaddr> {
+        let mut addrs = Vec::new();
+
+        for ip in &self.public_ips {
+            // Add TCP Multiaddr
+            let mut tcp_addr = Multiaddr::from(*ip);
+            tcp_addr.push(Protocol::Tcp(self.tcp_port));
+            addrs.push(tcp_addr);
+
+            // Add QUIC Multiaddr (QUIC runs over UDP)
+            let mut quic_addr = Multiaddr::from(*ip);
+            quic_addr.push(Protocol::Udp(self.quic_port));
+            quic_addr.push(Protocol::QuicV1);
+            addrs.push(quic_addr);
+        }
+
+        addrs
+    }
+
+    /// The list of IPs banned from the CLI.
+    ///
+    /// This convenience function extracts the IPs from the `bans` argument
+    /// which contains `Multiaddr`s, not IPs.
+    pub fn banned_ips(&self) -> Vec<IpAddr> {
+        self.bans
+            .iter()
+            .filter_map(|ma| {
+                ma.iter().find_map(|protocol| match protocol {
+                    Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                    Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                    _ => None,
+                })
+            })
+            .collect()
+    }
 }
 
 impl From<&Args> for ProverJobSettings {
@@ -845,6 +1004,7 @@ mod tests {
     use std::ops::RangeBounds;
 
     use super::*;
+    use crate::application::config::parser::multiaddr::parse_to_multiaddr;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 
     // extra methods for tests.
@@ -992,5 +1152,27 @@ mod tests {
         assert_range_eq!(5u64..=u64::MAX, parse_range("5:").unwrap());
         assert_range_eq!(0u64..10, parse_range(":10").unwrap());
         assert_range_eq!(0u64..=u64::MAX, parse_range(":").unwrap());
+    }
+
+    #[test]
+    fn can_specify_ips_as_peers() {
+        let mut cli = Args::default();
+
+        let ipv4 = "139.162.193.206:9798".to_string();
+        let ipv6 = "[2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798".to_string();
+
+        cli.peers.push(parse_to_multiaddr(&ipv4).unwrap());
+        cli.peers.push(parse_to_multiaddr(&ipv6).unwrap());
+    }
+
+    #[test]
+    fn can_specify_multiaddrs_as_peers() {
+        let mut cli = Args::default();
+
+        let ipv4 = "/ip4/8.8.8.8".to_string();
+        let ipv4_udp_quic = "/ip4/8.8.4.4/udp/1337/quic-v1".to_string();
+
+        cli.peers.push(parse_to_multiaddr(&ipv4).unwrap());
+        cli.peers.push(parse_to_multiaddr(&ipv4_udp_quic).unwrap());
     }
 }

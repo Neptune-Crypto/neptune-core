@@ -101,6 +101,7 @@ pub enum NegativePeerSanction {
     NonFavorableBlockProposal,
     BlockProposalFromBlockedPeer,
     RequestForUnknownBlock,
+    RequestForGenesisBlock,
 
     UnwantedMessage,
 
@@ -144,6 +145,7 @@ impl Display for NegativePeerSanction {
                 "invalid start height of batch blocks"
             }
             NegativePeerSanction::RequestForUnknownBlock => "request for unknown block",
+            NegativePeerSanction::RequestForGenesisBlock => "request for genesis block",
             NegativePeerSanction::BatchBlocksUnknownRequest => "batch blocks unknown request",
             NegativePeerSanction::InvalidTransaction => "invalid transaction",
             NegativePeerSanction::UnconfirmableTransaction => "unconfirmable transaction",
@@ -230,6 +232,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::BlockProposalNotFound => -1,
             NegativePeerSanction::InvalidBlockProposal => -10,
             NegativePeerSanction::RequestForUnknownBlock => -5,
+            NegativePeerSanction::RequestForGenesisBlock => -100,
             NegativePeerSanction::UnwantedMessage => -1,
             NegativePeerSanction::NonFavorableBlockProposal => -1,
             NegativePeerSanction::BlockProposalFromBlockedPeer => -10,
@@ -290,7 +293,7 @@ pub struct PeerStanding {
     pub standing: i32,
     pub latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
     pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
-    peer_tolerance: i32,
+    pub(crate) peer_tolerance: i32,
 }
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct StandingExceedsBanThreshold;
@@ -1017,6 +1020,7 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
             35 => NegativePeerSanction::OversizedAnnouncement,
             36 => NegativePeerSanction::OversizedBlock,
             37 => NegativePeerSanction::RequestForUnknownBlock,
+            38 => NegativePeerSanction::RequestForGenesisBlock,
 
             _ => unreachable!(),
         }

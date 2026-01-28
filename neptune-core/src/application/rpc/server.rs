@@ -54,11 +54,14 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
+use libp2p::multiaddr::Protocol;
+use libp2p::Multiaddr;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -67,6 +70,7 @@ use systemstat::System;
 use tarpc::context;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
+use tokio::sync::oneshot;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
@@ -84,6 +88,7 @@ use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
+use crate::application::network::overview::NetworkOverview;
 use crate::application::rpc::server::coinbase_output_readable::CoinbaseOutputReadable;
 use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
@@ -1567,7 +1572,10 @@ pub trait RPC {
     /******** CHANGE THINGS ********/
     // Place all things that change state here
 
-    /// Clears standing for all peers, connected or not
+    /// Clears standing for all peers, connected or not.
+    ///
+    /// Legacy command, applies at the peer loop logic level. For the modern
+    /// equivalent, see [`RPC::unban_all`].
     ///
     /// ```no_run
     /// # use anyhow::Result;
@@ -1600,7 +1608,10 @@ pub trait RPC {
     /// ```
     async fn clear_all_standings(token: auth::Token) -> RpcResult<()>;
 
-    /// Clears standing for ip, whether connected or not
+    /// Clears standing for ip, whether connected or not.
+    ///
+    /// Legacy command, applies at the peer loop logic level. For the modern
+    /// equivalent, see [`RPC::unban`].
     ///
     /// ```no_run
     /// # use anyhow::Result;
@@ -1636,6 +1647,35 @@ pub trait RPC {
     /// # }
     /// ```
     async fn clear_standing_by_ip(token: auth::Token, ip: IpAddr) -> RpcResult<()>;
+
+    /// Put the given address on the black list and disconnect if there is a
+    /// connection to this peer.
+    ///
+    /// Requires a connection to the server.
+    async fn ban(token: auth::Token, ip: Multiaddr) -> RpcResult<()>;
+
+    /// Remove the given address from black list and clear the corresponding
+    /// peer standing.
+    ///
+    /// Requires a connection to the server.
+    async fn unban(token: auth::Token, ip: Multiaddr) -> RpcResult<()>;
+
+    /// Remove all entries from the black list and clear all peer standings.
+    ///
+    /// Requires a connection to the server.
+    async fn unban_all(token: auth::Token) -> RpcResult<()>;
+
+    /// Dial (attempt to initiate a connection to) a [`Multiaddr`].
+    async fn dial(token: auth::Token, address: Multiaddr) -> RpcResult<()>;
+
+    /// Probe the NAT status of this node.
+    async fn probe_nat(token: auth::Token) -> RpcResult<()>;
+
+    /// Reset this node's relay reservations with its relaying peers.
+    async fn reset_relay_reservations(token: auth::Token) -> RpcResult<()>;
+
+    /// Get the network overview data and health statistics.
+    async fn get_network_overview(token: auth::Token) -> RpcResult<NetworkOverview>;
 
     /// record transaction and initiate broadcast to peers
     ///
@@ -2335,6 +2375,28 @@ impl NeptuneRPCServer {
     pub fn data_directory(&self) -> &DataDirectory {
         &self.data_directory
     }
+
+    async fn get_network_overview_inner(&self) -> RpcResult<NetworkOverview> {
+        // Create one-shot channel.
+        let (tx, rx) = oneshot::channel();
+
+        // Send one-shot channel to NetworkActor, via main loop.
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::GetNetworkOverview(tx))
+            .await
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
+
+        // Await receipt.
+        match tokio::time::timeout(Duration::from_secs(2), rx).await {
+            Ok(Ok(overview)) => Ok(overview),
+            Ok(Err(e)) => Err(RpcError::SendError(format!("NetworkActor dropped: {e}."))),
+            Err(e) => Err(RpcError::Failed(format!(
+                "RPC Timeout while waiting for NetworkActor response: {e}."
+            ))),
+        }
+    }
 }
 
 impl RPC for NeptuneRPCServer {
@@ -2794,9 +2856,19 @@ impl RPC for NeptuneRPCServer {
         let global_state = self.state.lock_guard().await;
 
         // Get all connected peers
-        for (socket_address, peer_info) in &global_state.net.peer_map {
+        for peer_info in global_state.net.peer_map.values() {
             if peer_info.standing().is_negative() {
-                sanctions_in_memory.insert(socket_address.ip(), peer_info.standing());
+                let maybe_ip = peer_info
+                    .address()
+                    .iter()
+                    .find_map(|component| match component {
+                        Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                        Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                        _ => None,
+                    });
+                if let Some(ip) = maybe_ip {
+                    sanctions_in_memory.insert(ip, peer_info.standing());
+                }
             }
         }
 
@@ -3121,8 +3193,8 @@ impl RPC for NeptuneRPCServer {
         let cpu_temp = None; // disable for now.  call is too slow.
         let proving_capability = self.state.cli().proving_capability();
 
-        let peer_count = Some(state.net.peer_map.len());
-        let max_num_peers = self.state.cli().max_num_peers;
+        let peer_count = state.net.peer_map.len();
+        let network_overview = self.get_network_overview_inner().await.ok();
 
         let mining_status = Some(state.mining_state.mining_status);
 
@@ -3163,11 +3235,11 @@ impl RPC for NeptuneRPCServer {
             confirmed_total_balance,
             unconfirmed_available_balance,
             unconfirmed_total_balance,
+            peer_count,
+            network_overview,
             mempool_size,
             mempool_total_tx_count,
             mempool_own_tx_count,
-            peer_count,
-            max_num_peers,
             mining_status,
             proving_capability,
             confirmations,
@@ -3221,16 +3293,138 @@ impl RPC for NeptuneRPCServer {
             .net
             .peer_map
             .iter_mut()
-            .for_each(|(socketaddr, peerinfo)| {
-                if socketaddr.ip() == ip {
+            .for_each(|(_peer_id, peerinfo)| {
+                let maybe_ip = peerinfo
+                    .address()
+                    .iter()
+                    .find_map(|component| match component {
+                        libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                        libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                        _ => None,
+                    });
+                if maybe_ip.is_some_and(|peer_ip| ip == peer_ip) {
                     peerinfo.standing.clear_standing();
                 }
             });
 
-        //Also clears this IP's standing in database, whether it is connected or not.
+        // Also clears this IP's standing in database, whether it is connected or not.
         global_state_mut.net.clear_ip_standing_in_database(ip).await;
 
         Ok(global_state_mut.flush_databases().await?)
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn ban(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        address: Multiaddr,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::Ban(address))
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn unban(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        address: Multiaddr,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::Unban(address))
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn unban_all(self, _: context::Context, token: auth::Token) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::UnbanAll)
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn dial(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        address: Multiaddr,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::Dial(address))
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn probe_nat(self, _: context::Context, token: auth::Token) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::ProbeNat)
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
+
+        Ok(())
+    }
+
+    // Already documented in trait; do not add docstring.
+    async fn reset_relay_reservations(
+        self,
+        _: context::Context,
+        token: auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .try_send(RPCServerToMain::ResetRelayReservations)
+            .map_err(|e| {
+                RpcError::SendError(format!("could not send message to main loop: {e}"))
+            })?;
+
+        Ok(())
+    }
+    // Already documented in trait; do not add docstring.
+    async fn get_network_overview(
+        self,
+        _: context::Context,
+        token: auth::Token,
+    ) -> RpcResult<NetworkOverview> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.get_network_overview_inner().await
     }
 
     // documented in trait. do not add doc-comment.
@@ -4491,6 +4685,9 @@ pub mod error {
 
         #[error("Wallet key counter is zero. Must be positive after init")]
         WalletKeyCounterIsZero,
+
+        #[error("Access to this endpoint is restricted")]
+        RestrictedAccess,
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
@@ -5127,12 +5324,15 @@ mod tests {
         .await;
         let token = cookie_token(&rpc_server).await;
         let rpc_request_context = context::current();
-        let (peer_address0, peer_address1) = {
+        let (peer_id0, peer_address0, peer_id1, peer_address1) = {
             let global_state = rpc_server.state.lock_guard().await;
 
+            let entries = global_state.net.peer_map.iter().collect::<Vec<_>>();
             (
-                global_state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address(),
-                global_state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address(),
+                *entries[0].0,
+                entries[0].1.address(),
+                *entries[1].0,
+                entries[1].1.address(),
             )
         };
 
@@ -5153,7 +5353,7 @@ mod tests {
             global_state_mut
                 .net
                 .peer_map
-                .entry(peer_address0)
+                .entry(peer_id0)
                 .and_modify(|p| {
                     p.standing
                         .sanction(PeerSanction::Negative(
@@ -5164,7 +5364,7 @@ mod tests {
             global_state_mut
                 .net
                 .peer_map
-                .entry(peer_address1)
+                .entry(peer_id1)
                 .and_modify(|p| {
                     p.standing
                         .sanction(PeerSanction::Negative(
@@ -5172,8 +5372,8 @@ mod tests {
                         ))
                         .unwrap_err();
                 });
-            let standing_0 = global_state_mut.net.peer_map[&peer_address0].standing;
-            let standing_1 = global_state_mut.net.peer_map[&peer_address1].standing;
+            let standing_0 = global_state_mut.net.peer_map[&peer_id0].standing;
+            let standing_1 = global_state_mut.net.peer_map[&peer_id1].standing;
             (standing_0, standing_1)
         };
 
@@ -5188,16 +5388,33 @@ mod tests {
             "Punished list must have two elements after sanctionings"
         );
 
+        let ip0 = peer_address0
+            .iter()
+            .find_map(|component| match component {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .unwrap();
+        let ip1 = peer_address1
+            .iter()
+            .find_map(|component| match component {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .unwrap();
+
         {
             let mut global_state_mut = rpc_server.state.lock_guard_mut().await;
 
             global_state_mut
                 .net
-                .write_peer_standing_on_decrease(peer_address0.ip(), standing0)
+                .write_peer_standing_on_decrease(ip0, standing0)
                 .await;
             global_state_mut
                 .net
-                .write_peer_standing_on_decrease(peer_address1.ip(), standing1)
+                .write_peer_standing_on_decrease(ip1, standing1)
                 .await;
         }
 
@@ -5215,16 +5432,10 @@ mod tests {
         // Verify expected initial conditions
         {
             let global_state = rpc_server.state.lock_guard().await;
-            let standing0 = global_state
-                .net
-                .get_peer_standing_from_database(peer_address0.ip())
-                .await;
+            let standing0 = global_state.net.get_peer_standing_from_database(ip0).await;
             assert_ne!(0, standing0.unwrap().standing);
             assert_ne!(None, standing0.unwrap().latest_punishment);
-            let peer_standing_1 = global_state
-                .net
-                .get_peer_standing_from_database(peer_address1.ip())
-                .await;
+            let peer_standing_1 = global_state.net.get_peer_standing_from_database(ip1).await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
             assert_ne!(None, peer_standing_1.unwrap().latest_punishment);
             drop(global_state);
@@ -5232,30 +5443,24 @@ mod tests {
             // Clear standing of #0
             rpc_server
                 .clone()
-                .clear_standing_by_ip(rpc_request_context, token, peer_address0.ip())
+                .clear_standing_by_ip(rpc_request_context, token, ip0)
                 .await?;
         }
 
         // Verify expected resulting conditions in database
         {
             let global_state = rpc_server.state.lock_guard().await;
-            let standing0 = global_state
-                .net
-                .get_peer_standing_from_database(peer_address0.ip())
-                .await;
+            let standing0 = global_state.net.get_peer_standing_from_database(ip0).await;
             assert_eq!(0, standing0.unwrap().standing);
             assert_eq!(None, standing0.unwrap().latest_punishment);
-            let standing1 = global_state
-                .net
-                .get_peer_standing_from_database(peer_address1.ip())
-                .await;
+            let standing1 = global_state.net.get_peer_standing_from_database(ip1).await;
             assert_ne!(0, standing1.unwrap().standing);
             assert_ne!(None, standing1.unwrap().latest_punishment);
 
             // Verify expected resulting conditions in peer map
-            let standing0_from_memory = global_state.net.peer_map[&peer_address0].clone();
+            let standing0_from_memory = global_state.net.peer_map[&peer_id0].clone();
             assert_eq!(0, standing0_from_memory.standing.standing);
-            let standing1_from_memory = global_state.net.peer_map[&peer_address1].clone();
+            let standing1_from_memory = global_state.net.peer_map[&peer_id1].clone();
             assert_ne!(0, standing1_from_memory.standing.standing);
         }
 
@@ -5285,19 +5490,44 @@ mod tests {
         .await;
         let token = cookie_token(&rpc_server).await;
         let mut state = rpc_server.state.lock_guard_mut().await;
-        let peer_address0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address();
-        let peer_address1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address();
+
+        let (peer_id0, peer_address0, peer_id1, peer_address1) = {
+            let entries = state.net.peer_map.iter().collect::<Vec<_>>();
+            (
+                *entries[0].0,
+                entries[0].1.address(),
+                *entries[1].0,
+                entries[1].1.address(),
+            )
+        };
+
+        let ip0 = peer_address0
+            .iter()
+            .find_map(|component| match component {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .unwrap();
+        let ip1 = peer_address1
+            .iter()
+            .find_map(|component| match component {
+                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                _ => None,
+            })
+            .unwrap();
 
         // sanction both peers
         let (standing0, standing1) = {
-            state.net.peer_map.entry(peer_address0).and_modify(|p| {
+            state.net.peer_map.entry(peer_id0).and_modify(|p| {
                 p.standing
                     .sanction(PeerSanction::Negative(
                         NegativePeerSanction::DifferentGenesis,
                     ))
                     .unwrap_err();
             });
-            state.net.peer_map.entry(peer_address1).and_modify(|p| {
+            state.net.peer_map.entry(peer_id1).and_modify(|p| {
                 p.standing
                     .sanction(PeerSanction::Negative(
                         NegativePeerSanction::DifferentGenesis,
@@ -5305,18 +5535,18 @@ mod tests {
                     .unwrap_err();
             });
             (
-                state.net.peer_map[&peer_address0].standing,
-                state.net.peer_map[&peer_address1].standing,
+                state.net.peer_map[&peer_id0].standing,
+                state.net.peer_map[&peer_id1].standing,
             )
         };
 
         state
             .net
-            .write_peer_standing_on_decrease(peer_address0.ip(), standing0)
+            .write_peer_standing_on_decrease(ip0, standing0)
             .await;
         state
             .net
-            .write_peer_standing_on_decrease(peer_address1.ip(), standing1)
+            .write_peer_standing_on_decrease(ip1, standing1)
             .await;
 
         drop(state);
@@ -5328,7 +5558,7 @@ mod tests {
                 .lock_guard_mut()
                 .await
                 .net
-                .get_peer_standing_from_database(peer_address0.ip())
+                .get_peer_standing_from_database(ip0)
                 .await;
             assert_ne!(0, peer_standing0.unwrap().standing);
             assert_ne!(None, peer_standing0.unwrap().latest_punishment);
@@ -5340,7 +5570,7 @@ mod tests {
                 .lock_guard_mut()
                 .await
                 .net
-                .get_peer_standing_from_database(peer_address1.ip())
+                .get_peer_standing_from_database(ip1)
                 .await;
             assert_ne!(0, peer_standing1.unwrap().standing);
             assert_ne!(None, peer_standing1.unwrap().latest_punishment);
@@ -5364,31 +5594,25 @@ mod tests {
 
         // Verify expected resulting conditions in database
         {
-            let peer_standing_0 = state
-                .net
-                .get_peer_standing_from_database(peer_address0.ip())
-                .await;
+            let peer_standing_0 = state.net.get_peer_standing_from_database(ip0).await;
             assert_eq!(0, peer_standing_0.unwrap().standing);
             assert_eq!(None, peer_standing_0.unwrap().latest_punishment);
         }
 
         {
-            let peer_still_standing_1 = state
-                .net
-                .get_peer_standing_from_database(peer_address1.ip())
-                .await;
+            let peer_still_standing_1 = state.net.get_peer_standing_from_database(ip1).await;
             assert_eq!(0, peer_still_standing_1.unwrap().standing);
             assert_eq!(None, peer_still_standing_1.unwrap().latest_punishment);
         }
 
         // Verify expected resulting conditions in peer map
         {
-            let peer_standing_0_from_memory = state.net.peer_map[&peer_address0].clone();
+            let peer_standing_0_from_memory = state.net.peer_map[&peer_id0].clone();
             assert_eq!(0, peer_standing_0_from_memory.standing.standing);
         }
 
         {
-            let peer_still_standing_1_from_memory = state.net.peer_map[&peer_address1].clone();
+            let peer_still_standing_1_from_memory = state.net.peer_map[&peer_id1].clone();
             assert_eq!(0, peer_still_standing_1_from_memory.standing.standing);
         }
 

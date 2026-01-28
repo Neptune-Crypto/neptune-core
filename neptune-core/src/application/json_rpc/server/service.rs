@@ -1,7 +1,9 @@
 use std::collections::HashSet;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use itertools::Itertools;
+use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::api::export::AdditionRecord;
@@ -913,6 +915,107 @@ impl RpcApi for RpcServer {
 
         Ok(tx)
     }
+
+    async fn ban_call(&self, request: BanRequest) -> RpcResult<BanResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::Ban(request.address))
+            .await;
+
+        Ok(BanResponse {})
+    }
+
+    async fn unban_call(&self, request: UnbanRequest) -> RpcResult<UnbanResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::Unban(request.address))
+            .await;
+
+        Ok(UnbanResponse {})
+    }
+
+    async fn unban_all_call(&self, _request: UnbanAllRequest) -> RpcResult<UnbanAllResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        let _ = self.to_main_tx.send(RPCServerToMain::UnbanAll).await;
+
+        Ok(UnbanAllResponse {})
+    }
+
+    async fn dial_call(&self, request: DialRequest) -> RpcResult<DialResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::Dial(request.address))
+            .await;
+
+        Ok(DialResponse {})
+    }
+
+    async fn probe_nat_call(&self, _request: ProbeNatRequest) -> RpcResult<ProbeNatResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        let _ = self.to_main_tx.send(RPCServerToMain::ProbeNat).await;
+
+        Ok(ProbeNatResponse {})
+    }
+
+    async fn reset_relay_reservations_call(
+        &self,
+        _request: ResetRelayReservationsRequest,
+    ) -> RpcResult<ResetRelayReservationsResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::ResetRelayReservations)
+            .await;
+
+        Ok(ResetRelayReservationsResponse {})
+    }
+
+    async fn network_overview_call(
+        &self,
+        _request: NetworkOverviewRequest,
+    ) -> RpcResult<NetworkOverviewResponse> {
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        // Create one-shot channel.
+        let (tx, rx) = oneshot::channel();
+
+        // Send one-shot channel to NetworkActor, via main loop.
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::GetNetworkOverview(tx))
+            .await;
+
+        // Await receipt.
+        let timeout_period = Duration::from_secs(1);
+        match tokio::time::timeout(timeout_period, rx).await {
+            Ok(Ok(network_overview)) => Ok(NetworkOverviewResponse { network_overview }),
+            Ok(Err(_e)) => Err(RpcError::RxChannel),
+            Err(_e) => Err(RpcError::Timeout(timeout_period)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -920,6 +1023,7 @@ impl RpcApi for RpcServer {
 pub mod tests {
     use std::collections::HashSet;
 
+    use libp2p::Multiaddr;
     use macro_rules_attr::apply;
     use num_traits::Zero;
     use tasm_lib::prelude::Digest;
@@ -942,6 +1046,7 @@ pub mod tests {
     use crate::application::json_rpc::core::model::message::BlockHeightsByFlagsRequest;
     use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
+    use crate::application::network::arbitrary::arb_multiaddr;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
     use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
@@ -1550,5 +1655,55 @@ pub mod tests {
             .unwrap()
             .block_heights
             .is_empty());
+    }
+
+    fn random_multiaddr() -> Multiaddr {
+        let mut test_runner =
+            proptest::test_runner::TestRunner::new(proptest::test_runner::Config::default());
+        proptest::strategy::ValueTree::current(
+            &proptest::prelude::Strategy::new_tree(&arb_multiaddr(), &mut test_runner).unwrap(),
+        )
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn network_commands_do_not_crash() {
+        // Network commands have an *indirect* effect on state. The main loop
+        // receives messages from the RPC server and may modify state directly
+        // or may pass on messages to the network actor or to the peer loop
+        // which then modify state. These secondary effects are not in the
+        // scope of this test module. For now it suffices to verify that the
+        // network commands can be delivered without crashing.
+        let mut rpc_server = test_rpc_server().await;
+        rpc_server.unrestricted = true;
+
+        let multiaddr = random_multiaddr();
+
+        rpc_server.ban(multiaddr.clone()).await.unwrap();
+        rpc_server.unban(multiaddr.clone()).await.unwrap();
+        rpc_server.unban_all().await.unwrap();
+        rpc_server.dial(multiaddr).await.unwrap();
+        rpc_server.probe_nat().await.unwrap();
+        rpc_server.reset_relay_reservations().await.unwrap();
+        rpc_server.get_network_overview().await
+            .expect_err("dummy main loop consumes and drops incoming messages including oneshot back-communication channel");
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn network_commands_require_unrestricted_access() {
+        let rpc_server = test_rpc_server().await;
+
+        let multiaddr = random_multiaddr();
+
+        let err = RpcError::RestrictedAccess;
+        assert_eq!(err, rpc_server.ban(multiaddr.clone()).await.unwrap_err());
+        assert_eq!(err, rpc_server.unban(multiaddr.clone()).await.unwrap_err());
+        assert_eq!(err, rpc_server.unban_all().await.unwrap_err());
+        assert_eq!(err, rpc_server.dial(multiaddr).await.unwrap_err());
+        assert_eq!(err, rpc_server.probe_nat().await.unwrap_err());
+        assert_eq!(
+            err,
+            rpc_server.reset_relay_reservations().await.unwrap_err()
+        );
+        assert_eq!(err, rpc_server.get_network_overview().await.unwrap_err());
     }
 }
