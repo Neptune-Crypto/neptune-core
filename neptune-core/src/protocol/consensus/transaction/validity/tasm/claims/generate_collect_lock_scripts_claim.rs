@@ -14,11 +14,11 @@ use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
 pub(crate) struct GenerateCollectLockScriptsClaim;
 
 impl BasicSnippet for GenerateCollectLockScriptsClaim {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "proof_collection_pointer".to_owned())]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "claim".to_owned())]
     }
 

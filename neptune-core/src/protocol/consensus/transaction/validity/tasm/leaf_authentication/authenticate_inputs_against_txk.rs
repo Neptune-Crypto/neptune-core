@@ -17,7 +17,7 @@ use crate::triton_vm::prelude::*;
 pub struct AuthenticateInputsAgainstTxk;
 
 impl BasicSnippet for AuthenticateInputsAgainstTxk {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "transaction_kernel_mast_hash".to_owned()),
             // Type of `inputs` is Vec<RemovalRecord>
@@ -26,7 +26,7 @@ impl BasicSnippet for AuthenticateInputsAgainstTxk {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![]
     }
 
