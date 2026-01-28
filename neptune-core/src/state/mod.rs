@@ -205,6 +205,10 @@ impl GlobalStateLock {
     /// Tries to update the cache from the async mutex via `try_lock`. If
     /// successful, update the cache. If busy, returns the cached version
     /// immediately.
+    ///
+    /// This function is for obtaining the node's [`HandshakeData`] without
+    /// immediately (*i.e.*, without blocking) in a synchronous environment.
+    /// In other cases, call [`GlobalState::get_own_handshakedata`] instead.
     pub fn get_own_handshakedata_sync(&self) -> HandshakeData {
         // Happy path: we obtain the read lock on global state.
         if let Ok(global_state) = self.global_state_lock.try_lock_guard() {

@@ -2,32 +2,32 @@
 
 ### 1. Unified Peer Management: The Bridge Pattern
 
-The integration of [`libp2p`](https://libp2p.io/) into Neptune-Cash was designed as a "bridge" rather than a total rewrite. This allowed the node to leverage modern transport protocols while retaining the battle-tested consensus logic found in the core peer loops.
+The integration of [`libp2p`](https://libp2p.io/) into Neptune-Cash was designed as a "bridge" rather than a total rewrite. This allowed the node to leverage libp2p's variety of protocols while retaining the battle-tested blockchain peer loop logic found in `peer_loop.rs`.Both the legacy network stack (`connect_to_peers.rs`) and the libp2p network stack (everything in module `network/`) are pathways to spawning a blockchain peer loop.
 
-#### The Peer Loop Abstraction
+#### The Blockchain Peer Loop
 
-At the heart of Neptune Cash's communication is the **Peer Loop** (`PeerLoopHandler::run`), located in `neptune-core/src/application/loops/peer_loop.rs`. This loop is entirely protocol-agnostic; it manages the high-level application state, including block synchronization, mempool updates, and consensus messages. The peer loop has two lines of communication: one to the main loop within the same process and back, and one to and from its counterpart on the other side of an internet connection.
+At the heart of Neptune Cash's communication is the **Blockchain Peer Loop** (`PeerLoopHandler::run`), located in `neptune-core/src/application/loops/peer_loop.rs`. This loop is entirely protocol-agnostic; it manages the high-level application state, including block synchronization, mempool updates, and consensus messages. The blockchain peer loop has two lines of communication: one to the main loop within the same process and back, and one to and from its counterpart on the other side of an internet connection.
 
-* **Logic Reuse:** The loop is wrapped in `run_wrapper`, which handles task initialization and graceful shutdown. This wrapper expects a generic asynchronous stream that has already been "primed" with a successful handshake.
+* **Logic Reuse:** The loop is wrapped in `run_wrapper`, which handles task initialization, graceful shutdown, and spawns `run` inside a panic-guard so that if there is a panic inside the blockchain peer loop the fallout is at most a terminated connection. This wrapper expects a generic asynchronous stream that has already been "primed" with a successful handshake.
 * **The Seamless Handoff:** Because `run_wrapper` is generic, it does not know—nor does it need to know—whether it was spawned by the legacy TCP stack or the modern `libp2p` stack. Once a connection is established and the handshake is validated, the underlying stream is handed off to this loop to begin application-level processing.
 
 #### Gateway to libp2p: The `StreamGateway` Subprotocol
 
-To allow `libp2p` to interface with this existing loop, we implemented a custom subprotocol called **`StreamGateway`**.
+The **`StreamGateway`** subprotocol is a custom protocol in the libp2p network stack whose purpose is to turn connections with libp2p peers into connections with blockchain peers running the blockchain peer loop.
 
 1. **Handshake Validation:** When two `libp2p` peers connect, the `StreamGateway` subprotocol is negotiated. If the connection is determined to be direct (*i.e.*, not through a relay), the `StreamGateway` exchanges and validates the standard Neptune `HandshakeData` (the same data structure used by the legacy stack).
-2. **Stream Hijacking:** Once the handshake is verified, `libp2p` "hijacks" the substream. Instead of using standard `libp2p` message framing, the raw substream is fed directly into a spawned `run_wrapper` task.
+2. **Stream Hijacking:** Once the handshake is verified, the substream is "hijacked". Instead of using standard `libp2p` message framing, the raw substream is fed directly into a spawned `run_wrapper` task.
 3. **Protocol Evolution:** This architecture allows the `PeerMessage` enum—which defines our consensus and state replication protocol—to remain unchanged. While some messages (specifically those for legacy peer discovery) are redundant in the `libp2p` stack, the core consensus logic remains untouched.
 
 **Direct-Only Policy -- Motivation.**
 
  1. Relays are a precious resource with the specific purpose of coordinating hole-punches, whereas participating in the consensus protocol is a resource-intensive activity. Doing so through a relay duplicates resource usage in a non-constructive way.
  2. Lots of exchanges in the consensus protocol are sensitive to round-trip time (RTT), which is significantly better on a direct connection than through a relay.
- 3. The policy ensures that the identity of a peer (their IP) is transparent. This prevents malicious peers from hiding behind a relay's IP and ensures that blacklisting targets the perpetrator rather than the infrastructure.
+ 3. The policy ensures that the IP of a peer is transparent. This prevents malicious peers from hiding behind a relay's IP and ensures that blacklisting targets the perpetrator rather than the infrastructure.
 
 **Direct-Only Policy -- Enforcement.**
 
- - When a connection is established, a `GatewayHandler` is created. If the transport is identified as relayed (containing `/p2p-circuit`), the handler is initialized in a `paused` state.
+ - When a connection is established, the `StreamGateway` creates a `GatewayHandler` for it. If the transport is identified as relayed (containing `/p2p-circuit`), the handler is initialized in a `paused` state.
  - While paused, the handler's `poll` loop returns `Poll::Pending`. It will not initiate outbound substream requests or respond to inbound protocol negotiations.
  - If a *direct* connection is established (either initially or subsequently via DCUtR hole-punching), the `StreamGateway` behaviour sends a `Command::Activate` signal to the handler.
  - Upon receiving the activation signal, the handler clears the pause flag, allowing the `poll` loop to signal `Ready` and begin the Neptune Cash handshake.
@@ -36,8 +36,18 @@ To allow `libp2p` to interface with this existing loop, we implemented a custom 
 
 Despite the reuse of the legacy loops, the influence of the `libp2p` stack is visible throughout the system's types:
 
-* **Identification:** Peers are no longer identified by transient IP/Port combinations. Every peer is identified by a unique, cryptographic **`PeerId`**.
+* **Identification:** Peers are identified by a unique, cryptographic **`PeerId`**.
 * **Addressing:** The system has moved away from `SocketAddr` in favor of **`Multiaddr`**. This allows the network stack to seamlessly handle TCP, QUIC, and Relay addresses using a single, future-proof format (e.g., `/ip4/1.2.3.4/udp/4001/quic-v1`).
+
+#### Handshake
+
+Prior to entering into the blockchain peer loop, two connecting peers must validate each other's handshake. In the legacy stack, handshake validation happens in-line in `call_peer` and `answer_peer`. In the libp2p stack handshake validation happens in `network/handshake.rs` which calls `HandshakeData::validate`.
+
+The purpose of the handshake is:
+ - To provide security-in-depth backstop against establishing connections with incompatible peers. (For instance, peers running the wrong protocol.)
+ - To catch connections to self. This catch is mediated by the `instance_id` field, which is a random number generated at startup and forgotten at shutdown, even if the PeerId does not change.
+ - To exchange blockchain data that would otherwise need to be queried immediately after the handshake anyway.
+ - To advertise services specific to Neptune Cash such as whether the node is archival (*i.e.*, whether it stores all historical data, in which case it can serve a set of requests it otherwise could not).
 
 | Component | Legacy Stack | libp2p Stack |
 | --- | --- | --- |
@@ -57,7 +67,7 @@ Moving away from the custom TCP stack to `libp2p` provides several critical adva
 * **Transport Flexibility:** While the legacy stack is tethered to TCP, `libp2p` grants us native support for **UDP and QUIC**. QUIC, in particular, offers 1-RTT handshakes and eliminates head-of-line blocking, which is a massive performance boon for block propagation.
 * **Native Encryption:** The legacy stack offers no transport-level encryption. `libp2p` provides transport-level encryption (via Noise or TLS) natively.
 * **Advanced Networking Features:** `libp2p` comes with "off-the-shelf" modules for **Multiplexing** (Yamux), **Relaying** (Circuit Relay v2), and **Hole Punching** (DCUtR). Rebuilding these features in a custom TCP stack would be an enormous, error-prone undertaking.
-* **Ecosystem Compatibility:** `libp2p` is the industry standard for decentralized networks, used by Ethereum, IPFS, Polkadot, and Filecoin. Adopting it ensures that Neptune-Cash benefits from the collective security audits and performance optimizations of the wider blockchain community.
+* **Ecosystem Compatibility:** `libp2p` is the industry standard for decentralized networks, used by Ethereum, IPFS, Polkadot, and Filecoin. Adopting it ensures that Neptune Cash benefits from the collective security audits and performance optimizations of the wider blockchain community.
 * **Future-Proofing:** The modular nature of `libp2p` allows us to plug in new discovery mechanisms or transports as they emerge without needing to refactor our core consensus loops.
 
 | Feature | Legacy TCP Stack | libp2p Stack |
@@ -70,7 +80,7 @@ Moving away from the custom TCP stack to `libp2p` provides several critical adva
 
 ### 3. Node Identity and Cryptographic Keys
 
-In the `libp2p` ecosystem, a node’s identity is not defined by its IP address, but by a stable, unique identifier called a **`PeerId`**. This allows the Neptune-Cash network to track peer performance and reputation across different sessions, even if the peer's physical location or network address changes. It also allows advanced features like whitelisting or peer pairing.
+In the `libp2p` ecosystem, a node’s identity is not defined by its IP address, but by a stable, unique identifier called a **`PeerId`**. This allows the Neptune Cash network to track peer performance and reputation across different sessions, even if the peer's physical location or network address changes. It also allows advanced features like whitelisting or peer pairing.
 
 #### The Origin of a `PeerId`
 
@@ -78,13 +88,13 @@ A `PeerId` is a verifiable link to a node's cryptographic credentials. It is a `
 
 * **Keypairs:** Every node generates a cryptographic key pair (by default, Ed25519).
 * **Encryption & Signing:** These keys serve a dual purpose: they are used to sign peer-to-peer messages (ensuring they haven't been tampered with) and to establish secure, encrypted "Noise" or TLS channels between peers.
-* **Separation of Concerns:** It is important to note that these networking keys are **entirely separate** from the cryptographic keys used to manage Neptune-Cash funds. The networking identity is used strictly for routing, confidentiality, authenticity, and reputation within the peer-to-peer stack.
+* **Separation of Concerns:** It is important to note that these networking keys are **entirely separate** from the cryptographic keys used to manage Neptune Cash funds. The networking identity is used strictly for routing, confidentiality, authenticity, and reputation within the peer-to-peer stack.
 
 #### Persistence and Management
 
-To ensure a stable presence in the network, `neptune-core` persists its networking identity to a file. This prevents the node from appearing as a brand-new entity (a "churn" event) every time it restarts.
+To ensure a stable presence in the network, `neptune-core` persists its networking identity to a file. This prevents the node from appearing as a brand-new entity every time it restarts.
 
-* **Default Behavior:** At startup, the node looks for an `identity.key` file in its data directory. If the file exists, the node loads its long-term identity; if not, it generates a new one and saves it.
+* **Default Behavior:** At startup, the node looks for an `identity.key` file in the `network/` subdirectory of its data directory. If the file exists, the node loads its long-term identity; if not, it generates a new one and saves it.
 * **CLI Configurations:**
 * `--identity-file <file>`: Overrides the default location, allowing users to manage multiple identities.
 * `--new-identity`: Backs up the current identity file and generates a fresh one. This is useful if a user wants to "reset" their network reputation.
@@ -97,15 +107,13 @@ To ensure a stable presence in the network, `neptune-core` persists its networki
 3. **Reconnect Speed:** Peers who have previously connected to you store your `PeerId` and `Multiaddr` in their local address books, resulting in faster re-connections without needing to query the DHT again.
 4. **IPs Change:** IPs are rarely static but vary because they are assigned from a limited address space or resampled upon system reboot. As a result, whitelisting peers based on IP is fragile and unsound in the face of IP spoofing, but whitelisting based on their `PeerId` provides a robust countermeasure against this range of attacks. However, persistent `PeerId`s offer little security against misbehaving nodes which is why the ban list contains IP addresses and not `PeerId`s.
 
-You are right to pull me back to the actual implementation details—let’s sharpen this. You're correct about Kademlia: in `rust-libp2p`, unless you've manually implemented a persistence layer for the `MemoryStore` or switched to a different storage backend, the routing table is transient and clears on restart. We rely on the **Address Book** to provide the "seeds" for Kademlia to rebuild itself.
-
 ## 4. The NetworkActor
 
 The `NetworkActor` is the central struct that manages the network's lifecycle. It defines helper functions and contains the state for an event loop.
 
 ### The `NetworkStack` (NetworkBehaviour)
 
-The main composite protocol is named `NetworkStack`. This struct defines the protocols our node supports. By deriving `NetworkBehaviour`, libp2p handles routing events between these internal modules.
+The main composite protocol is named `NetworkStack`. This struct defines the protocols our node supports. By deriving `NetworkBehaviour`, `libp2p` handles routing events between these internal modules.
 
 ```rust
 #[derive(libp2p::swarm::NetworkBehaviour)]
@@ -124,13 +132,13 @@ pub struct NetworkStack {
 
 ```
 
-### Actor State and PeerLoop Spawning
+### Actor State and Blockchain Peer Loop Spawning
 
 The `NetworkActor` possesses all the context required to instantiate a StreamGateway protocol, which hijacks a raw libp2p substream and passes it to a newly spawned peer loop. To do this, the actor holds:
 
-* **Main Channel Handles:** The mpsc sender and receiver used to communicate with the **Main Loop**.
-* **Global State Access:** Necessary to generate handshakes as well as an input to the Peer Loop.
-* **Peer Loop Channel Handles:** The broadcast receiver and mpsc sender channels that are also inputs to the Peer Loop.
+* **Main Channel Handles:** The `mpsc` sender and receiver used to communicate with the **Main Loop**.
+* **Global State Access:** Necessary to generate handshakes as well as an input to the Blockchain Peer Loop.
+* **Peer Loop Channel Handles:** The broadcast receiver and `mpsc` sender channels that are also inputs to the Blockchain Peer Loop.
 
 When the `StreamGateway` successfully negotiates a new connection, the `NetworkActor` reacts to that event by spawning a new `tokio` task. This task runs `run_wrapper`, effectively handing over the hijacked stream and the necessary channel handles to the `PeerLoopHandler`.
 
@@ -158,21 +166,47 @@ In the `NetworkStack` (the libp2p `NetworkBehaviour`), each subprotocol serves a
 
 The total number of connections is limited by the command-line argument `--max-num-peers` which defaults to 10. This limit is enforced by the `NetworkActor` (as opposed to by some subprotocol like connection-limits) in order to prioritize sticky peers and own dialing attempts.
 
-To prevent memory-based DoS attacks without impacting the Mempool's growth, Neptune-Cash avoids process-wide memory limits. Instead, it uses Yamux Auto-Tuning and a strict cap on sub-streams (`set_max_num_streams(256)`) to ensure that a single malicious peer cannot exhaust the node's resources by opening thousands of idle streams.
+To prevent memory-based DoS attacks without impacting the Mempool's growth, Neptune Cash avoids process-wide memory limits. Instead, it uses Yamux Auto-Tuning and a strict cap on sub-streams (`set_max_num_streams(256)`) to ensure that a single malicious peer cannot exhaust the node's resources by opening thousands of idle streams.
 
 ## 5. Persistence
 
 Three separate pieces of information are persisted to disk, and read from disk at startup. By default these are stored in the subdirectory `[DATA_DIR]/network/`.
 
  1. The *identity file* `identity.key` contains the secret key for the node's libp2p key pair. As per standard libp2p practice, the node's `PeerId` is the multihash of its public key, and this public key is determined by this file.
- 2. The *address book* `address-book.json` contains peer metadata for long-lived dialable connections. The address book can contain entries that do not correspond to currently active connections, but over time unreachable nodes will be degraded in score and eventually booted from the list.
- 3. The *black list* `black-list.json` contains the IP addresses of banned peers.
+ 2. The *address book* `address-book.json` contains peer metadata for long-lived dialable connections. The address book can contain entries that do not correspond to currently active connections, but over time unreachable nodes will be degraded in score and eventually booted from the list. If the address book is empty, and the user specified no peers using `--peer` in the command line arguments, then the address book will respond to a request for initial peers with a list of *hardcoded bootstrap addresses* listed explicitly in `AddressBook::select_initial_peers`.
+ 3. The *black list* `black-list.json` contains the IP addresses of banned peers. The `NetworkActor` has no logic for deciding whether to ban peers. It merely follows instructions passed to it by the main loop. The main loop, in turn, passes these instructions on from the blockchain peer loop or the RPC server. Bans apply to incoming as well as outgoing connections because hole punching makes even incoming connections look like outgoing ones.
 
-## 6. Component Protocols
+## 6. CLI
+
+The following network-related flags or arguments are available when starting `neptune-core`:
+
+ - `--peer <SocketAddr or Multiaddr>` if the port is different from 9798, this flag instructs the `NetworkActor` to ensure that there is always a connection to the given peer, now called a *sticky peer*. If the port is 9798, then this peer is passed to the legacy network stack.
+ - `--ban <SocketAddr or Multiaddr>` instructs the `NetworkActor` to disconnect from the given peers, in addition to the peers in the black list. No changes are made to the black list.
+ - *Not presently supported:* `--restrict-peers-to-list` instructs the `NetworkActor` to only upgrade peers specified via `--peer` to blockchain peer loops.
+ - *Not presently supported:* `--max-connections-per-ip <number>` instructs the `NetworkActor` to reject connections to different `PeerId`s living at the same IP in excess of the given number.
+ - `--quic-port` instructs the `NetworkActor` on which port to listen for UDP connections.
+ - `--tcp-port` instructs the `NetworkActor` on which port to listen for TCP connections.
+ - `--peer-listen-addr` instructs the `NetworkActor` on which IP to listen for connections.
+ - `--public-ip <IP>` instructs the `NetworkActor` to announce only the given IPs as the public addresses where it is reachable in its `Identify` handshakes, and to ignore `AutoNAT` events.
+ - `--new-identity` instructs the `NetworkActor` to back-up the old identity file and create a new one, assuming a new `PeerId`.
+ - `--identity-file` tells the `NetworkActor` where to look for the identity file, if it is not in the default location.
+ - `--incognito` instructs teh `NetworkActor` to assume a new `PeerId` for the current session, and forget it afterwards.
+
+The following network-related commands are available when running `neptune-cli`:
+
+ - `own-instance-id` prints the instance ID.
+ - `ban <Multiaddr> <Multiaddr> ...` bans the peer(s).
+ - `unban --all` or `unban <Multiaddr> <Multiaddr> ...` unbans the peer(s) and clears their standings.
+ - `dial <Multiaddr>` instructs the `NetworkActor` to initiate a connection to the given peer.
+ - `probe-nat` instructs the `NetworkActor` to launch a NAT probe to determine its own NAT status.
+ - `reset-relay-reservations` intructs the `NetworkActor` to tear down its relay reservations on all peers serving it with them.
+ - `network-overview` prints a brief summary of network vitals.
+
+## 7. Component Protocols
 
 ### [Identify](https://github.com/libp2p/specs/tree/master/identify)
 
-The "handshake" of the `libp2p` world. It allows peers to exchange their public keys, communicate which protocols they support (like Kademlia or StreamGateway), and their observed external addresses.
+The "handshake" of the `libp2p` world. It allows peers to exchange their public keys, communicate their versions, which subprotocols they support (like `Kademlia` or `StreamGateway`), and their observed external addresses.
 
 * **Neptune Use:** Essential for version checking and for the node to learn its own "observed" public IP address from others.
 
@@ -186,9 +220,11 @@ A simple liveness check that periodically sends a bit of data and measures the r
 
 The Distributed Hash Table used for peer discovery. It allows nodes to find the network addresses of other peers by querying the network for a specific `PeerId`.
 
-* **Neptune Use:** The primary mechanism for finding new Neptune-Cash nodes without relying on a central server.
+* **Neptune Use:** The primary mechanism for finding new Neptune Cash nodes without relying on a central server.
 
-***Cold Start Workflow:*** Upon startup, the NetworkActor loads the persisted Address Book. It dials these known "seed" addresses; once connected, the Kademlia behavior uses these peers to re-discover the rest of the network and rebuild its in-memory routing table.
+***Cold Start Workflow:*** Upon startup, the `NetworkActor` loads the persisted Address Book. It dials a selection (determined by `select_initial_peers()`) of these "seed" addresses. Once connected, the `Kademlia` behavior uses these peers to re-discover the rest of the network and rebuild its in-memory routing table.
+
+***Server versus Client:*** By default, `Kademlia` is configured to act as server. This configuration makes the node discoverable by peers. However, if the node is behind a NAT and is not reachable via relay addresses, it sets its `Kademlia` configuration to client. Such nodes do not advertise `Kademlia` as a supported subprotocol in their Identify handshakes.
 
 ### [AutoNAT](https://github.com/libp2p/specs/tree/master/autonat)
 
@@ -204,16 +240,15 @@ A protocol for automatic port mapping on local routers.
 
 ### [Circuit Relay v2](https://github.com/libp2p/specs/tree/master/relay)
 
-Allows a node to stay reachable even if it is behind a restrictive firewall by using a third-party "Relay" node as a proxy.
+Allows a node to be reachable even if it is behind a restrictive firewall by using a third-party "Relay" node as a proxy. Otherwise-unreachable nodes can acquire circuit addresses, which route traffic through relay servers. Relays are configured to expire after 2 minutes, which should be long enough to coordinate a hole-punch.
 
 * **Neptune Use:** Neptune nodes can act as both **Clients** (to be reachable) and **Servers** (to help others).
 
 ### [DCUtR (Direct Connection Upgrade through Relay)](https://github.com/libp2p/specs/tree/master/dcutr)
 
-Coordinates a "synchronized" connection attempt between two private nodes already connected via a Relay.
+Coordinates a "synchronized" connection attempt between two private nodes already connected via a Relay. The purpose of this exercise is to circumvent the problem of establishing a direct connection when both peers are behind a NAT. By simultaneously initiating a connection, that connection shows up as outgoing to (and is therefore allowed by) both peers' NAT routers.
 
-* **Neptune Use:** "Hole punching." It upgrades a slow, proxied Relay connection to a fast, direct P2P connection.
-
+* **Neptune Use:** "Hole punching." It upgrades a slow, proxied Relay connection to a fast, direct P2P connection. Direct connections are required to proceed into the blockchain peer loop.
 
 ### StreamGateway (Custom)
 
