@@ -13,7 +13,7 @@ use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
 pub(crate) struct GenerateK2oClaim;
 
 impl BasicSnippet for GenerateK2oClaim {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "transaction_kernel_digest".to_owned()),
             (DataType::Bfe, "garb0".to_string()),
@@ -22,7 +22,7 @@ impl BasicSnippet for GenerateK2oClaim {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "transaction_kernel_digest".to_owned()),
             (DataType::Bfe, "garb0".to_string()),

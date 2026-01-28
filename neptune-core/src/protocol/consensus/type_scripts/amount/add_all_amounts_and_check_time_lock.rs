@@ -35,7 +35,7 @@ impl AddAllAmountsAndCheckTimeLock {
 }
 
 impl BasicSnippet for AddAllAmountsAndCheckTimeLock {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::U32, "num_coins".to_string()),
             (DataType::U32, "index".to_string()),
@@ -47,7 +47,7 @@ impl BasicSnippet for AddAllAmountsAndCheckTimeLock {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::U32, "num_coins".to_string()),
             (DataType::U32, "num_coins".to_string()),

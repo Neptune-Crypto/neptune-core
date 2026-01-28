@@ -13,7 +13,7 @@ use crate::protocol::proof_abstractions::mast_hash::MastHash;
 pub(crate) struct AuthenticateTxkField(pub(crate) TransactionKernelField);
 
 impl BasicSnippet for AuthenticateTxkField {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "transaction_kernel_mast_hash".to_owned()),
             (DataType::VoidPointer, "field".to_owned()),
@@ -21,7 +21,7 @@ impl BasicSnippet for AuthenticateTxkField {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![]
     }
 

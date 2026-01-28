@@ -17,7 +17,7 @@ pub(crate) struct TestTimeLockAndMaybeMark {
 }
 
 impl BasicSnippet for TestTimeLockAndMaybeMark {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::VoidPointer, "*coin".to_string()),
             (DataType::U128, "amount".to_string()),
@@ -27,7 +27,7 @@ impl BasicSnippet for TestTimeLockAndMaybeMark {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::VoidPointer, "*coin".to_string()),
             (DataType::U128, "amount".to_string()),

@@ -20,12 +20,12 @@ impl<const NUM_INPUT_LISTS: usize> HashRemovalRecordIndexSets<NUM_INPUT_LISTS> {
 }
 
 impl<const NUM_INPUT_LISTS: usize> BasicSnippet for HashRemovalRecordIndexSets<NUM_INPUT_LISTS> {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         // Type of all "inputs" argument is Vec<RemovalRecord>
         vec![(DataType::VoidPointer, "rr_list".to_owned()); NUM_INPUT_LISTS]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         let list_of_digests = DataType::List(Box::new(DataType::Digest));
         vec![(list_of_digests, "list_of_digests".to_string())]
     }

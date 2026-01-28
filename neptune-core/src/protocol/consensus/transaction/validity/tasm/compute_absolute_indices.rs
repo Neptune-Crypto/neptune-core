@@ -15,7 +15,7 @@ const LOG2_CHUNK_SIZE: u8 = 12;
 pub(crate) struct ComputeAbsoluteIndices;
 
 impl BasicSnippet for ComputeAbsoluteIndices {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::U64, "aocl_leaf".to_string()),
             (DataType::Digest, "receiver_preimage".to_string()),
@@ -24,7 +24,7 @@ impl BasicSnippet for ComputeAbsoluteIndices {
         ]
     }
 
-    fn outputs(&self) -> Vec<(tasm_lib::prelude::DataType, String)> {
+    fn return_values(&self) -> Vec<(tasm_lib::prelude::DataType, String)> {
         let distances_array = DataType::Array(Box::new(ArrayType {
             element_type: DataType::U32,
             length: NUM_TRIALS as usize,

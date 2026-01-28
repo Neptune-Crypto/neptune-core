@@ -9,14 +9,14 @@ use crate::triton_vm::prelude::*;
 pub(crate) struct GenerateSingleProofClaim;
 
 impl BasicSnippet for GenerateSingleProofClaim {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         let txk_mast_hash = (DataType::Digest, "txk_mast_hash".to_string());
         let program_digest = (DataType::Digest, "single_proof_program_digest".to_string());
 
         vec![txk_mast_hash, program_digest]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "single_proof_claim".to_string())]
     }
 

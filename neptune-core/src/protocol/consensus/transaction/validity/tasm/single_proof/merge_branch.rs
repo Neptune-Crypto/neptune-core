@@ -323,7 +323,7 @@ impl MergeBranch {
 }
 
 impl BasicSnippet for MergeBranch {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "single_proof_program_digest".to_owned()),
             (DataType::Digest, "new_tx_kernel_digest".to_owned()),
@@ -332,7 +332,7 @@ impl BasicSnippet for MergeBranch {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "single_proof_program_digest".to_owned()),
             (DataType::Digest, "new_tx_kernel_digest".to_owned()),

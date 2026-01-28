@@ -18,7 +18,7 @@ use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
 pub struct GenerateRriClaim;
 
 impl BasicSnippet for GenerateRriClaim {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "transaction_kernel_digest".to_owned()),
             (DataType::Bfe, "garb1".to_string()),
@@ -27,7 +27,7 @@ impl BasicSnippet for GenerateRriClaim {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "transaction_kernel_digest".to_owned()),
             (DataType::Bfe, "garb1".to_string()),

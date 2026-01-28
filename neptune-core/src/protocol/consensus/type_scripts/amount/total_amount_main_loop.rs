@@ -26,7 +26,7 @@ pub struct TotalAmountMainLoop {
 }
 
 impl BasicSnippet for TotalAmountMainLoop {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::U32, "num_utxos".to_string()),
             (DataType::U32, "utxo_index".to_string()),
@@ -42,7 +42,7 @@ impl BasicSnippet for TotalAmountMainLoop {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::U32, "num_utxos".to_string()),
             (DataType::U32, "num_utxos".to_string()),
