@@ -379,7 +379,7 @@ impl Block {
     }
 
     #[inline]
-    pub(crate) fn appendix(&self) -> &BlockAppendix {
+    pub fn appendix(&self) -> &BlockAppendix {
         &self.kernel.appendix
     }
 

@@ -10,11 +10,11 @@ use crate::protocol::consensus::transaction::validity::proof_collection::ProofCo
 pub(crate) struct GenerateTypeScriptClaimTemplate;
 
 impl BasicSnippet for GenerateTypeScriptClaimTemplate {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "*proof_collection".to_string())]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::VoidPointer, "*claim".to_string()),
             (DataType::VoidPointer, "*program_digest".to_string()),

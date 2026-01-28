@@ -12,14 +12,14 @@ use tasm_lib::triton_vm::prelude::*;
 pub struct NewClaim;
 
 impl BasicSnippet for NewClaim {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::U32, "input_length".to_string()),
             (DataType::U32, "output_length".to_string()),
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::VoidPointer, "*claim".to_string()),
             (DataType::VoidPointer, "*output".to_string()),

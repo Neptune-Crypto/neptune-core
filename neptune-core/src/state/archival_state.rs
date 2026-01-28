@@ -11,6 +11,7 @@ use memmap2::MmapOptions;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use tasm_lib::prelude::Tip5;
+use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -47,6 +48,7 @@ use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
 use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
+use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::archival_state::rusty_utxo_index::RustyUtxoIndex;
 use crate::state::database::BlockFileLocation;
 use crate::state::database::BlockIndexKey;
@@ -100,7 +102,7 @@ pub struct ArchivalState {
     pub(crate) archival_mutator_set: RustyArchivalMutatorSet,
 
     /// Archival-MMR of the block digests belonging to the canonical chain.
-    pub(crate) archival_block_mmr: RustyArchivalBlockMmr,
+    pub archival_block_mmr: RustyArchivalBlockMmr,
 
     /// Mapping from block digest to a list of (flag, receiver_id) pairs for all
     /// announcement in the block. This index is only maintained if the node has
@@ -284,7 +286,7 @@ impl ArchivalState {
         archival_mutator_set.persist().await;
     }
 
-    pub(crate) async fn new(data_dir: DataDirectory, genesis_block: Block, cli: &Args) -> Self {
+    pub async fn new(data_dir: DataDirectory, genesis_block: Block, cli: &Args) -> Self {
         let mut archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)
             .await
             .expect("Must be able to initialize archival mutator set");
@@ -331,10 +333,15 @@ impl ArchivalState {
             if utxo_index.is_empty().await {
                 utxo_index.index_block(&genesis_block).await;
             }
+            debug!("UTXO index populated");
             Some(utxo_index)
         } else {
             None
         };
+
+        // Populate true claims cache with block claims from checkpoint.
+        Self::accept_checkpoint().await;
+        debug!("Accepted checkpoint");
 
         let genesis_block = Box::new(genesis_block);
         Self {
@@ -741,7 +748,8 @@ impl ArchivalState {
             .block_file_path(block_record.file_location.file_index);
 
         tokio::task::spawn_blocking(move || {
-            let block_file = std::fs::File::open(&block_file_path)?;
+            let block_file = std::fs::File::open(&block_file_path)
+                .map_err(|e| anyhow::anyhow!("IO Error while reading '{}': {e}.", block_file_path.to_string_lossy()))?;
 
             // 1. Get file metadata to find its actual size on disk.
             let metadata = block_file.metadata()?;
@@ -1053,7 +1061,7 @@ impl ArchivalState {
 
     /// Return latest block from database, or genesis block if no other block
     /// is known.
-    pub(crate) async fn get_tip(&self) -> Block {
+    pub async fn get_tip(&self) -> Block {
         let lookup_res_info: Option<Block> = self
             .get_tip_from_disk()
             .await
@@ -1147,7 +1155,7 @@ impl ArchivalState {
     ///  - `Ok(Some(block))` in case of success.
     ///  - `Ok(None)` if the block does not live in archival state.
     ///  - `Err(_)` if there was a problem reading from archival state.
-    pub(crate) async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
+    pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         let maybe_record = self.get_block_record(block_digest).await;
         let Some(record) = maybe_record else {
             let maybe_genesis_block =
@@ -2030,6 +2038,29 @@ impl ArchivalState {
                 Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             ),
         ]
+    }
+
+    /// Populate the true claims cache with the claims derived from the blocks
+    /// defined by the checkpoint as valid.
+    async fn accept_checkpoint() {
+        const CHECKPOINT: &str = include_str!("../assets/checkpoint.dat");
+
+        // Parse checkpoint.
+        let historical_block_claims = CHECKPOINT
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.is_empty() {
+                    return None;
+                }
+                line.split_once(' ').map(|(_, hex)| hex.trim())
+            })
+            .map(|h| hex::decode(h).unwrap())
+            .map(|b| bincode::deserialize::<Claim>(&b).unwrap())
+            .collect_vec();
+
+        // Populate true claims cache
+        cache_true_claims(historical_block_claims).await;
     }
 }
 

@@ -29,7 +29,7 @@ pub(crate) const MAX_NUM_CLAIMS: usize = 500;
 /// The appendix can softly be extended with new claims.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
-pub(crate) struct BlockAppendix {
+pub struct BlockAppendix {
     claims: Vec<Claim>,
 }
 

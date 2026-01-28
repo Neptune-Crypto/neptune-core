@@ -11,14 +11,14 @@ use tasm_lib::triton_vm::prelude::LabelledInstruction;
 pub(crate) struct AddTimelockedAmount;
 
 impl BasicSnippet for AddTimelockedAmount {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::U128, "timelocked_amount".to_string()),
             (DataType::U128, "utxo_amount".to_string()),
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::U128, "sum".to_string()),
             (DataType::U128, "utxo_amount".to_string()),

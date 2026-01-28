@@ -45,7 +45,7 @@ impl AuthenticateCoinbaseFields {
 }
 
 impl BasicSnippet for AuthenticateCoinbaseFields {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::VoidPointer, "left_tx_kernel".to_owned()),
             (DataType::VoidPointer, "right_tx_kernel".to_owned()),
@@ -53,7 +53,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![]
     }
 

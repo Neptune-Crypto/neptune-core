@@ -48,7 +48,7 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::verifier::cache_true_claim;
+use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
@@ -558,7 +558,7 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
         let block_proof_witness = BlockProofWitness::produce(primitive_witness);
         let appendix = block_proof_witness.appendix();
         let claim = BlockProgram::claim(&body, &appendix);
-        cache_true_claim(claim.clone()).await;
+        cache_true_claims([claim.clone()]).await;
         (appendix, BlockProof::SingleProof(Proof::invalid()))
     };
 

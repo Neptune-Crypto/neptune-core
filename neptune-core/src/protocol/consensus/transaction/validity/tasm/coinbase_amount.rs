@@ -16,11 +16,11 @@ impl CoinbaseAmount {
 ///
 /// Panics if coinbase amount is negative.
 impl BasicSnippet for CoinbaseAmount {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "*coinbase".to_owned())]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![(DataType::U128, "coinbase_amount".to_owned())]
     }
 

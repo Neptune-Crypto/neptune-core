@@ -6,9 +6,13 @@ use tokio::task;
 use crate::application::config::network::Network;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 
-// This claims-cache stores mock proof-claims that are simply asserted to be valid.
-//
-// The cache is only used for tests and regtest mode!!
+/// This claims-cache contains claims that are simply defined to be true.
+///
+/// If the claim is in the cache, then the Triton VM verifier is by-passed
+/// without reading the proof.
+///
+/// Besides tests, it is used for *checkpoints*, where we define historical
+/// blocks to be valid.
 //
 // The cache enables mock proofs to be generated and validated immediately
 // which enables mock blocks and transactions.
@@ -30,11 +34,9 @@ use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 // from genesis block anyway.
 //
 // see: https://github.com/Neptune-Crypto/neptune-core/issues/539
-#[cfg(test)]
 static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::HashSet<Claim>>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashSet::new()));
 
-#[cfg(test)]
 static CLAIMS_CACHE_ENABLED: std::sync::LazyLock<tokio::sync::Mutex<bool>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(true));
 
@@ -52,8 +54,6 @@ pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool
         return proof.is_valid_mock();
     }
 
-    // presently this is used by certain unit tests.
-    #[cfg(test)]
     {
         let is_enabled = *CLAIMS_CACHE_ENABLED.lock().await;
         if is_enabled && CLAIMS_CACHE.lock().await.contains(&claim) {
@@ -74,17 +74,18 @@ pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool
     // size, so we don't blow up RAM.
     #[cfg(test)]
     if verdict {
-        cache_true_claim(claim_clone).await;
+        cache_true_claims([claim_clone]).await;
     }
 
     verdict
 }
 
-/// Add a claim to the [`CLAIMS_CACHE`].
-/// only used for tests at present.
-#[cfg(test)]
-pub(crate) async fn cache_true_claim(claim: Claim) {
-    CLAIMS_CACHE.lock().await.insert(claim);
+/// Add claims to the [`CLAIMS_CACHE`].
+pub(crate) async fn cache_true_claims<IterClaims: IntoIterator<Item = Claim>>(claims: IterClaims) {
+    let mut cache = CLAIMS_CACHE.lock().await;
+    for claim in claims {
+        cache.insert(claim);
+    }
 }
 
 /// Disable the true [`CLAIMS_CACHE`].
@@ -130,7 +131,7 @@ pub(crate) mod tests {
         assert!(!verify(some_claim.clone(), some_proof.clone(), network).await);
 
         // put claim into cache
-        cache_true_claim(some_claim.clone()).await;
+        cache_true_claims(vec![some_claim.clone()]).await;
 
         // verification must succeed
         assert!(verify(some_claim, some_proof, network).await);

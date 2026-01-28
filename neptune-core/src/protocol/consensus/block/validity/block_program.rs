@@ -34,15 +34,15 @@ use crate::protocol::proof_abstractions::verifier::verify;
 
 /// Verifies that all claims listed in the appendix are true.
 ///
-/// The witness for this program is [`BlockProofWitness`].
+/// The witness for this program is `BlockProofWitness`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct BlockProgram;
+pub struct BlockProgram;
 
 impl BlockProgram {
     const ILLEGAL_FEE: i128 = 1_000_210;
     const PROOF_SIZE_INDICATOR_TOO_BIG: i128 = 1_000_211;
 
-    pub(crate) fn claim(block_body: &BlockBody, appendix: &BlockAppendix) -> Claim {
+    pub fn claim(block_body: &BlockBody, appendix: &BlockAppendix) -> Claim {
         Claim::new(Self.hash())
             .with_input(block_body.mast_hash().reversed().values().to_vec())
             .with_output(appendix.claims_as_output())

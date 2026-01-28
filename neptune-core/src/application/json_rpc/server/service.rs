@@ -1481,7 +1481,7 @@ pub mod tests {
             RpcError::SubmitBlock(SubmitBlockError::InsufficientWork)
         );
 
-        let solution = metadata.solve(ConsensusRuleSet::default());
+        let solution = metadata.solve(ConsensusRuleSet::TvmProofVersion1);
         assert!(
             rpc_server
                 .submit_block(block.clone(), solution.clone())

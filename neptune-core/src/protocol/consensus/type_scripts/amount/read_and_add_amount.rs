@@ -16,7 +16,7 @@ use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
 pub(crate) struct ReadAndAddAmount;
 
 impl BasicSnippet for ReadAndAddAmount {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::VoidPointer, "*coin_si".to_string()),
             (DataType::U128, "amount".to_string()),
@@ -26,7 +26,7 @@ impl BasicSnippet for ReadAndAddAmount {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::VoidPointer, "*coin_si".to_string()),
             (DataType::U128, "amount".to_string()),

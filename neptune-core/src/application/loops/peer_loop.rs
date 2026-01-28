@@ -2819,15 +2819,16 @@ mod tests {
             Ok(())
         }
 
-        /// Return four blocks:
+        /// Return five blocks:
         /// - one with invalid PoW and invalid mock-PoW
         /// - one with invalid PoW and valid mock-Pow
         /// - one with valid reboot PoW
         /// - one with valid hardfork PoW
+        /// - one with valid hardfork TVM proof v1
         async fn pow_related_blocks(
             network: Network,
             predecessor: &Block,
-        ) -> (Block, Block, Block, Block) {
+        ) -> (Block, Block, Block, Block, Block) {
             let rng = StdRng::seed_from_u64(5550001).random();
             let block = fake_valid_block_proposal_successor_for_test(
                 predecessor,
@@ -2852,7 +2853,8 @@ mod tests {
             let mut block_with_valid_reboot_pow = block.clone();
             block_with_valid_reboot_pow.satisfy_pow(difficulty, ConsensusRuleSet::Reboot);
             assert!(block_with_valid_reboot_pow.is_valid_mock_pow(difficulty.target()));
-            assert!(block_with_valid_reboot_pow.has_proof_of_work(network, predecessor.header()));
+            assert!(block_with_valid_reboot_pow
+                .pow_verify(difficulty.target(), ConsensusRuleSet::Reboot));
 
             let mut block_with_valid_alpha_pow = block.clone();
             block_with_valid_alpha_pow.satisfy_pow(difficulty, ConsensusRuleSet::HardforkAlpha);
@@ -2860,11 +2862,18 @@ mod tests {
             assert!(block_with_valid_alpha_pow
                 .pow_verify(difficulty.target(), ConsensusRuleSet::HardforkAlpha));
 
+            let mut block_with_valid_tvmv1_pow = block.clone();
+            block_with_valid_tvmv1_pow.satisfy_pow(difficulty, ConsensusRuleSet::TvmProofVersion1);
+            assert!(block_with_valid_tvmv1_pow.is_valid_mock_pow(difficulty.target()));
+            assert!(block_with_valid_tvmv1_pow
+                .pow_verify(difficulty.target(), ConsensusRuleSet::TvmProofVersion1));
+
             (
                 invalid_pow,
                 block_with_valid_mock_pow,
                 block_with_valid_reboot_pow,
                 block_with_valid_alpha_pow,
+                block_with_valid_tvmv1_pow,
             )
         }
 
@@ -2910,23 +2919,25 @@ mod tests {
                 block_with_valid_mock_pow,
                 valid_pow_reboot,
                 valid_pow_alpha,
+                valid_pow_tvmv1,
             ) = pow_related_blocks(network, &genesis).await;
-            assert!(
-                peer_loop_handler
-                    .handle_blocks(vec![block_without_any_pow], genesis.clone())
-                    .await
-                    .unwrap()
-                    .is_none(),
-                "Must return None on invalid Pow"
-            );
-            assert!(
-                peer_loop_handler
-                    .handle_blocks(vec![block_with_valid_mock_pow], genesis.clone())
-                    .await
-                    .unwrap()
-                    .is_none(),
-                "Must return None on valid mock Pow and invalid Pow"
-            );
+
+            for invalid_pow_block in [
+                block_without_any_pow,
+                block_with_valid_mock_pow,
+                valid_pow_alpha,
+                valid_pow_tvmv1,
+            ] {
+                assert!(
+                    peer_loop_handler
+                        .handle_blocks(vec![invalid_pow_block], genesis.clone())
+                        .await
+                        .unwrap()
+                        .is_none(),
+                    "Must return None on invalid Pow"
+                );
+            }
+
             assert_eq!(
                 BlockHeight::genesis().next(),
                 peer_loop_handler
@@ -2935,14 +2946,6 @@ mod tests {
                     .unwrap()
                     .unwrap(),
                 "Must return Some(1) on valid Pow"
-            );
-            assert!(
-                peer_loop_handler
-                    .handle_blocks(vec![valid_pow_alpha], genesis.clone())
-                    .await
-                    .unwrap()
-                    .is_none(),
-                "Must return None on hardfork-alpha solution when rule set is reboot"
             );
         }
 
@@ -2965,13 +2968,14 @@ mod tests {
             ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
             let peer_address = get_dummy_socket_address(0);
 
-            let (without_any_pow, with_valid_mock_pow, _, with_valid_hf_alpha_pow) =
+            let (no_pow, mock_pow, _, alpha_pow, tvmv1_pow) =
                 pow_related_blocks(network, &Block::genesis(network)).await;
-            for block_without_valid_pow in [
-                without_any_pow,
-                with_valid_mock_pow,
-                with_valid_hf_alpha_pow,
-            ] {
+            for (i, block_without_valid_pow) in [no_pow, mock_pow, alpha_pow, tvmv1_pow]
+                .into_iter()
+                .enumerate()
+            {
+                println!("i: {i}");
+
                 // Sending an invalid block will not necessarily result in a ban. This depends on the peer
                 // tolerance that is set in the client. For this reason, we include a "Bye" here.
                 let mock = Mock::new(vec![
@@ -3001,7 +3005,11 @@ mod tests {
                 // Verify that no further message was sent to main loop
                 match to_main_rx1.try_recv() {
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
-                    _ => bail!("Block notification must not be sent for block with invalid PoW"),
+                    Ok(msg) => panic!(
+                        "Unexpected message of type {} sent to main loop",
+                        msg.get_type()
+                    ),
+                    Err(err) => panic!("Unexpected error: {err}"),
                 };
             }
 

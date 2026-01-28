@@ -17,7 +17,7 @@ use crate::triton_vm::prelude::*;
 pub struct AuthenticateMsaAgainstTxk;
 
 impl BasicSnippet for AuthenticateMsaAgainstTxk {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::VoidPointer, "aocl_mmr".to_owned()),
             (DataType::VoidPointer, "swbfi_bagged_ptr".to_owned()),
@@ -26,7 +26,7 @@ impl BasicSnippet for AuthenticateMsaAgainstTxk {
         ]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         vec![]
     }
 
