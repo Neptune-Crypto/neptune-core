@@ -92,16 +92,15 @@ Windows should just work out-of-the-box with cargo build etc.
 ## Running & Connecting
 
 - Generate a wallet file: `neptune-cli generate-wallet`
-- Run neptune-core daemon: `neptune-core` with flags
-    - `--peer [ip_address:port]` to connect to a given peer, for instance
-      `--peer 51.15.139.238:9798` or `--peer 139.162.193.206:9798` or
+- Ensure ports 9798, 9800, 9801 are open on your firewall for both TCP and UDP.
+- Run neptune-core daemon: `neptune-core` with:
+   - no flags should already be enough to connect to the netwrok;
+   - `--peer [ip_address:port]` or `--peer [Multiaddr]` to connect to a given peer, for instance
+      `--peer 51.15.139.238:9798` or `--peer /ip4/139.162.193.206/tcp/9798` or
       `--peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798`.
-    - `--compose --guess` to mine — if you want to generate coins
-    - `--help` to get a list of available command-line arguments
-
-If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience
-that you will then be able to open and receive connections to other nodes through Nepture Core's
-built-in peer-discovery process.
+    - `--compose --guess` to mine — if you want to generate coins.
+    - `--help` to get a list of available command-line arguments.
+    - `--public-ip [IP address]` if you have a known publicly reachable IP address; this flag allows you to skip a bunch of steps that peers behind NATs need to go through.
 
 ## Documentation
 
@@ -135,8 +134,8 @@ To get e.g. the block height of a running daemon, execute
 neptune-cli block-height
 ```
 
-If you set up `neptune-core` to listen for RPC requests on a different port from the default (9799),
-then the flag `--port <port>` is your friend.
+If you set up `neptune-core` to listen for RPC requests on a different port from the default, (9799),
+then the flag `--rpc-port <port>` is your friend.
 
 ## Setup for Development (Ubuntu)
 
