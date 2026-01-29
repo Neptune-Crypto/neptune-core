@@ -1576,8 +1576,8 @@ impl NetworkActor {
     /// node to become publicly reachable, while failure simply leaves the node
     /// in the `NatStatus::Private` state. From here, the
     /// [`RelayStrategy`](super::reachability::RelayStrategy) of
-    /// [`ReachabilityState::Private`](super::reachability::ReachabilityState::Private)
-    /// is activated, which ultimately culminates in DCUtR (Hole Punching).
+    /// [`ReachabilityState::Private`] is activated, which ultimately culminates
+    /// in DCUtR (Hole Punching).
     ///
     /// # Protocol Interactions
     ///

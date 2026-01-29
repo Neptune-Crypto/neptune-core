@@ -209,7 +209,7 @@ impl GlobalStateLock {
     /// This function is for obtaining the node's [`HandshakeData`] without
     /// immediately (*i.e.*, without blocking) in a synchronous environment.
     /// In other cases, call [`GlobalState::get_own_handshakedata`] instead.
-    pub fn get_own_handshakedata_sync(&self) -> HandshakeData {
+    pub(crate) fn get_own_handshakedata_sync(&self) -> HandshakeData {
         // Happy path: we obtain the read lock on global state.
         if let Ok(global_state) = self.global_state_lock.try_lock_guard() {
             let mut handshake_data = global_state.get_own_handshakedata();
