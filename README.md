@@ -42,6 +42,7 @@ A development shell is included and can be accessed by running `nix develop` or 
 - Source the rust environment: `source "$HOME/.cargo/env"`
 - Install build tools: `sudo apt install build-essential`
 - Install LevelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
+- Install clang and its linker: `sudo apt install clang && sudo apt install libstdc++-14-dev`
 - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
 - Enter the repository: `cd neptune-core`
 - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development*
