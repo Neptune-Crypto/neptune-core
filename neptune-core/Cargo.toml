@@ -156,7 +156,6 @@ whoami = "2.0.0"
 
 arbitrary = { version = "1.4.1", features = ["derive"] }
 assert2 = "0.3"
-blake3 = "1.5.4"
 clienter = "0.1.1"
 divan = "0.1.14"
 macro_rules_attr = "0.1.3"
