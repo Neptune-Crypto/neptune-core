@@ -12,3 +12,5 @@ RUST_BACKTRACE = "1"
 
 # workaround for dependency `leveldb-sys v2.0.9`
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+CC = "clang"
+CXX = "clang++"
