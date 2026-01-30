@@ -33,9 +33,9 @@ pub const BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET: BlockHeight =
 /// ultimately [`Block::is_valid`][super::block::Block::is_valid].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Default, strum_macros::Display)]
 pub enum ConsensusRuleSet {
-    #[default]
     Reboot,
     HardforkAlpha,
+    #[default]
     TvmProofVersion1,
 }
 
