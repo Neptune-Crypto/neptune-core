@@ -13,8 +13,13 @@
 
 use std::sync::Arc;
 
+use num_traits::CheckedSub;
+use tracing::debug;
+
 use super::error;
+use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
+use crate::api::export::TxProvingCapability;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
@@ -243,6 +248,81 @@ impl TransactionInitiator {
     ) -> Result<TxCreationArtifacts, error::SendError> {
         self.send_inner(outputs, change_policy, fee, timestamp, false)
             .await
+    }
+
+    pub async fn consolidate(
+        &mut self,
+        timestamp: Timestamp,
+        consolidation_address: Option<ReceivingAddress>,
+    ) -> Result<(), error::SendError> {
+        const CONSOLIDATION_FEE_PC: NativeCurrencyAmount =
+            NativeCurrencyAmount::from_nau(NativeCurrencyAmount::coin_as_nau() / 10);
+        const CONSOLIDATION_FEE_SP: NativeCurrencyAmount =
+            NativeCurrencyAmount::from_nau(NativeCurrencyAmount::coin_as_nau() / 200);
+        const CONSOLIDATION_INPUT_COUNT: usize = 4;
+
+        debug!("consolidate: Attempting to consolidate UTXOs in wallet");
+        let spendable_inputs = self.spendable_inputs(timestamp).await;
+        if spendable_inputs.len() < CONSOLIDATION_INPUT_COUNT {
+            debug!("Nothing to consolidate as wallet has less than {CONSOLIDATION_INPUT_COUNT} spendable inputs.");
+            return Ok(());
+        }
+
+        let (inputs, _) = spendable_inputs.split_at(CONSOLIDATION_INPUT_COUNT);
+        let inputs: TxInputList = inputs.to_vec().into();
+
+        let receiving_address = match consolidation_address {
+            Some(addr) => addr,
+            None => {
+                let mut state = self.global_state_lock.lock_guard_mut().await;
+
+                state.wallet_state.next_unused_symmetric_key().await.into()
+            }
+        };
+
+        let capability = self.global_state_lock.cli().proving_capability();
+        let fee = match capability {
+            TxProvingCapability::LockScript | TxProvingCapability::PrimitiveWitness => {
+                return Err(error::SendError::Proof(error::CreateProofError::TooWeak {
+                    proof_type: TransactionProofType::ProofCollection,
+                    capability,
+                }));
+            }
+            TxProvingCapability::ProofCollection => CONSOLIDATION_FEE_PC,
+            TxProvingCapability::SingleProof => CONSOLIDATION_FEE_SP,
+        };
+
+        let unlocked_amount = spendable_inputs.total_native_coins();
+        let output_amount = match unlocked_amount.checked_sub(&fee) {
+            Some(output_amount) => output_amount,
+            None => {
+                return Err(error::SendError::Tx(
+                    error::CreateTxError::InsufficientFunds {
+                        requested: fee,
+                        available: unlocked_amount,
+                    },
+                ));
+            }
+        };
+
+        let outputs = self
+            .generate_tx_outputs(vec![(receiving_address, output_amount)])
+            .await;
+
+        let tx_details = self
+            .generate_tx_details(inputs, outputs, ChangePolicy::ExactChange, fee)
+            .await?;
+
+        let pw = self.generate_witness_proof(Arc::new(tx_details.clone()));
+        let artifacts = self.assemble_transaction_artifacts(tx_details, pw)?;
+
+        tracing::info!("creating consolidation transaction");
+
+        self.record_and_broadcast_transaction(&artifacts).await?;
+
+        tracing::info!("done");
+
+        Ok(())
     }
 
     /// Build and broadcast a *transparent* transaction.

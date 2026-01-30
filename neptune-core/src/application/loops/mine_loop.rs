@@ -2230,6 +2230,7 @@ pub(crate) mod tests {
         let cli_args = cli_args::Args {
             compose: true,
             network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
             ..Default::default()
         };
         let global_state_lock =
@@ -2301,6 +2302,7 @@ pub(crate) mod tests {
         let cli_args = cli_args::Args {
             compose: true,
             network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
             ..Default::default()
         };
         let global_state_lock =

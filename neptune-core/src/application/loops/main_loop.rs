@@ -36,6 +36,8 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
+use crate::api::export::Timestamp;
+use crate::application::config::auto_consolidation::AutoConsolidationSetting;
 use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::loops::channel::MainToMiner;
 use crate::application::loops::channel::MinerToMain;
@@ -840,6 +842,24 @@ impl MainLoopHandler {
                 // TODO: Do clever trick to collapse all jobs relating to the same transaction,
                 //       identified by transaction-ID, into *one* update job.
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
+
+                let (consolidate, maybe_consolidation_address) =
+                    match self.global_state_lock.cli().auto_consolidate() {
+                        AutoConsolidationSetting::Inactive => (false, None),
+                        AutoConsolidationSetting::ActiveDynamic => (true, None),
+                        AutoConsolidationSetting::ActiveFixed { address } => (true, Some(address)),
+                    };
+
+                if consolidate {
+                    let timestamp = Timestamp::now();
+                    let mut tx_initiator = self.global_state_lock().api_mut().tx_initiator();
+                    tokio::task::spawn(async move {
+                        let _ = tx_initiator
+                            .consolidate(timestamp, maybe_consolidation_address)
+                            .await
+                            .inspect_err(|err| warn!("{err}"));
+                    });
+                }
 
                 // Inform miner about new block.
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);

@@ -117,10 +117,14 @@ pub fn display_banner() {
     println!("{}", NEPTUNE_BANNER);
 }
 
-pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
+pub async fn initialize(mut cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(fut);
     }
+
+    // Parse, populate cache and disallow later mutation
+    cli_args.second_parse()?;
+    let cli_args = cli_args;
 
     // see comment for Network::performs_automated_mining()
     if cli_args.mine() && !cli_args.network.performs_automated_mining() {

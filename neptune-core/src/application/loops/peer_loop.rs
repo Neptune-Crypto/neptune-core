@@ -2792,10 +2792,11 @@ mod tests {
                 "run_wrapper must return failure when genesis is different"
             );
 
-            // Verify that no further message was sent to main loop
             match to_main_rx1.try_recv() {
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
-                _ => bail!("Block notification must not be sent for block with invalid PoW"),
+                Ok(PeerTaskToMain::Ban(_)) => (),
+                _ => {
+                    panic!("Expected channel message to ban peer");
+                }
             };
 
             drop(to_main_tx);
@@ -5000,6 +5001,7 @@ mod tests {
             let not_composer = cli_args::Args::default();
             let composer = cli_args::Args {
                 compose: true,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 ..Default::default()
             };
 

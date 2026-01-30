@@ -16,11 +16,11 @@ use itertools::Itertools;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use num_traits::Zero;
-use sysinfo::System;
 use tracing::error;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
+use crate::application::config::auto_consolidation::AutoConsolidationSetting;
 use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
@@ -162,6 +162,24 @@ pub struct Args {
     /// flag, or else copy the wallet file to another machine.
     #[clap(long, alias = "notx")]
     pub(crate) no_transaction_initiation: bool,
+
+    /// Enable automatic consolidation of UTXOs.
+    ///
+    /// If this flag is set, whenever there are four or more UTXOs managed by
+    /// the wallet, the client will initiate and broadcast a transaction that
+    /// spends them to either the next unused symmetric key, or else the given
+    /// address.
+    ///
+    /// Examples:
+    ///
+    /// ```text
+    /// --auto-consolidate [nolgam14nguf3jkf.....rfg348f]
+    /// ```
+    #[clap(long, default_value = None)]
+    pub(crate) auto_consolidate: Option<Option<String>>,
+
+    #[clap(skip)]
+    pub(crate) auto_consolidate_cache: OnceLock<AutoConsolidationSetting>,
 
     /// Specify environment variables for Triton VM for a given (log2 of) the
     /// padded height. Can be used to control the environment variables
@@ -767,13 +785,8 @@ impl Args {
     /// Cache the result so we don't estimate more than once.
     pub fn proving_capability(&self) -> TxProvingCapability {
         *self.tx_proving_capability_cache.get_or_init(|| {
-            if let Some(proving_capability) = self.tx_proving_capability {
-                proving_capability
-            } else if self.compose {
-                TxProvingCapability::SingleProof
-            } else {
-                Self::estimate_proving_capability()
-            }
+            self.derive_proving_capability()
+                .expect("Must have consistent proving capability")
         })
     }
 
@@ -810,34 +823,6 @@ impl Args {
         }
 
         Ok(())
-    }
-
-    fn estimate_proving_capability() -> TxProvingCapability {
-        const SINGLE_PROOF_CORE_REQ: usize = 19;
-        // see https://github.com/Neptune-Crypto/neptune-core/issues/426
-        const SINGLE_PROOF_MEMORY_USAGE: u64 = (1u64 << 30) * 120;
-
-        const PROOF_COLLECTION_CORE_REQ: usize = 2;
-        const PROOF_COLLECTION_MEMORY_USAGE: u64 = (1u64 << 30) * 16;
-
-        let s = System::new_all();
-        let total_memory = s.total_memory();
-        assert!(
-            !total_memory.is_zero(),
-            "Total memory reported illegal value of 0"
-        );
-
-        let physical_core_count = s.physical_core_count().unwrap_or(1);
-
-        if total_memory > SINGLE_PROOF_MEMORY_USAGE && physical_core_count > SINGLE_PROOF_CORE_REQ {
-            TxProvingCapability::SingleProof
-        } else if total_memory > PROOF_COLLECTION_MEMORY_USAGE
-            && physical_core_count > PROOF_COLLECTION_CORE_REQ
-        {
-            TxProvingCapability::ProofCollection
-        } else {
-            TxProvingCapability::PrimitiveWitness
-        }
     }
 
     /// creates a `TritonVmProofJobOptions` from cli args.
@@ -972,6 +957,22 @@ impl Args {
             })
             .collect()
     }
+
+    /// Get the auto-consolidation setting.
+    ///
+    /// Cache should be set by [`Self::second_parse`].
+    ///
+    /// # Panics
+    /// - If cache is not set, and an invalid address is given as consolidation
+    ///   address.
+    pub(crate) fn auto_consolidate(&self) -> AutoConsolidationSetting {
+        self.auto_consolidate_cache
+            .get_or_init(|| {
+                AutoConsolidationSetting::parse(&self.auto_consolidate, self.network)
+                    .expect("Must be able to parse auto consolidation setting")
+            })
+            .to_owned()
+    }
 }
 
 impl From<&Args> for ProverJobSettings {
@@ -1046,12 +1047,6 @@ mod tests {
             ..Default::default()
         };
         assert!(args.disallow_all_incoming_peer_connections());
-    }
-
-    #[test]
-    fn estimate_own_proving_capability() {
-        // doubles as a no-crash test
-        println!("{}", Args::estimate_proving_capability());
     }
 
     #[test]
