@@ -8,6 +8,7 @@
 use clap::Parser;
 use itertools::Itertools;
 use neptune_cash::api::export::BlockHeight;
+use neptune_cash::api::export::Network;
 use neptune_cash::application::config::cli_args;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::protocol::consensus::block::validity::block_program::BlockProgram;
@@ -18,6 +19,7 @@ use neptune_cash::state::archival_state::ArchivalState;
 #[clap()]
 struct CliArg {
     max_height: u64,
+    network: Option<Network>,
 }
 
 fn main() {
@@ -27,14 +29,17 @@ fn main() {
         .build()
         .expect("Could not create tokio runtime");
 
-    let max_height = CliArg::parse().max_height;
+    let CliArg {
+        max_height,
+        network,
+    } = CliArg::parse();
 
-    tokio_runtime.block_on(print_block_claims(max_height));
+    tokio_runtime.block_on(print_block_claims(max_height, network));
 }
 
-async fn print_block_claims(max_height: u64) {
+async fn print_block_claims(max_height: u64, network: Option<Network>) {
     // Initialize archival state.
-    let cli_args = cli_args::Args::default();
+    let cli_args = cli_args::Args::default_with_network(network.unwrap_or_default());
     let genesis = Block::genesis(cli_args.network);
     let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)
         .expect("data directory exists");

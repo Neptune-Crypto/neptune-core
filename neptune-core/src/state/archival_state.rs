@@ -340,7 +340,8 @@ impl ArchivalState {
         };
 
         // Populate true claims cache with block claims from checkpoint.
-        Self::accept_checkpoint().await;
+        let network = cli.network;
+        Self::accept_checkpoint(network).await;
         debug!("Accepted checkpoint");
 
         let genesis_block = Box::new(genesis_block);
@@ -350,7 +351,7 @@ impl ArchivalState {
             genesis_block,
             archival_mutator_set,
             archival_block_mmr,
-            network: cli.network,
+            network,
             utxo_index,
         }
     }
@@ -2042,11 +2043,17 @@ impl ArchivalState {
 
     /// Populate the true claims cache with the claims derived from the blocks
     /// defined by the checkpoint as valid.
-    async fn accept_checkpoint() {
-        const CHECKPOINT: &str = include_str!("../assets/checkpoint.dat");
+    async fn accept_checkpoint(network: Network) {
+        const CHECKPOINT_MAIN: &str = include_str!("../assets/main/checkpoint.dat");
+        const CHECKPOINT_TESTNET0: &str = include_str!("../assets/testnet-0/checkpoint.dat");
+        let checkpoint = match network {
+            Network::Main => CHECKPOINT_MAIN,
+            Network::Testnet(0) => CHECKPOINT_TESTNET0,
+            _ => return,
+        };
 
         // Parse checkpoint.
-        let historical_block_claims = CHECKPOINT
+        let historical_block_claims = checkpoint
             .lines()
             .filter_map(|line| {
                 let line = line.trim();
