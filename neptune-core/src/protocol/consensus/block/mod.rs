@@ -782,27 +782,8 @@ impl Block {
             return Err(BlockValidationError::FutureDating);
         }
 
-        // 1.a)
-        for required_claim in BlockAppendix::consensus_claims(self.body(), consensus_rule_set) {
-            if !self.appendix().contains(&required_claim) {
-                return Err(BlockValidationError::AppendixMissingClaim);
-            }
-        }
-
-        // 1.b)
-        if self.appendix().len() > MAX_NUM_CLAIMS {
-            return Err(BlockValidationError::AppendixTooLarge);
-        }
-
-        // 1.c)
-        let BlockProof::SingleProof(block_proof) = &self.proof else {
-            return Err(BlockValidationError::ProofQuality);
-        };
-
-        // 1.d)
-        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
-            return Err(BlockValidationError::ProofValidity);
-        }
+        // 1.a, 1.b, 1.c, 1.d
+        self.validate_block_proof(network).await?;
 
         // 1.e)
         if self.size() > consensus_rule_set.max_block_size() {
@@ -889,6 +870,39 @@ impl Block {
             > consensus_rule_set.max_num_announcements()
         {
             return Err(BlockValidationError::TooManyAnnouncements);
+        }
+
+        Ok(())
+    }
+
+    /// Validate the proof of a block, an that the proof relates to the expected
+    /// appendices.
+    pub(crate) async fn validate_block_proof(
+        &self,
+        network: Network,
+    ) -> Result<(), BlockValidationError> {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+
+        // 1.a)
+        for required_claim in BlockAppendix::consensus_claims(self.body(), consensus_rule_set) {
+            if !self.appendix().contains(&required_claim) {
+                return Err(BlockValidationError::AppendixMissingClaim);
+            }
+        }
+
+        // 1.b)
+        if self.appendix().len() > MAX_NUM_CLAIMS {
+            return Err(BlockValidationError::AppendixTooLarge);
+        }
+
+        // 1.c)
+        let BlockProof::SingleProof(block_proof) = &self.proof else {
+            return Err(BlockValidationError::ProofQuality);
+        };
+
+        // 1.d)
+        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
+            return Err(BlockValidationError::ProofValidity);
         }
 
         Ok(())
