@@ -22,7 +22,6 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::application::config::network::Network;
-use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
 
 pub(crate) const ADDRESS_BOOK_MAX_SIZE: usize = 1000_usize;
 
@@ -307,11 +306,9 @@ impl AddressBook {
             .book
             .values()
             .map(|p| (PeerScore::from_peer(p), p))
-            // Only dial peers that support Neptune Cash
-            .filter(|(score, _)| score.is_correct_protocol)
             .collect();
 
-        // Sort by PeerScore (Protocol > Recency > Lifespan)
+        // Sort by PeerScore (Recency > Lifespan)
         // Sort is descending so the "best" peers are at the start.
         scores.sort_by(|(a, _), (b, _)| b.cmp(a));
 
@@ -425,7 +422,6 @@ impl PartialEq for AddressBook {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct PeerScore {
     // Order of fields defines sorting priority for #[derive(Ord)]
-    is_correct_protocol: bool,
     recent: bool,
     fail_count_inverse: u32,
     total_lifespan: std::time::Duration,
@@ -436,7 +432,6 @@ impl PeerScore {
         let now = SystemTime::now();
         let ten_minutes_ago = now.checked_sub(Duration::from_mins(10)).unwrap_or(now);
         Self {
-            is_correct_protocol: peer.protocol_version == NEPTUNE_PROTOCOL_STR,
             recent: peer.last_seen.duration_since(ten_minutes_ago).is_ok(),
             fail_count_inverse: u32::MAX - peer.fail_count,
             // duration between first discovery and last activity
@@ -534,7 +529,7 @@ mod tests {
             listen_addresses: vec![],
             agent_version: "".to_string(),
             protocol_version: NetworkActor::protocol_version(network),
-            supported_protocols: vec![libp2p::StreamProtocol::new(NEPTUNE_PROTOCOL_STR)],
+            supported_protocols: vec![libp2p::StreamProtocol::new("/foo")],
             first_seen: three_hours_ago,
             last_seen: now,
             fail_count: 0,
@@ -552,10 +547,6 @@ mod tests {
         let mut p3 = p2.clone();
         p3.last_seen = one_hour_ago;
 
-        // P4: Worse because of wrong_protocol
-        let mut p4 = p3.clone();
-        p4.protocol_version = "QUICK-CACHE".to_string();
-
         // verify pairs
         assert!(
             PeerScore::from_peer(&p0) > PeerScore::from_peer(&p1),
@@ -568,10 +559,6 @@ mod tests {
         assert!(
             PeerScore::from_peer(&p2) > PeerScore::from_peer(&p3),
             "failed to prefer recent peers"
-        );
-        assert!(
-            PeerScore::from_peer(&p3) > PeerScore::from_peer(&p4),
-            "failed to prefer peers with same protocol"
         );
 
         // verify sorting (descending order)
