@@ -293,16 +293,13 @@ impl TransactionInitiator {
         };
 
         let unlocked_amount = spendable_inputs.total_native_coins();
-        let output_amount = match unlocked_amount.checked_sub(&fee) {
-            Some(output_amount) => output_amount,
-            None => {
-                return Err(error::SendError::Tx(
-                    error::CreateTxError::InsufficientFunds {
-                        requested: fee,
-                        available: unlocked_amount,
-                    },
-                ));
-            }
+        let Some(output_amount) = unlocked_amount.checked_sub(&fee) else {
+            return Err(error::SendError::Tx(
+                error::CreateTxError::InsufficientFunds {
+                    requested: fee,
+                    available: unlocked_amount,
+                },
+            ));
         };
 
         let outputs = self

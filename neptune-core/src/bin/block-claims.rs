@@ -1,9 +1,9 @@
 //! block-claims
 //!
-//! Utility for printing [`Claim`](triton_vm::Claim)s related to validity of
-//! canonical, stored blocks. Useful for producing a checkpoint: by adding these
-//! claims to the true claims cache, incoming blocks are automatically validated
-//! as true without going through the effort of verifying their proofs.
+//! Utility for printing `Claim`s related to validity of canonical, stored
+//! blocks. Useful for producing a checkpoint: by adding these claims to the
+//! true claims cache, incoming blocks are automatically validated as true
+//! without going through the effort of verifying their proofs.
 
 use clap::Parser;
 use itertools::Itertools;

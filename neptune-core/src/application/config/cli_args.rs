@@ -175,6 +175,9 @@ pub struct Args {
     /// ```text
     /// --auto-consolidate [nolgam14nguf3jkf.....rfg348f]
     /// ```
+    // OK to suppress this linter rule because we are parsing and the nested
+    // type tells clap how to parse.
+    #[expect(clippy::option_option)]
     #[clap(long, default_value = None)]
     pub(crate) auto_consolidate: Option<Option<String>>,
 

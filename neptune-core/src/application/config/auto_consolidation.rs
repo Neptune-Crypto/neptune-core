@@ -12,6 +12,9 @@ pub enum AutoConsolidationSetting {
 }
 
 impl AutoConsolidationSetting {
+    // OK to suppress this linter rule because we are parsing and the nested
+    // type tells clap how to parse.
+    #[expect(clippy::option_option)]
     pub(crate) fn parse(
         cli_argument: &Option<Option<String>>,
         network: Network,
