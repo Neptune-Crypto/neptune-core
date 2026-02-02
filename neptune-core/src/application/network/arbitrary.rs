@@ -41,8 +41,6 @@ pub(crate) fn arb_peer_id() -> impl Strategy<Value = PeerId> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
-
     use std::time::Duration;
     use std::time::SystemTime;
 
@@ -50,6 +48,7 @@ pub(crate) mod tests {
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
 
+    use super::*;
     use crate::application::network::address_book::Peer;
 
     /// Generates an arbitrary valid libp2p StreamProtocol.

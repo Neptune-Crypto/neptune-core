@@ -1,9 +1,11 @@
+use std::fs;
+use std::path::PathBuf;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+
 use anyhow::Context;
 use anyhow::Result;
 use libp2p::identity::Keypair;
-use std::fs;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
 
 const IDENTITY_WARNING_HEADER: &str = r#"# =============================================================================
@@ -132,8 +134,9 @@ pub(crate) fn resolve_identity(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::env;
+
+    use super::*;
 
     #[test]
     fn test_identity_lifecycle() {

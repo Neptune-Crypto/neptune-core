@@ -1,10 +1,10 @@
-use serde::Deserialize;
-use serde::Serialize;
 use std::fmt::Display;
 
 use libp2p::autonat::NatStatus;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::application::network::reachability::ReachabilityState;
 
@@ -70,18 +70,16 @@ impl Display for NetworkOverview {
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 mod arbitrary {
-    use crate::application::network::arbitrary::arb_multiaddr;
-    use crate::application::network::arbitrary::arb_peer_id;
-
-    use super::*;
-
     use ::arbitrary::Arbitrary;
-
     use ::arbitrary::Result;
     use ::arbitrary::Unstructured;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
+
+    use super::*;
+    use crate::application::network::arbitrary::arb_multiaddr;
+    use crate::application::network::arbitrary::arb_peer_id;
 
     impl<'a> Arbitrary<'a> for NetworkOverview {
         fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {

@@ -3,10 +3,9 @@ pub mod multiaddr;
 use num_traits::Zero;
 use sysinfo::System;
 
+use super::cli_args::Args;
 use crate::api::export::TxProvingCapability;
 use crate::application::config::auto_consolidation::AutoConsolidationSetting;
-
-use super::cli_args::Args;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub(crate) enum CliArgsParseError {

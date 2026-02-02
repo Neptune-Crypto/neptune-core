@@ -1,6 +1,7 @@
+use std::fmt::Display;
+
 use serde::Deserialize;
 use serde::Serialize;
-use std::fmt::Display;
 
 /// Tracks the state of the [`NetworkActor`](super::actor::NetworkActor) with
 /// regards to its knowledge about how reachable it is, and to its strategy for
@@ -251,9 +252,8 @@ pub(crate) mod arbitrary {
     use proptest::prelude::BoxedStrategy;
     use proptest::strategy::Strategy;
 
-    use crate::application::network::arbitrary::arb_multiaddr;
-
     use super::*;
+    use crate::application::network::arbitrary::arb_multiaddr;
 
     impl RelayStrategy {
         pub(crate) fn arbitrary() -> BoxedStrategy<Self> {

@@ -2507,11 +2507,9 @@ mod tests {
         use std::str::FromStr;
 
         use super::*;
-        use crate::{
-            application::config::parser::multiaddr::socketaddr_to_multiaddr,
-            protocol::peer::peer_info::pseudorandom_peer_id,
-            tests::shared::globalstate::get_dummy_peer_outgoing,
-        };
+        use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
+        use crate::protocol::peer::peer_info::pseudorandom_peer_id;
+        use crate::tests::shared::globalstate::get_dummy_peer_outgoing;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -5263,10 +5261,8 @@ mod tests {
         use itertools::Itertools;
 
         use super::*;
-        use crate::{
-            protocol::peer::peer_info::pseudorandom_peer_id,
-            tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests_dyn,
-        };
+        use crate::protocol::peer::peer_info::pseudorandom_peer_id;
+        use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests_dyn;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

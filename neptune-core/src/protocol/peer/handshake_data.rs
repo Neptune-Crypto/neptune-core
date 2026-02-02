@@ -180,10 +180,9 @@ pub(crate) mod test {
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
+    use super::*;
     use crate::api::export::BlockHeight;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
-
-    use super::*;
 
     impl VersionString {
         /// Generate a version string that is guaranteed to parse correctly.

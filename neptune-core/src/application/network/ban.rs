@@ -124,11 +124,6 @@ impl BlackList {
 
 #[cfg(test)]
 mod tests {
-    use crate::application::network::arbitrary::arb_ip_addr;
-    use crate::application::network::arbitrary::tests::arb_system_time;
-
-    use super::*;
-
     use proptest::collection::vec;
     use proptest::prelude::any;
     use proptest::prelude::Strategy;
@@ -136,6 +131,10 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
+
+    use super::*;
+    use crate::application::network::arbitrary::arb_ip_addr;
+    use crate::application::network::arbitrary::tests::arb_system_time;
 
     fn black_list_strategy() -> impl Strategy<Value = BlackList> {
         let path_strategy = any::<String>().prop_map(|s| PathBuf::from(format!("{}.json", s)));

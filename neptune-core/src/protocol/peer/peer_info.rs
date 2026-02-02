@@ -284,13 +284,14 @@ impl rand::distr::Distribution<PeerInfo> for rand::distr::StandardUniform {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use test_strategy::proptest;
-
-    use super::*;
     use std::hint::black_box;
     use std::net::Ipv4Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV4;
+
+    use test_strategy::proptest;
+
+    use super::*;
 
     #[test]
     fn can_identify_local_addresses() {
