@@ -84,8 +84,8 @@ pub mod tests {
 
     #[test]
     fn can_convert_socketaddrs_to_multiaddrs() {
-        assert!(parse_to_multiaddr(&"139.162.193.206:9798").is_ok());
-        assert!(parse_to_multiaddr(&"[2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798").is_ok());
+        assert!(parse_to_multiaddr("139.162.193.206:9798").is_ok());
+        assert!(parse_to_multiaddr("[2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798").is_ok());
     }
 
     #[test]

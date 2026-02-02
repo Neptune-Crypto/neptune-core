@@ -371,9 +371,9 @@ pub struct Args {
     /// Public IP where the node is reachable.
     ///
     /// Only use for globally accessible IPs. Setting this value overrides
-    /// libp2p AutoNAT behaviour [sic]. If no public IPs are set, libp2p's
-    /// AutoNAT protocol will automatically try to guess the NAT status and
-    /// external addresses.
+    /// libp2p AutoNAT behaviour. If no public IPs are set, libp2p's AutoNAT
+    /// protocol will automatically try to guess the NAT status and external
+    /// addresses.
     ///
     /// Examples:
     /// ```text

@@ -185,18 +185,8 @@ pub(crate) mod test {
 
     use super::*;
 
-    /// Does not necessarily parse.
-    pub(crate) fn arbitrary_version_string() -> BoxedStrategy<VersionString> {
-        vec(0u8..=u8::MAX, 31)
-            .prop_map(|bytes| {
-                VersionString(ArrayString::from_chars(
-                    bytes.into_iter().map(|b| b as char),
-                ))
-            })
-            .boxed()
-    }
-
     impl VersionString {
+        /// Generate a version string that is guaranteed to parse correctly.
         pub(crate) fn arbitrary_semver() -> BoxedStrategy<Self> {
             (0..5, 0..50, 0..200)
                 .prop_map(|(major, minor, point)| {
