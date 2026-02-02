@@ -4,7 +4,6 @@ use tasm_lib::prelude::Digest;
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
 /// A [`MutatorSetAccumulator`] with matching [`RemovalRecord`]s.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -17,25 +16,8 @@ pub struct MsaAndRecords {
 }
 
 impl MsaAndRecords {
-    pub(crate) fn new(
-        mutator_set_accumulator: MutatorSetAccumulator,
-        unpacked_removal_records: Vec<RemovalRecord>,
-        membership_proofs: Vec<MsMembershipProof>,
-    ) -> Self {
-        assert_eq!(unpacked_removal_records.len(), membership_proofs.len());
-        Self {
-            mutator_set_accumulator,
-            removal_records: unpacked_removal_records,
-            membership_proofs,
-        }
-    }
-
     pub(crate) fn unpacked_removal_records(&self) -> Vec<RemovalRecord> {
         self.removal_records.clone()
-    }
-
-    pub(crate) fn packed_removal_records(&self) -> Vec<RemovalRecord> {
-        RemovalRecordList::pack(self.removal_records.clone())
     }
 
     pub fn verify(&self, items: &[Digest]) -> bool {
@@ -161,7 +143,7 @@ pub mod neptune_arbitrary {
                             },
                         )
                         .collect_vec();
-                    let mut all_bloom_indices = all_index_sets.iter().flat_map(|ais|ais.to_array()).collect_vec();
+                    let mut all_bloom_indices = all_index_sets.iter().flat_map(|ais|ais.to_array()).collect::<Vec<_>>();
                     all_bloom_indices.sort();
 
                     // assemble all chunk indices
@@ -346,9 +328,27 @@ mod tests {
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl MsaAndRecords {
+        pub(crate) fn new(
+            mutator_set_accumulator: MutatorSetAccumulator,
+            unpacked_removal_records: Vec<RemovalRecord>,
+            membership_proofs: Vec<MsMembershipProof>,
+        ) -> Self {
+            assert_eq!(unpacked_removal_records.len(), membership_proofs.len());
+            Self {
+                mutator_set_accumulator,
+                removal_records: unpacked_removal_records,
+                membership_proofs,
+            }
+        }
+
+        pub(crate) fn packed_removal_records(&self) -> Vec<RemovalRecord> {
+            RemovalRecordList::pack(self.removal_records.clone())
+        }
+
         /// Split an [MsaAndRecords] into multiple instances of the same type.
         ///
         /// input argument specifies the length of each returned instance.
