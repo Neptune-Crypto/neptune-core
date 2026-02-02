@@ -625,7 +625,7 @@ pub(crate) mod tests {
         let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
             auth_paths,
             None,
-            ConsensusRuleSet::default(),
+            ConsensusRuleSet::Reboot,
             prev_block_digest,
         );
 

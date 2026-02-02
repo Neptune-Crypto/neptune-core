@@ -60,6 +60,7 @@ use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDicti
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 use crate::util_types::mutator_set::shared::NUM_TRIALS;
+use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 /// Create a valid block on top of provided block. Returned block is valid in
 /// terms of both block validity and PoW, and is thus the new canonical block of
@@ -296,15 +297,21 @@ pub(crate) async fn block_with_num_puts(
     num_outputs: usize,
 ) -> Block {
     let mut rng = rand::rng();
+    let active_window_start = u128::from(
+        predecessor
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .get_batch_index(),
+    ) * u128::from(CHUNK_SIZE);
     let inputs = (0..num_inputs)
         .map(|_| RemovalRecord {
             absolute_indices: AbsoluteIndexSet::new(
-                vec![
-                    (1u128 << 20) + rng.random_range(0..=u128::from(CHUNK_SIZE));
-                    NUM_TRIALS as usize
-                ]
-                .try_into()
-                .unwrap(),
+                (0..NUM_TRIALS)
+                    .map(|_| rng.random_range(u128::from(CHUNK_SIZE * 3)..u128::from(WINDOW_SIZE)))
+                    .map(|ri| ri + active_window_start)
+                    .collect_vec()
+                    .try_into()
+                    .unwrap(),
             ),
             target_chunks: ChunkDictionary::default(),
         })

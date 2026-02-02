@@ -4694,6 +4694,7 @@ pub(crate) mod tests {
                 fee_notification: FeeNotificationPolicy::OffChain,
                 scan_blocks: Some(0..=10),
                 compose: true,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 network,
                 ..Default::default()
             };

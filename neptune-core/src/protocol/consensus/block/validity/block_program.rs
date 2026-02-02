@@ -604,7 +604,6 @@ pub(crate) mod tests {
 
     test_program_snapshot!(
         BlockProgram,
-        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
-        "2a3126ef86970a4a8df02711c2fbb4e5c9e025e257e0d169aab38114737a4cb9c84f9985b679c55a"
+        "72d46afed8a1bf162814a432cf1ebe0f16a1cdb84bd339badc6fbd499172c3474c285dd0d5ba4e0c"
     );
 }

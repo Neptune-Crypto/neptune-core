@@ -4774,6 +4774,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::TxProvingCapability;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
     use crate::application::database::storage::storage_vec::traits::*;
@@ -6073,6 +6074,7 @@ mod tests {
             .is_err());
     }
 
+    #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn coinbase_distribution_happy_path() {
         let network = Network::Main;
@@ -6091,6 +6093,7 @@ mod tests {
         let cli = cli_args::Args {
             network,
             compose: true,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
             ..Default::default()
         };
         let rpc_server = test_rpc_server(WalletEntropy::new_random(), 2, cli).await;
@@ -6286,7 +6289,7 @@ mod tests {
                 .to_address();
             let bob_token = cookie_token(&bob).await;
 
-            let (proposal, puzzle) = bob
+            let (proposal_block1, puzzle) = bob
                 .clone()
                 .full_pow_puzzle_external_key(context::current(), bob_token, guesser_address)
                 .await
@@ -6299,23 +6302,28 @@ mod tests {
                         context::current(),
                         bob_token,
                         Default::default(),
-                        proposal.clone()
+                        proposal_block1.clone()
                     )
                     .await
                     .unwrap(),
                 "Node must reject new tip with invalid PoW solution."
             );
 
-            let solution = puzzle.solve(ConsensusRuleSet::default());
+            let solution = puzzle.solve(ConsensusRuleSet::Reboot);
             assert!(
                 bob.clone()
-                    .provide_new_tip(context::current(), bob_token, solution, proposal.clone())
+                    .provide_new_tip(
+                        context::current(),
+                        bob_token,
+                        solution,
+                        proposal_block1.clone()
+                    )
                     .await
                     .unwrap(),
                 "Node must accept valid new tip."
             );
 
-            let mut bad_proposal = proposal;
+            let mut bad_proposal = proposal_block1;
             bad_proposal.set_proof(BlockProof::SingleProof(NeptuneProof::invalid()));
             assert!(
                 !bob.clone()
