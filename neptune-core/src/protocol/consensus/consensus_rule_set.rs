@@ -125,6 +125,14 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1 => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
+
+    pub(crate) fn first_tvmv1_block(network: Network) -> BlockHeight {
+        match network {
+            Network::Main => BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET,
+            Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET,
+            _ => BlockHeight::genesis(),
+        }
+    }
 }
 
 #[cfg(test)]

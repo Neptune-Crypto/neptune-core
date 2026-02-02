@@ -89,6 +89,7 @@ use crate::application::network::actor::NetworkActorChannels;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::config::NetworkConfig;
 use crate::application::rpc::server::RPC;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalStateLock;
@@ -171,6 +172,39 @@ pub async fn initialize(mut cli_args: cli_args::Args) -> Result<MainLoopHandler>
             .import_blocks_from_directory(&block_import_directory, flush_period, validate_blocks)
             .await?;
         info!("Successfully imported {num_blocks_read} blocks.");
+    }
+
+    // Roll back blocks if necessary.
+    let tip = global_state_lock
+        .lock_guard()
+        .await
+        .chain
+        .light_state()
+        .clone();
+    if !tip.header().height.is_genesis()
+        && tip.validate_block_proof(cli_args.network).await.is_err()
+    {
+        info!("tip height was {} prior to rollback", tip.header().height);
+        let mut state = global_state_lock.lock_guard_mut().await;
+
+        // Rollback to threshold -- or to Genesis block if needed
+        let threshold = ConsensusRuleSet::first_tvmv1_block(cli_args.network)
+            .previous()
+            .unwrap_or_default();
+        let checkpoint = state
+            .chain
+            .archival_state()
+            .archival_block_mmr
+            .ammr()
+            .try_get_leaf(threshold.into())
+            .await
+            .unwrap_or_else(|| state.chain.archival_state().genesis_block().hash());
+        info!("Rolling back to checkpoint block {threshold} ... or to genesis block if needed.");
+
+        if let Err(e) = state.set_tip_to_stored_block(checkpoint).await {
+            panic!("Could not roll back to checkpoint {threshold}. Fatal error: {e}.");
+        }
+        info!("Rollback succeeded.");
     }
 
     if !cli_args.triton_vm_env_vars.is_empty() {
