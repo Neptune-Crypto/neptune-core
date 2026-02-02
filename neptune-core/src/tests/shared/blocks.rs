@@ -241,12 +241,15 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         ..Default::default()
     };
 
+    let consensus_rule_set =
+        ConsensusRuleSet::infer_from(network, previous_block.header().height.next());
     let (mut transaction, composer_txos) = make_coinbase_transaction_stateless(
         previous_block,
         composer_parameters,
         block_timestamp,
         TritonVmJobQueue::get_instance(),
         cli.proof_job_options_primitive_witness(),
+        consensus_rule_set,
     )
     .await
     .unwrap();

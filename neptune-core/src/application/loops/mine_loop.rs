@@ -369,6 +369,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     timestamp: Timestamp,
     vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
+    consensus_rule_set: ConsensusRuleSet,
 ) -> Result<(Transaction, TxOutputList)> {
     let network = job_options.job_settings.network;
     let (composer_outputs, transaction_details) = prepare_coinbase_transaction_stateless(
@@ -382,15 +383,8 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 
     info!("Start: generate single proof for coinbase transaction");
 
-    // note: we provide an owned witness to proof-builder and clone the kernel
-    // because this fn accepts arbitrary proving power and generates proof to
-    // match highest.  If we were guaranteed to NOT be generating a witness
-    // proof, we could use primitive_witness_ref() instead to avoid clone.
-
     let kernel = witness.kernel.clone();
 
-    let target_block_height = latest_block.header().height;
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, target_block_height);
     let proof = TransactionProofBuilder::new()
         .consensus_rule_set(consensus_rule_set)
         .transaction_details(&transaction_details)
@@ -505,9 +499,9 @@ pub(crate) async fn create_block_transaction_from(
         .lock_guard()
         .await
         .composer_parameters(predecessor_block.header().height.next());
-    let block_height = predecessor_block.header().height.next();
+    let next_block_height = predecessor_block.header().height.next();
     let network = global_state_lock.cli().network;
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
@@ -518,6 +512,7 @@ pub(crate) async fn create_block_transaction_from(
         timestamp,
         vm_job_queue.clone(),
         job_options.clone(),
+        consensus_rule_set,
     )
     .await?;
 
@@ -565,7 +560,7 @@ pub(crate) async fn create_block_transaction_from(
                     vm_job_queue.clone(),
                     proof_job_options.clone(),
                     &wallet_entropy,
-                    block_height,
+                    next_block_height,
                     notification_policy,
                 )
                 .await
@@ -1050,12 +1045,15 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .composer_parameters(next_block_height);
+        let network = global_state_lock.cli().network;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
         let (transaction, composer_outputs) = make_coinbase_transaction_stateless(
             latest_block,
             composer_parameters.clone(),
             timestamp,
             vm_job_queue,
             job_options,
+            consensus_rule_set,
         )
         .await?;
 

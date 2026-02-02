@@ -4715,12 +4715,15 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .composer_parameters(BlockHeight::genesis().next());
+            let consensus_rule_set =
+                ConsensusRuleSet::infer_from(network, previous_block.header().height.next());
             let (transaction, _composer_txos) = make_coinbase_transaction_stateless(
                 &previous_block,
                 composer_parameters.clone(),
                 now,
                 TritonVmJobQueue::get_instance(),
                 rando.cli().proof_job_options_primitive_witness(),
+                consensus_rule_set,
             )
             .await
             .unwrap();
@@ -4845,10 +4848,12 @@ pub(crate) mod tests {
             let genesis_block = Block::genesis(network);
             let now = network.launch_date() + Timestamp::minutes(10);
 
+            let next_block_height = BlockHeight::genesis().next();
             let composer_parameters = global_state_lock
                 .lock_guard()
                 .await
-                .composer_parameters(BlockHeight::genesis().next());
+                .composer_parameters(next_block_height);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
             let (transaction, composer_txos) = make_coinbase_transaction_stateless(
                 &genesis_block,
                 composer_parameters.clone(),
@@ -4857,6 +4862,7 @@ pub(crate) mod tests {
                 global_state_lock
                     .cli()
                     .proof_job_options_primitive_witness(),
+                consensus_rule_set,
             )
             .await
             .unwrap();
