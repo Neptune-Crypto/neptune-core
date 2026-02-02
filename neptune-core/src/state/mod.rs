@@ -2781,6 +2781,9 @@ impl GlobalState {
         let block_file_paths = ArchivalState::read_block_file_names_from_directory(directory)?;
         let mut num_stored_blocks = 0;
         let mut predecessor = self.chain.light_state().clone();
+        let network = self.cli.network;
+        let ignore_invalid_threshold = ConsensusRuleSet::first_tvmv1_block(network);
+
         for block_file_path in block_file_paths {
             let blocks = ArchivalState::blocks_from_file_without_record(&block_file_path).await?;
 
@@ -2809,7 +2812,7 @@ impl GlobalState {
                     // Ensure we have the right predecessor, in case block data
                     // contains reorganizations.
                     let predecessor = if prev_block_digest == predecessor.hash() {
-                        predecessor
+                        predecessor.clone()
                     } else {
                         match self
                             .chain
@@ -2824,16 +2827,28 @@ impl GlobalState {
                         }
                     };
 
+                    let validity = block
+                        .validate(&predecessor, Timestamp::now(), network)
+                        .await;
+
+                    if let Err(error) = validity {
+                        // Skip/ignore invalid blocks instead of returning an
+                        // error -- iff they are based on a deprecated version
+                        // of Triton VM's proof system. Otherwise, this function
+                        // cannot handle orphaned blocks prior to TVM proof
+                        // version 1.
+                        if block_height < ignore_invalid_threshold {
+                            continue;
+                        }
+
+                        bail!(
+                            "Attempted to process a block from {} \
+                        which is invalid. Block height: {block_height}. Error: {error}",
+                            block_file_path.to_string_lossy()
+                        );
+                    }
                     ensure!(
-                        block
-                            .is_valid(&predecessor, Timestamp::now(), self.cli.network)
-                            .await,
-                        "Attempted to process a block from {} \
-                        which is invalid. Block height: {block_height}.",
-                        block_file_path.to_string_lossy()
-                    );
-                    ensure!(
-                        block.has_proof_of_work(self.cli.network, predecessor.header()),
+                        block.has_proof_of_work(network, predecessor.header()),
                         "Attempted to process a block from {} \
                         which does not have required PoW amount. \
                         Block height: {block_height}.",

@@ -11,6 +11,7 @@ use neptune_cash::api::export::Timestamp;
 use neptune_cash::protocol::consensus::block::Block;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tracing_test::traced_test;
 
 use crate::common::fetch_files::test_helper_data_dir;
 use crate::common::fetch_files::try_fetch_file_from_server;
@@ -36,6 +37,7 @@ pub fn genesis_block_hasnt_changed_testnet_0() {
 
 /// test: Verify that first ~250 blocks on main net are still considered valid,
 /// and that a global state can be restored from it.
+#[traced_test]
 #[tokio::test(flavor = "multi_thread")]
 async fn can_restore_from_real_mainnet_data_with_reorganizations() {
     logging::tracing_logger();
