@@ -2339,6 +2339,7 @@ impl GlobalState {
     async fn set_new_tip_internal(&mut self, new_tip: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
+        debug!("Storing block.");
         self.chain
             .archival_state_mut()
             .set_new_tip(&new_tip)
@@ -2350,6 +2351,7 @@ impl GlobalState {
         // removing all transaction that became invalid/was mined by this
         // block. Also returns the list of update-jobs that should be
         // performed by this client.
+        debug!("Applying block to mempool.");
         let (mempool_events, update_jobs) = self.mempool.update_with_block(&new_tip)?;
 
         let parent_ms_accumulator =
@@ -2399,6 +2401,8 @@ impl GlobalState {
                     || self.force_wallet_membership_proof_maintance
             }
         };
+
+        debug!("Applying block to wallet.");
         self.wallet_state
             .update_wallet_state_with_new_block(
                 &parent_ms_accumulator.unwrap_or_default(),
@@ -2410,10 +2414,12 @@ impl GlobalState {
         // Get new membership proofs from mutator set accumulator, in case
         // wallet didn't set these from block data.
         if !maintain_mps_in_wallet {
+            debug!("Setting MS membership proofs in wallet");
             self.restore_monitored_utxos_from_archival_mutator_set()
                 .await;
         }
 
+        debug!("Handling mempool events.");
         self.wallet_state
             .handle_mempool_events(mempool_events)
             .await;
@@ -2423,6 +2429,7 @@ impl GlobalState {
         self.mining_state.block_proposal = BlockProposal::none();
         self.mining_state.exported_block_proposals.clear();
 
+        debug!("Done setting new tip.");
         Ok(update_jobs)
     }
 
