@@ -36,31 +36,29 @@ impl VersionString {
     }
 
     pub(crate) fn versions_are_compatible(own: Self, other: Self) -> bool {
-        let own_version = semver::Version::parse(&own)
+        let own = semver::Version::parse(&own)
             .unwrap_or_else(|_| panic!("Must be able to parse own version string. Got: {own}"));
-        let Ok(other_version) = semver::Version::parse(&other) else {
+        let Ok(other) = semver::Version::parse(&other) else {
             return false;
         };
 
         // All alphanet and betanet versions are incompatible with each other.
         // Alpha and betanet have versions "0.0.n". Alpha and betanet are
         // incompatible with all other versions.
-        if own_version.major == 0 && own_version.minor == 0
-            || other_version.major == 0 && other_version.minor == 0
-        {
-            return own_version == other_version;
+        if own.major == 0 && own.minor == 0 || other.major == 0 && other.minor == 0 {
+            return own == other;
         }
 
         // Cannot connect two different versions on either side of 0.5.
-        if own_version.major == 0 && other_version.major == 0 {
-            let own_is_less = own_version.minor <= 5;
-            let other_is_more = other_version.minor > 5;
+        if own.major == 0 && other.major == 0 {
+            let own_is_less = own.minor <= 5;
+            let other_is_more = other.minor > 5;
             if own_is_less && other_is_more {
                 return false;
             }
 
-            let own_is_more = other_version.minor > 5;
-            let other_is_less = own_version.minor <= 5;
+            let own_is_more = own.minor > 5;
+            let other_is_less = other.minor <= 5;
             if own_is_more && other_is_less {
                 return false;
             }
@@ -267,6 +265,50 @@ pub(crate) mod test {
                         )
                 })
                 .boxed()
+        }
+    }
+
+    #[test]
+    fn malformed_version_from_peer_doesnt_crash() {
+        let version_numbers = ["potato", "&&&&"];
+        for b in version_numbers {
+            assert!(!VersionString::versions_are_compatible(
+                VersionString::new_from_str("0.1.0"),
+                VersionString::new_from_str(b)
+            ));
+        }
+    }
+
+    #[test]
+    fn v0_5_0_and_0_6_0_are_incompatible() {
+        assert!(!VersionString::versions_are_compatible(
+            VersionString::new_from_str("0.6.0"),
+            VersionString::new_from_str("0.5.0")
+        ));
+        assert!(!VersionString::versions_are_compatible(
+            VersionString::new_from_str("0.5.0"),
+            VersionString::new_from_str("0.6.0")
+        ));
+    }
+
+    #[test]
+    fn versions_are_compatible_for_all_versions_above_0_6_() {
+        let version_numbers = [
+            "0.6.0",
+            "0.6.1",
+            "0.6.99",
+            "0.7.0",
+            "1.2.0",
+            "2.2.0",
+            "3.2.0",
+            "9999.99999.9999",
+        ];
+        for a in version_numbers {
+            let a = VersionString::new_from_str(a);
+            for b in version_numbers {
+                let b = VersionString::new_from_str(b);
+                assert!(VersionString::versions_are_compatible(a, b));
+            }
         }
     }
 

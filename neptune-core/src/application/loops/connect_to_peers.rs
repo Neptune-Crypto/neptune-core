@@ -37,6 +37,7 @@ use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
+use crate::protocol::peer::handshake_data::VersionString;
 use crate::protocol::peer::peer_info::pseudorandom_peer_id;
 use crate::protocol::peer::ConnectionRefusedReason;
 use crate::protocol::peer::InternalConnectionStatus;
@@ -84,34 +85,6 @@ where
     bincode::DefaultOptions::new()
         .with_limit(MAX_PEER_FRAME_LENGTH_IN_BYTES as u64)
         .into()
-}
-
-/// Returns true iff version numbers are compatible. Returns false otherwise.
-///
-/// # Panics
-///
-/// panics if own version could not be parsed.
-fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
-    let own_version = semver::Version::parse(own_version)
-        .unwrap_or_else(|_| panic!("Must be able to parse own version string. Got: {own_version}"));
-    let other_version = match semver::Version::parse(other_version) {
-        Ok(version) => version,
-        Err(err) => {
-            warn!("Peer version is not a valid semver version. Got error: {err}",);
-            return false;
-        }
-    };
-
-    // All alphanet and betanet versions are incompatible with each other.
-    // Alpha and betanet have versions "0.0.n". Alpha and betanet are
-    // incompatible with all other versions.
-    if own_version.major == 0 && own_version.minor == 0
-        || other_version.major == 0 && other_version.minor == 0
-    {
-        return own_version == other_version;
-    }
-
-    true
 }
 
 /// Infallible absolute difference between two timestamps, in seconds.
@@ -290,7 +263,7 @@ async fn check_if_connection_is_allowed(
     }
 
     // Disallow connection if versions are incompatible
-    if !versions_are_compatible(&own_handshake.version, &other_handshake.version) {
+    if !VersionString::versions_are_compatible(own_handshake.version, other_handshake.version) {
         warn!(
             "Attempting to connect to incompatible version. You might have to upgrade, or the other node does. Own version: {}, other version: {}",
             own_handshake.version,
@@ -815,33 +788,6 @@ mod tests {
         };
 
         Ok(())
-    }
-
-    #[test]
-    fn malformed_version_from_peer_doesnt_crash() {
-        let version_numbers = ["potato", "&&&&"];
-        for b in version_numbers {
-            assert!(!versions_are_compatible("0.1.0", b));
-        }
-    }
-
-    #[test]
-    fn versions_are_compatible_for_all_versions_above_0_1_0() {
-        let version_numbers = [
-            "0.1.0",
-            "0.1.1",
-            "0.1.99",
-            "0.2.0",
-            "1.2.0",
-            "2.2.0",
-            "3.2.0",
-            "9999.99999.9999",
-        ];
-        for a in version_numbers {
-            for b in version_numbers {
-                assert!(versions_are_compatible(a, b));
-            }
-        }
     }
 
     #[test]
