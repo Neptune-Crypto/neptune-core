@@ -3,7 +3,7 @@ name = "neptune-dashboard"
 description = "neptune-cash tui dashboard and wallet"
 authors = ["Triton Software"]
 
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -16,7 +16,7 @@ mock = ["rand", "neptune-cash/mock-rpc"]
 
 [dependencies]
 anyhow = { version = "1.0" }
-neptune-cash = { version = "0.5.0", path = "../neptune-core" }
+neptune-cash = { version = "0.6.0", path = "../neptune-core" }
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.27"
 libp2p = { version = "0.56.0", features = ["autonat"] }
