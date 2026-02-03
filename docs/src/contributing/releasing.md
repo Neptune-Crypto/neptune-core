@@ -53,7 +53,15 @@ An appropriate commit message could be:
 
 ### Bump Version
 
-Bump the version in `Cargo.toml` [as appropriate](https://doc.rust-lang.org/cargo/reference/semver.html).
+Bump the version of all crates in `Cargo.toml` [as appropriate](https://doc.rust-lang.org/cargo/reference/semver.html), including cross-dependencies between the crates.
+
+At the time of writing, you need to bump the versions in these files:
+ - `neptune-core-cli/Cargo.toml`
+ - `neptune-core/Cargo.toml`
+ - `neptune-dashboard/Cargo.toml`
+ - `neptune-rpc/client/Cargo.toml`
+ - `neptune-rpc/macros/Cargo.toml`
+
 
 ### Confirm Version Bump as Semantic
 
