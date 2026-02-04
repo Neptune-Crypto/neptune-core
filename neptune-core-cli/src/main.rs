@@ -9,6 +9,7 @@ use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -20,6 +21,7 @@ use clap::Parser;
 use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
+use libp2p::Multiaddr;
 use neptune_cash::api::export::TransactionKernelId;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::application::config::data_directory::DataDirectory;
@@ -206,6 +208,30 @@ enum Command {
         max_num_blocks: Option<usize>,
     },
 
+    /// Shows the circulating supply of Neptune coins.
+    ///
+    /// "Circulating" means "not time-locked" or "time-locked but with an
+    /// expired release date".
+    ///
+    /// This number is computed rapidly but heuristically:
+    ///  - It assumes that every block mined minted the maximum allowable
+    ///    coinbase.
+    ///  - It assumes that time-locks expire after exactly 160815 blocks,
+    ///    corresponding to one generation.
+    ///  - It assumes all burns are known.
+    CirculatingSupply,
+
+    /// Shows the asymptotical limit on the supply of Neptune coins.
+    ///
+    /// This number is computed rapidly but heuristically:
+    ///  - It assumes that every block mined in the past or to be mined in the
+    ///    future mints the maximum allowable coinbase.
+    ///  - It assumes that all burns are known (even future ones).
+    MaxSupply,
+
+    /// Shows the total supply of Neptune coins that were burned.
+    BurnedSupply,
+
     /******** PEER INTERACTIONS ********/
     /// Broadcast transaction notifications for all transactions in mempool.
     BroadcastMempoolTransactions,
@@ -217,13 +243,69 @@ enum Command {
     /// shutdown neptune-core
     Shutdown,
 
-    /// clear all peer standings
+    /// Clear all peer standings.
+    ///
+    /// This is a legacy command that applies to the peer loop logic only. So in
+    /// particular, any peers banned at the modern libp2p-level will remain
+    /// banned. For the modern equivalent, use the command `unban --all` (which
+    /// also clears all standings at the peer loop logic level).
     ClearAllStandings,
 
-    /// clear standings for peer with a given IP
+    /// Clear standing for peer with a given IP.
+    ///
+    /// This is a legacy command that applies to the peer loop logic only. So in
+    /// particular, if the peer is banned at the modern libp2p-level, that ban
+    /// will remain in effect. For the modern equivalent, use the command
+    /// `unban` (which also clears the peer's standing at the peer loop logic
+    /// level).
     ClearStandingByIp {
         ip: IpAddr,
     },
+
+    /// Ban one or more peers by address.
+    Ban {
+        /// The Multiaddrs to ban (e.g., /ip4/1.2.3.4/tcp/8080)
+        #[arg(required = true, num_args = 1..)]
+        addresses: Vec<Multiaddr>,
+    },
+
+    /// Unban one or more peers.
+    Unban {
+        /// The Multiaddrs to unban
+        #[arg(num_args = 0..)]
+        addresses: Vec<Multiaddr>,
+
+        /// Clear the entire blacklist
+        #[arg(short, long, conflicts_with = "addresses")]
+        all: bool,
+    },
+
+    /// Dial the given address.
+    ///
+    /// In other words, attempt to initiate a connection to it.
+    Dial {
+        #[arg(required = true)]
+        address: Multiaddr,
+    },
+
+    /// Manually trigger a NAT status probe.
+    ///
+    /// Neptune nodes use AutoNAT to determine if they are publicly reachable.
+    /// Run this if you have recently changed your router settings or
+    /// port-forwarding and want the node to update its reachability status
+    /// immediately.
+    ProbeNat,
+
+    /// Reset all active relay reservations.
+    ///
+    /// If your node is not publicly reachable and relies on libp2p relays,
+    /// this command will drop current relay connections and attempt to
+    /// re-reserve slots. This can help resolve "No Relay Circuit" errors
+    /// without restarting the entire node.
+    ResetRelayReservations,
+
+    /// Show a brief overview of network vitals.
+    NetworkOverview,
 
     /// claim an off-chain utxo-transfer.
     ClaimUtxo {
@@ -233,6 +315,38 @@ enum Command {
         /// Indicates how many blocks to look back in case the UTXO was already
         /// mined.
         max_search_depth: Option<u64>,
+    },
+
+    /// Rescan the selected (inclusive) range of blocks for announced, incoming
+    /// UTXOs to all addresses registered by the client's wallet. Requires the
+    /// client to be launched with the UTXO index activated.
+    RescanAnnounced {
+        first: u64,
+        last: u64,
+    },
+
+    /// Rescan the selected (inclusive) range of blocks for UTXOs that were
+    /// registered as expected. Works regardless of UTXO index status.
+    RescanExpected {
+        first: u64,
+        last: u64,
+    },
+
+    /// Rescan the selected (inclusive) range of blocks for spent UTXOs. Useful
+    /// to rebuild transaction history. Requires the client to be launched with
+    /// the UTXO index activated.
+    RescanOutgoing {
+        first: u64,
+        last: u64,
+    },
+
+    /// Rescan the selected (inclusive) range of blocks for guesser rewards.
+    /// Useful if the client's seed has been used to guess on correct proof-of-
+    /// work solutions in the past but wallet state was somehow lost. Works
+    /// regardless of UTXO index status.
+    RescanGuesserRewards {
+        first: u64,
+        last: u64,
     },
 
     /// send a payment to a single recipient
@@ -270,7 +384,9 @@ enum Command {
     ///
     /// Specifically, the transaction will include announcements that expose the
     /// raw UTXOs and all commitment randomness. This information suffices to
-    /// track amounts as well as origins and destinations.
+    /// track amounts as well as origins and destinations. Because of the added
+    /// announcements, these transactions require a higher fee than
+    /// non-transparent transactions.
     SendTransparent {
         #[clap(long, value_parser, required = false)]
         file: Option<PathBuf>,
@@ -1045,6 +1161,21 @@ async fn main() -> Result<()> {
             )
         }
 
+        Command::CirculatingSupply => {
+            let circulating_supply = client.circulating_supply(ctx, token).await??;
+            println!("{}", circulating_supply.display_lossless());
+        }
+
+        Command::MaxSupply => {
+            let max_supply = client.max_supply(ctx, token).await??;
+            println!("{}", max_supply.display_lossless());
+        }
+
+        Command::BurnedSupply => {
+            let burned_supply = client.burned_supply(ctx, token).await??;
+            println!("{}", burned_supply.display_lossless());
+        }
+
         /******** PEER INTERACTIONS ********/
         Command::BroadcastMempoolTransactions => {
             println!("Broadcasting transaction-notifications for all transactions in mempool.");
@@ -1070,6 +1201,39 @@ async fn main() -> Result<()> {
             client.clear_standing_by_ip(ctx, token, ip).await??;
             println!("Cleared standing of {ip}");
         }
+        Command::Ban { addresses } => {
+            for address in addresses {
+                client.ban(ctx, token, address.clone()).await??;
+                println!("Banned {address}.");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+        Command::Unban { addresses, all } => {
+            if all {
+                client.unban_all(ctx, token).await??;
+                println!("Unbanned all.");
+            } else {
+                for address in addresses {
+                    client.unban(ctx, token, address.clone()).await??;
+                    println!("Unbanned {address}.");
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+        }
+        Command::Dial { address } => {
+            client.dial(ctx, token, address).await??;
+            println!("beeep brp");
+        }
+        Command::ProbeNat => {
+            client.probe_nat(ctx, token).await??;
+        }
+        Command::ResetRelayReservations => {
+            client.reset_relay_reservations(ctx, token).await??;
+        }
+        Command::NetworkOverview => {
+            let overview = client.get_network_overview(ctx, token).await??;
+            println!("{overview}");
+        }
         Command::ClaimUtxo {
             format,
             max_search_depth,
@@ -1092,6 +1256,30 @@ async fn main() -> Result<()> {
             } else {
                 println!("This claim has already been registered.");
             }
+        }
+        Command::RescanAnnounced { first, last } => {
+            client
+                .rescan_announced(ctx, token, first.into(), last.into())
+                .await??;
+            println!("Rescan started. Please check application log for progress.");
+        }
+        Command::RescanExpected { first, last } => {
+            client
+                .rescan_expected(ctx, token, first.into(), last.into())
+                .await??;
+            println!("Rescan started. Please check application log for progress.");
+        }
+        Command::RescanOutgoing { first, last } => {
+            client
+                .rescan_outgoing(ctx, token, first.into(), last.into())
+                .await??;
+            println!("Rescan started. Please check application log for progress.");
+        }
+        Command::RescanGuesserRewards { first, last } => {
+            client
+                .rescan_guesser_rewards(ctx, token, first.into(), last.into())
+                .await??;
+            println!("Rescan started. Please check application log for progress.");
         }
         Command::Send {
             address,

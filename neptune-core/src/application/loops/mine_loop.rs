@@ -369,6 +369,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     timestamp: Timestamp,
     vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
+    consensus_rule_set: ConsensusRuleSet,
 ) -> Result<(Transaction, TxOutputList)> {
     let network = job_options.job_settings.network;
     let (composer_outputs, transaction_details) = prepare_coinbase_transaction_stateless(
@@ -382,15 +383,8 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 
     info!("Start: generate single proof for coinbase transaction");
 
-    // note: we provide an owned witness to proof-builder and clone the kernel
-    // because this fn accepts arbitrary proving power and generates proof to
-    // match highest.  If we were guaranteed to NOT be generating a witness
-    // proof, we could use primitive_witness_ref() instead to avoid clone.
-
     let kernel = witness.kernel.clone();
 
-    let target_block_height = latest_block.header().height;
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, target_block_height);
     let proof = TransactionProofBuilder::new()
         .consensus_rule_set(consensus_rule_set)
         .transaction_details(&transaction_details)
@@ -505,9 +499,9 @@ pub(crate) async fn create_block_transaction_from(
         .lock_guard()
         .await
         .composer_parameters(predecessor_block.header().height.next());
-    let block_height = predecessor_block.header().height.next();
+    let next_block_height = predecessor_block.header().height.next();
     let network = global_state_lock.cli().network;
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
@@ -518,6 +512,7 @@ pub(crate) async fn create_block_transaction_from(
         timestamp,
         vm_job_queue.clone(),
         job_options.clone(),
+        consensus_rule_set,
     )
     .await?;
 
@@ -544,7 +539,7 @@ pub(crate) async fn create_block_transaction_from(
         .proof_type(TransactionProofType::SingleProof)
         .build();
     if transactions_to_merge.is_empty() && tx_merge_origin == TxMergeOrigin::Mempool {
-        info!("No synced single-proof tx found for merge looking for one to update");
+        info!("No synced single-proof tx found for merge. Looking for one to update.");
         let min_gobbling_fee = NativeCurrencyAmount::zero();
         let update_job = global_state_lock
             .lock_guard_mut()
@@ -565,7 +560,7 @@ pub(crate) async fn create_block_transaction_from(
                     vm_job_queue.clone(),
                     proof_job_options.clone(),
                     &wallet_entropy,
-                    block_height,
+                    next_block_height,
                     notification_policy,
                 )
                 .await
@@ -984,7 +979,6 @@ pub(crate) mod tests {
     use arbitrary::Arbitrary;
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
-    use block_header::tests::random_block_header;
     use difficulty_control::Difficulty;
     use itertools::Itertools;
     use macro_rules_attr::apply;
@@ -1051,12 +1045,15 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .composer_parameters(next_block_height);
+        let network = global_state_lock.cli().network;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
         let (transaction, composer_outputs) = make_coinbase_transaction_stateless(
             latest_block,
             composer_parameters.clone(),
             timestamp,
             vm_job_queue,
             job_options,
+            consensus_rule_set,
         )
         .await?;
 
@@ -1794,7 +1791,7 @@ pub(crate) mod tests {
         println!("initial difficulty: {}", initial_difficulty);
         prev_block.set_header_timestamp_and_difficulty(
             prev_block.header().timestamp,
-            Difficulty::from_biguint(initial_difficulty),
+            Difficulty::from_biguint(initial_difficulty).unwrap(),
         );
 
         let expected_duration = target_block_interval * NUM_BLOCKS;
@@ -2152,7 +2149,7 @@ pub(crate) mod tests {
         rng.fill_bytes(&mut unstructured_source);
         let mut unstructured = arbitrary::Unstructured::new(&unstructured_source);
 
-        let mut predecessor_header = random_block_header();
+        let mut predecessor_header = rng.random::<BlockHeader>();
         predecessor_header.difficulty = Difficulty::from(difficulty);
         let predecessor_body = BlockBody::new(
             TransactionKernelProxy::arbitrary(&mut unstructured)
@@ -2170,7 +2167,7 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let mut successor_header = random_block_header();
+        let mut successor_header = rng.random::<BlockHeader>();
         successor_header.prev_block_digest = predecessor_block.hash();
         // note that successor's difficulty is random
         let successor_body = BlockBody::new(
@@ -2231,6 +2228,7 @@ pub(crate) mod tests {
         let cli_args = cli_args::Args {
             compose: true,
             network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
             ..Default::default()
         };
         let global_state_lock =
@@ -2302,6 +2300,7 @@ pub(crate) mod tests {
         let cli_args = cli_args::Args {
             compose: true,
             network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
             ..Default::default()
         };
         let global_state_lock =

@@ -515,7 +515,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
     ) -> Result<(), PowValidationError> {
         let leaf_prefix = match consensus_rule_set {
             ConsensusRuleSet::Reboot => auth_paths.commit(),
-            ConsensusRuleSet::HardforkAlpha => parent_digest,
+            ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::TvmProofVersion1 => parent_digest,
         };
         let index_picker_preimage = Tip5::hash_pair(self.root, auth_paths.commit());
         let (index_a, index_b) = Self::indices(index_picker_preimage, self.nonce);
@@ -625,7 +625,7 @@ pub(crate) mod tests {
         let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(
             auth_paths,
             None,
-            ConsensusRuleSet::default(),
+            ConsensusRuleSet::Reboot,
             prev_block_digest,
         );
 
@@ -1044,7 +1044,7 @@ pub(crate) mod tests {
             let (root, index, path, element) =
                 valid_root_index_path_element_tuple(height, rng.random());
 
-            let translation = rng.random_range(0..((1 << height) - 1));
+            let translation = rng.random_range(1..((1 << height) - 1));
             let index = (index + translation) % (1 << height);
 
             assert!(!MTree::verify(root, index, &path, element));

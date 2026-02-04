@@ -154,9 +154,12 @@ impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> St
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use macro_rules_attr::apply;
+
     use super::super::SimpleRustyStorage;
     use super::*;
     use crate::application::database::NeptuneLevelDb;
+    use crate::tests::shared_tokio_runtime;
 
     pub async fn mk_test_vec_u64() -> DbtVec<u64> {
         // open new DB that will be closed on drop.
@@ -165,6 +168,48 @@ mod tests {
             .unwrap();
         let mut rusty_storage = SimpleRustyStorage::new(db);
         rusty_storage.schema.new_vec::<u64>("test-vector").await
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn correct_length_after_clear_and_persist() {
+        // open new DB that will be closed on drop.
+        let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
+            .await
+            .unwrap();
+        let mut rusty_storage = SimpleRustyStorage::new(db);
+        let mut vec = rusty_storage.schema.new_vec::<u64>("test-vector").await;
+
+        vec.push(32).await;
+
+        vec.clear().await;
+        assert_eq!(0, vec.len().await);
+
+        rusty_storage.persist().await;
+        assert_eq!(0, vec.len().await);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn correct_length_after_clear_push_and_persist() {
+        // open new DB that will be closed on drop.
+        let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
+            .await
+            .unwrap();
+        let mut rusty_storage = SimpleRustyStorage::new(db);
+        let mut vec = rusty_storage.schema.new_vec::<u64>("test-vector").await;
+
+        vec.push(32).await;
+        vec.push(33).await;
+        vec.push(34).await;
+
+        vec.clear().await;
+
+        vec.push(33).await;
+        vec.push(34).await;
+
+        assert_eq!(2, vec.len().await);
+
+        rusty_storage.persist().await;
+        assert_eq!(2, vec.len().await);
     }
 
     pub mod streams {

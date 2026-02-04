@@ -19,19 +19,6 @@ in particular:
 2. methods do not need to be exactly the same as the rpc endpoints.  We may have
    additional types, methods, and parameters where it makes sense to do so.
 
-## module owner
-
-this module has a module owner that enforces the rules and oversees things
-remain in a cohesive state, conventions are followed, etc.
-
-as a public-facing module, it is intentional that submitting a PR to this module
-may incur more rigorous scrutiny than other areas, and that this module will
-change more slowly than internal areas of the codebase.
-
-The module-owner can be changed by a vote of the core team members
-or if the module-owner resigns.
-
-the present module owner is github user: dan-da
 
 ## rules:
 

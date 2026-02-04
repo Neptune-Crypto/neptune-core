@@ -200,7 +200,9 @@ impl SpendingKey {
     }
 
     /// Scans all announcements in a `Transaction` and return all
-    /// UTXOs that are recognized by this spending key.
+    /// UTXOs that are announced and recognized by this spending key. Does not
+    /// verify that the announced UTXOs are actually present. This is the
+    /// caller's responsibility..
     ///
     /// Note that a single `Transaction` may represent an entire block.
     ///

@@ -11,6 +11,7 @@ use crate::application::config::network::Network;
 use crate::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
 use crate::state::archival_state::BLOCK_INDEX_DB_NAME;
 use crate::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;
+use crate::state::archival_state::UTXO_INDEX_DIRECTORY_NAME;
 use crate::state::database::DATABASE_DIRECTORY_ROOT_NAME;
 use crate::state::networking_state::BANNED_IPS_DB_NAME;
 use crate::state::shared::BLOCK_FILENAME_EXTENSION;
@@ -23,6 +24,7 @@ use crate::state::wallet::wallet_file::WALLET_OUTPUT_COUNT_DB_NAME;
 const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.
 const DB_MIGRATION_BACKUPS_DIR: &str = "migration_backups";
+const NETWORK_SUBDIRECTORY_NAME: &str = "network";
 
 // TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -94,6 +96,10 @@ impl DataDirectory {
     /// The block database directory path
     pub fn database_dir_path(&self) -> PathBuf {
         self.data_dir.join(Path::new(DATABASE_DIRECTORY_ROOT_NAME))
+    }
+
+    pub fn network_subdirectory(&self) -> PathBuf {
+        self.data_dir.join(Path::new(NETWORK_SUBDIRECTORY_NAME))
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -191,12 +197,22 @@ impl DataDirectory {
 
     ///////////////////////////////////////////////////////////////////////////
     ///
-    /// The archival block MMR database director path
+    /// The archival block MMR database directory path
     ///
     /// This directory lives within `DataDirectory::database_dir_path()`.
     pub fn archival_block_mmr_dir_path(&self) -> PathBuf {
         self.database_dir_path()
             .join(Path::new(ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME))
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    ///
+    /// The UTXO index database directory path
+    ///
+    /// This directory lives within `DataDirectory::database_dir_path()`.
+    pub(crate) fn utxo_index_dir_path(&self) -> PathBuf {
+        self.database_dir_path()
+            .join(Path::new(UTXO_INDEX_DIRECTORY_NAME))
     }
 
     ///////////////////////////////////////////////////////////////////////////

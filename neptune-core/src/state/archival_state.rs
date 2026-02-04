@@ -1,24 +1,36 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
+use itertools::Itertools;
 use memmap2::MmapOptions;
+use num_traits::CheckedSub;
 use num_traits::Zero;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tracing::debug;
+use tracing::info;
 use tracing::warn;
 
 pub(crate) mod import_blocks_from_files;
+pub mod rusty_utxo_index;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
+use crate::api::export::Args;
+use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
+use crate::api::export::Utxo;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::database::create_db_if_missing;
 use crate::application::database::storage::storage_schema::traits::*;
@@ -28,25 +40,36 @@ use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
 use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::block_height::BLOCKS_PER_GENERATION;
+use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
+use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
+use crate::protocol::proof_abstractions::verifier::cache_true_claims;
+use crate::state::archival_state::rusty_utxo_index::RustyUtxoIndex;
 use crate::state::database::BlockFileLocation;
 use crate::state::database::BlockIndexKey;
 use crate::state::database::BlockIndexValue;
 use crate::state::database::BlockRecord;
 use crate::state::database::FileRecord;
 use crate::state::database::LastFileRecord;
+use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::rusty_archival_block_mmr::RustyArchivalBlockMmr;
+use crate::BFieldElement;
 
 pub(crate) const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub(crate) const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
 pub(crate) const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
+pub(crate) const UTXO_INDEX_DIRECTORY_NAME: &str = "utxo_index";
 
 /// Provides interface to historic blockchain data which consists of
 ///  * block-data stored in individual files (append-only)
@@ -79,7 +102,12 @@ pub struct ArchivalState {
     pub(crate) archival_mutator_set: RustyArchivalMutatorSet,
 
     /// Archival-MMR of the block digests belonging to the canonical chain.
-    pub(crate) archival_block_mmr: RustyArchivalBlockMmr,
+    pub archival_block_mmr: RustyArchivalBlockMmr,
+
+    /// Mapping from block digest to a list of (flag, receiver_id) pairs for all
+    /// announcement in the block. This index is only maintained if the node has
+    /// been started with the CLI flag `--utxo-index`.
+    pub(crate) utxo_index: Option<RustyUtxoIndex>,
 
     /// The network that this node is on. Used to simplify method interfaces.
     network: Network,
@@ -94,6 +122,7 @@ impl core::fmt::Debug for ArchivalState {
             .field("block_index_db", &self.block_index_db)
             .field("genesis_block", &self.genesis_block)
             .field("network", &self.network)
+            .field("archival_block_mmr", &self.archival_block_mmr)
             .finish()
     }
 }
@@ -257,11 +286,7 @@ impl ArchivalState {
         archival_mutator_set.persist().await;
     }
 
-    pub(crate) async fn new(
-        data_dir: DataDirectory,
-        genesis_block: Block,
-        network: Network,
-    ) -> Self {
+    pub async fn new(data_dir: DataDirectory, genesis_block: Block, cli: &Args) -> Self {
         let mut archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)
             .await
             .expect("Must be able to initialize archival mutator set");
@@ -297,6 +322,28 @@ impl ArchivalState {
             .await
             .expect("Must be able to initialize block index database");
         debug!("Got block index database");
+
+        // UTXO index is always initialized. But only populated with blocks if
+        // this index is activated.
+        let utxo_index = if cli.utxo_index {
+            let mut utxo_index = RustyUtxoIndex::initialize(&data_dir)
+                .await
+                .expect("Must be able to initialize utxo index database");
+
+            if utxo_index.is_empty().await {
+                utxo_index.index_block(&genesis_block).await;
+            }
+            debug!("UTXO index populated");
+            Some(utxo_index)
+        } else {
+            None
+        };
+
+        // Populate true claims cache with block claims from checkpoint.
+        let network = cli.network;
+        Self::accept_checkpoint(network).await;
+        debug!("Accepted checkpoint");
+
         let genesis_block = Box::new(genesis_block);
         Self {
             data_dir,
@@ -305,6 +352,7 @@ impl ArchivalState {
             archival_mutator_set,
             archival_block_mmr,
             network,
+            utxo_index,
         }
     }
 
@@ -509,6 +557,27 @@ impl ArchivalState {
         Ok(())
     }
 
+    /// Update all of archival state with a new block which is set as tip.
+    ///
+    /// May also be used to set the tip back to any earlier block, including the
+    /// genesis block. However, a path from the current tip to the new tip must
+    /// be known.
+    ///
+    /// Performs no validation.
+    ///
+    /// # Panics
+    ///
+    /// - If the new tip does not have a mutator set update.
+    /// - If databases are in an inconsistent state.
+    pub(crate) async fn set_new_tip(&mut self, block: &Block) -> Result<()> {
+        self.write_block_as_tip(block).await?;
+        self.append_to_archival_block_mmr(block).await;
+        self.update_mutator_set(block).await?;
+        self.update_utxo_index(block).await;
+
+        Ok(())
+    }
+
     /// Write a newly found block to database and to disk, without setting it as
     /// tip.
     ///
@@ -523,7 +592,7 @@ impl ArchivalState {
     /// If block was already written to database, then it is only marked as
     /// tip, and no write to disk occurs. Instead, the old block database entry
     /// is assumed to be valid, and so is the block stored on disk.
-    pub(crate) async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
+    async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
         self.write_block_internal(new_block, true).await
     }
 
@@ -531,7 +600,7 @@ impl ArchivalState {
     ///
     /// This method handles reorganizations, but all predecessors of this block
     /// must be known and stored in the block index database for it to work.
-    pub(crate) async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
+    async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
         #[cfg(test)]
         {
             // In tests you're allowed to set a genesis block with a height
@@ -603,13 +672,85 @@ impl ArchivalState {
             .await;
     }
 
+    /// Apply a new block to the UTXO index. Does nothing if no UTXO index is
+    /// maintained by this archival state.
+    ///
+    /// This method handles reorganizations, but all predecessors of this block
+    /// must be known and stored in the block index database for it to work.
+    /// Reorganizations leaves ophaned blocks in the index though. So this must
+    /// be accounted for when reading from the index.
+    ///
+    /// # Panics
+    /// - If any of the predecessor blocks have not been applied to the block
+    ///   index database.
+    async fn update_utxo_index(&mut self, new_block: &Block) {
+        if self.utxo_index.is_none() {
+            return;
+        }
+
+        let current_sync = self.utxo_index.as_ref().unwrap().sync_label().await;
+        let new_block_hash = new_block.hash();
+
+        // Index all not-yet-indexed blocks preceding the new block. In the
+        // common case, where the new block is the direct descendant of the
+        // block that was previously applied, only one block will be processed
+        // here. This path-finding logic allows for an efficient common-case
+        // processing, and an effcient "catchup" behavior where the UTXO index
+        // is many block behind the rest of the archival state.
+        let (_, _, missing_blocks) = self.find_path(current_sync, new_block_hash).await;
+
+        // Inform user if this will take a long time.
+        let num_missing_blocks = missing_blocks.len();
+        debug!("Applying {num_missing_blocks} missing blocks to UTXO index.");
+        if num_missing_blocks > 10 {
+            info!("Applying {num_missing_blocks} missing blocks to UTXO index. This may take a while.")
+        }
+        for missing in missing_blocks {
+            // This optimization means that we don't have to read the full
+            // blocks from disk in case it was already processed.
+            if self
+                .utxo_index
+                .as_ref()
+                .unwrap()
+                .block_was_indexed(missing)
+                .await
+            {
+                continue;
+            }
+
+            if missing == new_block_hash {
+                // Avoid reading the new block from disk if it's already in
+                // memory.
+                self.utxo_index
+                    .as_mut()
+                    .unwrap()
+                    .index_block(new_block)
+                    .await;
+            } else {
+                let missing = self
+                    .get_block(missing)
+                    .await
+                    .expect("Fetching block must succeed")
+                    .expect("missing block must exist before processed by UTXO index");
+                self.utxo_index
+                    .as_mut()
+                    .unwrap()
+                    .index_block(&missing)
+                    .await;
+            }
+        }
+
+        debug!("Done updating UTXO index");
+    }
+
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
         let block_file_path: PathBuf = self
             .data_dir
             .block_file_path(block_record.file_location.file_index);
 
         tokio::task::spawn_blocking(move || {
-            let block_file = std::fs::File::open(&block_file_path)?;
+            let block_file = std::fs::File::open(&block_file_path)
+                .map_err(|e| anyhow::anyhow!("IO Error while reading '{}': {e}.", block_file_path.to_string_lossy()))?;
 
             // 1. Get file metadata to find its actual size on disk.
             let metadata = block_file.metadata()?;
@@ -700,6 +841,7 @@ impl ArchivalState {
                 return Ok(None);
             }
         };
+        let tip_height = record.block_header.height;
 
         // Is AOCL leaf index after current tip?
         if aocl_leaf_index > record.max_aocl_index() {
@@ -710,6 +852,7 @@ impl ArchivalState {
         let mut max_block_height = record.block_header.height;
 
         // Do binary search to find block
+        // invariant: min_block_height <= record.block_header.height && record.block_header.height <= max_block_height
         loop {
             if aocl_leaf_index < record.min_aocl_index {
                 // Look below current height
@@ -726,6 +869,10 @@ impl ArchivalState {
             };
 
             let new_guess_height = BlockHeight::arithmetic_mean(min_block_height, max_block_height);
+            debug!(
+                "canonical_block_digest_of_aocl_index: binary search on [{}:{}] -- new guess is {} (/{})",
+                min_block_height, max_block_height, new_guess_height, tip_height
+            );
             block_hash = self
                 .archival_block_mmr
                 .ammr()
@@ -805,9 +952,117 @@ impl ArchivalState {
         }
     }
 
+    /// Return all block heights of blocks belonging to the canonical chain
+    /// containing any of the requested addition records.
+    ///
+    /// Never loads the entire block from disk. Only reads from the database, so
+    /// performace should be good.
+    ///
+    /// Only works if a UTXO index is maintained.
+    pub(crate) async fn addition_records_to_block_height(
+        &self,
+        addition_records: HashSet<AdditionRecord>,
+    ) -> Result<HashSet<BlockHeight>> {
+        ensure!(
+            self.utxo_index.is_some(),
+            "Only works a UTXO index is maintained."
+        );
+
+        let mut ret = HashSet::new();
+        for addition_record in addition_records {
+            let maybe_matching_blocks = self
+                .utxo_index
+                .as_ref()
+                .unwrap()
+                .blocks_by_addition_record(addition_record)
+                .await;
+
+            // Verify reported block height matches a block in the canonical
+            // chain.
+            // An addition record can (theoretically) be present in mutiple
+            // blocks, and even multiple times in the same block. This loop
+            // handles that case. Common case is that returned list has length
+            // zero or one.
+            for height in maybe_matching_blocks {
+                let (actual_ars_in_canonical_block, _) = self
+                    .addition_record_indices_for_block_by_height(height.into())
+                    .await
+                    .expect("Height reported by UTXO index must be known by archival state");
+                if actual_ars_in_canonical_block.contains_key(&addition_record) {
+                    ret.insert(height);
+                }
+            }
+        }
+
+        Ok(ret)
+    }
+
+    /// Return all block heights of blocks belonging to the canonical chain
+    /// containing any of the requested absolute index sets.
+    ///
+    /// Never loads the entire block from disk. Only reads from the database, so
+    /// performace should be good.
+    ///
+    /// Only works if a UTXO index is maintained.
+    pub(crate) async fn absolute_index_sets_to_block_heights(
+        &self,
+        absolute_index_sets: HashSet<AbsoluteIndexSet>,
+    ) -> Result<HashSet<BlockHeight>> {
+        ensure!(
+            self.utxo_index.is_some(),
+            "Only works a UTXO index is maintained."
+        );
+
+        let mut ret = HashSet::new();
+        for index_set in absolute_index_sets {
+            let maybe_matching_block = self
+                .utxo_index
+                .as_ref()
+                .unwrap()
+                .block_by_index_set(&index_set)
+                .await;
+
+            let Some(maybe_matching_block) = maybe_matching_block else {
+                continue;
+            };
+
+            // No use to add same block height twice.
+            if ret.contains(&maybe_matching_block) {
+                continue;
+            }
+
+            // Verify that the block height in question has not been reorganized
+            // out of canonicity.
+            let Some(block_hash) = self
+                .archival_block_mmr
+                .ammr()
+                .try_get_leaf(maybe_matching_block.into())
+                .await
+            else {
+                // Reorganization to shorter chain. Very unlikely.
+                continue;
+            };
+
+            let block_index_set_digests = self
+                .utxo_index
+                .as_ref()
+                .unwrap()
+                .index_set_digests(block_hash)
+                .await
+                .expect("Canonical block must have been indexed by UTXO index");
+
+            let index_set_digest = Tip5::hash(&index_set);
+            if block_index_set_digests.contains(&index_set_digest) {
+                ret.insert(maybe_matching_block);
+            }
+        }
+
+        Ok(ret)
+    }
+
     /// Return latest block from database, or genesis block if no other block
     /// is known.
-    pub(crate) async fn get_tip(&self) -> Block {
+    pub async fn get_tip(&self) -> Block {
         let lookup_res_info: Option<Block> = self
             .get_tip_from_disk()
             .await
@@ -901,7 +1156,7 @@ impl ArchivalState {
     ///  - `Ok(Some(block))` in case of success.
     ///  - `Ok(None)` if the block does not live in archival state.
     ///  - `Err(_)` if there was a problem reading from archival state.
-    pub(crate) async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
+    pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         let maybe_record = self.get_block_record(block_digest).await;
         let Some(record) = maybe_record else {
             let maybe_genesis_block =
@@ -915,11 +1170,147 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
+    /// Return the list of `[StrongUtxoKey]` of the guesser rewards for the
+    /// specified block belonging to the canonical chain. Can be used to check
+    /// if a wallet has already registered guesser reward UTXOs.
+    ///
+    /// Returns none if no block of the specified height belonging to the
+    /// canonical chain is known.
+    ///
+    /// Perf: Does not read block from disk.
+    ///
+    /// # Panics
+    ///
+    ///  - If the database is corrupted.
+    pub(crate) async fn guesser_reward_strong_keys_for_block(
+        &self,
+        block_height: u64,
+    ) -> Option<Vec<StrongUtxoKey>> {
+        if block_height == BlockHeight::genesis().value() {
+            return Some(vec![]);
+        }
+
+        let Some(block_hash) = self
+            .archival_block_mmr
+            .ammr()
+            .try_get_leaf(block_height)
+            .await
+        else {
+            warn!("Attempted to get addition records for block height {block_height} which is not known.");
+            return None;
+        };
+
+        let block_record = self
+            .get_block_record(block_hash)
+            .await
+            .expect("Must know block record of canonical and non-genesis block");
+
+        // The protocol dictates that the timelocked UTXO comes first, then the
+        // liquid.
+        let leaf_index_timelocked = block_record.max_aocl_index() - 1;
+        let addition_record_timelocked = self
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .get_leaf_async(leaf_index_timelocked)
+            .await;
+
+        let leaf_index_liquid = block_record.max_aocl_index();
+        let addition_record_liquid = self
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .get_leaf_async(leaf_index_liquid)
+            .await;
+
+        Some(vec![
+            StrongUtxoKey::new(
+                AdditionRecord::new(addition_record_timelocked),
+                leaf_index_timelocked,
+            ),
+            StrongUtxoKey::new(
+                AdditionRecord::new(addition_record_liquid),
+                leaf_index_liquid,
+            ),
+        ])
+    }
+
+    /// Returns a [`HashMap`] of [`AdditionRecord`] to  AOCL leaf indices for
+    /// all outputs in a given block, including guesser rewards.  Also returns
+    /// the block hash. Returns `None` if no block at the specified height is
+    /// known. AOCL leaf indices have list type since a block can contain the
+    /// same addition record multiple times.
+    ///
+    /// Never loads the entire block from disk. Only reads from the database, so
+    /// performace should be good.
+    ///
+    /// # Panics
+    ///
+    ///  - If the database is corrupted.
+    pub(crate) async fn addition_record_indices_for_block_by_height(
+        &self,
+        block_height: u64,
+    ) -> Option<(HashMap<AdditionRecord, Vec<u64>>, Digest)> {
+        let (aocl_leaf_indices, block_hash) = if block_height == BlockHeight::genesis().value() {
+            // Special-case for genesis block since it has no block record.
+            let num_outputs_in_genesis: u64 = self
+                .genesis_block()
+                .body()
+                .transaction_kernel()
+                .outputs
+                .len()
+                .try_into()
+                .expect("Can always convert usize to u64");
+            let range = 0u64..=(num_outputs_in_genesis - 1);
+            (range, self.genesis_block().hash())
+        } else {
+            let Some(block_hash) = self
+                .archival_block_mmr
+                .ammr()
+                .try_get_leaf(block_height)
+                .await
+            else {
+                warn!("Attempted to get addition records for block height {block_height} which is not known.");
+                return None;
+            };
+
+            let block_record = self
+                .get_block_record(block_hash)
+                .await
+                .expect("Must know block record of canonical and non-genesis block");
+
+            let range = block_record.min_aocl_index..=block_record.max_aocl_index();
+            (range, block_hash)
+        };
+
+        // Getting all leafs in a batch-read operation was benchmarked to be
+        // faster than getting each leaf individually. So batch-reading of leafs
+        // was chosen here.
+        let addition_records = self
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .get_leaf_range_inclusive_async(aocl_leaf_indices.clone())
+            .await;
+        let mut ret = HashMap::new();
+        for (ar, leaf_index) in addition_records.into_iter().zip_eq(aocl_leaf_indices) {
+            let addition_record = AdditionRecord::new(ar);
+            ret.entry(addition_record)
+                .and_modify(|e: &mut Vec<u64>| e.push(leaf_index))
+                .or_insert(vec![leaf_index]);
+        }
+
+        Some((ret, block_hash))
+    }
+
     /// Returns a [`HashMap`] of [`AdditionRecord`] to [`Option`] of AOCL leaf
     /// index (`u64`) for all outputs in a given block. If the block is not
     /// canonical, the indices are all `None`, and conversely, if the block is
     /// canonical then the indices point into the current mutator set AOCL.
     /// If the block does not live in the archival state, return `None`.
+    ///
+    /// If the block is canonical this method never loads the entire blocks from
+    /// disk. So in that case, it is guaranteed to perform well.
     ///
     /// # Panics
     ///
@@ -1232,6 +1623,8 @@ impl ArchivalState {
     ///
     ///  - If the database does not contain rolled back blocks.
     ///  - If there is no path to the new block.
+    // Public bc used in benchmarks.
+    #[doc(hidden)]
     pub async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
         #[cfg(test)]
         {
@@ -1400,6 +1793,282 @@ impl ArchivalState {
 
         Ok(())
     }
+
+    /// Compute the circulating supply heuristically, measured in Neptune coins.
+    ///
+    /// This number counts (all):
+    ///  - the premine
+    ///  - the redemption claims fund (because of reboot)
+    ///  - all liquid mined coins up until this block height
+    ///  - mined time-locked coins provided that the time-lock has expired.
+    ///
+    /// It does not count coins that were mined and whose time-lock is still
+    /// active.
+    ///
+    /// Also, the amounts of known burn events are taken into account.
+    ///
+    /// The heuristic comes from three simplifications:
+    ///  1. We assume that every block that was mined did in fact mine the
+    ///     maximum allowable coinbase amount, whereas in fact miners are
+    ///     allowed to mint less than the subsidy.
+    ///  2. We assume that time-locked coins expire exactly one full generation
+    ///     after they are minted, when in fact they expire based on timestamps
+    ///     and not based on block heights.
+    ///  3. We assume all known burns are accounted for, whereas there might be
+    ///     more.
+    pub async fn circulating_supply(&self) -> NativeCurrencyAmount {
+        let premine = PREMINE_MAX_SIZE;
+        let claims_pool = INITIAL_BLOCK_SUBSIDY
+            .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
+
+        let block_height = self.get_tip().await.header().height;
+        let mined_liquid = Block::mined_immediately_liquid_supply(block_height);
+        let mined_released = Block::mined_timelocked_and_released_supply(block_height);
+
+        let burned = self.burned_supply().await;
+
+        debug!("premine: {premine}");
+        debug!("claims pool: {claims_pool}");
+        debug!("mined liquid: {mined_liquid}");
+        debug!("mined released: {mined_released}");
+        debug!("burned: {burned}");
+
+        (premine + claims_pool + mined_liquid + mined_released)
+            .checked_sub(&burned)
+            .unwrap_or(NativeCurrencyAmount::zero())
+    }
+
+    /// Compute the asymptotical supply of the limit heuristically, measured in
+    /// Neptune coins.
+    ///
+    /// This number counts (all):
+    ///  - the premine
+    ///  - the redemption claims fund (because of reboot)
+    ///  - all mined coins, liquid or time-locked, between genesis and the last nau.
+    ///
+    /// Also, the amounts of known burn events are taken into account.
+    pub async fn max_supply(&self) -> NativeCurrencyAmount {
+        let premine = PREMINE_MAX_SIZE;
+        let claims_pool = INITIAL_BLOCK_SUBSIDY
+            .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
+
+        let block_height = BlockHeight::from(BLOCKS_PER_GENERATION * 130);
+        let mined = Block::mined_supply(block_height);
+
+        let burned = self.burned_supply().await;
+
+        debug!("premine: {premine}");
+        debug!("claims pool: {claims_pool}");
+        debug!("mined: {mined}");
+        debug!("burned: {burned}");
+
+        (premine + claims_pool + mined)
+            .checked_sub(&burned)
+            .unwrap_or(NativeCurrencyAmount::zero())
+    }
+
+    /// Compute the total amount of all coins burned, according to all known
+    /// burn events.
+    pub async fn burned_supply(&self) -> NativeCurrencyAmount {
+        let mut burned = NativeCurrencyAmount::zero();
+        for utxo in self.authentic_burns().await {
+            burned += utxo.get_native_currency_amount();
+        }
+        burned
+    }
+
+    /// Produce a list of verified burned UTXOs.
+    ///
+    /// Start from the suggestion of [`Self::known_burns`] and verify them
+    /// against the given state.
+    pub async fn authentic_burns(&self) -> Vec<Utxo> {
+        let mut authentic_burns = vec![];
+
+        let known_burns = Self::known_burns();
+
+        debug!("Validating {} known burns.", known_burns.len());
+
+        for (
+            block_height,
+            output_index,
+            amount,
+            lock_script_hash,
+            sender_randomness,
+            receiver_digest,
+        ) in Self::known_burns()
+        {
+            // Verify that lock script hash is that of burn lock script or that
+            // receiver digest is all-zeros (either suffices).
+            if receiver_digest != Digest::new(bfe_array![0;5])
+                && lock_script_hash != LockScript::burn().hash()
+            {
+                debug!(
+                    "Burn {}/{} could not be validated because the receiver \
+                    digest =/= (0,0,0,0,0) and the lock script hash does not \
+                    agree with the burn lock script.",
+                    block_height, output_index
+                );
+                continue;
+            }
+
+            // Get block.
+            let candidate_block_digests = self.block_height_to_block_digests(block_height).await;
+            let mut canonical_block_digest = Digest::default();
+            for candidate_block_digest in candidate_block_digests {
+                if self
+                    .block_belongs_to_canonical_chain(candidate_block_digest)
+                    .await
+                {
+                    canonical_block_digest = candidate_block_digest;
+                }
+            }
+            let Ok(Some(block)) = self.get_block(canonical_block_digest).await else {
+                debug!(
+                    "Burn {}/{} could not be validated because no block with \
+                    digest {canonical_block_digest:x} was found.",
+                    block_height, output_index
+                );
+                continue;
+            };
+
+            // Get output.
+            let Some(&output) = block.body().transaction_kernel.outputs.get(output_index) else {
+                debug!(
+                    "Burn {}/{} could not be validated because referenced \
+                    block does not contain any outputs with the given index \
+                    {output_index}.",
+                    block_height, output_index
+                );
+                continue;
+            };
+
+            // Re-create UTXO.
+            let utxo = Utxo::new_native_currency(lock_script_hash, amount);
+
+            // Re-create addition record.
+            let addition_record = commit(Tip5::hash(&utxo), sender_randomness, receiver_digest);
+
+            // On match, append UTXOs to running list.
+            if output == addition_record {
+                debug!(
+                    "UTXO {block_height}/{output_index} ({:x}) with {} coins were burned.",
+                    addition_record.canonical_commitment,
+                    utxo.get_native_currency_amount()
+                );
+                authentic_burns.push(utxo);
+            } else if block
+                .body()
+                .transaction_kernel
+                .outputs
+                .contains(&addition_record)
+            {
+                let correct_index = block
+                    .body()
+                    .transaction_kernel
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, d)| **d == addition_record)
+                    .map(|(i, _d)| i)
+                    .unwrap();
+                warn!(
+                    "UTXO {:x} was burned but index is not {output_index} but {correct_index}. Fix the code, dummy! ;-)",
+                    addition_record.canonical_commitment
+                );
+                authentic_burns.push(utxo);
+            } else {
+                debug!(
+                    "Burn {}/{} could not be validated because referenced \
+                    output does not agree with recreated addition record.",
+                    block_height, output_index
+                );
+                debug!(
+                    "Addition record {block_height}/{output_index}: {:x}",
+                    output.canonical_commitment
+                );
+                debug!(
+                    "Re-created digest: {:x}",
+                    addition_record.canonical_commitment
+                );
+            }
+        }
+
+        authentic_burns
+    }
+
+    /// Return a list of "known" burn events.
+    ///
+    /// The list is given as a vector of (block-height, output-index, amount,
+    /// lock-script-hash, sender_randomness, receiver_digest) tuples.
+    ///
+    /// Note that this list is not definite since, in theory, a deep
+    /// reorganization could undo these burns.
+    pub fn known_burns() -> Vec<(
+        BlockHeight,
+        usize,
+        NativeCurrencyAmount,
+        Digest,
+        Digest,
+        Digest,
+    )> {
+        vec![
+            (
+                BlockHeight::from(16452),
+                1,
+                NativeCurrencyAmount::coins_from_str("0.10396").unwrap(),
+                // Since we don't know the lock script hash of this UTXO, we
+                // actually can't authenticate the amount in this burn.
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            ),
+            (
+                BlockHeight::from(16815),
+                1,
+                NativeCurrencyAmount::coins_from_str("0.10000").unwrap(),
+                LockScript::burn().hash(),
+                Digest::try_from_hex("01000000000000000200000000000000030000000000000004000000000000000500000000000000").unwrap(),
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            ),
+            (
+                BlockHeight::from(16999),
+                3,
+                NativeCurrencyAmount::coins_from_str("1526640.00000").unwrap(),
+                LockScript::burn().hash(),
+                Digest::try_from_hex("01000000000000000200000000000000030000000000000004000000000000000500000000000000").unwrap(),
+                Digest::try_from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            ),
+        ]
+    }
+
+    /// Populate the true claims cache with the claims derived from the blocks
+    /// defined by the checkpoint as valid.
+    async fn accept_checkpoint(network: Network) {
+        const CHECKPOINT_MAIN: &str = include_str!("../assets/main/checkpoint.dat");
+        const CHECKPOINT_TESTNET0: &str = include_str!("../assets/testnet-0/checkpoint.dat");
+        let checkpoint = match network {
+            Network::Main => CHECKPOINT_MAIN,
+            Network::Testnet(0) => CHECKPOINT_TESTNET0,
+            _ => return,
+        };
+
+        // Parse checkpoint.
+        let historical_block_claims = checkpoint
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.is_empty() {
+                    return None;
+                }
+                line.split_once(' ').map(|(_, hex)| hex.trim())
+            })
+            .map(|h| hex::decode(h).unwrap())
+            .map(|b| bincode::deserialize::<Claim>(&b).unwrap())
+            .collect_vec();
+
+        // Populate true claims cache
+        cache_true_claims(historical_block_claims).await;
+    }
 }
 
 #[cfg(test)]
@@ -1416,7 +2085,7 @@ pub(super) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::application::config::cli_args;
+    use crate::application::config::cli_args::Args;
     use crate::application::config::data_directory::DataDirectory;
     use crate::application::config::network::Network;
     use crate::application::database::storage::storage_vec::traits::*;
@@ -1437,8 +2106,6 @@ pub(super) mod tests {
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::transaction_output::TxOutputList;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::archival::add_block_to_archival_state;
-    use crate::tests::shared::archival::mock_genesis_archival_state;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
@@ -1446,11 +2113,11 @@ pub(super) mod tests {
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared_tokio_runtime;
 
-    pub(super) async fn make_test_archival_state(network: Network) -> ArchivalState {
-        let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();
+    pub(super) async fn make_test_archival_state(cli: &Args) -> ArchivalState {
+        let data_dir: DataDirectory = unit_test_data_directory(cli.network).unwrap();
 
-        let genesis_block = Block::genesis(network);
-        ArchivalState::new(data_dir, genesis_block, network).await
+        let genesis_block = Block::genesis(cli.network);
+        ArchivalState::new(data_dir, genesis_block, cli).await
     }
 
     #[traced_test]
@@ -1461,16 +2128,15 @@ pub(super) mod tests {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let network = Network::RegTest;
 
-        let mut archival_state0 = make_test_archival_state(network).await;
+        let mut archival_state0 =
+            make_test_archival_state(&Args::default_with_network(network)).await;
 
         let b = Block::genesis(network);
         let some_wallet_secret = WalletEntropy::new_random();
         let some_key = some_wallet_secret.nth_generation_spending_key_for_tests(0);
 
         let (block_1, _) = make_mock_block(&b, None, some_key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state0, block_1.clone())
-            .await
-            .unwrap();
+        archival_state0.set_new_tip(&block_1).await.unwrap();
         let _c = archival_state0
             .get_block(block_1.hash())
             .await
@@ -1485,7 +2151,7 @@ pub(super) mod tests {
     async fn archival_state_init_test() -> Result<()> {
         // Verify that archival mutator set is populated with outputs from genesis block
         let network = Network::RegTest;
-        let archival_state = make_test_archival_state(network).await;
+        let archival_state = make_test_archival_state(&Args::default_with_network(network)).await;
 
         assert_eq!(
             Block::genesis(network)
@@ -1537,8 +2203,8 @@ pub(super) mod tests {
         let mut rng = rand::rng();
         // Verify that a restored archival mutator set is populated with the right `sync_label`
         let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network).await;
-        let cli_args = cli_args::Args::default_with_network(network);
+        let cli_args = Args::default_with_network(network);
+        let mut archival_state = make_test_archival_state(&cli_args).await;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
         let (mock_block_1, _) = make_mock_block(
@@ -1578,7 +2244,7 @@ pub(super) mod tests {
 
         let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(107221549301u64);
-        let cli_args = cli_args::Args::default_with_network(network);
+        let cli_args = Args::default_with_network(network);
         let alice_wallet =
             mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
         let alice_wallet = alice_wallet.wallet_entropy;
@@ -1668,8 +2334,10 @@ pub(super) mod tests {
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let (mut archival_state, _peer_db_lock, _data_dir) =
-            mock_genesis_archival_state(network).await;
+        let data_dir = unit_test_data_directory(network).unwrap();
+        let cli = Args::default_with_network(network);
+        let mut archival_state = ArchivalState::new(data_dir, Block::genesis(network), &cli).await;
+
         let own_wallet = WalletEntropy::new_random();
         let own_key = own_wallet.nth_generation_spending_key_for_tests(0);
 
@@ -1729,7 +2397,7 @@ pub(super) mod tests {
         let alice_wallet = WalletEntropy::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
-        let cli_args = cli_args::Args::default_with_network(network);
+        let cli_args = Args::default_with_network(network);
         let mut alice = mock_genesis_global_state(42, alice_wallet, cli_args).await;
         let genesis_block = Block::genesis(network);
 
@@ -1832,7 +2500,7 @@ pub(super) mod tests {
         let genesis_block = Block::genesis(network);
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
-        let cli_args = cli_args::Args::default_with_network(network);
+        let cli_args = Args::default_with_network(network);
         let mut alice = mock_genesis_global_state(42, alice_wallet, cli_args).await;
 
         let mut expected_num_utxos = Block::premine_utxos().len();
@@ -2013,14 +2681,14 @@ pub(super) mod tests {
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
         let network = Network::Main;
-        let cli_args = cli_args::Args::default_with_network(network);
+        let cli_args = Args::default_with_network(network);
         let premine_rec_ws =
             mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
         let premine_rec_spending_key = premine_rec_ws.wallet_entropy.nth_generation_spending_key(0);
         let mut premine_rec = mock_genesis_global_state(
             3,
             premine_rec_ws.wallet_entropy,
-            cli_args::Args {
+            Args {
                 guesser_fraction: 0.0,
                 network,
                 ..Default::default()
@@ -2538,7 +3206,8 @@ pub(super) mod tests {
             Network::Testnet(0),
             Network::Testnet(1),
         ] {
-            let mut archival_state: ArchivalState = make_test_archival_state(network).await;
+            let mut archival_state: ArchivalState =
+                make_test_archival_state(&Args::default_with_network(network)).await;
 
             assert!(
                 archival_state.get_tip_from_disk().await.unwrap().is_none(),
@@ -2560,9 +3229,7 @@ pub(super) mod tests {
             let genesis = *archival_state.genesis_block.clone();
             let (mock_block_1, _) =
                 make_mock_block(&genesis, None, own_key, rng.random(), network).await;
-            add_block_to_archival_state(&mut archival_state, mock_block_1.clone())
-                .await
-                .unwrap();
+            archival_state.set_new_tip(&mock_block_1).await.unwrap();
 
             assert_eq!(
                 mock_block_1,
@@ -2578,9 +3245,7 @@ pub(super) mod tests {
             // Add a 2nd block and verify that this new block is now returned
             let (mock_block_2, _) =
                 make_mock_block(&mock_block_1, None, own_key, rng.random(), network).await;
-            add_block_to_archival_state(&mut archival_state, mock_block_2.clone())
-                .await
-                .unwrap();
+            archival_state.set_new_tip(&mock_block_2).await.unwrap();
             let ret2 = archival_state.get_tip_from_disk().await.unwrap();
             assert!(
                 ret2.is_some(),
@@ -2623,7 +3288,8 @@ pub(super) mod tests {
     async fn get_block_test() -> Result<()> {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
 
         let genesis = *archival_state.genesis_block.clone();
         let own_wallet = WalletEntropy::new_random();
@@ -2640,7 +3306,7 @@ pub(super) mod tests {
             "Must return none when not stored to DB"
         );
 
-        add_block_to_archival_state(&mut archival_state, mock_block_1.clone()).await?;
+        archival_state.set_new_tip(&mock_block_1).await?;
         assert_eq!(
             mock_block_1,
             archival_state
@@ -2653,7 +3319,7 @@ pub(super) mod tests {
         // Inserted a new block and verify that both blocks can be found
         let (mock_block_2, _) =
             make_mock_block(&mock_block_1.clone(), None, own_key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_2.clone()).await?;
+        archival_state.set_new_tip(&mock_block_2).await?;
         let fetched2 = archival_state
             .get_block(mock_block_2.hash())
             .await?
@@ -2677,7 +3343,7 @@ pub(super) mod tests {
         for _ in 0..(rand::rng().next_u32() % 20) {
             let (new_block, _) =
                 make_mock_block(&last_block, None, own_key, rng.random(), network).await;
-            add_block_to_archival_state(&mut archival_state, new_block.clone()).await?;
+            archival_state.set_new_tip(&new_block).await?;
             blocks.push(new_block.clone());
             last_block = new_block;
         }
@@ -2697,7 +3363,8 @@ pub(super) mod tests {
     async fn test_get_addition_record_indices() {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
 
         // Digest::default ==> no block found
         assert!(archival_state
@@ -2780,7 +3447,8 @@ pub(super) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn ms_update_to_tip_genesis() {
         let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
         let current_msa = archival_state
             .archival_mutator_set
             .ams()
@@ -2824,7 +3492,8 @@ pub(super) mod tests {
         let network = Network::Main;
         let wallet = WalletEntropy::new_random();
         let mut rng = rand::rng();
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
         let mut current_block = Block::genesis(network);
         let genesis_msa = current_block
             .mutator_set_accumulator_after()
@@ -2841,9 +3510,7 @@ pub(super) mod tests {
             )
             .await
             .0;
-            add_block_to_archival_state(&mut archival_state, next_block.clone())
-                .await
-                .unwrap();
+            archival_state.set_new_tip(&next_block).await.unwrap();
             current_block = next_block;
         }
 
@@ -2862,7 +3529,8 @@ pub(super) mod tests {
         }
 
         // Walking the opposite way returns None, and does not crash.
-        let mut genesis_archival_state = make_test_archival_state(network).await;
+        let mut genesis_archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
         for i in 0..10 {
             assert!(genesis_archival_state
                 .get_mutator_set_update_to_tip(&current_msa, i)
@@ -2877,7 +3545,8 @@ pub(super) mod tests {
         let network = Network::Main;
         let wallet = WalletEntropy::new_random();
         let mut rng = rand::rng();
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
         let mut current_block = Block::genesis(network);
         let compose_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
         let mut blocks = vec![current_block.clone()];
@@ -2891,9 +3560,7 @@ pub(super) mod tests {
                 network,
             )
             .await;
-            add_block_to_archival_state(&mut archival_state, next_block.clone())
-                .await
-                .unwrap();
+            archival_state.set_new_tip(&next_block).await.unwrap();
             current_block = next_block;
             blocks.push(current_block.clone());
 
@@ -2953,7 +3620,8 @@ pub(super) mod tests {
             Network::Testnet(0),
             Network::Testnet(1),
         ] {
-            let archival_state = make_test_archival_state(network).await;
+            let archival_state =
+                make_test_archival_state(&Args::default_with_network(network)).await;
             let genesis_block_digest = archival_state.genesis_block().hash();
             let num_premine_outputs = Block::premine_utxos().len() as u64;
 
@@ -2985,7 +3653,7 @@ pub(super) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn find_canonical_block_with_output_genesis_block_test() {
         let network = Network::Main;
-        let archival_state = make_test_archival_state(network).await;
+        let archival_state = make_test_archival_state(&Args::default_with_network(network)).await;
         let genesis_block = Block::genesis(network);
 
         let addition_records = Block::genesis(network)
@@ -3010,7 +3678,7 @@ pub(super) mod tests {
         random_index_set: AbsoluteIndexSet,
     ) {
         let network = Network::Main;
-        let archival_state = make_test_archival_state(network).await;
+        let archival_state = make_test_archival_state(&Args::default_with_network(network)).await;
 
         assert!(archival_state
             .find_canonical_block_with_input(random_index_set, None)
@@ -3024,7 +3692,8 @@ pub(super) mod tests {
         let mut rng = rand::rng();
         let network = Network::Main;
         let wallet = WalletEntropy::new_random();
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
         let genesis_block = Block::genesis(network);
         let genesis_msa = &genesis_block.mutator_set_accumulator_after().unwrap();
         let compose_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
@@ -3052,9 +3721,7 @@ pub(super) mod tests {
 
         // 1a is tip
         let search_depth = 1;
-        add_block_to_archival_state(&mut archival_state, block_1a.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&block_1a).await.unwrap();
         positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
         positive_prop_ms_update_to_tip(block_1a_msa, &mut archival_state, search_depth).await;
         assert!(archival_state
@@ -3063,9 +3730,7 @@ pub(super) mod tests {
             .is_none());
 
         // 1b is tip
-        add_block_to_archival_state(&mut archival_state, block_1b.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&block_1b).await.unwrap();
         positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
         assert!(archival_state
             .get_mutator_set_update_to_tip(block_1a_msa, 1)
@@ -3080,7 +3745,8 @@ pub(super) mod tests {
         let mut rng = rand::rng();
         let network = Network::Main;
         let wallet = WalletEntropy::new_random();
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
         let genesis_block = Block::genesis(network);
         let genesis_msa = &genesis_block.mutator_set_accumulator_after().unwrap();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
@@ -3104,9 +3770,7 @@ pub(super) mod tests {
 
         // 1a is tip
         let search_depth = 10;
-        add_block_to_archival_state(&mut archival_state, block_1a.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&block_1a).await.unwrap();
         assert!(archival_state
             .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
             .await
@@ -3117,9 +3781,7 @@ pub(super) mod tests {
             .is_none());
 
         // 1b is tip
-        add_block_to_archival_state(&mut archival_state, block_1b.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&block_1b).await.unwrap();
         assert!(archival_state
             .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
             .await
@@ -3130,9 +3792,7 @@ pub(super) mod tests {
             .is_none());
 
         // 2a is tip
-        add_block_to_archival_state(&mut archival_state, block_2a.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&block_2a).await.unwrap();
         positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
         positive_prop_ms_update_to_tip(block_1a_msa, &mut archival_state, search_depth).await;
         positive_prop_ms_update_to_tip(block_2a_msa, &mut archival_state, search_depth).await;
@@ -3146,9 +3806,7 @@ pub(super) mod tests {
             .is_none());
 
         // 2b is tip
-        add_block_to_archival_state(&mut archival_state, block_2b.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&block_2b).await.unwrap();
         positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
         positive_prop_ms_update_to_tip(block_1b_msa, &mut archival_state, search_depth).await;
         positive_prop_ms_update_to_tip(block_2b_msa, &mut archival_state, search_depth).await;
@@ -3167,7 +3825,8 @@ pub(super) mod tests {
     async fn find_path_simple_test() -> Result<()> {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
         let genesis = *archival_state.genesis_block.clone();
 
         // Test that `find_path` returns the correct result
@@ -3193,11 +3852,11 @@ pub(super) mod tests {
         let key = wallet.nth_generation_spending_key_for_tests(0);
         let (mock_block_1_a, _) =
             make_mock_block(&genesis.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_1_a.clone()).await?;
+        archival_state.set_new_tip(&mock_block_1_a).await.unwrap();
 
         let (mock_block_1_b, _) =
             make_mock_block(&genesis.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_1_b.clone()).await?;
+        archival_state.set_new_tip(&mock_block_1_b).await.unwrap();
 
         // Test 1a
         let (backwards_1, luca_1, forwards_1) = archival_state
@@ -3319,7 +3978,8 @@ pub(super) mod tests {
         }
 
         let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
 
         let genesis = *archival_state.genesis_block.clone();
         assert!(
@@ -3333,7 +3993,7 @@ pub(super) mod tests {
         let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
         let (block1, _) = make_mock_block(&genesis.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, block1.clone()).await?;
+        archival_state.set_new_tip(&block1).await.unwrap();
         assert!(
             archival_state
                 .block_belongs_to_canonical_chain(genesis.hash())
@@ -3350,13 +4010,13 @@ pub(super) mod tests {
         // Insert three more blocks and verify that all are part of the canonical chain
         let (mock_block_2_a, _) =
             make_mock_block(&block1.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_2_a.clone()).await?;
+        archival_state.set_new_tip(&mock_block_2_a).await.unwrap();
         let (mock_block_3_a, _) =
             make_mock_block(&mock_block_2_a.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_3_a.clone()).await?;
+        archival_state.set_new_tip(&mock_block_3_a).await.unwrap();
         let (mock_block_4_a, _) =
             make_mock_block(&mock_block_3_a.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_4_a.clone()).await?;
+        archival_state.set_new_tip(&mock_block_4_a).await.unwrap();
         for (i, block) in [
             genesis.clone(),
             block1.clone(),
@@ -3389,16 +4049,16 @@ pub(super) mod tests {
         // belonging to the canonical chain
         let (mock_block_2_b, _) =
             make_mock_block(&block1.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_2_b.clone()).await?;
+        archival_state.set_new_tip(&mock_block_2_b).await.unwrap();
         let (mock_block_3_b, _) =
             make_mock_block(&mock_block_2_b.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_3_b.clone()).await?;
+        archival_state.set_new_tip(&mock_block_3_b).await.unwrap();
         let (mock_block_4_b, _) =
             make_mock_block(&mock_block_3_b.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_4_b.clone()).await?;
+        archival_state.set_new_tip(&mock_block_4_b).await.unwrap();
         let (mock_block_5_b, _) =
             make_mock_block(&mock_block_4_b.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_5_b.clone()).await?;
+        archival_state.set_new_tip(&mock_block_5_b).await.unwrap();
         for (i, block) in [
             genesis.clone(),
             block1.clone(),
@@ -3456,47 +4116,47 @@ pub(super) mod tests {
         // Prior to this line, block 4a is tip.
         let (mock_block_3_c, _) =
             make_mock_block(&mock_block_2_a.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_3_c.clone()).await?;
+        archival_state.set_new_tip(&mock_block_3_c).await.unwrap();
         let (mock_block_4_c, _) =
             make_mock_block(&mock_block_3_c.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_4_c.clone()).await?;
+        archival_state.set_new_tip(&mock_block_4_c).await.unwrap();
         let (mock_block_5_c, _) =
             make_mock_block(&mock_block_4_c.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_5_c.clone()).await?;
+        archival_state.set_new_tip(&mock_block_5_c).await.unwrap();
         let (mock_block_6_c, _) =
             make_mock_block(&mock_block_5_c.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_6_c.clone()).await?;
+        archival_state.set_new_tip(&mock_block_6_c).await.unwrap();
         let (mock_block_7_c, _) =
             make_mock_block(&mock_block_6_c.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_7_c.clone()).await?;
+        archival_state.set_new_tip(&mock_block_7_c).await.unwrap();
         let (mock_block_8_c, _) =
             make_mock_block(&mock_block_7_c.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_8_c.clone()).await?;
+        archival_state.set_new_tip(&mock_block_8_c).await.unwrap();
         let (mock_block_5_a, _) =
             make_mock_block(&mock_block_4_a.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_5_a.clone()).await?;
+        archival_state.set_new_tip(&mock_block_5_a).await.unwrap();
         let (mock_block_3_d, _) =
             make_mock_block(&mock_block_2_a.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_3_d.clone()).await?;
+        archival_state.set_new_tip(&mock_block_3_d).await.unwrap();
 
         let (mock_block_4_e, _) =
             make_mock_block(&mock_block_3_d.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_4_e.clone()).await?;
+        archival_state.set_new_tip(&mock_block_4_e).await.unwrap();
         let (mock_block_5_e, _) =
             make_mock_block(&mock_block_4_e.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_5_e.clone()).await?;
+        archival_state.set_new_tip(&mock_block_5_e).await.unwrap();
 
         let (mock_block_4_d, _) =
             make_mock_block(&mock_block_3_d.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_4_d.clone()).await?;
+        archival_state.set_new_tip(&mock_block_4_d).await.unwrap();
         let (mock_block_5_d, _) =
             make_mock_block(&mock_block_4_d.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_5_d.clone()).await?;
+        archival_state.set_new_tip(&mock_block_5_d).await.unwrap();
 
         // This is the most canonical block in the known set
         let (mock_block_6_d, _) =
             make_mock_block(&mock_block_5_d.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_6_d.clone()).await?;
+        archival_state.set_new_tip(&mock_block_6_d).await.unwrap();
 
         for (i, block) in [
             genesis.clone(),
@@ -3555,7 +4215,7 @@ pub(super) mod tests {
         // Make a new block, 6b, canonical and verify that all checks work
         let (mock_block_6_b, _) =
             make_mock_block(&mock_block_5_b.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_6_b.clone()).await?;
+        archival_state.set_new_tip(&mock_block_6_b).await.unwrap();
         for (i, block) in [
             mock_block_3_c.clone(),
             mock_block_4_c.clone(),
@@ -3653,7 +4313,8 @@ pub(super) mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn block_belongs_to_canonical_chain_doesnt_crash_on_unknown_block() {
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state =
+            make_test_archival_state(&Args::default_with_network(Network::Main)).await;
         assert!(
             !archival_state
                 .block_belongs_to_canonical_chain(random())
@@ -3665,7 +4326,8 @@ pub(super) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn digest_of_ancestors_panic_test() {
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state =
+            make_test_archival_state(&Args::default_with_network(Network::Main)).await;
 
         let genesis = archival_state.genesis_block.clone();
         archival_state
@@ -3678,7 +4340,8 @@ pub(super) mod tests {
     async fn digest_of_ancestors_test() {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
         let genesis = *archival_state.genesis_block.clone();
         let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
@@ -3699,24 +4362,16 @@ pub(super) mod tests {
         // Insert blocks and verify that the same result is returned
         let (mock_block_1, _) =
             make_mock_block(&genesis.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_1.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&mock_block_1).await.unwrap();
         let (mock_block_2, _) =
             make_mock_block(&mock_block_1.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_2.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&mock_block_2).await.unwrap();
         let (mock_block_3, _) =
             make_mock_block(&mock_block_2.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_3.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&mock_block_3).await.unwrap();
         let (mock_block_4, _) =
             make_mock_block(&mock_block_3.clone(), None, key, rng.random(), network).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_4.clone())
-            .await
-            .unwrap();
+        archival_state.set_new_tip(&mock_block_4).await.unwrap();
 
         assert!(archival_state
             .get_ancestor_block_digests(genesis.hash(), 10)
@@ -3779,7 +4434,8 @@ pub(super) mod tests {
     async fn write_block_db_test() -> Result<()> {
         let network = Network::Main;
         let mut rng = rand::rng();
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
         let genesis = *archival_state.genesis_block.clone();
         let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
@@ -4003,7 +4659,7 @@ pub(super) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn can_initialize_mutator_set_database() {
-        let args: cli_args::Args = cli_args::Args::default();
+        let args: Args = Args::default();
         let data_dir = DataDirectory::get(args.data_dir.clone(), args.network).unwrap();
         println!("data_dir for MS initialization test: {data_dir}");
         let _rams = ArchivalState::initialize_mutator_set(&data_dir)
@@ -4019,7 +4675,8 @@ pub(super) mod tests {
         #[apply(shared_tokio_runtime)]
         async fn stored_block_hash_witness_agrees_with_block_hash() {
             let network = Network::Main;
-            let mut archival_state = make_test_archival_state(network).await;
+            let mut archival_state =
+                make_test_archival_state(&Args::default_with_network(network)).await;
             let genesis_block = Block::genesis(network);
             let mut blocks = vec![];
             let mut predecessor = genesis_block;
@@ -4059,5 +4716,220 @@ pub(super) mod tests {
                 );
             }
         }
+    }
+
+    /// Test of functions that require both UTXO index and other parts of the
+    /// archival state
+    mod utxo_index {
+        use super::*;
+        use crate::api::export::GenerationSpendingKey;
+        use crate::tests::shared::blocks::block_with_num_puts;
+        use crate::tests::shared::blocks::invalid_empty_block;
+        use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
+
+        /// Return a block with the specified puts, along with randomized
+        /// composer rewards.
+        async fn block_with_puts(
+            network: Network,
+            predecessor: &Block,
+            outputs: Vec<AdditionRecord>,
+            inputs: Vec<RemovalRecord>,
+        ) -> Block {
+            let mut rng = rand::rng();
+            let (block, _) = make_mock_block_with_inputs_and_outputs(
+                predecessor,
+                inputs,
+                outputs,
+                None,
+                GenerationSpendingKey::derive_from_seed(rng.random()),
+                rng.random(),
+                network,
+            )
+            .await;
+
+            block
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn only_canonical_addition_records_are_matched() {
+            let network = Network::Main;
+            let cli = Args {
+                utxo_index: true,
+                network,
+                ..Default::default()
+            };
+            let mut archive = make_test_archival_state(&cli).await;
+
+            let genesis = Block::genesis(network);
+            let mut rng = rand::rng();
+
+            let abandoned_output = AdditionRecord::new(rng.random());
+            let block1_orphaned =
+                block_with_puts(network, &genesis, vec![abandoned_output], vec![]).await;
+            archive.set_new_tip(&block1_orphaned).await.unwrap();
+
+            let canonical_output = AdditionRecord::new(rng.random());
+            let block1_canonical =
+                block_with_puts(network, &genesis, vec![canonical_output], vec![]).await;
+            archive.set_new_tip(&block1_canonical).await.unwrap();
+
+            let abandoned_output = [abandoned_output].into_iter().collect();
+            assert!(archive
+                .addition_records_to_block_height(abandoned_output)
+                .await
+                .unwrap()
+                .is_empty());
+
+            let canonical_output = [canonical_output].into_iter().collect();
+            let block_height_1: HashSet<_> = [BlockHeight::from(1u64)].into_iter().collect();
+            assert_eq!(
+                block_height_1,
+                archive
+                    .addition_records_to_block_height(canonical_output)
+                    .await
+                    .unwrap()
+            );
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn only_canonical_absolute_index_sets_are_matched() {
+            let network = Network::Main;
+            let cli = Args {
+                utxo_index: true,
+                network,
+                ..Default::default()
+            };
+            let mut archive = make_test_archival_state(&cli).await;
+
+            let genesis = Block::genesis(network);
+            let abandoned_block1 = block_with_num_puts(network, &genesis, 4, 4).await;
+            let canonical_block1 = block_with_num_puts(network, &genesis, 4, 4).await;
+
+            archive.set_new_tip(&abandoned_block1).await.unwrap();
+            archive.set_new_tip(&canonical_block1).await.unwrap();
+
+            // Verify no inputs from abandoned block are matched.
+            for abs_index_set in abandoned_block1
+                .body()
+                .transaction_kernel()
+                .inputs
+                .iter()
+                .map(|x| x.absolute_indices)
+            {
+                let abs_index_set = [abs_index_set].into_iter().collect();
+                let res = archive
+                    .absolute_index_sets_to_block_heights(abs_index_set)
+                    .await
+                    .unwrap();
+                assert!(res.is_empty());
+            }
+
+            // Verify that all inputs from canonical block 1 are matched.
+            for abs_index_set in canonical_block1
+                .body()
+                .transaction_kernel()
+                .inputs
+                .iter()
+                .map(|x| x.absolute_indices)
+            {
+                let abs_index_set = [abs_index_set].into_iter().collect();
+                let res = archive
+                    .absolute_index_sets_to_block_heights(abs_index_set)
+                    .await
+                    .unwrap();
+                let expected: HashSet<BlockHeight> =
+                    [BlockHeight::from(1u64)].into_iter().collect();
+                assert_eq!(expected, res);
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn returns_multiple_block_heights_on_repeated_addition_records() {
+            let network = Network::Main;
+            let cli = Args {
+                utxo_index: true,
+                network,
+                ..Default::default()
+            };
+            let mut archive = make_test_archival_state(&cli).await;
+            let genesis = Block::genesis(network);
+            let mut rng = rand::rng();
+
+            let repeated_output = AdditionRecord::new(rng.random());
+            let block1 = block_with_puts(
+                network,
+                &genesis,
+                vec![
+                    repeated_output,
+                    repeated_output,
+                    repeated_output,
+                    repeated_output,
+                ],
+                vec![],
+            )
+            .await;
+            archive.set_new_tip(&block1).await.unwrap();
+            let block2 = block_with_puts(
+                network,
+                &block1,
+                vec![repeated_output, repeated_output],
+                vec![],
+            )
+            .await;
+            archive.set_new_tip(&block2).await.unwrap();
+            let block3 = invalid_empty_block(&block2, network);
+            archive.set_new_tip(&block3).await.unwrap();
+            let block4 = block_with_puts(network, &block3, vec![repeated_output], vec![]).await;
+            archive.set_new_tip(&block4).await.unwrap();
+
+            let expected: HashSet<_> = [
+                BlockHeight::from(1u64),
+                BlockHeight::from(2u64),
+                BlockHeight::from(4u64),
+            ]
+            .into_iter()
+            .collect();
+
+            let repeated_output = [repeated_output].into_iter().collect();
+            assert_eq!(
+                expected,
+                archive
+                    .addition_records_to_block_height(repeated_output)
+                    .await
+                    .unwrap()
+            );
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn no_panic_when_utxo_index_is_not_present() {
+            let network = Network::Main;
+            let cli = Args {
+                utxo_index: false,
+                network,
+                ..Default::default()
+            };
+            let archive = make_test_archival_state(&cli).await;
+            assert!(archive.utxo_index.is_none());
+
+            let dummy_tx_input = AbsoluteIndexSet::empty_dummy();
+            let dummy_tx_input = [dummy_tx_input].into_iter().collect();
+            assert!(archive
+                .absolute_index_sets_to_block_heights(dummy_tx_input)
+                .await
+                .is_err());
+
+            let dummy_tx_output = AdditionRecord::new(Digest::default());
+            let dummy_tx_output = [dummy_tx_output].into_iter().collect();
+            assert!(archive
+                .addition_records_to_block_height(dummy_tx_output)
+                .await
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn can_produce_list_of_known_burns() {
+        let burns = ArchivalState::known_burns(); // no crash
+        assert!(!burns.is_empty());
     }
 }

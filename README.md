@@ -18,6 +18,21 @@ Neptune-core is the reference implementation for the [Neptune Cash](https://nept
 
 ## Installing
 
+### Build with [Nix](https://nixos.org/)
+
+ -  Make sure you have `nix` installed or install it with:
+    ```shell
+    sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon
+    ```
+ -  Now simply run it with:
+    - `nix run github:Neptune-Crypto/neptune-core` will run the `neptune-core` binary, fetching the git repo automatically.
+    - Or run a specific package with `nix run github:Neptune-Crypto/neptune-core#neptune-cli`.
+    - Or locally in the repo with `nix run` or `nix run .#neptune-cli`
+    - To globally install use `nix profile install` or a specific package with `nix profile install .#neptune-cli`
+
+All required build dependencies are packaged reproducibly and defined in `flake.nix`.
+A development shell is included and can be accessed by running `nix develop` or use `direnv allow` if available.
+
 ### Compile from Source -- Linux Debian/Ubuntu
 
 - Open a terminal to run the following commands.
@@ -27,6 +42,7 @@ Neptune-core is the reference implementation for the [Neptune Cash](https://nept
 - Source the rust environment: `source "$HOME/.cargo/env"`
 - Install build tools: `sudo apt install build-essential`
 - Install LevelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
+- Install clang and its linker: `sudo apt install clang && sudo apt install libstdc++-14-dev`
 - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
 - Enter the repository: `cd neptune-core`
 - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development*
@@ -77,16 +93,15 @@ Windows should just work out-of-the-box with cargo build etc.
 ## Running & Connecting
 
 - Generate a wallet file: `neptune-cli generate-wallet`
-- Run neptune-core daemon: `neptune-core` with flags
-    - `--peer [ip_address:port]` to connect to a given peer, for instance
-      `--peer 51.15.139.238:9798` or `--peer 139.162.193.206:9798` or
+- Ensure ports 9798, 9800, 9801 are open on your firewall for both TCP and UDP.
+- Run neptune-core daemon: `neptune-core` with:
+   - no flags should already be enough to connect to the netwrok;
+   - `--peer [ip_address:port]` or `--peer [Multiaddr]` to connect to a given peer, for instance
+      `--peer 51.15.139.238:9798` or `--peer /ip4/139.162.193.206/tcp/9798` or
       `--peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798`.
-    - `--compose --guess` to mine — if you want to generate coins
-    - `--help` to get a list of available command-line arguments
-
-If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience
-that you will then be able to open and receive connections to other nodes through Nepture Core's
-built-in peer-discovery process.
+    - `--compose --guess` to mine — if you want to generate coins.
+    - `--help` to get a list of available command-line arguments.
+    - `--public-ip [IP address]` if you have a known publicly reachable IP address; this flag allows you to skip a bunch of steps that peers behind NATs need to go through.
 
 ## Documentation
 
@@ -120,8 +135,8 @@ To get e.g. the block height of a running daemon, execute
 neptune-cli block-height
 ```
 
-If you set up `neptune-core` to listen for RPC requests on a different port from the default (9799),
-then the flag `--port <port>` is your friend.
+If you set up `neptune-core` to listen for RPC requests on a different port from the default, (9799),
+then the flag `--rpc-port <port>` is your friend.
 
 ## Setup for Development (Ubuntu)
 

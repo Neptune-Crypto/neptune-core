@@ -1,6 +1,7 @@
 use super::v0_to_v1;
 use crate::application::database::storage::storage_schema::traits::StorageWriter;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+use crate::state::wallet::migrate_db::v1_to_v2;
 
 // migrates a wallet db from a lower schema version to a higher version.
 //
@@ -23,8 +24,8 @@ use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 // let's say we are incrementing to SCHEMA_VERSION 2.
 //
 // 1. in the match statement of this fn, add:
-//    v if v == 2 => {
-//        log_apply_version(v);
+//    2 => {
+//        log_apply_version(apply_version);
 //        v1_to_v2::migrate(storage).await?
 //    }
 //
@@ -62,13 +63,20 @@ pub(crate) async fn migrate_range(
         let apply_version = i + 1;
 
         match apply_version {
-            v if v == 1 => {
-                log_apply_version(v);
+            0 => panic!("Cannot migrate to version 0"),
+            1 => {
+                log_apply_version(apply_version);
                 v0_to_v1::migrate(storage).await?
             }
-            _ => panic!("schema version {} is unknown", i),
+            2 => {
+                log_apply_version(apply_version);
+                v1_to_v2::migrate(storage).await?
+            }
+            _ => panic!("schema version {apply_version} is unknown"),
         }
 
+        // Must persist after each migration, since migrate calls reset schema
+        // which throws away ephemeral (non-persisted) data.
         storage.persist().await;
         tracing::debug!("persisted wallet db after migration to v{}", apply_version);
     }

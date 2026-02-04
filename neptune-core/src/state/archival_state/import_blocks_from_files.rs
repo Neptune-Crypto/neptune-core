@@ -122,6 +122,7 @@ mod tests {
 
     use super::*;
     use crate::api::export::Network;
+    use crate::application::config::cli_args;
     use crate::state::archival_state::tests::make_test_archival_state;
     use crate::tests::shared::blocks::invalid_empty_blocks;
     use crate::tests::shared_tokio_runtime;
@@ -166,7 +167,8 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn get_blocks_directly_from_file_without_database() {
         let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network).await;
+        let mut archival_state =
+            make_test_archival_state(&cli_args::Args::default_with_network(network)).await;
         let blocks = invalid_empty_blocks(&archival_state.genesis_block, 10, network);
 
         for i in 0..10 {

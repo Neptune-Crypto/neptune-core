@@ -123,7 +123,7 @@ mod tests {
     use crate::protocol::consensus::block::BlockProof;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
-    use crate::protocol::proof_abstractions::verifier::cache_true_claim;
+    use crate::protocol::proof_abstractions::verifier::cache_true_claims;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
@@ -406,7 +406,7 @@ mod tests {
             b_new.body(),
             ConsensusRuleSet::infer_from(network, b_prev.header().height),
         ));
-        cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
         prop_assert_eq!(
             BlockValidationError::TransactionTimestamp,
@@ -433,7 +433,7 @@ mod tests {
             b_new.body(),
             ConsensusRuleSet::infer_from(network, b_prev.header().height),
         ));
-        cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
         prop_assert_eq!(
             BlockValidationError::CoinbaseTooBig,
@@ -459,7 +459,7 @@ mod tests {
             b_new.body(),
             ConsensusRuleSet::infer_from(network, b_prev.header().height),
         ));
-        cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
         prop_assert_eq!(
             BlockValidationError::NegativeCoinbase,
@@ -484,7 +484,7 @@ mod tests {
             b_new.body(),
             ConsensusRuleSet::infer_from(network, b_prev.header().height),
         ));
-        cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
         prop_assert_eq!(
             BlockValidationError::NegativeFee,

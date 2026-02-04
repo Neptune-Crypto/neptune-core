@@ -526,6 +526,33 @@ impl MutatorSetAccumulator {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<MutatorSetAccumulator> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> MutatorSetAccumulator {
+        let random_mmr_accumulator = |seed| {
+            use rand::rngs::StdRng;
+            use rand::Rng;
+            use rand::RngCore;
+            use rand::SeedableRng;
+
+            let mut inner_rng = StdRng::from_seed(seed);
+            let leaf_count = inner_rng.next_u64();
+            let num_peaks = leaf_count.count_ones();
+            MmrAccumulator::init(
+                (0..num_peaks).map(|_| inner_rng.random()).collect_vec(),
+                leaf_count,
+            )
+        };
+        MutatorSetAccumulator {
+            aocl: random_mmr_accumulator(rng.random()),
+            swbf_inactive: random_mmr_accumulator(rng.random()),
+            swbf_active: ActiveWindow {
+                sbf: (0..10).map(|_| rng.random()).collect_vec(),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::izip;

@@ -50,6 +50,16 @@ jobs:
           --skip can_cancel_preprocess_within_one_second
           --skip can_cancel_merkle_tree_construction_within_two_seconds
           --skip alice_updates_mutator_set_data_on_own_transaction
+          --skip can_sync_from
+          --skip can_sync_with_moving
+
+      - name: Run non-parallel test "resume block download from saved state"
+        run: >
+          cargo test can_resume_block_download_from_saved_state -- --ignored
+
+      - name: Run non-parallel test "resume sync from saved state"
+        run: >
+          cargo test can_resume_sync_from_saved_state -- --ignored
 
         # `--doc` cannot be mixed with other target option
       - name: Run documentation tests
