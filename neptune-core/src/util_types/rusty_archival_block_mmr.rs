@@ -8,7 +8,8 @@ use crate::application::database::storage::storage_schema::RustyValue;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::NeptuneLevelDb;
 
-pub(crate) struct RustyArchivalBlockMmr {
+#[derive(Debug)]
+pub struct RustyArchivalBlockMmr {
     ammr: ArchivalMmr<DbtVec<Digest>>,
     storage: SimpleRustyStorage,
 }

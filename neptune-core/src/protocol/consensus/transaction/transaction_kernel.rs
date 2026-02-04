@@ -280,30 +280,13 @@ impl MastHash for TransactionKernel {
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
     use arbitrary::Arbitrary;
-    use arbitrary::Unstructured;
     use itertools::Itertools;
     use proptest::prelude::Strategy;
-    use proptest::prelude::*;
-    use proptest::strategy::BoxedStrategy;
 
     use super::*;
 
     impl TransactionKernel {
-        /// Lifts `Self::arbitrary_with_fee` into a `Strategy`.
-        pub(crate) fn strategy_with_fee(fee: NativeCurrencyAmount) -> BoxedStrategy<Self> {
-            // Choose an upper bound for how many bytes you want to feed into
-            // `Unstructured`.
-            const MAX_BYTES: usize = 262144;
-
-            proptest::collection::vec(any::<u8>(), 0..=MAX_BYTES)
-                .prop_filter_map("could not construct from bytes", move |bytes| {
-                    let mut u = Unstructured::new(&bytes);
-                    Self::arbitrary_with_fee(&mut u, fee).ok()
-                })
-                .boxed()
-        }
-
-        fn arbitrary_with_fee<'a>(
+        pub(crate) fn arbitrary_with_fee<'a>(
             u: &mut ::arbitrary::Unstructured<'a>,
             fee: NativeCurrencyAmount,
         ) -> ::arbitrary::Result<Self> {
@@ -525,9 +508,32 @@ impl TransactionKernelModifier {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<TransactionKernel> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionKernel {
+        TransactionKernel {
+            inputs: (0..10).map(|_| rng.random()).collect_vec(),
+            outputs: (0..10).map(|_| rng.random()).collect_vec(),
+            announcements: (0..10).map(|_| rng.random()).collect_vec(),
+            fee: rng.random::<NativeCurrencyAmount>().abs(),
+            coinbase: if rng.random_bool(0.5) {
+                Some(rng.random())
+            } else {
+                None
+            },
+            timestamp: rng.random(),
+            mutator_set_hash: rng.random(),
+            merge_bit: rng.random(),
+            mast_sequences: OnceLock::new(),
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
+    use arbitrary::Unstructured;
     use itertools::Itertools;
+    use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -539,6 +545,22 @@ pub mod tests {
     use crate::protocol::consensus::transaction::PrimitiveWitness;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
+
+    impl TransactionKernel {
+        /// Lifts `Self::arbitrary_with_fee` into a `Strategy`.
+        pub(crate) fn strategy_with_fee(fee: NativeCurrencyAmount) -> BoxedStrategy<Self> {
+            // Choose an upper bound for how many bytes you want to feed into
+            // `Unstructured`.
+            const MAX_BYTES: usize = 262144;
+
+            proptest::collection::vec(arb::<u8>(), 0..=MAX_BYTES)
+                .prop_filter_map("could not construct from bytes", move |bytes| {
+                    let mut u = Unstructured::new(&bytes);
+                    Self::arbitrary_with_fee(&mut u, fee).ok()
+                })
+                .boxed()
+        }
+    }
 
     #[test]
     pub fn arbitrary_tx_kernel_is_deterministic() {

@@ -130,6 +130,14 @@ impl AbsoluteIndexSet {
             .map(|x| u128::from(x).saturating_add(self.minimum))
     }
 
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = u128> + '_ {
+        let min = self.minimum;
+        self.distances
+            .iter()
+            .map(move |&d| min.saturating_add(u128::from(d)))
+    }
+
     /// Split the [`AbsoluteIndexSet`] into two parts, one for chunks in the
     /// inactive part of the Bloom filter and another one for chunks in the
     /// active part of the Bloom filter.
@@ -253,6 +261,16 @@ mod neptune_arbitrary {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<AbsoluteIndexSet> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> AbsoluteIndexSet {
+        AbsoluteIndexSet {
+            minimum: rng.random(),
+            distances: rng.random(),
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest::prelude::TestCaseError;
@@ -293,6 +311,13 @@ mod tests {
         pub(crate) fn new_raw(minimum: u128, distances: [u32; NUM_TRIALS as usize]) -> Self {
             Self { minimum, distances }
         }
+
+        pub(crate) fn empty_dummy() -> Self {
+            Self {
+                minimum: 0,
+                distances: [0; NUM_TRIALS as usize],
+            }
+        }
     }
 
     #[proptest]
@@ -303,6 +328,32 @@ mod tests {
 
         let as_array_again = as_ais_again.to_array();
         prop_assert_eq!(as_array_again, as_array);
+    }
+
+    #[proptest]
+    fn iter_followed_by_collect_vec_is_to_vec(#[strategy(arb())] ais: AbsoluteIndexSet) {
+        let as_vec = ais.iter().collect_vec();
+        let as_vec_again = ais.to_vec();
+        prop_assert_eq!(as_vec_again, as_vec);
+    }
+
+    #[test]
+    fn iter_and_to_vec_and_to_array_handle_overflow_same_way() {
+        fn prop(ais: AbsoluteIndexSet) {
+            let as_vec = ais.to_vec();
+            let as_array = ais.to_array();
+            let through_iter = ais.iter().collect_vec();
+            assert_eq!(as_vec, as_array.to_vec());
+            assert_eq!(as_vec, through_iter);
+        }
+        prop(AbsoluteIndexSet::new_raw(
+            u128::MAX,
+            [(1 << 19); NUM_TRIALS as usize],
+        ));
+        prop(AbsoluteIndexSet::new_raw(
+            u128::MAX,
+            [u32::MAX; NUM_TRIALS as usize],
+        ));
     }
 
     #[test]

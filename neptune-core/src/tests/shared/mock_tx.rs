@@ -20,7 +20,7 @@ use crate::protocol::consensus::transaction::validity::single_proof::single_proo
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::verifier::cache_true_claim;
+use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -140,7 +140,7 @@ pub(super) async fn fake_create_transaction_from_details_for_tests(
     let kernel = PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
 
     let claim = single_proof_claim(kernel.mast_hash(), consensus_rule_set);
-    cache_true_claim(claim.clone()).await;
+    cache_true_claims([claim.clone()]).await;
 
     Transaction {
         kernel,
@@ -169,7 +169,7 @@ pub(super) async fn fake_merge_block_transactions_for_tests(
     let new_kernel = merge_witness.new_kernel.clone();
 
     let claim = single_proof_claim(new_kernel.mast_hash(), consensus_rule_set);
-    cache_true_claim(claim).await;
+    cache_true_claims([claim]).await;
 
     Ok(BlockTransaction {
         kernel: new_kernel.try_into().unwrap(),

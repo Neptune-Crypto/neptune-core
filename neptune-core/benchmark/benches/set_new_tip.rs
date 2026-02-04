@@ -2,15 +2,18 @@ use divan::Bencher;
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::Timestamp;
+use neptune_cash::application::config::cli_args;
 use neptune_cash::bench_helpers::devops_global_state_genesis;
 use neptune_cash::bench_helpers::next_block_incoming_utxos;
 use neptune_cash::protocol::consensus::block::Block;
+use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
 
 fn main() {
     divan::main();
 }
 
 mod set_new_tip {
+
     use super::*;
 
     fn update_state(bencher: Bencher) {
@@ -21,8 +24,9 @@ mod set_new_tip {
         const NUM_OUTPUTS_IN_TX: usize = 1000;
         let rt = tokio::runtime::Runtime::new().unwrap();
         let network = Network::Main;
+        let cli_args = cli_args::Args::default_with_network(network);
 
-        let mut global_state_lock = rt.block_on(devops_global_state_genesis(network));
+        let mut global_state_lock = rt.block_on(devops_global_state_genesis(cli_args));
         let mut global_state = rt.block_on(global_state_lock.lock_guard_mut());
         let genesis = Block::genesis(network);
         let own_address = rt
@@ -33,13 +37,14 @@ mod set_new_tip {
             )
             .to_address();
         let block1_time = network.launch_date() + Timestamp::months(7);
-        let block1 = rt.block_on(next_block_incoming_utxos(
+        let (block1, _) = rt.block_on(next_block_incoming_utxos(
             &genesis,
             own_address.clone(),
             NUM_INPUTS_IN_TX,
             &global_state.wallet_state,
             block1_time,
             network,
+            UtxoNotificationMedium::OnChain,
         ));
 
         rt.block_on(global_state.set_new_tip(block1.clone()))
@@ -47,13 +52,14 @@ mod set_new_tip {
 
         // Wallet now has N inputs it can spend
         let block2_time = block1_time + Timestamp::hours(1);
-        let block2 = rt.block_on(next_block_incoming_utxos(
+        let (block2, _) = rt.block_on(next_block_incoming_utxos(
             &block1,
             own_address,
             NUM_OUTPUTS_IN_TX,
             &global_state.wallet_state,
             block2_time,
             network,
+            UtxoNotificationMedium::OnChain,
         ));
 
         bencher.bench_local(|| {

@@ -10,6 +10,16 @@ use serde::Serialize;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RustyKey(pub Vec<u8>);
 
+impl RustyKey {
+    /// serialize a value `K` that implements `serde::Serialize` into `RustyKey`
+    ///
+    /// This provides the serialization for `RustyKey` in the database.
+    #[inline]
+    pub fn from_any<T: Serialize>(value: &T) -> Self {
+        Self(super::rusty_value::serialize(value))
+    }
+}
+
 impl From<u8> for RustyKey {
     #[inline]
     fn from(value: u8) -> Self {

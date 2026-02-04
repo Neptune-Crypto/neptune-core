@@ -20,12 +20,12 @@ impl<const NUM_INPUT_LISTS: usize> HashRemovalRecordIndexSets<NUM_INPUT_LISTS> {
 }
 
 impl<const NUM_INPUT_LISTS: usize> BasicSnippet for HashRemovalRecordIndexSets<NUM_INPUT_LISTS> {
-    fn inputs(&self) -> Vec<(DataType, String)> {
+    fn parameters(&self) -> Vec<(DataType, String)> {
         // Type of all "inputs" argument is Vec<RemovalRecord>
         vec![(DataType::VoidPointer, "rr_list".to_owned()); NUM_INPUT_LISTS]
     }
 
-    fn outputs(&self) -> Vec<(DataType, String)> {
+    fn return_values(&self) -> Vec<(DataType, String)> {
         let list_of_digests = DataType::List(Box::new(DataType::Digest));
         vec![(list_of_digests, "list_of_digests".to_string())]
     }
@@ -117,17 +117,14 @@ mod tests {
             FunctionInitialState { stack, memory }
         }
 
-        fn pseudorandom_rrs_pointers(rng: &mut StdRng) -> [BFieldElement; N] {
-            const ESTIMATED_MAX_NUMBER_OF_REMOVAL_RECORDS: u64 = 20;
-            const ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORD: u64 = 10_000;
-            const ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORDS_LIST: u64 =
-                ESTIMATED_MAX_NUMBER_OF_REMOVAL_RECORDS * ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORD;
+        fn pseudorandom_rrs_pointers(rng: &mut StdRng, lengths: &[usize]) -> [BFieldElement; N] {
             let mut rrs_ptrs = [BFieldElement::ZERO; N];
             let mut previous_ptr = BFieldElement::ZERO;
-            for ptr in &mut rrs_ptrs {
-                *ptr = previous_ptr
-                    + bfe!(rng.random_range(ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORDS_LIST..(1 << 26)));
+            let mut previous_length = 0;
+            for (ptr, length) in rrs_ptrs.iter_mut().zip_eq(lengths) {
+                *ptr = previous_ptr + bfe!(rng.random_range(previous_length..(1 << 26)));
                 previous_ptr = *ptr;
+                previous_length = *length;
             }
 
             rrs_ptrs
@@ -140,8 +137,9 @@ mod tests {
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
         ) {
-            let digests = (0..N)
-                .map(|_| stack.pop().unwrap())
+            let rrs_ptrs = (0..N).map(|_| stack.pop().unwrap()).collect_vec();
+            let digests = rrs_ptrs
+                .into_iter()
                 .flat_map(|rrs_ptr| {
                     *Vec::<RemovalRecord>::decode_from_memory(memory, rrs_ptr).unwrap()
                 })
@@ -163,8 +161,6 @@ mod tests {
             bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
             let mut rng: StdRng = SeedableRng::from_seed(seed);
-
-            let rrs_ptrs = Self::pseudorandom_rrs_pointers(&mut rng);
 
             let arb_params = match bench_case {
                 Some(BenchmarkCase::CommonCase) => (2, 0, 0),
@@ -197,14 +193,20 @@ mod tests {
                 .clone();
                 removal_records.push(removal_record);
             }
-            let removal_records = removal_records.try_into().unwrap();
+            let removal_records: [Vec<RemovalRecord>; N] = removal_records.try_into().unwrap();
+            let rrs_lengths = removal_records
+                .iter()
+                .map(|list| list.encode().len())
+                .collect_vec();
+
+            let rrs_ptrs = Self::pseudorandom_rrs_pointers(&mut rng, &rrs_lengths);
 
             self.init_state(rrs_ptrs, removal_records)
         }
 
         fn corner_case_initial_states(&self) -> Vec<FunctionInitialState> {
             let mut rng: StdRng = SeedableRng::seed_from_u64(5550001);
-            let rrs_ptrs = Self::pseudorandom_rrs_pointers(&mut rng);
+            let rrs_ptrs = Self::pseudorandom_rrs_pointers(&mut rng, &[1usize; N]);
             let rrss = vec![vec![]; N].try_into().unwrap();
             let no_inputs = self.init_state(rrs_ptrs, rrss);
 

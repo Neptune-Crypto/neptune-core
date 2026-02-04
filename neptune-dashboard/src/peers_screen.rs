@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::cmp::min;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -8,6 +9,7 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
+use multiaddr::Protocol;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::protocol::peer::peer_info::PeerInfo;
 use ratatui::layout::Constraint;
@@ -245,7 +247,13 @@ impl PeersScreen {
             let items = self.events.items.lock().unwrap();
             items
                 .get(selected_index - Events::TABLE_HEADER_ROWS)
-                .map(|peer| peer.connected_address().ip())
+                .and_then(|peer| {
+                    peer.address().iter().find_map(|component| match component {
+                        Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+                        Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+                        _ => None,
+                    })
+                })
         };
 
         let Some(ip) = peer_ip else { return };
@@ -356,10 +364,9 @@ impl Widget for PeersScreen {
         let mut pi = self.data.lock().unwrap();
 
         match self.sort_column {
-            PeerSortColumn::Ip => pi.sort_by(|a, b| {
-                self.sort_order
-                    .compare(a.connected_address(), b.connected_address())
-            }),
+            PeerSortColumn::Ip => {
+                pi.sort_by(|a, b| self.sort_order.compare(a.address(), b.address()))
+            }
             PeerSortColumn::Version => {
                 pi.sort_by(|a, b| self.sort_order.compare(a.version(), b.version()))
             }
@@ -412,12 +419,8 @@ impl Widget for PeersScreen {
                     .connection_established()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap();
-                // convert ip to canonical form, then update SocketAddr with it.
-                let ip = pi.connected_address().ip().to_canonical();
-                let mut addr = pi.connected_address();
-                addr.set_ip(ip);
                 vec![
-                    addr.to_string(),
+                    pi.address().to_string(),
                     pi.version().to_string(),
                     neptune_cash::utc_timestamp_to_localtime(connection_established.as_millis())
                         .map(|ts| ts.to_string())

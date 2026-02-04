@@ -1,4 +1,6 @@
+use std::fmt::Debug;
 use std::fmt::Display;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
@@ -9,6 +11,7 @@ use super::DbtSingleton;
 use super::DbtVec;
 use super::PendingWrites;
 use super::SimpleRustyReader;
+use crate::application::database::storage::storage_schema::DbtMap;
 use crate::application::locks::tokio::AtomicRw;
 use crate::application::locks::tokio::LockCallbackFn;
 
@@ -16,7 +19,7 @@ use crate::application::locks::tokio::LockCallbackFn;
 ///
 /// `DbtSchema` can create any number of instances of types that
 /// implement the trait [`DbTable`].  We refer to these instances as
-/// `table`.  Examples are [`DbtVec`] and [`DbtSingleton`].
+/// `table`.  Examples are [`DbtVec`], [`DbtSingleton`], and [`DbtMap`].
 ///
 /// With proper usage (below), the application can perform writes
 /// to any subset of the `table`s and then persist (write) the data
@@ -51,7 +54,8 @@ use crate::application::locks::tokio::LockCallbackFn;
 /// let tables = (
 ///     storage.schema.new_vec::<u16>("ages").await,
 ///     storage.schema.new_vec::<String>("names").await,
-///     storage.schema.new_singleton::<bool>("proceed").await
+///     storage.schema.new_singleton::<bool>("proceed").await,
+///     storage.schema.new_map::<u64, String>("messages").await
 /// );
 ///
 /// let mut atomic_tables = AtomicRw::from(tables);
@@ -62,6 +66,7 @@ use crate::application::locks::tokio::LockCallbackFn;
 ///     lock.0.push(5).await;
 ///     lock.1.push("Sally".into()).await;
 ///     lock.2.set(true).await;
+///     lock.3.insert(101, "Hello".to_owned()).await;
 /// }
 ///
 /// // all pending writes are persisted to DB in one atomic batch operation.
@@ -131,9 +136,6 @@ impl DbtSchema {
         vector
     }
 
-    // possible future extension
-    // fn new_hashmap<K, V>(&self) -> Arc<RefCell<DbtHashMap<K, V>>> { }
-
     /// Create a new DbtSingleton
     ///
     /// All pending write operations of the DbtSingleton are stored
@@ -155,5 +157,27 @@ impl DbtSchema {
         );
         singleton.restore_or_new().await;
         singleton
+    }
+
+    /// Create a new DbtMap
+    ///
+    /// All pending write operations of the DbtMap are stored
+    /// in the schema
+    pub async fn new_map<K, V>(&mut self, name: &str) -> DbtMap<K, V>
+    where
+        K: Clone + Debug + Serialize + DeserializeOwned + Eq + Hash + Send + Sync,
+        V: Clone + Debug + Serialize + DeserializeOwned + Send + Sync,
+    {
+        let key_prefixes = [self.table_count, self.table_count + 1];
+        self.table_count += 2;
+        let mut map = DbtMap::<K, V>::new(
+            self.pending_writes.clone(),
+            self.reader.clone(),
+            key_prefixes,
+            name,
+        )
+        .await;
+        map.restore_or_new().await;
+        map
     }
 }

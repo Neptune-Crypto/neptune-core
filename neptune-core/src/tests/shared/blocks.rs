@@ -1,4 +1,5 @@
 use futures::channel::oneshot;
+use itertools::Itertools;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -10,6 +11,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
+use crate::api::export::Announcement;
 use crate::api::export::GenerationSpendingKey;
 use crate::api::export::GlobalStateLock;
 use crate::api::export::Network;
@@ -46,14 +48,19 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::verifier::cache_true_claim;
+use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::Randomness;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+use crate::util_types::mutator_set::shared::NUM_TRIALS;
+use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 /// Create a valid block on top of provided block. Returned block is valid in
 /// terms of both block validity and PoW, and is thus the new canonical block of
@@ -234,12 +241,15 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         ..Default::default()
     };
 
+    let consensus_rule_set =
+        ConsensusRuleSet::infer_from(network, previous_block.header().height.next());
     let (mut transaction, composer_txos) = make_coinbase_transaction_stateless(
         previous_block,
         composer_parameters,
         block_timestamp,
         TritonVmJobQueue::get_instance(),
         cli.proof_job_options_primitive_witness(),
+        consensus_rule_set,
     )
     .await
     .unwrap();
@@ -277,6 +287,53 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         .collect();
 
     (block, composer_expected_utxos)
+}
+
+/// Return a block with the specied number of inputs/outputs. Inputs and
+/// outputs are random. Also contains randomized composer rewards.
+///
+/// Does not have a valid proof, nor valid PoW. Not deterministic.
+pub(crate) async fn block_with_num_puts(
+    network: Network,
+    predecessor: &Block,
+    num_inputs: u128,
+    num_outputs: usize,
+) -> Block {
+    let mut rng = rand::rng();
+    let active_window_start = u128::from(
+        predecessor
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .get_batch_index(),
+    ) * u128::from(CHUNK_SIZE);
+    let inputs = (0..num_inputs)
+        .map(|_| RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new(
+                (0..NUM_TRIALS)
+                    .map(|_| rng.random_range(u128::from(CHUNK_SIZE * 3)..u128::from(WINDOW_SIZE)))
+                    .map(|ri| ri + active_window_start)
+                    .collect_vec()
+                    .try_into()
+                    .unwrap(),
+            ),
+            target_chunks: ChunkDictionary::default(),
+        })
+        .collect_vec();
+
+    let outputs = vec![rng.random(); num_outputs];
+
+    let (block, _) = make_mock_block_with_inputs_and_outputs(
+        predecessor,
+        inputs,
+        outputs,
+        None,
+        GenerationSpendingKey::derive_from_seed(rng.random()),
+        rng.random(),
+        network,
+    )
+    .await;
+
+    block
 }
 
 /// Build a fake block with a random hash, containing *two* outputs for the
@@ -445,6 +502,28 @@ pub(crate) fn invalid_empty_blocks_with_proof_size(
     blocks
 }
 
+pub(crate) fn invalid_empty_block_with_announcements(
+    predecessor: &Block,
+    network: Network,
+    announcements: Vec<Announcement>,
+) -> Block {
+    let tx = crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash(
+        vec![],
+        vec![],
+        predecessor.mutator_set_accumulator_after().unwrap().hash(),
+    );
+    let kernel = TransactionKernelModifier::default()
+        .announcements(announcements)
+        .clone_modify(&tx.kernel);
+    let tx = Transaction {
+        kernel,
+        proof: tx.proof,
+    };
+    let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    let tx = BlockTransaction::upgrade(tx);
+    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
+}
+
 /// Return a list of `n` invalid, empty blocks.
 pub(crate) fn invalid_empty_blocks(ancestor: &Block, n: usize, network: Network) -> Vec<Block> {
     let mut blocks = vec![];
@@ -489,7 +568,7 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
         let block_proof_witness = BlockProofWitness::produce(primitive_witness);
         let appendix = block_proof_witness.appendix();
         let claim = BlockProgram::claim(&body, &appendix);
-        cache_true_claim(claim.clone()).await;
+        cache_true_claims([claim.clone()]).await;
         (appendix, BlockProof::SingleProof(Proof::invalid()))
     };
 

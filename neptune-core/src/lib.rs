@@ -67,20 +67,29 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::debug;
+use tracing::error;
 use tracing::info;
+use tracing::warn;
 use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::data_directory::DataDirectory;
+use crate::application::config::identity::resolve_identity;
+use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::locks::tokio as sync_tokio;
 use crate::application::loops::channel::MainToMiner;
-use crate::application::loops::channel::MainToPeerTask;
 use crate::application::loops::channel::MinerToMain;
-use crate::application::loops::channel::PeerTaskToMain;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::connect_to_peers::call_peer;
 use crate::application::loops::main_loop::MainLoopHandler;
+use crate::application::loops::peer_loop::channel::MainToPeerTask;
+use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::network::actor::NetworkActor;
+use crate::application::network::actor::NetworkActorChannels;
+use crate::application::network::channel::NetworkActorCommand;
+use crate::application::network::config::NetworkConfig;
 use crate::application::rpc::server::RPC;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalStateLock;
@@ -109,10 +118,14 @@ pub fn display_banner() {
     println!("{}", NEPTUNE_BANNER);
 }
 
-pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
+pub async fn initialize(mut cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(fut);
     }
+
+    // Parse, populate cache and disallow later mutation
+    cli_args.second_parse()?;
+    let cli_args = cli_args;
 
     // see comment for Network::performs_automated_mining()
     if cli_args.mine() && !cli_args.network.performs_automated_mining() {
@@ -126,6 +139,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path()).await?;
     info!("Data directory is {}", data_directory);
 
+    // Initialize global state
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let genesis = Block::genesis(cli_args.network);
@@ -160,6 +174,39 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         info!("Successfully imported {num_blocks_read} blocks.");
     }
 
+    // Roll back blocks if necessary.
+    let tip = global_state_lock
+        .lock_guard()
+        .await
+        .chain
+        .light_state()
+        .clone();
+    if !tip.header().height.is_genesis()
+        && tip.validate_block_proof(cli_args.network).await.is_err()
+    {
+        info!("tip height was {} prior to rollback", tip.header().height);
+        let mut state = global_state_lock.lock_guard_mut().await;
+
+        // Rollback to threshold -- or to Genesis block if needed
+        let threshold = ConsensusRuleSet::first_tvmv1_block(cli_args.network)
+            .previous()
+            .unwrap_or_default();
+        let checkpoint = state
+            .chain
+            .archival_state()
+            .archival_block_mmr
+            .ammr()
+            .try_get_leaf(threshold.into())
+            .await
+            .unwrap_or_else(|| state.chain.archival_state().genesis_block().hash());
+        info!("Rolling back to checkpoint block {threshold} ... or to genesis block if needed.");
+
+        if let Err(e) = state.set_tip_to_stored_block(checkpoint).await {
+            panic!("Could not roll back to checkpoint {threshold}. Fatal error: {e}.");
+        }
+        info!("Rollback succeeded.");
+    }
+
     if !cli_args.triton_vm_env_vars.is_empty() {
         info!(
             "Triton VM environment variables set to: {}",
@@ -183,6 +230,68 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         .await?;
     info!("UTXO restoration check complete");
 
+    // Set up the libp2p NetworkActor
+    info!("Setting up Network Actor");
+    let legacy_marker = libp2p::multiaddr::Protocol::Tcp(9798);
+    let cli_peers_for_network_actor = cli_args
+        .peers
+        .iter()
+        .filter(|addr| addr.iter().all(|p| p != legacy_marker))
+        .cloned()
+        .collect_vec();
+    let network_config = NetworkConfig::default()
+        .with_subdirectory(data_directory.network_subdirectory())
+        .with_network(cli_args.network)
+        .with_max_num_peers(cli_args.max_num_peers)
+        .with_cli_bans(cli_args.bans.clone())
+        .with_cli_peers(cli_peers_for_network_actor)
+        .with_external_addresses(cli_args.own_public_addresses());
+    let identity = resolve_identity(
+        cli_args
+            .identity_file
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| network_config.identity_file()),
+        cli_args.incognito,
+        cli_args.new_identity,
+    )?;
+    let (channels, network_command_tx, network_event_rx) = NetworkActorChannels::setup(
+        peer_task_to_main_tx.clone(),
+        main_to_peer_broadcast_tx.clone(),
+    );
+    let mut actor = NetworkActor::new(
+        identity,
+        channels,
+        global_state_lock.clone(),
+        network_config,
+    )
+    .unwrap_or_else(|e| {
+        panic!("Failed to set up network actor: {e}.");
+    });
+    let mut task_join_handles = vec![];
+    let actor_handle = tokio::spawn(async move {
+        actor.dial_initial_peers();
+        if let Err(e) = actor.run().await {
+            error!("Network Actor crashed: {:?}", e);
+        }
+    });
+    task_join_handles.push(actor_handle);
+
+    // Tell libp2p network Actor to listen up.
+    let own_listen_addresses = cli_args.own_listen_addresses();
+    debug!(
+        "own_listen_address: {}",
+        own_listen_addresses.iter().join("; ")
+    );
+    for own_listen_address in own_listen_addresses {
+        if let Err(e) = network_command_tx
+            .send(NetworkActorCommand::Listen(own_listen_address))
+            .await
+        {
+            warn!("Could not send Listen message to Network Actor: {e}.");
+        }
+    }
+
     // Bind socket to port on this machine, to handle incoming connections from peers
     let incoming_peer_listener = if let Some(incoming_peer_listener) = cli_args.own_listen_port() {
         let ret = TcpListener::bind((cli_args.peer_listen_addr, incoming_peer_listener))
@@ -202,24 +311,36 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         "Most known canonical block has height {}",
         own_handshake_data.tip_header.height
     );
-    let mut task_join_handles = vec![];
-    for peer_address in global_state_lock.cli().peers.clone() {
-        let peer_state_var = global_state_lock.clone(); // bump arc refcount
-        let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
-            main_to_peer_broadcast_tx.subscribe();
-        let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = peer_task_to_main_tx.clone();
-        let peer_join_handle = tokio::task::spawn(async move {
-            call_peer(
-                peer_address,
-                peer_state_var.clone(),
-                main_to_peer_broadcast_rx_clone,
-                peer_task_to_main_tx_clone,
-                own_handshake_data,
-                1, // All outgoing connections have distance 1
-            )
-            .await;
-        });
-        task_join_handles.push(peer_join_handle);
+    let legacy_socketaddr = |multiaddr: &libp2p::Multiaddr| {
+        multiaddr_to_socketaddr(multiaddr).and_then(|sa| {
+            if [9800, 9801].contains(&sa.port()) {
+                None
+            } else {
+                Some(sa)
+            }
+        })
+    };
+    for multiaddress in &global_state_lock.cli().peers {
+        if let Some(peer_address) = legacy_socketaddr(multiaddress) {
+            let peer_state_var = global_state_lock.clone(); // bump arc refcount
+            let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
+                main_to_peer_broadcast_tx.subscribe();
+            let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> =
+                peer_task_to_main_tx.clone();
+            let peer_join_handle = tokio::task::spawn(async move {
+                call_peer(
+                    peer_address,
+                    peer_state_var.clone(),
+                    main_to_peer_broadcast_rx_clone,
+                    peer_task_to_main_tx_clone,
+                    own_handshake_data,
+                    1, // All outgoing connections have distance 1
+                )
+                .await;
+            });
+            task_join_handles.push(peer_join_handle);
+        }
+        // Else: NetworkActor already got CLI peers via NetworkConfig.
     }
     debug!("Made outgoing connections to peers");
 
@@ -338,9 +459,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         main_to_peer_broadcast_tx,
         peer_task_to_main_tx,
         main_to_miner_tx,
+        network_command_tx,
         peer_task_to_main_rx,
         miner_to_main_rx,
         rpc_server_to_main_rx,
+        network_event_rx,
         task_join_handles,
     ))
 }

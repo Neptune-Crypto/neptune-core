@@ -1,7 +1,10 @@
+pub(crate) mod network_event_handler;
 pub mod proof_upgrader;
 pub(crate) mod upgrade_incentive;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::process::Command;
 use std::process::Stdio;
@@ -10,11 +13,12 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::Result;
+use itertools::Either;
 use itertools::Itertools;
+use libp2p::PeerId;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
-use rand::seq::IndexedRandom;
 use tasm_lib::prelude::Digest;
 use tokio::net::TcpListener;
 use tokio::select;
@@ -32,11 +36,11 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
+use crate::api::export::Timestamp;
+use crate::application::config::auto_consolidation::AutoConsolidationSetting;
+use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::loops::channel::MainToMiner;
-use crate::application::loops::channel::MainToPeerTask;
-use crate::application::loops::channel::MainToPeerTaskBatchBlockRequest;
 use crate::application::loops::channel::MinerToMain;
-use crate::application::loops::channel::PeerTaskToMain;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::connect_to_peers::answer_peer;
 use crate::application::loops::connect_to_peers::call_peer;
@@ -44,27 +48,32 @@ use crate::application::loops::connect_to_peers::precheck_incoming_connection_is
 use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::loops::peer_loop::channel::MainToPeerTask;
+use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::loops::sync_loop::channel::BlockRequest;
+use crate::application::loops::sync_loop::channel::SyncToMain;
+use crate::application::loops::sync_loop::handle::SyncLoopHandle;
+use crate::application::loops::sync_loop::SYNC_LOOP_CHANNEL_CAPACITY;
+use crate::application::network::channel::NetworkActorCommand;
+use crate::application::network::channel::NetworkEvent;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::transaction_notification::TransactionNotification;
-use crate::protocol::peer::PeerSynchronizationState;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposal;
 use crate::state::networking_state::SyncAnchor;
+use crate::state::sync_status::SyncStatus;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
@@ -76,17 +85,6 @@ const MEMPOOL_PRUNE_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const MP_RESYNC_INTERVAL: Duration = Duration::from_secs(59);
 const PROOF_UPGRADE_INTERVAL: Duration = Duration::from_secs(10);
 const EXPECTED_UTXOS_PRUNE_INTERVAL: Duration = Duration::from_secs(19 * 60);
-
-const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
-
-/// Number of seconds within which an individual peer is expected to respond
-/// to a synchronization request.
-const INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT: Duration =
-    Duration::from_secs(SYNC_REQUEST_INTERVAL.as_secs() * SANCTION_PEER_TIMEOUT_FACTOR);
-
-/// Number of seconds that a synchronization may run without any progress.
-const GLOBAL_SYNCHRONIZATION_TIMEOUT: Duration =
-    Duration::from_secs(INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT.as_secs() * 4);
 
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 pub(crate) const MAX_NUM_DIGESTS_IN_BATCH_REQUEST: usize = 200;
@@ -132,9 +130,12 @@ pub struct MainLoopHandler {
     // note: MainToMinerChannel::send() does not block.  might log error.
     main_to_miner_tx: MainToMinerChannel,
 
+    network_command_tx: mpsc::Sender<NetworkActorCommand>,
+
     peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
     miner_to_main_rx: mpsc::Receiver<MinerToMain>,
     rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+    network_event_rx: mpsc::Receiver<NetworkEvent>,
     task_handles: Vec<JoinHandle<()>>,
 
     #[cfg(test)]
@@ -143,8 +144,10 @@ pub struct MainLoopHandler {
 
 /// The mutable part of the main loop function
 struct MutableMainLoopState {
-    /// Information used to batch-download blocks.
-    sync_state: SyncState,
+    /// A (handle on a) subordinate event loop responsible for rapidly
+    /// collecting blocks from peers and delivering them to the main loop in
+    /// order.
+    maybe_sync_loop: Option<SyncLoopHandle>,
 
     /// Information about potential peers for new connections.
     potential_peers: PotentialPeersState,
@@ -168,7 +171,7 @@ impl MutableMainLoopState {
         let (_dummy_sender, dummy_receiver) =
             mpsc::channel::<Vec<MempoolUpdateJobResult>>(TX_UPDATER_CHANNEL_CAPACITY);
         Self {
-            sync_state: SyncState::default(),
+            maybe_sync_loop: None,
             potential_peers: PotentialPeersState::default(),
             task_handles,
             proof_upgrader_task: None,
@@ -178,78 +181,16 @@ impl MutableMainLoopState {
     }
 }
 
-/// handles batch-downloading of blocks if we are more than n blocks behind
-#[derive(Default, Debug)]
-struct SyncState {
-    peer_sync_states: HashMap<SocketAddr, PeerSynchronizationState>,
-    last_sync_request: Option<(SystemTime, BlockHeight, SocketAddr)>,
-}
-
-impl SyncState {
-    fn record_request(
-        &mut self,
-        requested_block_height: BlockHeight,
-        peer: SocketAddr,
-        now: SystemTime,
-    ) {
-        self.last_sync_request = Some((now, requested_block_height, peer));
-    }
-
-    /// Return a list of peers that have reported to be in possession of blocks
-    /// with a PoW above a threshold.
-    fn get_potential_peers_for_sync_request(&self, threshold_pow: ProofOfWork) -> Vec<SocketAddr> {
-        self.peer_sync_states
-            .iter()
-            .filter(|(_sa, sync_state)| sync_state.claimed_max_pow > threshold_pow)
-            .map(|(sa, _)| *sa)
-            .collect()
-    }
-
-    /// Determine if a peer should be sanctioned for failing to respond to a
-    /// synchronization request fast enough. Also determine if a new request
-    /// should be made or the previous one should be allowed to run for longer.
-    ///
-    /// Returns (peer to be sanctioned, attempt new request).
-    fn get_status_of_last_request(
-        &self,
-        current_block_height: BlockHeight,
-        now: SystemTime,
-    ) -> (Option<SocketAddr>, bool) {
-        // A peer is sanctioned if no answer has been received after N times the sync request
-        // interval.
-        match self.last_sync_request {
-            None => {
-                // No sync request has been made since startup of program
-                (None, true)
-            }
-            Some((req_time, requested_height, peer_sa)) => {
-                if requested_height < current_block_height {
-                    // The last sync request updated the state
-                    (None, true)
-                } else if req_time + INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT < now {
-                    // The last sync request was not answered, sanction peer
-                    // and make a new sync request.
-                    (Some(peer_sa), true)
-                } else {
-                    // The last sync request has not yet been answered. But it has
-                    // not timed out yet.
-                    (None, false)
-                }
-            }
-        }
-    }
-}
-
 /// holds information about a potential peer in the process of peer discovery
 struct PotentialPeerInfo {
     _reported: SystemTime,
-    _reported_by: SocketAddr,
+    _reported_by: PeerId,
     instance_id: u128,
     distance: u8,
 }
 
 impl PotentialPeerInfo {
-    fn new(reported_by: SocketAddr, instance_id: u128, distance: u8, now: SystemTime) -> Self {
+    fn new(reported_by: PeerId, instance_id: u128, distance: u8, now: SystemTime) -> Self {
         Self {
             _reported: now,
             _reported_by: reported_by,
@@ -273,7 +214,7 @@ impl PotentialPeersState {
 
     fn add(
         &mut self,
-        reported_by: SocketAddr,
+        reported_by: PeerId,
         potential_peer: (SocketAddr, u128),
         max_peers: usize,
         distance: u8,
@@ -318,6 +259,8 @@ impl PotentialPeersState {
     /// connected to.
     ///
     /// Returns (socket address, peer distance)
+    ///
+    /// This function is part of the legacy peer-to-peer stack.
     fn get_candidate(
         &self,
         connected_clients: &[PeerInfo],
@@ -330,6 +273,7 @@ impl PotentialPeersState {
         let peers_listen_addresses: Vec<SocketAddr> = connected_clients
             .iter()
             .filter_map(|x| x.listen_address())
+            .filter_map(|ma| multiaddr_to_socketaddr(&ma))
             .collect();
 
         // Find the appropriate candidates
@@ -374,29 +318,6 @@ impl PotentialPeersState {
     }
 }
 
-/// Return a boolean indicating if synchronization mode should be left
-fn stay_in_sync_mode(
-    own_block_tip_header: &BlockHeader,
-    sync_state: &SyncState,
-    sync_mode_threshold: usize,
-) -> bool {
-    let max_claimed_pow = sync_state
-        .peer_sync_states
-        .values()
-        .max_by_key(|x| x.claimed_max_pow);
-    match max_claimed_pow {
-        None => false, // No peer have passed the sync challenge phase.
-
-        // Synchronization is left when the remaining number of block is half of what has
-        // been indicated to fit into RAM
-        Some(max_claim) => {
-            own_block_tip_header.cumulative_proof_of_work < max_claim.claimed_max_pow
-                && max_claim.claimed_max_height - own_block_tip_header.height
-                    > sync_mode_threshold as i128 / 2
-        }
-    }
-}
-
 impl MainLoopHandler {
     // todo: find a way to avoid triggering lint
     #[expect(clippy::too_many_arguments)]
@@ -406,10 +327,12 @@ impl MainLoopHandler {
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
         main_to_miner_tx: mpsc::Sender<MainToMiner>,
+        network_command_tx: mpsc::Sender<NetworkActorCommand>,
 
         peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
         miner_to_main_rx: mpsc::Receiver<MinerToMain>,
         rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+        network_event_rx: mpsc::Receiver<NetworkEvent>,
         task_handles: Vec<JoinHandle<()>>,
     ) -> Self {
         let maybe_main_to_miner_tx = if global_state_lock.cli().mine() {
@@ -423,10 +346,13 @@ impl MainLoopHandler {
             main_to_miner_tx: MainToMinerChannel(maybe_main_to_miner_tx),
             main_to_peer_broadcast_tx,
             peer_task_to_main_tx,
+            network_command_tx,
 
             peer_task_to_main_rx,
             miner_to_main_rx,
             rpc_server_to_main_rx,
+            network_event_rx,
+
             task_handles,
 
             #[cfg(test)]
@@ -615,6 +541,7 @@ impl MainLoopHandler {
         }
 
         // Then notify all peers about shareable transactions.
+        let mut num_notifications_sent = 0;
         for updated in update_results {
             if let MempoolUpdateJobResult::Success {
                 new_transaction, ..
@@ -623,8 +550,12 @@ impl MainLoopHandler {
                 if let Ok(pmsg) = new_transaction.as_ref().try_into() {
                     let pmsg = MainToPeerTask::TransactionNotification(pmsg);
                     self.main_to_peer_broadcast(pmsg);
+                    num_notifications_sent += 1;
                 }
             }
+        }
+        if num_notifications_sent > 0 {
+            info!("Broadcast {num_notifications_sent} transaction-notifications for Updated transactions.");
         }
 
         // Tell miner that it can now continue either composing or guessing.
@@ -823,65 +754,50 @@ impl MainLoopHandler {
                 let block_hashes = blocks.iter().map(|x| x.hash()).collect_vec();
                 let last_block = blocks.last().unwrap().to_owned();
                 let update_jobs = {
-                    // The peer tasks also check this condition, if block is more canonical than current
-                    // tip, but we have to check it again since the block update might have already been applied
-                    // through a message from another peer (or from own miner).
-                    let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
+                    // Double-check canonicity.
+                    // The peer tasks also check this condition. However, there
+                    // is a potential for race conditions that would otherwise
+                    // lead to duplicate work.
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let new_canonical =
                         global_state_mut.incoming_block_is_more_canonical(&last_block);
-
                     if !new_canonical {
-                        // The blocks are not canonical, but: if we are in sync
-                        // mode and these blocks beat our current champion, then
-                        // we store them anyway, without marking them as tip.
-                        let Some(sync_anchor) = global_state_mut.net.sync_anchor.as_mut() else {
-                            warn!(
-                                "Blocks were not new, and we're not syncing. Not storing blocks."
-                            );
-                            return Ok(());
-                        };
-                        if sync_anchor
-                            .champion
-                            .is_some_and(|(height, _)| height >= last_block.header().height)
-                        {
-                            warn!("Repeated blocks received in sync mode, not storing");
-                            return Ok(());
-                        }
-
-                        sync_anchor.catch_up(last_block.header().height, last_block.hash());
-
-                        for block in blocks {
-                            global_state_mut.store_block_not_tip(block).await?;
-                        }
-
-                        global_state_mut.flush_databases().await?;
-
+                        // Incoming blocks can be non-canonical, namely if they
+                        // come in via the sync loop. But the sync loop has a
+                        // dedicated message for this purpose, TipSuccessor.
+                        // This message handler should not be concerned with
+                        // sync mode, and so it should reject non-canonical
+                        // blocks.
                         return Ok(());
                     }
 
+                    // Report.
                     info!(
-                        "Last block from peer is new canonical tip: {:x}; height: {}",
+                        "Block {} from peer is new canonical tip: {:x}",
+                        last_block.header().height,
                         last_block.hash(),
-                        last_block.header().height
                     );
+                    if global_state_mut.cli().compose || global_state_mut.cli().guess {
+                        let block_subsidy = Block::block_subsidy(last_block.header().height);
+                        let guesser_fee = last_block.body().transaction_kernel.fee;
+                        let guesser_fee_fraction =
+                            guesser_fee.to_nau_f64() / block_subsidy.to_nau_f64();
+                        info!(
+                            "Block subsidy: {block_subsidy} / guesser fee: {guesser_fee} ({}%)",
+                            100.0 * guesser_fee_fraction
+                        );
+                    }
+
+                    // Update status.
+                    global_state_mut.net.sync_status = SyncStatus::Synced;
 
                     // Ask miner to stop work until state update is completed
                     self.main_to_miner_tx.send(MainToMiner::WaitForContinue);
 
-                    // Get out of sync mode if needed
-                    if global_state_mut.net.sync_anchor.is_some() {
-                        let stay_in_sync_mode = stay_in_sync_mode(
-                            &last_block.kernel.header,
-                            &main_loop_state.sync_state,
-                            sync_mode_threshold,
-                        );
-                        if !stay_in_sync_mode {
-                            info!("Exiting sync mode");
-                            global_state_mut.net.sync_anchor = None;
-                            self.main_to_miner_tx.send(MainToMiner::StopSyncing);
-                        }
-                    }
+                    // No need to worry about sync mode as it cannot be active
+                    // when this message handler is. If sync mode is active,
+                    // blocks are sent to the main loop through dedicated
+                    // message, NewSyncBlock.
 
                     let mut update_jobs: Vec<MempoolUpdateJob> = vec![];
                     for new_block in blocks {
@@ -927,70 +843,106 @@ impl MainLoopHandler {
                 //       identified by transaction-ID, into *one* update job.
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
+                let (consolidate, maybe_consolidation_address) =
+                    match self.global_state_lock.cli().auto_consolidate() {
+                        AutoConsolidationSetting::Inactive => (false, None),
+                        AutoConsolidationSetting::ActiveDynamic => (true, None),
+                        AutoConsolidationSetting::ActiveFixed { address } => (true, Some(address)),
+                    };
+
+                if consolidate {
+                    let timestamp = Timestamp::now();
+                    let mut tx_initiator = self.global_state_lock().api_mut().tx_initiator();
+                    tokio::task::spawn(async move {
+                        let _ = tx_initiator
+                            .consolidate(timestamp, maybe_consolidation_address)
+                            .await
+                            .inspect_err(|err| warn!("{err}"));
+                    });
+                }
+
                 // Inform miner about new block.
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);
             }
             PeerTaskToMain::AddPeerMaxBlockHeight {
+                peer_id,
                 peer_address,
                 claimed_height,
                 claimed_cumulative_pow,
                 claimed_block_mmra,
+                claimed_block_digest,
             } => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::AddPeerMaxBlockHeight");
 
-                let claimed_state =
-                    PeerSynchronizationState::new(claimed_height, claimed_cumulative_pow);
-                main_loop_state
-                    .sync_state
-                    .peer_sync_states
-                    .insert(peer_address, claimed_state);
+                // If we are already in sync mode, do nothing.
+                if main_loop_state.maybe_sync_loop.is_some() {
+                    return Ok(());
+                }
 
-                // Check if synchronization mode should be activated.
-                // Synchronization mode is entered if accumulated PoW exceeds
-                // our tip and if the height difference is positive and beyond
-                // a threshold value.
+                // Check if synchronization mode should be activated. Sync mode
+                // is entered into if claimed accumulated proof-of-work number
+                // exceeds that of our own tip and if the height difference is
+                // positive and beyond a threshold value.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                 if global_state_mut.sync_mode_criterion(claimed_height, claimed_cumulative_pow)
-                    && global_state_mut
-                        .net
-                        .sync_anchor
-                        .as_ref()
-                        .is_none_or(|sa| sa.cumulative_proof_of_work < claimed_cumulative_pow)
+                    && global_state_mut.net.sync_anchor.as_ref().is_none()
                 {
                     info!(
-                        "Entering synchronization mode due to peer {} indicating tip height {}; cumulative pow: {:?}",
+                        "Starting sync loop because peer {} indicates tip height {}; cumulative pow: {:?}",
                         peer_address, claimed_height, claimed_cumulative_pow
                     );
-                    global_state_mut.net.sync_anchor =
-                        Some(SyncAnchor::new(claimed_cumulative_pow, claimed_block_mmra));
+
+                    // Set sync anchor.
+                    global_state_mut.net.sync_anchor = Some(SyncAnchor::new(
+                        claimed_cumulative_pow,
+                        claimed_block_mmra,
+                        claimed_height,
+                        claimed_block_digest,
+                    ));
+
+                    // Clone info from global state and release write lock ASAP.
+                    let peer_map = global_state_mut.net.peer_map.clone();
+                    let network = global_state_mut.cli().network;
+                    let current_tip = global_state_mut.chain.light_state().clone();
+                    let resume_please = !global_state_mut.cli().no_resume_sync;
+                    drop(global_state_mut);
+
+                    // Create sync loop with handle.
+                    let genesis_block = Block::genesis(network);
+                    let mut sync_loop =
+                        SyncLoopHandle::new(genesis_block, claimed_height, network, resume_please)
+                            .await;
+                    sync_loop.start();
+
+                    // Tell sync loop about all known peers.
+                    sync_loop.send_add_peer(peer_id).await;
+                    for (peer, _) in peer_map.iter().take(SYNC_LOOP_CHANNEL_CAPACITY) {
+                        if *peer != peer_id {
+                            sync_loop.send_add_peer(*peer).await;
+                        }
+                    }
+
+                    // Store sync loop handle
+                    main_loop_state.maybe_sync_loop = Some(sync_loop);
+
+                    // Pause miner.
                     self.main_to_miner_tx.send(MainToMiner::StartSyncing);
-                }
-            }
-            PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
-                log_slow_scope!(fn_name!() + "::PeerTaskToMain::RemovePeerMaxBlockHeight");
 
-                debug!(
-                    "Removing max block height from sync data structure for peer {}",
-                    socket_addr
-                );
-                main_loop_state
-                    .sync_state
-                    .peer_sync_states
-                    .remove(&socket_addr);
-
-                // Get out of sync mode if needed.
-                let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
-                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-
-                if global_state_mut.net.sync_anchor.is_some() {
-                    let stay_in_sync_mode = stay_in_sync_mode(
-                        global_state_mut.chain.light_state().header(),
-                        &main_loop_state.sync_state,
-                        sync_mode_threshold,
-                    );
-                    if !stay_in_sync_mode {
-                        info!("Exiting sync mode");
-                        global_state_mut.net.sync_anchor = None;
+                    // Ask the peer about their block at the height of our own
+                    // tip. Either the peer is on the same fork as us and is
+                    // just further ahead; or else the peer is on a different
+                    // fork altogether. In the former case we can safely
+                    // fast-forward to the current tip and this will happen
+                    // automatically when the response to this question comes
+                    // in. In the latter case we need to run a bisection search
+                    // to find LUCA, and that happens as a side effect of the
+                    // sync loop querying random blocks. When those random
+                    // blocks come in, we fast-forward if we can.
+                    if !current_tip.header().height.is_genesis() {
+                        self.main_to_peer_broadcast(MainToPeerTask::RequestBlockByHeight {
+                            target_peer: peer_id,
+                            height: current_tip.header().height,
+                        });
                     }
                 }
             }
@@ -1006,6 +958,16 @@ impl MainLoopHandler {
                         distance,
                         self.now(),
                     );
+                }
+            }
+            PeerTaskToMain::NewPeer(peer_id) => {
+                if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
+                    sync_loop.send_add_peer(peer_id).await;
+                }
+            }
+            PeerTaskToMain::DroppedPeer(peer_id) => {
+                if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
+                    sync_loop.send_remove_peer(peer_id).await;
                 }
             }
             PeerTaskToMain::Transaction(pt2m_transaction) => {
@@ -1102,23 +1064,96 @@ impl MainLoopHandler {
                 let all_peers = global_state.net.peer_map.iter();
 
                 // filter out CLI peers
-                let disconnect_candidates =
-                    all_peers.filter(|p| !global_state.cli().peers.contains(p.0));
+                let cli_peers = global_state.cli().peers.iter().collect::<HashSet<_>>();
+                let disconnect_candidates = all_peers
+                    .filter(|(_id, info)| !cli_peers.contains(&info.address()))
+                    .filter(|p| multiaddr_to_socketaddr(&p.1.address()).is_some());
 
                 // find the one with the oldest connection
-                let longest_lived_peer = disconnect_candidates.min_by(
-                    |(_socket_address_left, peer_info_left),
-                     (_socket_address_right, peer_info_right)| {
+                let longest_lived_peer =
+                    disconnect_candidates.min_by(|(_, peer_info_left), (_, peer_info_right)| {
                         peer_info_left
                             .connection_established()
                             .cmp(&peer_info_right.connection_established())
-                    },
-                );
+                    });
 
                 // tell to disconnect
-                if let Some((peer_socket, _peer_info)) = longest_lived_peer {
-                    let pmsg = MainToPeerTask::Disconnect(peer_socket.to_owned());
+                if let Some((peer_id, _peer_info)) = longest_lived_peer {
+                    let pmsg = MainToPeerTask::Disconnect(*peer_id);
                     self.main_to_peer_broadcast(pmsg);
+                }
+            }
+            PeerTaskToMain::NewSyncTarget(new_target) => {
+                if let Some(sync_loop) = &mut main_loop_state.maybe_sync_loop {
+                    // Double-check new leadership status. Race condition.
+                    let height = new_target.header().height;
+                    let block_hash = new_target.hash();
+                    if sync_loop.target_height().next() == height {
+                        sync_loop.send_new_target(new_target).await;
+                        if let Some(sync_anchor) = self
+                            .global_state_lock
+                            .lock_guard_mut()
+                            .await
+                            .net
+                            .sync_anchor
+                            .as_mut()
+                        {
+                            sync_anchor.catch_up(height, block_hash);
+                        } else {
+                            error!("Sync mode active but sync anchor not set. The two should always be in sync.");
+                        }
+                    }
+                }
+            }
+            PeerTaskToMain::NewSyncBlock(block, peer) => {
+                if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
+                    // If we already know this block and it is on the canonical
+                    // chain, then we can fast-forward the sync; we are only
+                    // interested in downloading blocks that come after.
+                    let block_digest = block.hash();
+                    let state = self.global_state_lock.lock_guard().await;
+                    let have_block = state
+                        .chain
+                        .archival_state()
+                        .get_block_header(block_digest)
+                        .await
+                        .is_some();
+                    let is_canonical = if have_block {
+                        state
+                            .chain
+                            .archival_state()
+                            .block_belongs_to_canonical_chain(block_digest)
+                            .await
+                    } else {
+                        false
+                    };
+                    if have_block && is_canonical {
+                        info!("Fast-forwarding sync to block {}.", block.header().height);
+                        sync_loop.send_fast_forward_block(block).await;
+                    } else {
+                        sync_loop.send_block(block, peer);
+                    }
+                }
+            }
+            PeerTaskToMain::SyncCoverage(synchronization_bit_mask, socket_addr) => {
+                if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
+                    sync_loop.send_sync_coverage(socket_addr, synchronization_bit_mask);
+                }
+            }
+            PeerTaskToMain::PeerWantsSyncBlock(peer, height) => {
+                if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
+                    sync_loop.send_try_fetch_block(peer, height);
+                }
+            }
+            PeerTaskToMain::Ban(malicious_peer_id) => {
+                // Forward the request. The NetworkActor is the one to enforce
+                // the ban.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::Ban(Either::Left(malicious_peer_id)))
+                    .await
+                {
+                    error!("Cannot send message to NetworkActor: {e}.");
                 }
             }
         }
@@ -1140,15 +1175,14 @@ impl MainLoopHandler {
     async fn prune_peers(&self) -> Result<()> {
         // fetch all relevant info from global state; don't hold the lock
         let cli_args = self.global_state_lock.cli();
-        let connected_peers = self
-            .global_state_lock
-            .lock_guard()
-            .await
+        let global_state = self.global_state_lock.lock_guard().await;
+        let connected_peers = global_state
             .net
             .peer_map
-            .values()
-            .cloned()
+            .iter()
+            .map(|(peer_id, peer_info)| (*peer_id, peer_info.clone()))
             .collect_vec();
+        drop(global_state);
 
         let num_peers = connected_peers.len();
         let max_num_peers = cli_args.max_num_peers;
@@ -1159,22 +1193,26 @@ impl MainLoopHandler {
         warn!("Connected to {num_peers} peers, which exceeds the maximum ({max_num_peers}).");
 
         // If all connections are outbound, it's OK to exceed the max.
-        if connected_peers.iter().all(|p| p.connection_is_outbound()) {
+        if connected_peers
+            .iter()
+            .all(|(_, p)| p.connection_is_outbound())
+        {
             warn!("Not disconnecting from any peer because all connections are outbound.");
             return Ok(());
         }
 
         let num_peers_to_disconnect = num_peers - max_num_peers;
+        let cli_peers = cli_args.peers.iter().collect::<HashSet<_>>();
         let peers_to_disconnect = connected_peers
             .into_iter()
-            .filter(|peer| !cli_args.peers.contains(&peer.connected_address()))
+            .filter(|(_, peer)| !cli_peers.contains(&peer.address()))
             .choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
         match peers_to_disconnect.len() {
             0 => warn!("Not disconnecting from any peer because of manual override."),
             i => info!("Disconnecting from {i} peers."),
         }
-        for peer in peers_to_disconnect {
-            let pmsg = MainToPeerTask::Disconnect(peer.connected_address());
+        for (peer_id, _) in peers_to_disconnect {
+            let pmsg = MainToPeerTask::Disconnect(peer_id);
             self.main_to_peer_broadcast(pmsg);
         }
 
@@ -1192,15 +1230,19 @@ impl MainLoopHandler {
             .await
             .net
             .peer_map
-            .keys()
-            .copied()
+            .iter()
+            .map(|(peer_id, peer_info)| (*peer_id, peer_info.clone()))
+            .collect_vec();
+        let connected_peers_addresses = connected_peers
+            .iter()
+            .map(|(_peer_id, peer_info)| peer_info.address().clone())
             .collect_vec();
         let peers_with_lost_connection = self
             .global_state_lock
             .cli()
             .peers
             .iter()
-            .filter(|peer| !connected_peers.contains(peer));
+            .filter(|peer| !connected_peers_addresses.contains(peer));
 
         // If no connection was lost, there's nothing to do.
         if peers_with_lost_connection.clone().count() == 0 {
@@ -1213,36 +1255,44 @@ impl MainLoopHandler {
             .lock_guard()
             .await
             .get_own_handshakedata();
-        for &peer_with_lost_connection in peers_with_lost_connection {
-            // Disallow reconnection if peer is in bad standing
-            let peer_standing = self
-                .global_state_lock
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_with_lost_connection.ip())
-                .await;
-            if peer_standing.is_some_and(|standing| standing.is_bad()) {
-                debug!("Not reconnecting to peer in bad standing: {peer_with_lost_connection}");
-                continue;
-            }
+        for peer_with_lost_connection in peers_with_lost_connection {
+            if let Some(socketaddr) = multiaddr_to_socketaddr(peer_with_lost_connection) {
+                // Disallow reconnection if peer is in bad standing
+                let peer_standing = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .get_peer_standing_from_database(socketaddr.ip())
+                    .await;
+                if peer_standing.is_some_and(|standing| standing.is_bad()) {
+                    debug!("Not reconnecting to peer in bad standing: {socketaddr}");
+                    continue;
+                }
 
-            debug!("Attempting to reconnect to peer: {peer_with_lost_connection}");
-            let global_state_lock = self.global_state_lock.clone();
-            let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
-            let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
-            let outgoing_connection_task = tokio::task::spawn(async move {
-                call_peer(
-                    peer_with_lost_connection,
-                    global_state_lock,
-                    main_to_peer_broadcast_rx,
-                    peer_task_to_main_tx,
-                    own_handshake_data,
-                    1, // All CLI-specified peers have distance 1
-                )
-                .await;
-            });
-            main_loop_state.task_handles.push(outgoing_connection_task);
+                debug!("Attempting to reconnect to peer: {socketaddr}");
+                let global_state_lock = self.global_state_lock.clone();
+                let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
+                let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
+                let outgoing_connection_task = tokio::task::spawn(async move {
+                    call_peer(
+                        socketaddr,
+                        global_state_lock,
+                        main_to_peer_broadcast_rx,
+                        peer_task_to_main_tx,
+                        own_handshake_data,
+                        1, // All CLI-specified peers have distance 1
+                    )
+                    .await;
+                });
+                main_loop_state.task_handles.push(outgoing_connection_task);
+            } else if let Err(e) = self
+                .network_command_tx
+                .send(NetworkActorCommand::Dial(peer_with_lost_connection.clone()))
+                .await
+            {
+                warn!("Failed to reconnect to peer {peer_with_lost_connection}: {e}.");
+            }
             main_loop_state.task_handles.retain(|th| !th.is_finished());
         }
 
@@ -1321,161 +1371,6 @@ impl MainLoopHandler {
         // to be used in the next round of peer discovery.
         let m2pmsg = MainToPeerTask::MakeSpecificPeerDiscoveryRequest(peer_candidate);
         self.main_to_peer_broadcast(m2pmsg);
-
-        Ok(())
-    }
-
-    /// Return a list of block heights for a block-batch request.
-    ///
-    /// Returns an ordered list of the heights of *most preferred block*
-    /// to build on, where current tip is always the most preferred block.
-    ///
-    /// Uses a factor to ensure that the peer will always have something to
-    /// build on top of by providing potential starting points all the way
-    /// back to genesis.
-    fn batch_request_uca_candidate_heights(own_tip_height: BlockHeight) -> Vec<BlockHeight> {
-        const FACTOR: f64 = 1.07f64;
-
-        let mut look_behind = 0;
-        let mut ret = vec![];
-
-        // A factor of 1.07 can look back ~1m blocks in 200 digests.
-        while ret.len() < MAX_NUM_DIGESTS_IN_BATCH_REQUEST - 1 {
-            let height = match own_tip_height.checked_sub(look_behind) {
-                None => break,
-                Some(height) if height.is_genesis() => break,
-                Some(height) => height,
-            };
-
-            ret.push(height);
-            look_behind = ((look_behind as f64 + 1.0) * FACTOR).floor() as u64;
-        }
-
-        ret.push(BlockHeight::genesis());
-
-        ret
-    }
-
-    /// Logic for requesting the batch-download of blocks from peers
-    ///
-    /// Locking:
-    ///   * acquires `global_state_lock` for read
-    async fn block_sync(&mut self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
-        let global_state = self.global_state_lock.lock_guard().await;
-
-        // Check if we are in sync mode
-        let Some(anchor) = &global_state.net.sync_anchor else {
-            return Ok(());
-        };
-
-        debug!("Running sync");
-
-        let (own_tip_hash, own_tip_height, own_cumulative_pow) = (
-            global_state.chain.light_state().hash(),
-            global_state.chain.light_state().kernel.header.height,
-            global_state
-                .chain
-                .light_state()
-                .kernel
-                .header
-                .cumulative_proof_of_work,
-        );
-
-        // Check if sync mode has timed out entirely, in which case it should
-        // be abandoned.
-        let anchor = anchor.to_owned();
-        if self.now().duration_since(anchor.updated)? > GLOBAL_SYNCHRONIZATION_TIMEOUT {
-            warn!("Sync mode has timed out. Abandoning sync mode.");
-
-            // Abandon attempt, and punish all peers claiming to serve these
-            // blocks.
-            drop(global_state);
-            self.global_state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .sync_anchor = None;
-
-            let peers_to_punish = main_loop_state
-                .sync_state
-                .get_potential_peers_for_sync_request(own_cumulative_pow);
-
-            for peer in peers_to_punish {
-                let pmsg = MainToPeerTask::PeerSynchronizationTimeout(peer);
-                self.main_to_peer_broadcast(pmsg);
-            }
-
-            return Ok(());
-        }
-
-        let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
-            .sync_state
-            .get_status_of_last_request(own_tip_height, self.now());
-
-        // Sanction peer if they failed to respond
-        if let Some(peer) = peer_to_sanction {
-            let pmsg = MainToPeerTask::PeerSynchronizationTimeout(peer);
-            self.main_to_peer_broadcast(pmsg);
-        }
-
-        if !try_new_request {
-            debug!("Waiting for last sync to complete.");
-            return Ok(());
-        }
-
-        // Create the next request from the reported
-        info!("Creating new sync request");
-
-        // Pick a random peer that has reported to have relevant blocks
-        let candidate_peers = main_loop_state
-            .sync_state
-            .get_potential_peers_for_sync_request(own_cumulative_pow);
-        let chosen_peer = candidate_peers.choose(&mut rand::rng());
-        assert!(
-            chosen_peer.is_some(),
-            "A synchronization candidate must be available for a request. \
-            Otherwise, the data structure is in an invalid state and syncing should not be active"
-        );
-
-        let ordered_preferred_block_digests = match anchor.champion {
-            Some((_height, digest)) => vec![digest],
-            None => {
-                // Find candidate-UCA digests based on a sparse distribution of
-                // block heights skewed towards own tip height
-                let request_heights = Self::batch_request_uca_candidate_heights(own_tip_height);
-                let mut ordered_preferred_block_digests = vec![];
-                for height in request_heights {
-                    let digest = global_state
-                        .chain
-                        .archival_state()
-                        .archival_block_mmr
-                        .ammr()
-                        .get_leaf_async(height.into())
-                        .await;
-                    ordered_preferred_block_digests.push(digest);
-                }
-                ordered_preferred_block_digests
-            }
-        };
-
-        // Send message to the relevant peer loop to request the blocks
-        let chosen_peer = chosen_peer.unwrap();
-        info!(
-            "Sending block batch request to {}\nrequesting blocks descending from {:x}\n height {}",
-            chosen_peer, own_tip_hash, own_tip_height
-        );
-        let pmsg = MainToPeerTask::RequestBlockBatch(MainToPeerTaskBatchBlockRequest {
-            peer_addr_target: *chosen_peer,
-            known_blocks: ordered_preferred_block_digests,
-            anchor_mmr: anchor.block_mmr.clone(),
-        });
-        self.main_to_peer_broadcast(pmsg);
-
-        // Record that this request was sent to the peer
-        let requested_block_height = own_tip_height.next();
-        main_loop_state
-            .sync_state
-            .record_request(requested_block_height, *chosen_peer, self.now());
 
         Ok(())
     }
@@ -1713,7 +1608,7 @@ impl MainLoopHandler {
                     }
 
                     // Is this IP banned through database entry?
-                    let peer_banned = self.global_state_lock.lock_guard().await.net.peer_databases.peer_standings.get(ip).await.is_some_and(|x| x.is_bad());
+                    let peer_banned = self.global_state_lock.lock_guard().await.net.peer_databases.peer_standings_by_ip.get(ip).await.is_some_and(|x| x.is_bad());
                     if peer_banned {
                         debug!("Banned peer {ip} attempted incoming connection. Hanging up.");
                         continue;
@@ -1737,9 +1632,9 @@ impl MainLoopHandler {
                     let own_handshake_data: HandshakeData = state.get_own_handshakedata();
                     let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
                     let incoming_peer_task_handle = tokio::task::spawn(async move {
-                        // permit gets dropped at end of scope, to release slot.
-                        let _permit = permit;
-
+                        // Permit is passed to answer_peer and released after handshake,
+                        // not when the connection closes. This prevents semaphore
+                        // starvation attacks.
                         match answer_peer(
                             stream,
                             global_state_lock,
@@ -1747,6 +1642,7 @@ impl MainLoopHandler {
                             main_to_peer_broadcast_rx_clone,
                             peer_task_to_main_tx_clone,
                             own_handshake_data,
+                            Some(permit),
                         ).await {
                             Ok(()) => (),
                             Err(err) => debug!("Got result: {:?}", err),
@@ -1776,6 +1672,12 @@ impl MainLoopHandler {
 
                 }
 
+                // Handle messages from the network actor
+                Some(network_event) = self.network_event_rx.recv() => {
+                    debug!("Received message from network actor.");
+                    self.handle_network_event(network_event, &mut main_loop_state)?;
+                }
+
                 // Handle the completion of mempool tx-update jobs after new block.
                 Some(ms_updated_transactions) = main_loop_state.update_mempool_receiver.recv() => {
                     self.handle_updated_mempool_txs(ms_updated_transactions).await;
@@ -1783,10 +1685,19 @@ impl MainLoopHandler {
 
                 // Handle messages from rpc server task
                 Some(rpc_server_message) = self.rpc_server_to_main_rx.recv() => {
-                    let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone(), &mut main_loop_state).await?;
+                    let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message, &mut main_loop_state).await?;
                     if shutdown_after_execution {
                         break SUCCESS_EXIT_CODE
                     }
+                }
+
+                // Handle messages from the sync loop (if one exists)
+                Some(sync_loop_msg) = SyncLoopHandle::maybe_recv(&mut main_loop_state.maybe_sync_loop) => {
+                    let Some(sync_loop) = main_loop_state.maybe_sync_loop else {
+                        error!("Received message from non-existent sync loop.");
+                        continue;
+                    };
+                    main_loop_state.maybe_sync_loop = self.handle_sync_loop_message(sync_loop_msg, sync_loop).await;
                 }
 
                 // Handle peer discovery
@@ -1818,13 +1729,13 @@ impl MainLoopHandler {
                     }
                 }
 
-                // Handle synchronization (i.e. batch-downloading of blocks)
-                _ = block_sync_interval.tick() => {
-                    log_slow_scope!(fn_name!() + "::select::block_sync_interval");
+                // // Handle synchronization (i.e. batch-downloading of blocks)
+                // _ = block_sync_interval.tick() => {
+                //     log_slow_scope!(fn_name!() + "::select::block_sync_interval");
 
-                    trace!("Timer: block-synchronization job");
-                    self.block_sync(&mut main_loop_state).await?;
-                }
+                //     trace!("Timer: block-synchronization job");
+                //     self.block_sync(&mut main_loop_state).await?;
+                // }
 
                 // Clean up mempool: remove stale / too old transactions
                 _ = mempool_cleanup_interval.tick() => {
@@ -1876,7 +1787,11 @@ impl MainLoopHandler {
             }
         };
 
-        self.graceful_shutdown(main_loop_state.task_handles).await?;
+        self.graceful_shutdown(
+            main_loop_state.task_handles,
+            main_loop_state.maybe_sync_loop,
+        )
+        .await?;
         info!("Shutdown completed.");
 
         Ok(exit_code)
@@ -1965,7 +1880,6 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
-
             RPCServerToMain::BroadcastMempoolTransactions => {
                 info!("Broadcasting transaction notifications for all shareable transactions in mempool");
 
@@ -1979,6 +1893,10 @@ impl MainLoopHandler {
                             .mempool
                             .get(txid)
                             .expect("Transaction from iter must exist in mempool");
+                        if tx.proof.is_witness() {
+                            debug!("Not sharing PrimitiveWitness-backed transaction; this would leak secret keys!");
+                            continue;
+                        }
                         let notification = TransactionNotification::try_from(tx);
                         match notification {
                             Ok(notification) => {
@@ -2066,11 +1984,418 @@ impl MainLoopHandler {
                 // shut down
                 Ok(true)
             }
+            RPCServerToMain::SubmitTx(transaction) => {
+                // Technically RPC is not supposed/capable to handle ProofWitness but just in case
+                // Until a decision is made. (As this might get used by api too.)
+                let notification: Option<TransactionNotification> =
+                    transaction.as_ref().try_into().ok();
+
+                {
+                    let mut state = self.global_state_lock.lock_guard_mut().await;
+
+                    state
+                        .mempool_insert(*transaction, UpgradePriority::Critical)
+                        .await;
+                }
+
+                // If transaction can be sent thru P2P, submit instantly.
+                // This might be mempools responsibility but for now...
+                // We know upgraded transactions gets announced but not sure about new entries, might get moved into mempool too.
+                if let Some(notification) = notification {
+                    let pmsg = MainToPeerTask::TransactionNotification(notification);
+                    self.main_to_peer_broadcast(pmsg);
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::UpdateStatus => {
+                trace!("main loop is updating status indicators ...");
+                if let Some(sync_loop_handle) = &main_loop_state.maybe_sync_loop {
+                    sync_loop_handle.send_status_request();
+                    trace!("sent status request to sync loop.");
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::RescanAnnounced { first, last, keys } => {
+                info!("Rescanning block range {first}..={last} for announced UTXOs");
+
+                // Holds a write-lock over global state, so problematic if it
+                // takes too long.
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::RescanAnnounced");
+
+                let mut global_state_lock = self.global_state_lock.clone();
+                tokio::task::spawn(async move {
+                    let mut state = global_state_lock.lock_guard_mut().await;
+                    let _ = state.rescan_announced_incoming(keys, first, last).await;
+                    state
+                        .restore_monitored_utxos_from_archival_mutator_set()
+                        .await;
+                });
+
+                Ok(false)
+            }
+            RPCServerToMain::RescanExpected { first, last } => {
+                info!("Rescanning block range {first}..={last} for expected UTXOs");
+
+                // Holds a write-lock over global state, so problematic if it
+                // takes too long.
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::RescanExpected");
+
+                let mut global_state_lock = self.global_state_lock.clone();
+                tokio::task::spawn(async move {
+                    let mut state = global_state_lock.lock_guard_mut().await;
+                    let _ = state.rescan_expected_incoming(first, last).await;
+                    state
+                        .restore_monitored_utxos_from_archival_mutator_set()
+                        .await;
+                });
+
+                Ok(false)
+            }
+            RPCServerToMain::RescanOutgoing { first, last } => {
+                info!("Rescanning block range {first}..={last} for spent UTXOs");
+
+                // Holds a write-lock over global state, so problematic if it
+                // takes too long.
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::RescanOutgoing");
+
+                let mut global_state_lock = self.global_state_lock.clone();
+                tokio::task::spawn(async move {
+                    let mut state = global_state_lock.lock_guard_mut().await;
+                    let _ = state.rescan_outgoing(first, last).await;
+                    state
+                        .restore_monitored_utxos_from_archival_mutator_set()
+                        .await;
+                });
+
+                Ok(false)
+            }
+            RPCServerToMain::RescanGuesserRewards { first, last } => {
+                info!("Rescanning block range {first}..={last} for guesser reward UTXOs");
+
+                // Holds a write-lock over global state, so problematic if it
+                // takes too long.
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::RescanGuesserRewards");
+
+                let mut global_state_lock = self.global_state_lock.clone();
+                tokio::task::spawn(async move {
+                    let mut state = global_state_lock.lock_guard_mut().await;
+                    let _ = state.rescan_guesser_rewards(first, last).await;
+                    state
+                        .restore_monitored_utxos_from_archival_mutator_set()
+                        .await;
+                });
+
+                Ok(false)
+            }
+            RPCServerToMain::Ban(multiaddr) => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::Ban");
+
+                // Try get `PeerId` from peer map. Success indicates we are
+                // currently connected to them.
+                let mut maybe_network_command = None;
+                let mut maybe_peer_message: Option<MainToPeerTask> = None;
+                if let Some((peer_id, peer_info)) = self
+                    .global_state_lock()
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .peer_map
+                    .iter_mut()
+                    .find(|(_peer_id, peer_info)| peer_info.address() == multiaddr)
+                {
+                    // Send `Ban` command to NetworkActor.
+                    info!("Banning peer by PeerId {peer_id}.");
+                    maybe_network_command = Some(NetworkActorCommand::Ban(Either::Left(*peer_id)));
+
+                    // Max out peer's negative standing.
+                    peer_info.standing.standing = -peer_info.standing.peer_tolerance;
+
+                    // Disconnect.
+                    maybe_peer_message = Some(MainToPeerTask::Disconnect(*peer_id));
+                } else if let Some(ip_addr) = multiaddr.iter().find_map(|protocol| match protocol {
+                    libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                    libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                    _ => None,
+                }) {
+                    // Send `Ban` command to NetworkActor.
+                    info!("Banning peer by IP {ip_addr}.");
+                    maybe_network_command = Some(NetworkActorCommand::Ban(Either::Right(ip_addr)));
+                } else {
+                    warn!("Cannot ban peer: failed to extract PeerId and IP address. Nothing to hammer.");
+                };
+
+                // Now that the lock is dropped, we can send messages without
+                // risk of heart attack.
+                if let Some(ban_command) = maybe_network_command {
+                    if let Err(e) = self.network_command_tx.send(ban_command).await {
+                        error!("Cannot send Ban message to NetworkActor: {e}.");
+                    }
+                }
+                if let Some(peer_message) = maybe_peer_message {
+                    if let Err(e) = self.main_to_peer_broadcast_tx.send(peer_message) {
+                        error!("Cannot send Disconnect message to peer loop: {e}.");
+                    }
+                }
+                Ok(false)
+            }
+            RPCServerToMain::Unban(multiaddr) => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::Unban");
+
+                if let Some(ip_addr) = multiaddr.iter().find_map(|protocol| match protocol {
+                    libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
+                    libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
+                    _ => None,
+                }) {
+                    // Send Unban command to NetworkActor
+                    if let Err(e) = self
+                        .network_command_tx
+                        .send(NetworkActorCommand::Unban(ip_addr))
+                        .await
+                    {
+                        error!("Cannot send Unban message to NetworkActor: {e}.");
+                        return Ok(false);
+                    };
+
+                    // Reset standing in database.
+                    self.global_state_lock()
+                        .lock_guard_mut()
+                        .await
+                        .net
+                        .clear_ip_standing_in_database(ip_addr)
+                        .await;
+                } else {
+                    warn!("Cannot ban peer: failed to extract IP address. Nothing to hammer.");
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::UnbanAll => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::UnbanAll");
+
+                // Reset standings.
+                self.global_state_lock()
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .clear_all_standings_in_database()
+                    .await;
+
+                // Instruct NetworkActor to revoke bans.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::UnbanAll)
+                    .await
+                {
+                    error!("Cannot send UnbanAll message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::Dial(address) => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::Dial");
+
+                // Pass on message to NetworkActor.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::Dial(address))
+                    .await
+                {
+                    error!("Cannot send Dial message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::ProbeNat => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::ProbeNat");
+
+                // Pass on message to NetworkActor.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::ProbeNat)
+                    .await
+                {
+                    error!("Cannot send ProbeNat message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::ResetRelayReservations => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::ResetRelayReservations");
+
+                // Pass on message to NetworkActor.
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::ResetRelayReservations)
+                    .await
+                {
+                    error!("Cannot send ResetRelayReservations message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::GetNetworkOverview(channel) => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::ResetRelayReservations");
+
+                // Pass on message to NetworkActor.
+
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkActorCommand::GetNetworkOverview(channel))
+                    .await
+                {
+                    error!("Cannot send GetNetworkOverview message to NetworkActor: {e}.");
+                }
+
+                Ok(false)
+            }
         }
     }
 
-    async fn graceful_shutdown(&mut self, join_handles: Vec<JoinHandle<()>>) -> Result<()> {
+    /// Handle a message from the sync loop.
+    async fn handle_sync_loop_message(
+        &mut self,
+        sync_loop_message: SyncToMain,
+        sync_loop_handle: SyncLoopHandle,
+    ) -> Option<SyncLoopHandle> {
+        match sync_loop_message {
+            SyncToMain::Finished(block_height) => {
+                info!("Finished syncing to block height {block_height}.");
+
+                // Delete external sync anchor.
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .sync_anchor = None;
+
+                // Pass on "finished" message to miner.
+                self.main_to_miner_tx.send(MainToMiner::StopSyncing);
+                self.main_to_miner_tx.send(MainToMiner::NewBlock);
+
+                // Show finished where RPC server will look.
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .sync_status = SyncStatus::Synced;
+
+                // The sync loop cleaned up after itself. No need to abort tasks
+                // or delete files. Just drop the handle.
+                return None;
+            }
+            SyncToMain::Error => {
+                error!("Failed to sync.");
+
+                // Delete external sync anchor.
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .sync_anchor = None;
+
+                // Tell miner that syncing stopped. However, since syncing
+                // failed there is no new block.
+                self.main_to_miner_tx.send(MainToMiner::StopSyncing);
+
+                // Provoke block height notification messages from peers. This
+                // could start a new sync loop, and that one might finish
+                // successfully.
+                self.main_to_peer_broadcast(MainToPeerTask::RequestBlockNotification);
+
+                // Show unknown current state where RPC server will look.
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .sync_status = SyncStatus::Unknown;
+
+                // If we go the error message, the sync loop halted in error but
+                // somewhat gracefully. Specifically, the sync loop would have
+                // cleaned up after itself. So no need to abort tasks or delete
+                // files. Just drop the handle.
+                return None;
+            }
+            SyncToMain::TipSuccessor(block) => {
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
+                let height = block.header().height;
+
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                let new_canonical = global_state_mut.incoming_block_is_more_canonical(&block);
+
+                // Store block, whether as tip or not.
+                if !new_canonical {
+                    if let Err(e) = global_state_mut.store_block_not_tip(*block).await {
+                        panic!("Could not store sync block {}: {e}.", height);
+                    }
+                } else if let Err(e) = global_state_mut.set_new_tip(*block).await {
+                    panic!("Could not store sync block {} as new tip: {e}.", height);
+                }
+
+                // Flush.
+                if let Err(e) = global_state_mut.flush_databases().await {
+                    panic!("Could not flush databases following block write: {e}.");
+                }
+
+                // Report.
+                info!("Processed block {height} from sync loop.");
+            }
+            SyncToMain::RequestBlocks(block_requests) => {
+                // Distribute requests.
+                for BlockRequest {
+                    peer_handle,
+                    height,
+                } in block_requests
+                {
+                    self.main_to_peer_broadcast(MainToPeerTask::RequestBlockByHeight {
+                        target_peer: peer_handle,
+                        height,
+                    });
+                }
+            }
+            SyncToMain::Status(status) => {
+                info!("Sync loop progress: {status}.");
+                // Store on network state.
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .net
+                    .sync_status = SyncStatus::Syncing(status);
+            }
+            SyncToMain::Punish(peers) => {
+                for peer in peers {
+                    self.main_to_peer_broadcast(MainToPeerTask::PeerSynchronizationTimeout(peer));
+                }
+            }
+            SyncToMain::Coverage {
+                coverage,
+                peer_handle,
+            } => {
+                self.main_to_peer_broadcast(MainToPeerTask::SyncCoverage {
+                    coverage,
+                    peer_handle,
+                });
+            }
+            SyncToMain::SyncBlock { block, peer_handle } => {
+                self.main_to_peer_broadcast(MainToPeerTask::SyncBlock { block, peer_handle });
+            }
+        }
+
+        Some(sync_loop_handle)
+    }
+
+    async fn graceful_shutdown(
+        &mut self,
+        join_handles: Vec<JoinHandle<()>>,
+        maybe_sync_loop_handle: Option<SyncLoopHandle>,
+    ) -> Result<()> {
         info!("Shutdown initiated.");
+
+        // If the sync loop is active, stop it.
+        if let Some(sync_loop_handle) = maybe_sync_loop_handle {
+            sync_loop_handle.abort().await;
+        }
 
         // Stop mining
         self.main_to_miner_tx.send(MainToMiner::Shutdown);
@@ -2079,6 +2404,15 @@ impl MainLoopHandler {
         let pmsg = MainToPeerTask::DisconnectAll();
         self.main_to_peer_broadcast(pmsg);
         debug!("sent bye");
+
+        // Tell network actor to shut down swarm.
+        if let Err(e) = self
+            .network_command_tx
+            .send(NetworkActorCommand::Shutdown)
+            .await
+        {
+            error!("Could not send Shutdown command to Network Actor: {e}.");
+        };
 
         // Flush all databases
         self.global_state_lock.flush_databases().await?;
@@ -2126,6 +2460,7 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
+    use crate::protocol::peer::peer_info::pseudorandom_peer_id;
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
@@ -2158,6 +2493,8 @@ mod tests {
             main_to_peer_rx,
             peer_to_main_tx,
             peer_to_main_rx,
+            network_command_tx,
+            network_event_rx,
             mut state,
             _own_handshake_data,
         ) = get_test_genesis_setup(network, num_init_peers_outgoing, cli)
@@ -2176,12 +2513,13 @@ mod tests {
 
         for i in 0..num_peers_incoming {
             let peer_address = SocketAddr::from_str(&format!("255.254.253.{i}:8080")).unwrap();
+            let peer_id = pseudorandom_peer_id(&peer_address);
             state
                 .lock_guard_mut()
                 .await
                 .net
                 .peer_map
-                .insert(peer_address, get_dummy_peer_incoming(peer_address));
+                .insert(peer_id, get_dummy_peer_incoming(peer_address));
         }
 
         let incoming_peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2201,9 +2539,11 @@ mod tests {
             main_to_peer_tx,
             peer_to_main_tx,
             main_to_miner_tx,
+            network_command_tx,
             peer_to_main_rx,
             miner_to_main_rx,
             rpc_server_to_main_rx,
+            network_event_rx,
             task_join_handles,
         );
         TestSetup {
@@ -2379,145 +2719,9 @@ mod tests {
         }
     }
 
-    mod sync_mode {
-        use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-        use test_strategy::proptest;
-
-        use super::*;
-        use crate::tests::shared::globalstate::get_dummy_socket_address;
-
-        #[proptest]
-        fn batch_request_heights_prop(#[strategy(0u64..100_000_000_000)] own_height: u64) {
-            batch_request_heights_sanity(own_height);
-        }
-
-        #[test]
-        fn batch_request_heights_unit() {
-            let own_height = 1_000_000u64;
-            batch_request_heights_sanity(own_height);
-        }
-
-        fn batch_request_heights_sanity(own_height: u64) {
-            let heights = MainLoopHandler::batch_request_uca_candidate_heights(own_height.into());
-
-            let mut heights_rev = heights.clone();
-            heights_rev.reverse();
-            assert!(
-                heights_rev.is_sorted(),
-                "Heights must be sorted from high-to-low"
-            );
-
-            heights_rev.dedup();
-            assert_eq!(heights_rev.len(), heights.len(), "duplicates");
-
-            assert_eq!(heights[0], own_height.into(), "starts with own tip height");
-            assert!(
-                heights.last().unwrap().is_genesis(),
-                "ends with genesis block"
-            );
-        }
-
-        #[apply(shared_tokio_runtime)]
-        #[traced_test]
-        async fn sync_mode_abandoned_on_global_timeout() {
-            let num_outgoing_connections = 0;
-            let num_incoming_connections = 0;
-            let TestSetup {
-                mut main_loop_handler,
-                main_to_peer_rx: _main_to_peer_rx,
-                ..
-            } = setup(
-                num_outgoing_connections,
-                num_incoming_connections,
-                cli_args::Args::default(),
-            )
-            .await;
-            let mut mutable_main_loop_state = main_loop_handler.mutable();
-
-            main_loop_handler
-                .block_sync(&mut mutable_main_loop_state)
-                .await
-                .expect("Must return OK when no sync mode is set");
-
-            // Mock that we are in a valid sync state
-            let claimed_max_height = 1_000u64.into();
-            let claimed_max_pow = ProofOfWork::new([100; 6]);
-            main_loop_handler
-                .global_state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .sync_anchor = Some(SyncAnchor::new(
-                claimed_max_pow,
-                MmrAccumulator::new_from_leafs(vec![]),
-            ));
-            mutable_main_loop_state.sync_state.peer_sync_states.insert(
-                get_dummy_socket_address(0),
-                PeerSynchronizationState::new(claimed_max_height, claimed_max_pow),
-            );
-
-            let sync_start_time = main_loop_handler
-                .global_state_lock
-                .lock_guard()
-                .await
-                .net
-                .sync_anchor
-                .as_ref()
-                .unwrap()
-                .updated;
-            main_loop_handler
-                .block_sync(&mut mutable_main_loop_state)
-                .await
-                .expect("Must return OK when sync mode has not timed out yet");
-            assert!(
-                main_loop_handler
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .net
-                    .sync_anchor
-                    .is_some(),
-                "Sync mode must still be set before timeout has occurred"
-            );
-
-            assert_eq!(
-                sync_start_time,
-                main_loop_handler
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .net
-                    .sync_anchor
-                    .as_ref()
-                    .unwrap()
-                    .updated,
-                "timestamp may not be updated without state change"
-            );
-
-            // Mock that sync-mode has timed out
-            main_loop_handler = main_loop_handler.with_mocked_time(
-                SystemTime::now() + GLOBAL_SYNCHRONIZATION_TIMEOUT + Duration::from_secs(1),
-            );
-
-            main_loop_handler
-                .block_sync(&mut mutable_main_loop_state)
-                .await
-                .expect("Must return OK when sync mode has timed out");
-            assert!(
-                main_loop_handler
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .net
-                    .sync_anchor
-                    .is_none(),
-                "Sync mode must be unset on timeout"
-            );
-        }
-    }
-
     mod proof_upgrader {
         use super::*;
+        use crate::api::export::BlockHeight;
         use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
         use crate::protocol::consensus::transaction::Transaction;
         use crate::protocol::consensus::transaction::TransactionProof;
@@ -3089,6 +3293,7 @@ mod tests {
                     main_to_peer_rx_mock,
                     peer_to_main_tx_clone,
                     own_handshake,
+                    None, // No semaphore permit in test
                 )
                 .await
                 {
@@ -3133,6 +3338,7 @@ mod tests {
 
     mod peer_messages {
         use super::*;
+        use crate::api::export::BlockHeight;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

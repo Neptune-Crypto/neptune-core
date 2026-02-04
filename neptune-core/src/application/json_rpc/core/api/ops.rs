@@ -19,12 +19,13 @@ pub const RPC_API_VERSION: u16 = 1;
 #[strum(ascii_case_insensitive)]
 pub enum Namespace {
     Node,
-    Networking,
+    Network,
     Chain,
     Mining,
     Archival,
     Mempool,
     Wallet,
+    UtxoIndex,
 }
 
 #[derive(Router, Routes, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -95,6 +96,100 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Archival)]
     FindUtxoOrigin,
+
+    /// Check if indices in an absolute index set are set. Can be used to check
+    /// if a UTXO is spent without having to know the mutator set membership
+    /// proof.
+    #[namespace(Namespace::Archival)]
+    AreBloomIndicesSet,
+
+    #[namespace(Namespace::Archival)]
+    CirculatingSupply,
+
+    #[namespace(Namespace::Archival)]
+    MaxSupply,
+
+    #[namespace(Namespace::Archival)]
+    BurnedSupply,
+
+    #[namespace(Namespace::Wallet)]
+    GetBlocks,
+
+    #[namespace(Namespace::Wallet)]
+    RestoreMembershipProof,
+
+    #[namespace(Namespace::Wallet)]
+    SubmitTransaction,
+
+    #[namespace(Namespace::Wallet)]
+    RescanAnnounced,
+
+    #[namespace(Namespace::Wallet)]
+    RescanExpected,
+
+    #[namespace(Namespace::Wallet)]
+    RescanOutgoing,
+
+    #[namespace(Namespace::Wallet)]
+    RescanGuesserRewards,
+
+    #[namespace(Namespace::Mining)]
+    GetBlockTemplate,
+
+    #[namespace(Namespace::Mining)]
+    SubmitBlock,
+
+    /// Return block heights for blocks containing announcements with specified
+    /// announcement flags. May return results from orphaned blocks.
+    #[namespace(Namespace::UtxoIndex)]
+    BlockHeightsByFlags,
+
+    /// Return block heights for blocks containing specified addition records.
+    /// Returned block heights are guaranteed to reference blocks belonging to
+    /// the canonical chain.
+    #[namespace(Namespace::UtxoIndex)]
+    BlockHeightsByAdditionRecords,
+
+    /// Return block heights for blocks containing specified absolute index
+    /// sets. Returned block heights are guaranteed to reference blocks
+    /// belonging to the canonical chain.
+    #[namespace(Namespace::UtxoIndex)]
+    BlockHeightsByAbsoluteIndexSets,
+
+    #[namespace(Namespace::Mempool)]
+    Transactions,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionKernel,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionProof,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionsByAdditionRecords,
+
+    #[namespace(Namespace::Mempool)]
+    GetTransactionsByAbsoluteIndexSets,
+
+    /// Return transaction most likely to be mined in next block, based on fee
+    /// density, sync status, and proof quality.
+    #[namespace(Namespace::Mempool)]
+    BestTransactionForNextBlock,
+
+    #[namespace(Namespace::Network)]
+    Ban,
+    #[namespace(Namespace::Network)]
+    Unban,
+    #[namespace(Namespace::Network)]
+    UnbanAll,
+    #[namespace(Namespace::Network)]
+    Dial,
+    #[namespace(Namespace::Network)]
+    ProbeNat,
+    #[namespace(Namespace::Network)]
+    ResetRelayReservations,
+    #[namespace(Namespace::Network)]
+    NetworkOverview,
 }
 
 #[cfg(test)]

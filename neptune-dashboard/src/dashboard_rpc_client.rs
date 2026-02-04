@@ -1,5 +1,4 @@
 use std::net::IpAddr;
-use std::net::SocketAddr;
 use std::ops::Deref;
 
 use neptune_cash::api::export::BlockHeight;
@@ -62,24 +61,6 @@ impl DashboardRpcClient {
             DashboardRpcClient::Authentic(rpcclient) => rpcclient.network(ctx).await,
             #[cfg(feature = "mock")]
             DashboardRpcClient::Mock(mock_rpc_client) => mock_rpc_client.network(ctx).await,
-        }
-    }
-
-    pub async fn own_listen_address_for_peers(
-        &self,
-        ctx: ::tarpc::context::Context,
-        token: auth::Token,
-    ) -> ::core::result::Result<RpcResult<Option<SocketAddr>>, ::tarpc::client::RpcError> {
-        match self {
-            DashboardRpcClient::Authentic(rpcclient) => {
-                rpcclient.own_listen_address_for_peers(ctx, token).await
-            }
-            #[cfg(feature = "mock")]
-            DashboardRpcClient::Mock(mock_rpc_client) => {
-                mock_rpc_client
-                    .own_listen_address_for_peers(ctx, token)
-                    .await
-            }
         }
     }
 

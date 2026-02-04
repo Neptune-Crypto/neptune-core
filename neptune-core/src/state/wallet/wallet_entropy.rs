@@ -144,8 +144,8 @@ impl WalletEntropy {
         seed[0..32].try_into().unwrap()
     }
 
-    /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
-    /// for the mutator set.
+    /// Return pseudo-random sender randomness derived from secret seed and
+    /// other parameters.
     pub fn generate_sender_randomness(
         &self,
         block_height: BlockHeight,

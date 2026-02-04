@@ -3,6 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use itertools::Itertools;
 use num_traits::CheckedSub;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
@@ -19,6 +20,7 @@ use crate::api::export::Transaction;
 use crate::api::export::TransactionDetails;
 use crate::api::export::TransactionProof;
 use crate::api::export::TxInput;
+use crate::api::export::TxOutputList;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::loops::channel::RPCServerToMain;
@@ -28,8 +30,12 @@ use crate::protocol::consensus::block::validity::block_proof_witness::BlockProof
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockProof;
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+use crate::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::wallet::wallet_configuration::WalletConfiguration;
 use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::wallet::wallet_state::WalletState;
@@ -50,17 +56,14 @@ pub fn benchmark_data_directory(network: Network) -> Result<DataDirectory> {
 }
 
 /// Initialize a global state with a non-zero balance at genesis.
-pub async fn devops_global_state_genesis(network: Network) -> GlobalStateLock {
-    let data_directory = benchmark_data_directory(network).unwrap();
-    let genesis = Block::genesis(network);
-    let cli = cli_args::Args {
-        network,
-        ..Default::default()
-    };
-    let wallet_state = devops_wallet_state_genesis(network).await;
-    let gs = GlobalState::try_new_with_wallet_state(data_directory, genesis, cli, wallet_state)
-        .await
-        .unwrap();
+pub async fn devops_global_state_genesis(cli_args: cli_args::Args) -> GlobalStateLock {
+    let data_directory = benchmark_data_directory(cli_args.network).unwrap();
+    let genesis = Block::genesis(cli_args.network);
+    let wallet_state = devops_wallet_state_genesis(cli_args.network).await;
+    let gs =
+        GlobalState::try_new_with_wallet_state(data_directory, genesis, cli_args, wallet_state)
+            .await
+            .unwrap();
     let (rpc_server_to_main_tx, _rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     GlobalStateLock::from_global_state(gs, rpc_server_to_main_tx)
@@ -88,9 +91,24 @@ pub async fn devops_wallet_state_genesis(network: Network) -> WalletState {
         .unwrap()
 }
 
+pub fn extract_expected_utxos<'a>(
+    wallet_state: &WalletState,
+    tx_outputs: impl Iterator<Item = &'a TxOutput>,
+) -> Vec<ExpectedUtxo> {
+    wallet_state.extract_expected_utxos(tx_outputs, UtxoNotifier::Myself)
+}
+
+pub fn next_block_empty(parent: &Block, timestamp: Timestamp, network: Network) -> Block {
+    let msa = parent.mutator_set_accumulator_after().unwrap();
+    let nop = TransactionDetails::nop(msa, timestamp, network);
+
+    block_from_tx_kernel(parent, network, nop.transaction_kernel())
+}
+
 /// Sends the wallet's entire balance to the provided address. Divides the
 /// transaction up into `N` outputs, guaranteeing that the entire available
-/// balance is being spent.
+/// balance is being spent. Also returns tx output list for potential conversion
+/// to expected UTXOs.
 pub async fn next_block_incoming_utxos(
     parent: &Block,
     recipient: ReceivingAddress,
@@ -98,7 +116,8 @@ pub async fn next_block_incoming_utxos(
     sender: &WalletState,
     timestamp: Timestamp,
     network: Network,
-) -> Block {
+    notification_medium: UtxoNotificationMedium,
+) -> (Block, TxOutputList) {
     let one_nau = NativeCurrencyAmount::from_nau(1);
 
     let fee = one_nau;
@@ -126,13 +145,23 @@ pub async fn next_block_incoming_utxos(
         input_funds.push(input);
     }
 
+    let owned = sender
+        .get_all_known_addressable_spending_keys()
+        .map(|x| x.to_address())
+        .any(|x| x == recipient);
+
     let mut rng = rand::rng();
-    let outputs = outputs.into_iter().map(|(receiver, amount)| {
-        TxOutput::onchain_native_currency_as_change(amount, rng.random(), receiver)
-    });
+    let outputs: TxOutputList = outputs
+        .into_iter()
+        .map(|(receiver, amount)| {
+            TxOutput::native_currency(amount, rng.random(), receiver, notification_medium, owned)
+        })
+        .collect_vec()
+        .into();
+
     let tx_details = TransactionDetails::new_without_coinbase(
         input_funds,
-        outputs,
+        outputs.clone(),
         fee,
         timestamp,
         msa,
@@ -140,16 +169,23 @@ pub async fn next_block_incoming_utxos(
     );
 
     let kernel = PrimitiveWitness::from_transaction_details(&tx_details).kernel;
-    let packed = RemovalRecordList::pack(kernel.inputs.clone());
+    let block = block_from_tx_kernel(parent, network, kernel);
+
+    (block, outputs)
+}
+
+fn block_from_tx_kernel(parent: &Block, network: Network, txkernel: TransactionKernel) -> Block {
+    let packed = RemovalRecordList::pack(txkernel.inputs.clone());
     let kernel = TransactionKernelModifier::default()
         .merge_bit(true)
         .inputs(packed)
-        .modify(kernel);
+        .modify(txkernel);
     let tx = Transaction {
         kernel,
         proof: TransactionProof::SingleProof(NeptuneProof::invalid()),
     };
     let tx: BlockTransaction = tx.try_into().unwrap();
+    let timestamp = tx.kernel.timestamp;
     let block_primitive_witness = BlockPrimitiveWitness::new(parent.to_owned(), tx, network);
     let body = block_primitive_witness.body().to_owned();
     let header = block_primitive_witness.header(timestamp, network.target_block_interval());

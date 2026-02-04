@@ -51,6 +51,7 @@ use tracing::debug;
 use tracing::error;
 use tracing::warn;
 
+use crate::api::export::AdditionRecord;
 use crate::api::export::NeptuneProof;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::protocol::consensus::block::Block;
@@ -70,6 +71,7 @@ use crate::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 // 72 hours in secs
 pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
@@ -188,6 +190,21 @@ pub struct Mempool {
     merge_input_cache: MergeInputCache,
 }
 
+/// Enumerate ways that transactions in the mempool can be filtered.
+enum TxMatcher<'a> {
+    Inputs(&'a HashSet<AbsoluteIndexSet>),
+    Outputs(&'a HashSet<AdditionRecord>),
+}
+
+impl<'a> TxMatcher<'a> {
+    fn is_empty(&self) -> bool {
+        match self {
+            TxMatcher::Inputs(hash_set) => hash_set.is_empty(),
+            TxMatcher::Outputs(hash_set) => hash_set.is_empty(),
+        }
+    }
+}
+
 /// note that all methods that modify state and result in a MempoolEvent
 /// notification are private or pub(super).  This enforces that these methods
 /// can only be called from/via GlobalState.
@@ -243,7 +260,7 @@ impl Mempool {
     ///
     /// Even though this function returns true, a transaction might still be
     /// rejected for insertion if the mempool is full *and* the transaction has
-    /// a lower fee density that all transactions in the mempool.
+    /// a lower fee density than all transactions in the mempool.
     pub(crate) fn accept_transaction(
         &self,
         new_tx_txid: TransactionKernelId,
@@ -537,18 +554,21 @@ impl Mempool {
         conflict_txs_in_mempool
     }
 
-    /// Insert a transaction into the mempool. It is the caller's responsibility to validate
-    /// the transaction.
+    /// Insert a transaction into the mempool. It is the caller's responsibility
+    /// to validate the transaction.
     ///
-    /// The caller must also ensure that the transaction does not have a timestamp
-    /// in the too distant future, as such a transaction cannot be mined.
+    /// The caller must also ensure that the transaction does not have a
+    /// timestamp in the too distant future, as such a transaction cannot be
+    /// mined.
     ///
     /// Caller must specify the priority of the transaction to them.
     ///
-    /// this method may return:
-    ///   n events: RemoveTx,AddTx.  tx replaces a list of older txs with lower fee.
+    /// This method may return:
+    ///   n events: RemoveTx,AddTx. Tx replaces a list of older txs with lower
+    ///             fee.
     ///   1 event:  AddTx. tx does not replace an older one.
-    ///   0 events: tx not added because an older matching tx has a higher fee.
+    ///   0 events: tx not added because an older conflicting tx has a higher
+    ///             fee.
     pub(super) fn insert(
         &mut self,
         new_tx: Transaction,
@@ -795,6 +815,86 @@ impl Mempool {
     /// Computes in O(1)
     pub(crate) fn num_own_txs(&self) -> usize {
         self.upgrade_priorities.len()
+    }
+
+    /// Return the transactions in the mempool matching the selection criteria.
+    fn with_matching_puts_inner(
+        &self,
+        match_method: TxMatcher,
+    ) -> Vec<(TransactionKernel, Option<usize>)> {
+        if match_method.is_empty() {
+            return vec![];
+        }
+
+        // Build the matcher closure once
+        let is_match: Box<dyn Fn(&MempoolTransaction) -> bool> = match match_method {
+            TxMatcher::Inputs(index_sets) => Box::new(move |tx| {
+                tx.transaction
+                    .kernel
+                    .inputs
+                    .iter()
+                    .any(|ais| index_sets.contains(&ais.absolute_indices))
+            }),
+            TxMatcher::Outputs(addition_records) => Box::new(move |tx| {
+                tx.transaction
+                    .kernel
+                    .outputs
+                    .iter()
+                    .any(|ar| addition_records.contains(ar))
+            }),
+        };
+
+        let mut matching_txs_with_queue_position = vec![];
+        let mut queue_count = 0;
+        for (txid, _fee_density) in self.fee_density_iter() {
+            let tx = self
+                .tx_dictionary
+                .get(&txid)
+                .expect("Txid returned by fee density iter must match tx in mempool");
+
+            let sp_backed_and_synced = tx.transaction.proof.is_single_proof()
+                && tx.transaction.kernel.mutator_set_hash == self.tip_mutator_set_hash;
+            if is_match(tx) {
+                let queue_position = if sp_backed_and_synced {
+                    Some(queue_count)
+                } else {
+                    None
+                };
+
+                matching_txs_with_queue_position
+                    .push((tx.transaction.kernel.clone(), queue_position));
+            }
+
+            if sp_backed_and_synced {
+                queue_count += 1;
+            }
+        }
+
+        matching_txs_with_queue_position
+    }
+
+    /// Return (transaction, queue position) pairs for all transactions in the
+    /// mempool that have at least one of the specified addition records. Only
+    /// single proof-backed transactions with synced/updated proofs have an
+    /// associated queue position. If the transaction is not single
+    /// proof-backed, or it is not synced, the queue position is `None`.
+    pub(crate) fn with_matching_addition_records(
+        &self,
+        addition_records: &HashSet<AdditionRecord>,
+    ) -> Vec<(TransactionKernel, Option<usize>)> {
+        self.with_matching_puts_inner(TxMatcher::Outputs(addition_records))
+    }
+
+    /// Return (transaction, queue position) pairs for all transactions in the
+    /// mempool that have at least one of the specified absolute index sets.
+    /// Only single proof-backed transactions with synced/updated proofs have an
+    /// associated queue position. If the transaction is not single proof-
+    /// backed, or it is not synced, the queue position is `None`.
+    pub(crate) fn with_matching_absolute_index_sets(
+        &self,
+        absolute_index_sets: &HashSet<AbsoluteIndexSet>,
+    ) -> Vec<(TransactionKernel, Option<usize>)> {
+        self.with_matching_puts_inner(TxMatcher::Inputs(absolute_index_sets))
     }
 
     /// check if `Mempool` is empty
@@ -1219,6 +1319,7 @@ mod tests {
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1238,6 +1339,7 @@ mod tests {
     use crate::tests::shared::mock_tx::mock_transactions_with_sized_single_proof;
     use crate::tests::shared::mock_tx::testrunning::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
+    use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
@@ -1295,19 +1397,55 @@ mod tests {
         assert!(mempool.len().is_zero());
     }
 
-    /// Create a mempool with n transactions, all "synced" to the provided
-    /// block.
-    ///
-    /// All transactions inserted into the mempool this way are invalid and
-    /// cannot be included in any block.
-    fn setup_mock_mempool(transactions_count: usize, sync_block: &Block) -> Mempool {
+    /// Create a mempool with n transactions backed by either primitive witness,
+    /// proof collection, or single proof. Transactions may be either synced or
+    /// not synced from the the perspective of the mempool but in a broader
+    /// context they are invalid.
+    fn mock_mempool_mixed(num_txs: usize, sync_block: &Block) -> Mempool {
         let mut mempool = Mempool::new(
             ByteSize::gb(1),
             TxProvingCapability::ProofCollection,
             sync_block,
         );
-        let txs =
-            make_plenty_mock_transaction_supported_by_invalid_single_proofs(transactions_count);
+
+        let mut rng = rand::rng();
+
+        let mutator_set_hash = sync_block.mutator_set_accumulator_after().unwrap().hash();
+        let txs = make_plenty_mock_transaction_supported_by_primitive_witness(num_txs);
+        for mut tx in txs {
+            let proof_type = match rng.random_range(0..=2) {
+                0 => TransactionProofType::PrimitiveWitness,
+                1 => TransactionProofType::ProofCollection,
+                2 => TransactionProofType::SingleProof,
+                _ => unreachable!(),
+            };
+            tx.proof = proof_type.invalid();
+
+            let is_synced = rng.random_bool(0.5);
+            if is_synced {
+                tx.kernel = TransactionKernelModifier::default()
+                    .mutator_set_hash(mutator_set_hash)
+                    .modify(tx.kernel);
+            }
+
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+        }
+
+        mempool
+    }
+
+    /// Create a mempool with n single proof-backed transactions, all "synced"
+    /// to the provided block.
+    ///
+    /// All transactions inserted into the mempool this way are invalid and
+    /// cannot be included in any block.
+    fn mock_mempool_singleproofs(num_txs: usize, sync_block: &Block) -> Mempool {
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::ProofCollection,
+            sync_block,
+        );
+        let txs = make_plenty_mock_transaction_supported_by_invalid_single_proofs(num_txs);
         let mutator_set_hash = sync_block.mutator_set_accumulator_after().unwrap().hash();
         for mut tx in txs {
             tx.kernel = TransactionKernelModifier::default()
@@ -1316,7 +1454,7 @@ mod tests {
             mempool.insert(tx, UpgradePriority::Irrelevant);
         }
 
-        assert_eq!(transactions_count, mempool.len());
+        assert_eq!(num_txs, mempool.len());
 
         mempool
     }
@@ -1585,7 +1723,7 @@ mod tests {
         let num_txs = 10;
         let network = Network::Main;
         let sync_block = Block::genesis(network);
-        let mempool = setup_mock_mempool(num_txs, &sync_block);
+        let mempool = mock_mempool_singleproofs(num_txs, &sync_block);
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -1608,7 +1746,7 @@ mod tests {
         let num_txs_in_mempool = 12;
         let network = Network::Main;
         let sync_block = Block::genesis(network);
-        let mempool = setup_mock_mempool(num_txs_in_mempool, &sync_block);
+        let mempool = mock_mempool_singleproofs(num_txs_in_mempool, &sync_block);
 
         for num_mergers in 0..=num_txs_in_mempool {
             let returned_transactions = mempool
@@ -1638,7 +1776,7 @@ mod tests {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         let sync_block = Block::genesis(network);
         let num_txs = 0;
-        let mut mempool = setup_mock_mempool(num_txs, &sync_block);
+        let mut mempool = mock_mempool_singleproofs(num_txs, &sync_block);
         let genesis_block = Block::genesis(network);
         let bob_wallet_secret = WalletEntropy::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -1694,7 +1832,7 @@ mod tests {
         let network = Network::Main;
         let sync_block = Block::genesis(network);
         let num_txs = 10;
-        let mempool = setup_mock_mempool(num_txs, &sync_block);
+        let mempool = mock_mempool_singleproofs(num_txs, &sync_block);
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -1712,7 +1850,7 @@ mod tests {
         let network = Network::Main;
         let sync_block = Block::genesis(network);
         let num_txs = 12;
-        let mempool = setup_mock_mempool(num_txs, &sync_block);
+        let mempool = mock_mempool_singleproofs(num_txs, &sync_block);
 
         for i in 0..num_txs {
             assert_eq!(
@@ -2693,7 +2831,7 @@ mod tests {
         let network = Network::Main;
         let tx_count_small = 2;
         let genesis_block = Block::genesis(network);
-        let mempool_small = setup_mock_mempool(tx_count_small, &genesis_block);
+        let mempool_small = mock_mempool_singleproofs(tx_count_small, &genesis_block);
         let size_gs_small = mempool_small.get_size();
         let size_serialized_small = bincode::serialize(&mempool_small.tx_dictionary)
             .unwrap()
@@ -2709,7 +2847,7 @@ mod tests {
         );
 
         let tx_count_big = 6;
-        let mempool_big = setup_mock_mempool(tx_count_big, &genesis_block);
+        let mempool_big = mock_mempool_singleproofs(tx_count_big, &genesis_block);
         let size_gs_big = mempool_big.get_size();
         let size_serialized_big = bincode::serialize(&mempool_big.tx_dictionary)
             .unwrap()
@@ -2878,6 +3016,168 @@ mod tests {
             assert_eq!(1, MempoolEvent::num_removes(&events3));
             assert!(mempool_top.is_empty());
             assert!(mempool_top.merge_input_cache.is_empty());
+        }
+    }
+
+    mod get_txs_based_on_inputs_or_outputs {
+        use super::*;
+
+        #[test_strategy::proptest(async = "tokio", cases = 2)]
+        async fn return_empty_vec_on_empty_input_output_set(
+            #[strategy(txkernel::with_lengths(1, 1, 1, true))]
+        kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+            #[strategy(arb())] quality: TransactionProofType,
+        ) {
+            let tx = Transaction {
+                kernel: kernel.clone(),
+                proof: quality.invalid(),
+            };
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::SingleProof,
+                &Block::genesis(Network::Main),
+            );
+            mempool.tip_mutator_set_hash = kernel.mutator_set_hash;
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+
+            assert!(mempool
+                .with_matching_absolute_index_sets(&HashSet::new())
+                .is_empty());
+            assert!(mempool
+                .with_matching_addition_records(&HashSet::new())
+                .is_empty());
+        }
+
+        #[test_strategy::proptest(async = "tokio", cases = 20)]
+        async fn one_tx_in_mempool(
+            #[strategy(txkernel::with_lengths(3, 3, 3, true))]
+        kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+            #[strategy(arb())] quality: TransactionProofType,
+            #[strategy(arb())] has_synced_mutator_set: bool,
+        ) {
+            let tx = Transaction {
+                kernel: kernel.clone(),
+                proof: quality.invalid(),
+            };
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::SingleProof,
+                &Block::genesis(Network::Main),
+            );
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+            if has_synced_mutator_set {
+                mempool.tip_mutator_set_hash = kernel.mutator_set_hash;
+            }
+
+            /* Test input picker */
+            let all_sets: HashSet<AbsoluteIndexSet> =
+                kernel.inputs.iter().map(|x| x.absolute_indices).collect();
+            let mut index_setss: Vec<HashSet<AbsoluteIndexSet>> = vec![all_sets];
+            for index_set in kernel.inputs.iter().map(|x| x.absolute_indices) {
+                let index_set: HashSet<_> = [index_set].into_iter().collect();
+                index_setss.push(index_set);
+            }
+
+            let has_expected_queue_order =
+                has_synced_mutator_set && quality == TransactionProofType::SingleProof;
+
+            for index_set in index_setss {
+                let res = mempool.with_matching_absolute_index_sets(&index_set);
+                if has_expected_queue_order {
+                    assert_eq!(1, res.len());
+                    let (returned_kernel, queue_pos) = &res[0];
+                    assert_eq!(&kernel, returned_kernel);
+                    assert_eq!(Some(0), *queue_pos);
+                } else {
+                    assert_eq!(1, res.len());
+                    let (returned_kernel, queue_pos) = &res[0];
+                    assert_eq!(&kernel, returned_kernel);
+                    assert!(queue_pos.is_none());
+                }
+            }
+
+            /* Test output picker */
+            let all_outputs: HashSet<AdditionRecord> = kernel.outputs.iter().copied().collect();
+            let mut output_sets: Vec<HashSet<AdditionRecord>> = vec![all_outputs];
+            for output in &kernel.outputs {
+                let output: HashSet<AdditionRecord> = [*output].into_iter().collect();
+                output_sets.push(output);
+            }
+
+            for output_set in output_sets {
+                let res = mempool.with_matching_addition_records(&output_set);
+                if has_expected_queue_order {
+                    assert_eq!(1, res.len());
+                    let (returned_kernel, queue_pos) = &res[0];
+                    assert_eq!(&kernel, returned_kernel);
+                    assert_eq!(Some(0), *queue_pos);
+                } else {
+                    assert_eq!(1, res.len());
+                    let (returned_kernel, queue_pos) = &res[0];
+                    assert_eq!(&kernel, returned_kernel);
+                    assert!(queue_pos.is_none());
+                }
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn queue_order_matches_density_ordering_when_all_txs_are_sp_and_synced() {
+            // Generate mempool with 10 synced single proofs
+            let mempool = mock_mempool_singleproofs(10, &Block::genesis(Network::Main));
+
+            for (expected_queue_order, (txid, _)) in mempool.fee_density_iter().enumerate() {
+                let tx = mempool.get(txid).unwrap();
+
+                for output in &tx.kernel.outputs {
+                    let output = [*output].into_iter().collect();
+                    let res = mempool.with_matching_addition_records(&output);
+                    assert_eq!(1, res.len());
+                    let (returned_kernel, queue_pos) = &res[0];
+                    assert_eq!(&tx.kernel, returned_kernel);
+                    assert_eq!(Some(expected_queue_order), *queue_pos);
+                }
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn queue_order_matches_block_selection_order() {
+            let mempool = mock_mempool_mixed(20, &Block::genesis(Network::Main));
+
+            let txs_for_block_inclusion =
+                mempool.get_transactions_for_block_composition(usize::MAX, None);
+            let txs_for_block_inclusion = txs_for_block_inclusion
+                .into_iter()
+                .map(|x| x.txid())
+                .collect_vec();
+
+            for (txid, _) in mempool.fee_density_iter() {
+                let tx = mempool.get(txid).unwrap();
+                let an_output = tx.kernel.outputs[0];
+                let an_output = [an_output].into_iter().collect();
+                let (_, queue_pos) = mempool.with_matching_addition_records(&an_output)[0].clone();
+                let expected_queue_pos = txs_for_block_inclusion.iter().position(|x| *x == txid);
+
+                assert_eq!(expected_queue_pos, queue_pos);
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn can_return_multiple_txs() {
+            // Generate mempool with 11 synced single proofs
+            let num_txs = 11;
+            let mempool = mock_mempool_singleproofs(num_txs, &Block::genesis(Network::Main));
+
+            let mut all_outputs = vec![];
+            for (txid, _) in mempool.fee_density_iter() {
+                let tx = mempool.get(txid).unwrap();
+                all_outputs.extend(tx.kernel.outputs.clone());
+            }
+
+            let all_outputs: HashSet<_> = all_outputs.into_iter().collect();
+            let res = mempool.with_matching_addition_records(&all_outputs);
+            assert_eq!(num_txs, res.len());
+
+            assert!(res.iter().map(|(_, pos)| pos.unwrap()).eq(0..num_txs));
         }
     }
 
@@ -3114,7 +3414,7 @@ mod tests {
             let txid = pw_tx.txid();
 
             let genesis_block = Block::genesis(network);
-            let mut mempool = setup_mock_mempool(0, &genesis_block);
+            let mut mempool = mock_mempool_singleproofs(0, &genesis_block);
             mempool.insert(pw_tx.into(), UpgradePriority::Critical);
 
             let pc_tx =
@@ -3159,7 +3459,7 @@ mod tests {
             )
             .await;
             let genesis_block = Block::genesis(network);
-            let mut mempool = setup_mock_mempool(0, &genesis_block);
+            let mut mempool = mock_mempool_singleproofs(0, &genesis_block);
             mempool.insert(pw_high_fee.into(), UpgradePriority::Critical);
             assert!(mempool.len().is_one(), "One tx after insertion");
 
@@ -3191,7 +3491,7 @@ mod tests {
             )
             .await;
             let genesis_block = Block::genesis(network);
-            let mut mempool = setup_mock_mempool(0, &genesis_block);
+            let mut mempool = mock_mempool_singleproofs(0, &genesis_block);
             mempool.insert(pc_high_fee.into(), UpgradePriority::Irrelevant);
             assert!(mempool.len().is_one(), "One tx after insertion");
 
@@ -3223,7 +3523,7 @@ mod tests {
             )
             .await;
             let genesis_block = Block::genesis(network);
-            let mut mempool = setup_mock_mempool(0, &genesis_block);
+            let mut mempool = mock_mempool_singleproofs(0, &genesis_block);
             mempool.insert(pc_high_fee.into(), UpgradePriority::Critical);
             assert!(mempool.len().is_one(), "One tx after insertion");
 

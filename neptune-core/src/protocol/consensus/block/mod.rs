@@ -58,6 +58,7 @@ use crate::application::loops::channel::Cancelable;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::block_header::BlockHeaderField;
 use crate::protocol::consensus::block::block_header::BlockPow;
+use crate::protocol::consensus::block::block_height::BLOCKS_PER_GENERATION;
 use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use crate::protocol::consensus::block::block_kernel::BlockKernelField;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
@@ -105,7 +106,7 @@ pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmo
 /// whose timestamp exceeds now with this value or more.
 pub(crate) const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
 
-/// The size of the premine.
+/// The size of the premine, 831488 coins.
 pub const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 
 /// All blocks have proofs except the genesis block
@@ -383,7 +384,7 @@ impl Block {
     }
 
     #[inline]
-    pub(crate) fn appendix(&self) -> &BlockAppendix {
+    pub fn appendix(&self) -> &BlockAppendix {
         &self.kernel.appendix
     }
 
@@ -786,27 +787,8 @@ impl Block {
             return Err(BlockValidationError::FutureDating);
         }
 
-        // 1.a)
-        for required_claim in BlockAppendix::consensus_claims(self.body(), consensus_rule_set) {
-            if !self.appendix().contains(&required_claim) {
-                return Err(BlockValidationError::AppendixMissingClaim);
-            }
-        }
-
-        // 1.b)
-        if self.appendix().len() > MAX_NUM_CLAIMS {
-            return Err(BlockValidationError::AppendixTooLarge);
-        }
-
-        // 1.c)
-        let BlockProof::SingleProof(block_proof) = &self.proof else {
-            return Err(BlockValidationError::ProofQuality);
-        };
-
-        // 1.d)
-        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
-            return Err(BlockValidationError::ProofValidity);
-        }
+        // 1.a, 1.b, 1.c, 1.d
+        self.validate_block_proof(network).await?;
 
         // 1.e)
         if self.size() > consensus_rule_set.max_block_size() {
@@ -893,6 +875,39 @@ impl Block {
             > consensus_rule_set.max_num_announcements()
         {
             return Err(BlockValidationError::TooManyAnnouncements);
+        }
+
+        Ok(())
+    }
+
+    /// Validate the proof of a block, an that the proof relates to the expected
+    /// appendices.
+    pub(crate) async fn validate_block_proof(
+        &self,
+        network: Network,
+    ) -> Result<(), BlockValidationError> {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+
+        // 1.a)
+        for required_claim in BlockAppendix::consensus_claims(self.body(), consensus_rule_set) {
+            if !self.appendix().contains(&required_claim) {
+                return Err(BlockValidationError::AppendixMissingClaim);
+            }
+        }
+
+        // 1.b)
+        if self.appendix().len() > MAX_NUM_CLAIMS {
+            return Err(BlockValidationError::AppendixTooLarge);
+        }
+
+        // 1.c)
+        let BlockProof::SingleProof(block_proof) = &self.proof else {
+            return Err(BlockValidationError::ProofQuality);
+        };
+
+        // 1.d)
+        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
+            return Err(BlockValidationError::ProofValidity);
         }
 
         Ok(())
@@ -1108,22 +1123,153 @@ impl Block {
         self.kernel.guesser_fee_addition_records(block_hash)
     }
 
+    /// Return all addition records (transaction outputs) in this block,
+    /// including guesser rewards.
+    pub(crate) fn all_addition_records(&self) -> Result<Vec<AdditionRecord>, BlockValidationError> {
+        let mut addition_records = self.body().transaction_kernel.outputs.clone();
+        let guesser_addition_records = self.guesser_fee_addition_records()?;
+        addition_records.extend(guesser_addition_records);
+
+        Ok(addition_records)
+    }
+
     /// Return the mutator set update corresponding to this block, which sends
     /// the mutator set accumulator after the predecessor to the mutator set
     /// accumulator after self.
     pub fn mutator_set_update(&self) -> Result<MutatorSetUpdate, BlockValidationError> {
+        let outputs = self.all_addition_records()?;
         let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
             .map_err(BlockValidationError::from)?;
 
-        let mut mutator_set_update =
-            MutatorSetUpdate::new(inputs, self.body().transaction_kernel.outputs.clone());
+        Ok(MutatorSetUpdate::new(inputs, outputs))
+    }
 
-        let guesser_addition_records = self.guesser_fee_addition_records()?;
-        mutator_set_update
-            .additions
-            .extend(guesser_addition_records);
+    /// Compute the total supply of coins that were liquid immediately after
+    /// being mined.
+    pub(crate) fn mined_immediately_liquid_supply(
+        current_height: BlockHeight,
+    ) -> NativeCurrencyAmount {
+        Self::mined_supply(current_height).half()
+    }
 
-        Ok(mutator_set_update)
+    /// Compute the total supply of coins that were time-locked after mining and
+    /// are now (heuristically) released.
+    ///
+    /// The heuristic is to pretend that the blocks came in spaced apart by
+    /// exactly the target block interval. This model allows us to consider as
+    /// as expired the time-locks on subsidies for blocks more than one full
+    /// generation (`BLOCKS_PER_GENERATION`) ago, and all other time-locks still
+    /// in effect. In practice, the time-locks are released at a timestamp (not
+    /// a block height) and that timestamp does not need  to coincide with
+    /// exactly one full generation since the block was mined.
+    pub(crate) fn mined_timelocked_and_released_supply(
+        current_height: BlockHeight,
+    ) -> NativeCurrencyAmount {
+        let one_generation_ago =
+            BlockHeight::from(current_height.value().saturating_sub(BLOCKS_PER_GENERATION));
+        Self::mined_supply(one_generation_ago).half()
+    }
+
+    /// Compute the total mined money supply at a given block height, measured
+    /// in number of Neptune coins.
+    ///
+    /// The number does not count
+    ///  - the original premine,
+    ///  - the claims fund or claims, and
+    ///  - burns.
+    ///
+    /// It *does* count time-locked coins.
+    ///
+    /// This number is computed via arithmetic and geometric sums, implicitly
+    /// assuming that the miners rationally mint the maximum allowable coinbase.
+    pub(crate) fn mined_supply(current_height: BlockHeight) -> NativeCurrencyAmount {
+        // The first generation is special because of the genesis block and
+        // because of the skipped blocks due to reboot.
+        let num_blocks_in_generation_zero =
+            BLOCKS_PER_GENERATION - NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+        if num_blocks_in_generation_zero > current_height.into() {
+            // Number of blocks mined in this generation is equal to current
+            // block height because the genesis block (height 0) is not mined.
+            let num_mined_blocks = u64::from(current_height);
+            return INITIAL_BLOCK_SUBSIDY.scalar_mul(num_mined_blocks.try_into().unwrap());
+        }
+
+        // Nothing is mined in genesis block. All other blocks in generation
+        // zero did mine.
+        let num_coins_mined_in_generation_zero = INITIAL_BLOCK_SUBSIDY
+            .scalar_mul(u32::try_from(num_blocks_in_generation_zero).unwrap() - 1);
+        let mut total = num_coins_mined_in_generation_zero;
+
+        // Account for the blocks skipped because of the reboot. Do this by
+        // offsetting the current high so that we get clean wrap arounds modulo
+        // the number of blocks per generation.
+        let effective_block_height: u64 = u64::from(current_height) - num_blocks_in_generation_zero;
+        let current_generation = 1 + effective_block_height / BLOCKS_PER_GENERATION;
+        let current_block_in_generation = (effective_block_height) % BLOCKS_PER_GENERATION;
+
+        // Generation 40 is the first generation where precision is lost in the
+        // block subsidy. From that generation onwards, the geometric sum is not
+        // exact. So we use the geometric sum up until generation 39 and switch
+        // to an iterative rectangular formula after that.
+        let max_generation = 39;
+
+        // In the following we need the geometric sum. The formula is
+        // re-derived for your convenience here.
+        // L = sum from { i = 1 } to { C-1 } of { I * B / 2^i }
+        // L / 2 = B * sum from { i = 1 } to { C-1 } of { I / 2^(i+1) }
+        // L / 2 = B * sum from { i = 2 } to { C } of { I / 2^i }
+        // L - L / 2 = B * ( I/2 - I/2^C ) = L / 2 .
+        // So L = 2 * B * (I/2 - I/2^C) .
+
+        // Compute the total mined coins from all complete generations, except
+        // 0, and up to 40, using the geometric sum with
+        //  - I = INITIAL_BLOCK_SUBSIDY
+        //  - B = BLOCKS_PER_GENERATION
+        //  - C = current_generation.
+        let mut final_block_subsidy = NativeCurrencyAmount::from_nau(
+            INITIAL_BLOCK_SUBSIDY.to_nau() >> u64::min(max_generation, current_generation),
+        );
+        total += (INITIAL_BLOCK_SUBSIDY
+            .half()
+            .checked_sub(&final_block_subsidy)
+            .unwrap())
+        .scalar_mul(2 * u32::try_from(BLOCKS_PER_GENERATION).unwrap());
+
+        // If we are in a generation beyond the point where precision is lost,
+        // iterate over all generations between 40 and now and compute a
+        // contribution per generation.
+        if current_generation > max_generation {
+            for _ in max_generation..current_generation {
+                total +=
+                    final_block_subsidy.scalar_mul(u32::try_from(BLOCKS_PER_GENERATION).unwrap());
+                final_block_subsidy = final_block_subsidy.half();
+            }
+        }
+
+        // Count the liquid mined coins in the current (incomplete) generation
+        // using the rectangular formula.
+        total +=
+            final_block_subsidy.scalar_mul(u32::try_from(current_block_in_generation).unwrap() + 1);
+
+        total
+    }
+}
+
+#[cfg(test)]
+impl rand::distr::Distribution<Block> for rand::distr::StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Block {
+        use crate::api::export::NeptuneProof;
+
+        let kernel = rng.random::<BlockKernel>();
+        let proof = BlockProof::SingleProof(NeptuneProof::from(
+            (0..10).map(|_| rng.random()).collect_vec(),
+        ));
+        let digest = OnceLock::new();
+        Block {
+            kernel,
+            proof,
+            digest,
+        }
     }
 }
 
@@ -1261,6 +1407,13 @@ pub(crate) mod tests {
 
             self.set_header_pow(valid_pow);
         }
+
+        #[inline]
+        pub(crate) fn set_header_height(&mut self, block_height: BlockHeight) {
+            self.kernel.header.height = block_height;
+
+            self.unset_digest();
+        }
     }
 
     prop_compose! {
@@ -1310,12 +1463,12 @@ pub(crate) mod tests {
     fn guess_nonce_happy_path() {
         let network = Network::Main;
         let genesis = Block::genesis(network);
-        let mut invalid_block = invalid_empty_block(&genesis, network);
-        let mast_auth_paths = invalid_block.pow_mast_paths();
 
         for consensus_rule_set in ConsensusRuleSet::iter() {
+            let mut invalid_block = invalid_empty_block(&genesis, network);
+            let mast_auth_paths = invalid_block.pow_mast_paths();
             let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);
-            let target = Difficulty::from(2u32).target();
+            let target = Difficulty::from(50u32).target();
             let mut rng = rng();
             let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
 
@@ -1701,6 +1854,8 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
         use crate::application::loops::mine_loop::TxMergeOrigin;
         use crate::application::triton_vm_job_queue::vm_job_queue;
+        use crate::protocol::proof_abstractions::verifier::disable_true_claims_cache;
+        use crate::protocol::proof_abstractions::verifier::enable_true_claims_cache;
         use crate::state::transaction::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
@@ -1769,6 +1924,14 @@ pub(crate) mod tests {
             let index = rng.random_range(0..proof_length);
             block_proof.0.get_mut(index).unwrap().increment();
 
+            // Since the block is deterministic, it may have been validated
+            // already. In a test environment, its verified-to-be-true claim
+            // would have been absorbed into the true claims cache. In this
+            // case, even the false proof will validate. So in order to make the
+            // test meaningful, we first have to clear or disable the true
+            // claims cache.
+            disable_true_claims_cache().await;
+
             assert_eq!(
                 BlockValidationError::ProofValidity,
                 block
@@ -1776,6 +1939,8 @@ pub(crate) mod tests {
                     .await
                     .unwrap_err()
             );
+
+            enable_true_claims_cache().await;
         }
 
         #[traced_test]
@@ -2450,6 +2615,90 @@ pub(crate) mod tests {
             alice.set_new_tip(block.clone()).await.unwrap();
 
             blocks.push(block);
+        }
+    }
+
+    mod currency_supply {
+        use proptest::prop_assert_eq;
+        use test_strategy::proptest;
+
+        use super::*;
+
+        /// Compute the liquid mined money supply at a given block height,
+        /// measured in number of Neptune coins. This is a slow, but explicit,
+        /// algorithm for computing (hopefully) the same result as
+        /// [`Block::mined_supply`]. That's "hopefully" because this
+        /// method is what that faster one is being tested against.
+        pub(crate) fn mined_supply_slow(current_height: BlockHeight) -> NativeCurrencyAmount {
+            // Nothing is mined in genesis block.
+            let mut total = NativeCurrencyAmount::coins(0);
+
+            // For all blocks until and including now (but skipping the genesis)
+            // block, add the block subsidy.
+            let mut last_generation = BlockHeight::genesis().get_generation();
+            for height in 1_u64..=current_height.into() {
+                if BlockHeight::from(height).get_generation() != last_generation {
+                    last_generation = BlockHeight::from(height).get_generation();
+                }
+                total += Block::block_subsidy(height.into());
+            }
+
+            total
+        }
+
+        #[proptest]
+        fn fast_and_slow_methods_for_supply_agree_prop(
+            #[strategy(0u64..=20584320)] current_block_height: u64,
+        ) {
+            prop_assert_eq!(
+                Block::mined_supply(current_block_height.into()).to_nau(),
+                mined_supply_slow(current_block_height.into()).to_nau()
+            );
+        }
+
+        #[test]
+        fn fast_and_slow_methods_for_supply_agree_unit() {
+            for current_block_height in [
+                1395, 13950, 80827, 139505, 6057182, 7957182, 209766, 220232, 300320, 20584320,
+            ] {
+                println!("testing current block height {current_block_height} ...");
+                assert_eq!(
+                    Block::mined_supply(current_block_height.into()).to_nau(),
+                    mined_supply_slow(current_block_height.into()).to_nau()
+                );
+            }
+        }
+
+        #[test]
+        fn mined_supply_has_sane_limit() {
+            let claims_pool = INITIAL_BLOCK_SUBSIDY
+                .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
+            let premine_max_size = PREMINE_MAX_SIZE;
+
+            let very_far_future = BLOCKS_PER_GENERATION * 128;
+            // let total_mined = Block::mined_supply(very_far_future.into());
+            let total_mined = mined_supply_slow(very_far_future.into());
+
+            assert!(
+                (total_mined + premine_max_size + claims_pool)
+                    <= NativeCurrencyAmount::coins(42000000)
+            );
+
+            // total: 41999999.9999999999999999999999985124612500
+            println!(
+                "total: {}",
+                (total_mined + premine_max_size + claims_pool).display_lossless()
+            );
+
+            assert_eq!(
+                (total_mined + premine_max_size + claims_pool).display_n_decimals(20),
+                NativeCurrencyAmount::coins(42000000).display_n_decimals(20),
+                "total mined: {}\npremine max size: {}\nclaims pool: {}\nsum is {}",
+                total_mined.display_n_decimals(20),
+                premine_max_size.display_n_decimals(20),
+                claims_pool.display_n_decimals(20),
+                (total_mined + premine_max_size + claims_pool).display_n_decimals(20)
+            );
         }
     }
 }

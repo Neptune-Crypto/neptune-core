@@ -13,6 +13,14 @@ pub const BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET: BlockHeight =
 pub const BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(120u64));
 
+/// Height of 1st block that follows the alpha consensus ruleset, for test net.
+pub const BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(3571u64));
+
+/// Height of 1st block that uses Triton VM with proof version 1.
+pub const BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(23_401u64));
+
 /// Enumerates all possible sets of consensus rules.
 ///
 /// Specifically, this enum captures *differences* between consensus rules,
@@ -25,23 +33,19 @@ pub const BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET: BlockHeight =
 /// ultimately [`Block::is_valid`][super::block::Block::is_valid].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Default, strum_macros::Display)]
 pub enum ConsensusRuleSet {
-    #[default]
     Reboot,
     HardforkAlpha,
+    #[default]
+    TvmProofVersion1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum_macros::Display)]
+pub enum TritonProofVersion {
+    V0,
+    V1,
 }
 
 impl ConsensusRuleSet {
-    /// Maximum block size in number of BFieldElements
-    pub(crate) const fn max_block_size(&self) -> usize {
-        match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
-                // This size is 8MB which should keep it feasible to run archival nodes for
-                // many years without requiring excessive disk space.
-                1_000_000
-            }
-        }
-    }
-
     /// Infer the [`ConsensusRuleSet`] from the [`Network`] and the
     /// [`BlockHeight`]. The second argument is necessary to take into account
     /// planned hard or soft forks that activate at a given height. The first
@@ -52,41 +56,81 @@ impl ConsensusRuleSet {
             Network::Main => {
                 if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET {
                     ConsensusRuleSet::Reboot
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET {
                     ConsensusRuleSet::HardforkAlpha
+                } else {
+                    ConsensusRuleSet::TvmProofVersion1
                 }
             }
-            Network::TestnetMock => ConsensusRuleSet::HardforkAlpha,
-            Network::RegTest => ConsensusRuleSet::HardforkAlpha,
-            Network::Testnet(_) => {
+            Network::TestnetMock => ConsensusRuleSet::TvmProofVersion1,
+            Network::RegTest => ConsensusRuleSet::TvmProofVersion1,
+            Network::Testnet(0) => {
                 if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET {
                     ConsensusRuleSet::Reboot
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET {
                     ConsensusRuleSet::HardforkAlpha
+                } else {
+                    ConsensusRuleSet::TvmProofVersion1
                 }
+            }
+            Network::Testnet(_) => ConsensusRuleSet::TvmProofVersion1,
+        }
+    }
+
+    pub(crate) fn triton_proof_version(&self) -> TritonProofVersion {
+        if cfg!(test) {
+            // Only test with v1 since we would otherwise need to depend on two
+            // different versions of Triton VM.
+            TritonProofVersion::V1
+        } else {
+            match self {
+                ConsensusRuleSet::Reboot => TritonProofVersion::V0,
+                ConsensusRuleSet::HardforkAlpha => TritonProofVersion::V0,
+                ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
+            }
+        }
+    }
+
+    /// Maximum block size in number of BFieldElements
+    pub(crate) const fn max_block_size(&self) -> usize {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1 => {
+                // This size is 8MB which should keep it feasible to run archival nodes for
+                // many years without requiring excessive disk space.
+                1_000_000
             }
         }
     }
 
     pub(crate) fn max_num_inputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
-                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
-            }
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1 => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_outputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
-                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
-            }
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1 => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_announcements(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
-                MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS
-            }
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1 => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+        }
+    }
+
+    pub(crate) fn first_tvmv1_block(network: Network) -> BlockHeight {
+        match network {
+            Network::Main => BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET,
+            Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET,
+            _ => BlockHeight::genesis(),
         }
     }
 }

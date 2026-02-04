@@ -21,6 +21,12 @@ impl From<NativeCurrencyAmount> for RpcNativeCurrencyAmount {
     }
 }
 
+impl From<RpcNativeCurrencyAmount> for NativeCurrencyAmount {
+    fn from(v: RpcNativeCurrencyAmount) -> Self {
+        v.0
+    }
+}
+
 impl Serialize for RpcNativeCurrencyAmount {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -47,6 +53,12 @@ pub struct RpcBFieldElements(pub Vec<BFieldElement>);
 impl From<Vec<BFieldElement>> for RpcBFieldElements {
     fn from(v: Vec<BFieldElement>) -> Self {
         RpcBFieldElements(v)
+    }
+}
+
+impl From<RpcBFieldElements> for Vec<BFieldElement> {
+    fn from(v: RpcBFieldElements) -> Self {
+        v.0
     }
 }
 

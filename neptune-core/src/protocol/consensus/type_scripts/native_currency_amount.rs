@@ -82,6 +82,10 @@ impl NativeCurrencyAmount {
         Self(-Self::MAX_NAU)
     }
 
+    pub(crate) const fn coin_as_nau() -> i128 {
+        Self::conversion_factor()
+    }
+
     /// The conversion factor is 10^30 * 2^2.
     /// It is such that 42 000 000 * 10^30 * 2^2 is just one bit shy of being 128 bits
     /// wide. The one shy bit is used for the sign.
@@ -174,13 +178,13 @@ impl NativeCurrencyAmount {
     ///
     /// Quantities whose unit is nau are used for internal logic and are not to
     /// be used for user-facing displays.
-    pub fn to_nau(&self) -> i128 {
+    pub const fn to_nau(&self) -> i128 {
         self.0
     }
 
     /// Convert the number of Neptune atomic units (nau) to a
     /// `NativeCurrencyAmount`.
-    pub fn from_nau(nau: i128) -> Self {
+    pub const fn from_nau(nau: i128) -> Self {
         Self(nau)
     }
 
@@ -586,11 +590,11 @@ pub mod neptune_arbitrary {
     }
 }
 
-#[cfg(feature = "mock-rpc")]
+#[cfg(any(feature = "mock-rpc", test))]
 impl rand::distr::Distribution<NativeCurrencyAmount> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> NativeCurrencyAmount {
         NativeCurrencyAmount::from_nau(
-            rng.random_range(-NativeCurrencyAmount::MAX_NAU..NativeCurrencyAmount::MAX_NAU),
+            rng.random_range(NativeCurrencyAmount::min().0..NativeCurrencyAmount::max().0),
         )
     }
 }

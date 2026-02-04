@@ -2,9 +2,11 @@ use divan::Bencher;
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::Timestamp;
+use neptune_cash::application::config::cli_args;
 use neptune_cash::bench_helpers::devops_global_state_genesis;
 use neptune_cash::bench_helpers::next_block_incoming_utxos;
 use neptune_cash::protocol::consensus::block::Block;
+use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
 
 fn main() {
     divan::main();
@@ -15,6 +17,8 @@ mod resync_membership_proofs {
 
     mod sync_200_msmps_over_10_blocks {
 
+        use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+
         use super::*;
 
         fn resync_msmps(bencher: Bencher) {
@@ -24,7 +28,8 @@ mod resync_membership_proofs {
             // set membership proofs from the tip of one fork to the other.
             let rt = tokio::runtime::Runtime::new().unwrap();
             let network = Network::Main;
-            let mut global_state_lock = rt.block_on(devops_global_state_genesis(Network::Main));
+            let cli_args = cli_args::Args::default_with_network(network);
+            let mut global_state_lock = rt.block_on(devops_global_state_genesis(cli_args));
 
             let genesis = Block::genesis(network);
             let own_address = rt
@@ -36,13 +41,14 @@ mod resync_membership_proofs {
                 .to_address();
 
             let block1_timestamp = genesis.header().timestamp + Timestamp::months(7);
-            let block1 = rt.block_on(next_block_incoming_utxos(
+            let (block1, _) = rt.block_on(next_block_incoming_utxos(
                 &genesis,
                 own_address.clone(),
                 10,
                 &rt.block_on(global_state_lock.lock_guard()).wallet_state,
                 block1_timestamp,
                 network,
+                UtxoNotificationMedium::OnChain,
             ));
             rt.block_on(global_state_lock.set_new_tip(block1.clone()))
                 .unwrap();
@@ -69,13 +75,14 @@ mod resync_membership_proofs {
                     // Different block times on each fork to ensure the forks
                     // contain distinct blocks.
                     let block_time = block.header().timestamp + Timestamp::hours(1 + j);
-                    let next_block = rt.block_on(next_block_incoming_utxos(
+                    let (next_block, _) = rt.block_on(next_block_incoming_utxos(
                         &block,
                         own_address.clone(),
                         10,
                         &rt.block_on(global_state_lock.lock_guard()).wallet_state,
                         block_time,
                         network,
+                        UtxoNotificationMedium::OnChain,
                     ));
                     rt.block_on(global_state_lock.set_new_tip(next_block.clone()))
                         .unwrap();
@@ -106,16 +113,23 @@ mod resync_membership_proofs {
 mod maintain_membership_proofs {
     use super::*;
 
-    /// Maintain 400 membership proofs, while receiving an additional 10 UTXOs.
-    mod maintain_400_10 {
+    /// Maintain membership proofs, while receiving additional UTXOs.
+    mod maintain_msmps {
+
         use super::*;
 
-        fn update_wallet_with_block2(bencher: Bencher, maintain_msmps_from_block_data: bool) {
-            const NUM_UTXOS_MAINTAINED: usize = 400;
-            const NUM_NEW_UTXOS: usize = 10;
+        fn update_wallet_with_block2<
+            const NUM_UTXOS_MAINTAINED: usize,
+            const NUM_NEW_UTXOS: usize,
+        >(
+            bencher: Bencher,
+            maintain_msmps_from_block_data: bool,
+            update_msmps: bool,
+        ) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let network = Network::Main;
-            let mut global_state_lock = rt.block_on(devops_global_state_genesis(Network::Main));
+            let cli_args = cli_args::Args::default_with_network(network);
+            let mut global_state_lock = rt.block_on(devops_global_state_genesis(cli_args));
             let mut global_state = rt.block_on(global_state_lock.lock_guard_mut());
 
             let genesis = Block::genesis(network);
@@ -127,26 +141,28 @@ mod maintain_membership_proofs {
                 )
                 .to_address();
             let block1_time = Network::Main.launch_date() + Timestamp::months(7);
-            let block1 = rt.block_on(next_block_incoming_utxos(
+            let (block1, _) = rt.block_on(next_block_incoming_utxos(
                 &genesis,
                 own_address.clone(),
                 NUM_UTXOS_MAINTAINED,
                 &global_state.wallet_state,
                 block1_time,
                 network,
+                UtxoNotificationMedium::OnChain,
             ));
 
             rt.block_on(global_state.set_new_tip(block1.clone()))
                 .unwrap();
 
             let block2_time = block1_time + Timestamp::hours(1);
-            let block2 = rt.block_on(next_block_incoming_utxos(
+            let (block2, _) = rt.block_on(next_block_incoming_utxos(
                 &block1,
                 own_address,
                 NUM_NEW_UTXOS,
                 &global_state.wallet_state,
                 block2_time,
                 network,
+                UtxoNotificationMedium::OnChain,
             ));
 
             // update the mutator set with the UTXOs from this block
@@ -161,31 +177,42 @@ mod maintain_membership_proofs {
 
             bencher.bench_local(|| {
                 rt.block_on(async {
-                    let recovery_data = global_state
+                    global_state
                         .wallet_state
                         .update_wallet_state_with_new_block(
                             &block1.mutator_set_accumulator_after().unwrap(),
                             &block2,
                             maintain_msmps_from_block_data,
                         )
-                        .await
-                        .unwrap();
+                        .await;
 
-                    global_state
-                        .restore_monitored_utxos_from_archival_mutator_set(Some(recovery_data))
-                        .await
+                    if update_msmps {
+                        global_state
+                            .restore_monitored_utxos_from_archival_mutator_set()
+                            .await
+                    }
                 });
             });
         }
 
         #[divan::bench(sample_count = 10)]
-        fn apply_block2_maintain_msmps(bencher: Bencher) {
-            update_wallet_with_block2(bencher, true);
+        fn apply_block2_maintain_msmps_400_10(bencher: Bencher) {
+            update_wallet_with_block2::<400, 10>(bencher, true, true);
         }
 
         #[divan::bench(sample_count = 10)]
-        fn apply_block2_no_maintain_msmps(bencher: Bencher) {
-            update_wallet_with_block2(bencher, false);
+        fn apply_block2_no_maintain_msmps_400_10(bencher: Bencher) {
+            update_wallet_with_block2::<400, 10>(bencher, false, true);
+        }
+
+        #[divan::bench(sample_count = 10)]
+        fn apply_block2_no_maintain_msmps_1000_10_no_msmp_update(bencher: Bencher) {
+            update_wallet_with_block2::<1000, 10>(bencher, false, false);
+        }
+
+        #[divan::bench(sample_count = 10)]
+        fn apply_block2_no_maintain_msmps_1000_10_with_msmp_update(bencher: Bencher) {
+            update_wallet_with_block2::<1000, 10>(bencher, false, true);
         }
     }
 }

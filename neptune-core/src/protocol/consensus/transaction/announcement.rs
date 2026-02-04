@@ -103,6 +103,15 @@ impl TryFrom<String> for Announcement {
 }
 
 #[cfg(test)]
+impl rand::distr::Distribution<Announcement> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Announcement {
+        Announcement {
+            message: (0..10).map(|_| rng.random()).collect_vec(),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;

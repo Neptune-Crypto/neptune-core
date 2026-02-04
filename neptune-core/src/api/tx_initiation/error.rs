@@ -87,6 +87,9 @@ pub enum CreateProofError {
 
     #[error("Could not forward job cancellation msg to proving job. {0}")]
     JobCancelSendError(#[from] tokio::sync::watch::error::SendError<()>),
+
+    #[error("Cannot produce Triton Vm proofs for deprecated versions of Triton VM. Are you fully synced yet?")]
+    DeprecatedTritonVmVersion,
 }
 
 /// enumerates possible upgrade-proof errors

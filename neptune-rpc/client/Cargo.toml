@@ -2,13 +2,16 @@
 name = "neptune-rpc-client"
 description = "library for interacting with neptune-cash's JSON-RPC"
 authors = ["Triton Software"]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
+license = "Apache-2.0"
+
+repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
 [dependencies]
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "default-tls", "system-proxy"] }
 serde_json = "1.0"
-neptune-cash = { version = "0.5.0", path = "../../neptune-core" }
+neptune-cash = { version = "0.6.0", path = "../../neptune-core" }
 async-trait = "0.1.83"
 
 [dev-dependencies]

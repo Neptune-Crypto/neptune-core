@@ -25,5 +25,29 @@ jobs:
       - name: Remove Cargo.lock
         run: rm Cargo.lock
 
-      - name: Build
+      - name: Show available compilers (debug)
+        if: matrix.os != 'windows-latest'
+        run: |
+          echo "c++ -> $(which c++ 2>/dev/null || true)"
+          c++ --version || true
+          echo "clang++ -> $(which clang++ 2>/dev/null || true)"
+          clang++ --version || true
+        shell: bash
+
+      - name: Install clang (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+        shell: bash
+
+      - name: Build (linux & macos)
+        if: matrix.os != 'windows-latest'
+        env:
+          CC: clang
+          CXX: clang++
+        run: cargo build --all --release
+
+      - name: Build (windows)
+        if: matrix.os == 'windows-latest'
         run: cargo build --all --release
