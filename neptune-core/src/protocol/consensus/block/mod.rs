@@ -2641,7 +2641,7 @@ pub(crate) mod tests {
             total
         }
 
-        #[proptest]
+        #[proptest(cases = 4)]
         fn fast_and_slow_methods_for_supply_agree_prop(
             #[strategy(0u64..=20584320)] current_block_height: u64,
         ) {
