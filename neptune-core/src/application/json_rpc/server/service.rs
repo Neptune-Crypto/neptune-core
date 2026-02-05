@@ -1058,6 +1058,7 @@ pub mod tests {
     use crate::state::mining::block_proposal::BlockProposal;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::state::wallet::wallet_status::WalletStatusElement;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
@@ -1065,6 +1066,7 @@ pub mod tests {
     use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
+    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use crate::BFieldElement;
     use crate::Block;
 
@@ -1383,6 +1385,38 @@ pub mod tests {
         assert_eq!(announcement, expected_announcement);
 
         // Try restoring MSMP thru RPC and ensure it matches the one maintained by our wallet.
+        let wallet_status = rpc_server
+            .state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await;
+
+        let WalletStatusElement {
+            aocl_leaf_index,
+            utxo,
+            sender_randomness,
+            receiver_preimage,
+            ..
+        } = &wallet_status.synced_unspent[0];
+        let item = Tip5::hash(utxo);
+
+        let absolute_index_set = AbsoluteIndexSet::compute(
+            item,
+            *sender_randomness,
+            *receiver_preimage,
+            *aocl_leaf_index,
+        );
+        let msmp_snapshot = rpc_server
+            .restore_membership_proof(vec![absolute_index_set])
+            .await
+            .expect("restore to succeed")
+            .snapshot;
+        let extracted_msmp = msmp_snapshot.membership_proofs[0]
+            .clone()
+            .extract_ms_membership_proof(*aocl_leaf_index, *sender_randomness, *receiver_preimage)
+            .unwrap();
+
         let msa = rpc_server
             .state
             .lock_guard()
@@ -1391,31 +1425,7 @@ pub mod tests {
             .light_state()
             .mutator_set_accumulator_after()
             .unwrap();
-        let wallet_status = rpc_server
-            .state
-            .lock_guard()
-            .await
-            .wallet_state
-            .get_wallet_status(block_1.hash(), &msa)
-            .await;
-
-        let (utxo, msmp) = &wallet_status.synced_unspent[0];
-        let item = Tip5::hash(&utxo.utxo);
-
-        let msmp_snapshot = rpc_server
-            .restore_membership_proof(vec![msmp.compute_indices(item)])
-            .await
-            .expect("restore to succeed")
-            .snapshot;
-        let extracted_msmp = msmp_snapshot.membership_proofs[0]
-            .clone()
-            .extract_ms_membership_proof(
-                utxo.aocl_leaf_index,
-                msmp.sender_randomness,
-                msmp.receiver_preimage,
-            )
-            .unwrap();
-        assert_eq!(msmp, &extracted_msmp);
+        assert!(msa.verify(item, &extracted_msmp));
 
         // Try submitting a valid transaction (ProofCollection) by RPC.
         let tx_creation_config = TxCreationConfig::default()

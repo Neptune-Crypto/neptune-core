@@ -4,6 +4,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumIter;
+use tasm_lib::prelude::Digest;
 
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -14,14 +15,30 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 pub struct WalletStatusElement {
     pub aocl_leaf_index: u64,
     pub utxo: Utxo,
+    pub sender_randomness: Digest,
+    pub receiver_preimage: Digest,
+    pub ms_membership_proof: Option<MsMembershipProof>,
 }
 
 impl WalletStatusElement {
-    pub fn new(aocl_leaf_index: u64, utxo: Utxo) -> Self {
+    pub fn new(
+        aocl_leaf_index: u64,
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
+    ) -> Self {
         Self {
             aocl_leaf_index,
             utxo,
+            sender_randomness,
+            receiver_preimage,
+            ms_membership_proof: None,
         }
+    }
+
+    pub(crate) fn with_membership_proof(mut self, ms_membership_proof: MsMembershipProof) -> Self {
+        self.ms_membership_proof = Some(ms_membership_proof);
+        self
     }
 }
 
@@ -61,18 +78,12 @@ impl Display for WalletStatusElement {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WalletStatus {
     /// UTXOs that have a synced and valid membership proof
-    pub synced_unspent: Vec<(WalletStatusElement, MsMembershipProof)>,
+    pub synced_unspent: Vec<WalletStatusElement>,
 
-    /// UTXOs that have a synced membership proof but it is invalid (probably
-    /// because it was spent)
-    pub synced_spent: Vec<WalletStatusElement>,
+    /// Utxos that were spent
+    pub spent: Vec<WalletStatusElement>,
 
     /// UTXOs that do not have a synced membership proof
-    ///
-    /// note: this field is presently only used by:
-    ///  a) unit test(s)
-    ///  b) indirectly the neptune-cli `wallet-status` command when
-    ///     it json serializes `WalletStatus` to stdout.
     pub unsynced: Vec<WalletStatusElement>,
 }
 
@@ -81,7 +92,7 @@ impl WalletStatus {
     pub fn total_confirmed(&self) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
-            .map(|(wse, _msmp)| &wse.utxo)
+            .map(|wse| &wse.utxo)
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
     }
@@ -90,7 +101,7 @@ impl WalletStatus {
     pub fn available_confirmed(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
-            .map(|(wse, _msmp)| &wse.utxo)
+            .map(|wse| &wse.utxo)
             .filter(|utxo| utxo.can_spend_at(timestamp))
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
@@ -100,7 +111,7 @@ impl WalletStatus {
     pub fn synced_unspent_timelocked_amount(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
-            .map(|(wse, _msmp)| &wse.utxo)
+            .map(|wse| &wse.utxo)
             .filter(|utxo| !utxo.can_spend_at(timestamp))
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
@@ -173,18 +184,18 @@ impl WalletStatusExportFormat {
                     wallet_status
                         .synced_unspent
                         .iter()
-                        .map(|(wse, _)| wse)
+                        .map(|wse| wse)
                         .map(row)
                         .join("\n"),
                     wallet_status
                         .synced_unspent
                         .iter()
-                        .map(|(wse, _)| wse.utxo.get_native_currency_amount())
+                        .map(|wse| wse.utxo.get_native_currency_amount())
                         .sum::<NativeCurrencyAmount>()
                         .display_lossless(),
-                    wallet_status.synced_spent.iter().map(row).join("\n"),
+                    wallet_status.spent.iter().map(row).join("\n"),
                     wallet_status
-                        .synced_spent
+                        .spent
                         .iter()
                         .map(|wse| wse.utxo.get_native_currency_amount())
                         .sum::<NativeCurrencyAmount>()
@@ -208,7 +219,7 @@ mod tests {
 
     impl WalletStatus {
         pub(crate) fn num_elements(&self) -> usize {
-            self.synced_spent.len() + self.synced_unspent.len() + self.unsynced.len()
+            self.spent.len() + self.synced_unspent.len() + self.unsynced.len()
         }
     }
 }

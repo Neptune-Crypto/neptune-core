@@ -1405,6 +1405,23 @@ impl ArchivalState {
         }
     }
 
+    /// Returns true iff the (block height, block hash) pair represents a block
+    /// in the canonical chain.
+    pub(crate) async fn is_canonical_block(
+        &self,
+        block_hash: Digest,
+        block_height: BlockHeight,
+    ) -> bool {
+        let block_height: u64 = block_height.into();
+        self.archival_block_mmr
+            .ammr()
+            .try_get_leaf(block_height)
+            .await
+            .is_some_and(|canonical_digest_at_this_height| {
+                canonical_digest_at_this_height == block_hash
+            })
+    }
+
     /// Return a boolean indicating if block belongs to most canonical chain.
     ///
     /// Returns false if either the block is not known, or if it's known but

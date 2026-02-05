@@ -203,13 +203,12 @@ impl Utxo {
         }
 
         // decode and test release date(s) (if any)
-        for state in self
+        for coin in self
             .coins
             .iter()
             .filter(|c| c.type_script_hash == TimeLock.hash())
-            .map(|c| c.state.clone())
         {
-            match Timestamp::decode(&state) {
+            match Timestamp::decode(&coin.state) {
                 Ok(release_date) => {
                     if timestamp <= *release_date {
                         return false;

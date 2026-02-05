@@ -597,7 +597,6 @@ pub(crate) mod tests {
             );
 
             // 4th block after hard fork, with a transaction.
-            // Create transaction
             let tx_timestamp = block_f.header().timestamp + Timestamp::minutes(6);
             let tx_artifacts = tx_with_n_outputs(bob.clone(), 2, tx_timestamp).await;
             bob.api_mut()
