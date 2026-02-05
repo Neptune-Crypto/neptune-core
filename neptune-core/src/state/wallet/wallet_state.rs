@@ -187,7 +187,7 @@ impl<'a> UtxoValidityChecker<'a> {
     }
 
     #[inline]
-    async fn synced_and_spent(&self, monitored_utxo: &MonitoredUtxo) -> MonitoredUtxoState {
+    async fn mutxo_state(&self, monitored_utxo: &MonitoredUtxo) -> MonitoredUtxoState {
         match self {
             UtxoValidityChecker::Light {
                 tip_digest,
@@ -1957,7 +1957,7 @@ impl WalletState {
         let stream = monitored_utxos.stream().await;
         pin_mut!(stream); // needed for iteration
         while let Some((_i, mutxo)) = stream.next().await {
-            let mutxo_status = validity_checker.synced_and_spent(&mutxo).await;
+            let mutxo_status = validity_checker.mutxo_state(&mutxo).await;
 
             let mut wse = WalletStatusElement::new(
                 mutxo.aocl_leaf_index,
@@ -1988,28 +1988,27 @@ impl WalletState {
         }
     }
 
-    pub async fn get_all_own_coins_with_possible_timelocks(
+    pub async fn get_all_own_coins_with_possible_timelocks<'a>(
         &self,
-        mutator_set_accumulator: &MutatorSetAccumulator,
-        tip_digest: Digest,
+        validity_checker: &UtxoValidityChecker<'a>,
     ) -> Vec<CoinWithPossibleTimeLock> {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut own_coins = vec![];
 
         let stream = monitored_utxos.stream_values().await;
         pin_mut!(stream); // needed for iteration
-
         while let Some(mutxo) = stream.next().await {
             if mutxo.abandoned_at.is_some() || mutxo.get_latest_membership_proof_entry().is_none() {
                 continue;
             }
-            let Some(msmp) = mutxo.membership_proof_ref_for_block(tip_digest) else {
-                continue;
-            };
-            let is_spent = !mutator_set_accumulator.verify(Tip5::hash(&mutxo.utxo), msmp);
-            if is_spent {
-                continue;
+
+            let status = validity_checker.mutxo_state(&mutxo).await;
+            match status {
+                MonitoredUtxoState::Spent => continue,
+                MonitoredUtxoState::Unsynced => continue,
+                MonitoredUtxoState::SyncedAndUnspent => (),
             }
+
             let coin = CoinWithPossibleTimeLock {
                 amount: mutxo.utxo.get_native_currency_amount(),
                 confirmed: mutxo.confirmed_in_block.1,

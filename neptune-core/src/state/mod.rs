@@ -1592,24 +1592,48 @@ impl GlobalState {
         let stream = monitored_utxos.stream_many_values((0..monitored_utxos.len().await).rev());
         pin_mut!(stream); // needed for iteration
 
-        while let Some(mutxo) = stream.next().await {
-            if max_confirmed_in_block.is_none()
-                && mutxo
-                    .get_membership_proof_for_block(current_tip_digest)
-                    .is_some()
-            {
-                let (.., confirmed_in_block) = mutxo.confirmed_in_block;
-                max_confirmed_in_block = Some(confirmed_in_block);
-            }
+        let is_archival = self.chain.is_archival_node();
 
-            if let Some((.., spent_in_block)) = mutxo.spent_in_block {
-                if mutxo
-                    .get_membership_proof_for_block(current_tip_digest)
-                    .is_some()
-                    && (max_spent_in_block.is_none()
-                        || max_spent_in_block.is_some_and(|x| x < spent_in_block))
+        while let Some(mutxo) = stream.next().await {
+            if is_archival {
+                if max_confirmed_in_block.is_none() {
+                    let (hash, _, height) = mutxo.confirmed_in_block;
+                    if self
+                        .chain
+                        .archival_state()
+                        .is_canonical_block(hash, height)
+                        .await
+                    {
+                        max_confirmed_in_block = Some(height);
+                    }
+                }
+
+                if let Some((_, _, spent_in_block)) = mutxo.spent_in_block {
+                    if max_spent_in_block.is_none()
+                        || max_spent_in_block.is_some_and(|x| x < spent_in_block)
+                    {
+                        max_spent_in_block = Some(spent_in_block);
+                    }
+                }
+            } else {
+                if max_confirmed_in_block.is_none()
+                    && mutxo
+                        .get_membership_proof_for_block(current_tip_digest)
+                        .is_some()
                 {
-                    max_spent_in_block = Some(spent_in_block);
+                    let (.., confirmed_in_block) = mutxo.confirmed_in_block;
+                    max_confirmed_in_block = Some(confirmed_in_block);
+                }
+
+                if let Some((.., spent_in_block)) = mutxo.spent_in_block {
+                    if mutxo
+                        .get_membership_proof_for_block(current_tip_digest)
+                        .is_some()
+                        && (max_spent_in_block.is_none()
+                            || max_spent_in_block.is_some_and(|x| x < spent_in_block))
+                    {
+                        max_spent_in_block = Some(spent_in_block);
+                    }
                 }
             }
         }

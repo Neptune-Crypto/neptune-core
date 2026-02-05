@@ -131,6 +131,7 @@ use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutputList;
+use crate::state::wallet::wallet_state::UtxoValidityChecker;
 use crate::state::wallet::wallet_status::WalletStatus;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
@@ -4014,15 +4015,23 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let tip = state.chain.light_state();
-        let tip_hash = tip.hash();
-        let tip_msa = tip
-            .mutator_set_accumulator_after()
-            .expect("Block from state must have mutator set after");
+        let validity_checker = if state.chain.is_archival_node() {
+            UtxoValidityChecker::Archival(&state.chain.archival_state())
+        } else {
+            let tip = state.chain.light_state();
+            let tip_hash = tip.hash();
+            let tip_msa = tip
+                .mutator_set_accumulator_after()
+                .expect("Block from state must have mutator set after");
+            UtxoValidityChecker::Light {
+                tip_digest: tip_hash,
+                mutator_set_accumulator: tip_msa,
+            }
+        };
 
         Ok(state
             .wallet_state
-            .get_all_own_coins_with_possible_timelocks(&tip_msa, tip_hash)
+            .get_all_own_coins_with_possible_timelocks(&validity_checker)
             .await)
     }
 
