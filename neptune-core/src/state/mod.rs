@@ -2490,14 +2490,6 @@ impl GlobalState {
             )
             .await;
 
-        // Get new membership proofs from mutator set accumulator, in case
-        // wallet didn't set these from block data.
-        if !maintain_mps_in_wallet {
-            debug!("Setting MS membership proofs in wallet");
-            self.restore_monitored_utxos_from_archival_mutator_set()
-                .await;
-        }
-
         debug!("Handling mempool events.");
         self.wallet_state
             .handle_mempool_events(mempool_events)
