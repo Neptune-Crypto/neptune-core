@@ -115,7 +115,6 @@ pub async fn next_block_incoming_utxos(
     num_outputs: usize,
     sender: &GlobalState,
     timestamp: Timestamp,
-    network: Network,
     notification_medium: UtxoNotificationMedium,
 ) -> (Block, TxOutputList) {
     let one_nau = NativeCurrencyAmount::from_nau(1);
@@ -160,6 +159,7 @@ pub async fn next_block_incoming_utxos(
         .collect_vec()
         .into();
 
+    let network = sender.cli().network;
     let tx_details = TransactionDetails::new_without_coinbase(
         input_funds,
         outputs.clone(),

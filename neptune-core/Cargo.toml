@@ -214,13 +214,13 @@ path = "benchmark/benches/fast_kernel_mast_hash.rs"
 harness = false
 
 [[bench]]
-name = "set_new_tip"
-path = "benchmark/benches/set_new_tip.rs"
+name = "wallet_rescan"
+path = "benchmark/benches/wallet_rescan.rs"
 harness = false
 
 [[bench]]
-name = "wallet_rescan"
-path = "benchmark/benches/wallet_rescan.rs"
+name = "wallet_set_new_tip"
+path = "benchmark/benches/wallet_set_new_tip.rs"
 harness = false
 
 [[bench]]

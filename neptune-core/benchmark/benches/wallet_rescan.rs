@@ -65,7 +65,6 @@ mod rescan {
                 10,
                 &global_state,
                 timestamp,
-                network,
                 notification_medium,
             ));
             let expected_utxos =
