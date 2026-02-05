@@ -63,7 +63,7 @@ mod rescan {
                 &block,
                 own_address.clone(),
                 10,
-                &global_state.wallet_state,
+                &global_state,
                 timestamp,
                 network,
                 notification_medium,

@@ -113,7 +113,7 @@ pub async fn next_block_incoming_utxos(
     parent: &Block,
     recipient: ReceivingAddress,
     num_outputs: usize,
-    sender: &WalletState,
+    sender: &GlobalState,
     timestamp: Timestamp,
     network: Network,
     notification_medium: UtxoNotificationMedium,
@@ -134,18 +134,19 @@ pub async fn next_block_incoming_utxos(
         + fee;
 
     let msa = parent.mutator_set_accumulator_after().unwrap();
-    let wallet_status = sender.get_wallet_status(parent.hash(), &msa).await;
+    let wallet_status = sender.get_wallet_status_for_tip().await;
     let available_balance = wallet_status.available_confirmed(timestamp);
     let change_amt = available_balance.checked_sub(&intermediate_spend).unwrap();
 
     outputs.push((recipient.clone(), change_amt));
 
     let mut input_funds: Vec<TxInput> = vec![];
-    for input in sender.spendable_inputs(wallet_status, timestamp) {
+    for input in sender.spendable_inputs(wallet_status, timestamp).await {
         input_funds.push(input);
     }
 
     let owned = sender
+        .wallet_state
         .get_all_known_addressable_spending_keys()
         .map(|x| x.to_address())
         .any(|x| x == recipient);

@@ -96,10 +96,13 @@ use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_input::TxInput;
+use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
+use crate::state::wallet::wallet_state::UtxoValidityChecker;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::ArchivalState;
 use crate::RPCServerToMain;
@@ -768,18 +771,52 @@ impl GlobalState {
             .shuffle_seed(next_block_height)
     }
 
-    pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
-        let tip_digest = self.chain.light_state().hash();
-        let mutator_set_accumulator = self
-            .chain
-            .light_state()
-            .mutator_set_accumulator_after()
-            .expect("block in state must have mutator set after");
-        self.wallet_state
-            .get_wallet_status(tip_digest, &mutator_set_accumulator)
-            .await
+    /// Returns true iff the node does not need to maintain mutator set
+    /// membership proofs but can instead rely on the archival state.
+    fn prefer_archive_over_membership_proofs(&self) -> bool {
+        let is_archival = self.chain.is_archival_node();
+
+        #[cfg(test)]
+        {
+            is_archival
+                && self
+                    .chain
+                    .archival_state()
+                    .genesis_block
+                    .header()
+                    .height
+                    .is_genesis()
+                && !self.force_wallet_membership_proof_maintance
+        }
+        #[cfg(not(test))]
+        {
+            is_archival
+        }
     }
 
+    /// Return the wallet status relative to the current tip.
+    pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
+        let use_archival_state = self.prefer_archive_over_membership_proofs();
+
+        let validity_checker = if use_archival_state {
+            UtxoValidityChecker::Archival(self.chain.archival_state())
+        } else {
+            let tip_digest = self.chain.light_state().hash();
+            let mutator_set_accumulator = self
+                .chain
+                .light_state()
+                .mutator_set_accumulator_after()
+                .expect("block in state must have mutator set after");
+            UtxoValidityChecker::Light {
+                tip_digest,
+                mutator_set_accumulator,
+            }
+        };
+
+        self.wallet_state.get_wallet_status(&validity_checker).await
+    }
+
+    /// Return the [`ConsensusRuleSet`] that applies for current tip.
     pub(crate) fn consensus_rule_set(&self) -> ConsensusRuleSet {
         let tip_height = self.chain.light_state().header().height;
         ConsensusRuleSet::infer_from(self.cli().network, tip_height)
@@ -1626,6 +1663,92 @@ impl GlobalState {
         history
     }
 
+    /// Returns all spendable inputs.
+    ///
+    /// wallet_status must be current as of present tip.
+    ///
+    ///   excludes utxos:
+    ///     + that are timelocked in the future
+    ///     + that are unspendable (no spending key)
+    ///     + that are already spent by transactions in the mempool
+    pub(crate) async fn spendable_inputs(
+        &self,
+        wallet_status: WalletStatus,
+        timestamp: Timestamp,
+    ) -> impl IntoIterator<Item = TxInput> + use<'_> {
+        // Build a hashset of all tx inputs presently in the mempool.
+        let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
+            .wallet_state
+            .mempool_spent_utxos
+            .iter()
+            .flat_map(|(_txkid, tx_inputs)| tx_inputs.keys())
+            .copied()
+            .collect();
+
+        let lock_script_hash_to_spending_key: HashMap<Digest, SpendingKey> = self
+            .wallet_state
+            .get_all_known_spending_keys()
+            .map(|x| (x.lock_script_hash(), x))
+            .collect();
+
+        // filter spendable inputs.
+        let mut unlocked_utxos = vec![];
+        for wse in wallet_status.synced_unspent.into_iter() {
+            // filter out UTXOs that are still timelocked.
+            if !wse.utxo.can_spend_at(timestamp) {
+                continue;
+            }
+
+            // filter out inputs that are already spent by txs in mempool.
+            let item = Tip5::hash(&wse.utxo);
+            let absolute_index_set = AbsoluteIndexSet::compute(
+                item,
+                wse.sender_randomness,
+                wse.receiver_preimage,
+                wse.aocl_leaf_index,
+            );
+            if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
+                continue;
+            }
+
+            // // filter out inputs that we can't spend
+            let Some(spending_key) =
+                lock_script_hash_to_spending_key.get(&wse.utxo.lock_script_hash())
+            else {
+                warn!("spending key not found for utxo: {:?}", wse.utxo);
+                continue;
+            };
+
+            let membership_proof = match wse.ms_membership_proof {
+                Some(msmp) => msmp,
+                None => self
+                    .chain
+                    .archival_state()
+                    .archival_mutator_set
+                    .ams()
+                    .restore_membership_proof(
+                        item,
+                        wse.sender_randomness,
+                        wse.receiver_preimage,
+                        wse.aocl_leaf_index,
+                    )
+                    .await
+                    .expect("Spendable monitored UTXOs must have valid membership proofs"),
+            };
+
+            // Create the transaction input object
+            let unlocked_utxo = UnlockedUtxo::unlock(
+                wse.utxo.clone(),
+                spending_key.lock_script_and_witness(),
+                membership_proof,
+            )
+            .into();
+            unlocked_utxos.push(unlocked_utxo);
+        }
+
+        unlocked_utxos
+    }
+
     /// retrieves all spendable inputs in the wallet as of the present tip.
     ///
     /// excludes utxos:
@@ -1640,7 +1763,7 @@ impl GlobalState {
         timestamp: Timestamp,
     ) -> impl IntoIterator<Item = TxInput> + use<'_> {
         let wallet_status = self.get_wallet_status_for_tip().await;
-        self.wallet_state.spendable_inputs(wallet_status, timestamp)
+        self.spendable_inputs(wallet_status, timestamp).await
     }
 
     pub(crate) fn get_own_handshakedata(&self) -> HandshakeData {
@@ -2295,8 +2418,6 @@ impl GlobalState {
     ///
     /// - If the stored block is found but does not have a mutator set update.
     pub(crate) async fn set_tip_to_stored_block(&mut self, block_digest: Digest) -> Result<()> {
-        // If the node not archival, it cannot sync the wallet. So in this case,
-        // abort early.
         ensure!(
             self.chain.is_archival_node(),
             "node must be archival in order to set tip to stored block"
@@ -2960,6 +3081,11 @@ mod tests {
     }
 
     impl GlobalStateLock {
+        /// Set to force wallet to maintain its own mutator set membership
+        /// proofs. If not set, then membership proofs are handled by the
+        /// `ArchivalMutatorSet` in case any such is maintained. Used by tests
+        /// to verify correct mutator set membership proof maintanence, usually
+        /// across reorganizations.
         async fn force_wallet_membership_proof_maintance(&mut self) {
             self.lock_mut(|x| x.force_wallet_membership_proof_maintance = true)
                 .await;
@@ -3695,14 +3821,31 @@ mod tests {
             .set_tip_to_stored_block(target_block.hash())
             .await
             .unwrap();
+        println!(
+            "Setting tip to: {} / {}",
+            target_block.header().height,
+            target_block.hash()
+        );
 
         assert_eq!(alice_gsl.chain.light_state().hash(), target_block.hash());
 
         let wallet_status_7 = alice_gsl.get_wallet_status_for_tip().await;
+        println!(
+            "wallet_status_7: {}",
+            WalletStatusExportFormat::Table.export(&wallet_status_7)
+        );
+
+        println!(
+            "Current tip: {} / {}",
+            alice_gsl.chain.light_state().header().height,
+            alice_gsl.chain.light_state().hash()
+        );
         let timestamp_7 = current_block.header().timestamp;
+        println!("timestamp_7: {}", timestamp_7.standard_format());
+        let wallet_balance_7 = wallet_status_7.available_confirmed(timestamp_7);
         assert_eq!(
-            expected_branch_a_liquid_balance,
-            wallet_status_7.available_confirmed(timestamp_7),
+            expected_branch_a_liquid_balance, wallet_balance_7,
+            "wallet balance: {wallet_balance_7}.\nExpected: {expected_branch_a_liquid_balance}"
         );
 
         // Can set tip to genesis
@@ -4582,15 +4725,7 @@ mod tests {
                 // block 1a.
                 assert_eq!(
                     3,
-                    alice
-                        .wallet_state
-                        .get_wallet_status(
-                            mock_block_1a.hash(),
-                            &mock_block_1a.mutator_set_accumulator_after().unwrap()
-                        )
-                        .await
-                        .synced_unspent
-                        .len()
+                    alice.get_wallet_status_for_tip().await.synced_unspent.len()
                 );
                 assert_eq!(3, alice.get_balance_history().await.len());
 
@@ -4620,13 +4755,7 @@ mod tests {
                 }
 
                 // Verify that two MUTXOs are unsynced, and that 1 (from genesis) is synced
-                let alice_wallet_status_after_reorg = alice
-                    .wallet_state
-                    .get_wallet_status(
-                        parent_block.hash(),
-                        &parent_block.mutator_set_accumulator_after().unwrap(),
-                    )
-                    .await;
+                let alice_wallet_status_after_reorg = alice.get_wallet_status_for_tip().await;
                 assert_eq!(1, alice_wallet_status_after_reorg.synced_unspent.len());
                 assert_eq!(2, alice_wallet_status_after_reorg.unsynced.len());
 
@@ -4689,15 +4818,7 @@ mod tests {
                     // Verify that composer UTXOs were recorded
                     assert_eq!(
                         3,
-                        alice
-                            .wallet_state
-                            .get_wallet_status(
-                                block_1.hash(),
-                                &block_1.mutator_set_accumulator_after().unwrap()
-                            )
-                            .await
-                            .synced_unspent
-                            .len()
+                        alice.get_wallet_status_for_tip().await.synced_unspent.len()
                     );
                 }
 
@@ -4739,19 +4860,12 @@ mod tests {
                 );
 
                 // Add 60 blocks on top of 1, *not* mined by Alice
-                let fork_a_block = a_blocks.last().unwrap().to_owned();
                 for branch_block in a_blocks {
                     alice.set_new_tip(branch_block).await.unwrap();
                 }
 
                 // Verify that all both MUTXOs have synced MPs
-                let wallet_status_on_a_fork = alice
-                    .wallet_state
-                    .get_wallet_status(
-                        fork_a_block.hash(),
-                        &fork_a_block.mutator_set_accumulator_after().unwrap(),
-                    )
-                    .await;
+                let wallet_status_on_a_fork = alice.get_wallet_status_for_tip().await;
 
                 assert_eq!(3, wallet_status_on_a_fork.synced_unspent.len());
 
@@ -4762,13 +4876,8 @@ mod tests {
                 }
 
                 // Verify that there are zero MUTXOs with synced MPs
-                let alice_wallet_status_on_b_fork_before_resync = alice
-                    .wallet_state
-                    .get_wallet_status(
-                        fork_b_block.hash(),
-                        &fork_b_block.mutator_set_accumulator_after().unwrap(),
-                    )
-                    .await;
+                let alice_wallet_status_on_b_fork_before_resync =
+                    alice.get_wallet_status_for_tip().await;
                 assert_eq!(
                     0,
                     alice_wallet_status_on_b_fork_before_resync
@@ -4793,13 +4902,7 @@ mod tests {
                     }
                 };
 
-                let wallet_status_on_b_fork_after_resync = alice
-                    .wallet_state
-                    .get_wallet_status(
-                        fork_b_block.hash(),
-                        &fork_b_block.mutator_set_accumulator_after().unwrap(),
-                    )
-                    .await;
+                let wallet_status_on_b_fork_after_resync = alice.get_wallet_status_for_tip().await;
                 assert_eq!(
                     3,
                     wallet_status_on_b_fork_after_resync.synced_unspent.len(),
@@ -4819,13 +4922,8 @@ mod tests {
                 }
 
                 // Verify that there are zero MUTXOs with synced MPs
-                let alice_wallet_status_on_c_fork_before_resync = alice
-                    .wallet_state
-                    .get_wallet_status(
-                        fork_c_block.hash(),
-                        &fork_c_block.mutator_set_accumulator_after().unwrap(),
-                    )
-                    .await;
+                let alice_wallet_status_on_c_fork_before_resync =
+                    alice.get_wallet_status_for_tip().await;
                 assert_eq!(
                     0,
                     alice_wallet_status_on_c_fork_before_resync
@@ -4851,13 +4949,7 @@ mod tests {
                     }
                 };
 
-                let alice_ws_c_after_resync = alice
-                    .wallet_state
-                    .get_wallet_status(
-                        fork_c_block.hash(),
-                        &fork_c_block.mutator_set_accumulator_after().unwrap(),
-                    )
-                    .await;
+                let alice_ws_c_after_resync = alice.get_wallet_status_for_tip().await;
                 assert_eq!(1, alice_ws_c_after_resync.synced_unspent.len());
                 assert_eq!(2, alice_ws_c_after_resync.unsynced.len());
 
@@ -6151,18 +6243,9 @@ mod tests {
             let tip = old_state.chain.light_state();
             assert_eq!(*tip, new_state.chain.archival_state().get_tip().await);
             assert_eq!(*tip, old_state.chain.archival_state().get_tip().await);
-            let msa = tip.mutator_set_accumulator_after().unwrap();
             assert_eq!(
-                old_state
-                    .wallet_state
-                    .get_wallet_status(tip.hash(), &msa)
-                    .await
-                    .synced_unspent,
-                new_state
-                    .wallet_state
-                    .get_wallet_status(tip.hash(), &msa)
-                    .await
-                    .synced_unspent,
+                old_state.get_wallet_status_for_tip().await.synced_unspent,
+                new_state.get_wallet_status_for_tip().await.synced_unspent,
                 "Restored wallet state must agree with original state"
             );
         }
