@@ -17,7 +17,7 @@ pub(crate) mod wallet_configuration;
 pub(crate) mod wallet_db_tables;
 pub mod wallet_entropy;
 pub mod wallet_file;
-pub(crate) mod wallet_state;
+pub mod wallet_state;
 pub mod wallet_status;
 
 #[cfg(test)]

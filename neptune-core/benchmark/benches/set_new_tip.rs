@@ -14,47 +14,90 @@ fn main() {
 
 mod set_new_tip {
 
+    use neptune_cash::state::{wallet::wallet_state::UtxoValidityChecker, GlobalStateLock};
+
     use super::*;
 
-    fn update_state<const NUM_OUTPUTS_IN_TX: usize, const NUM_BLOCKS: usize>(bencher: Bencher) {
-        // The goal is to benchmark how long it takes to run `set_new_tip` when
+    async fn setup<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
+    ) -> (GlobalStateLock, [Block; NUM_BLOCKS]) {
+        // The goal is to benchmark various parts of state updating or reading how long it takes to run `set_new_tip` when
         // a block has many inputs and outputs. To build a block with many
         // inputs, we first need to get the wallet to a state where it has many
         // UTXOs.
-        let rt = tokio::runtime::Runtime::new().unwrap();
+
         let network = Network::Main;
         let cli_args = cli_args::Args::default_with_network(network);
-
-        let mut global_state = rt.block_on(devops_global_state_genesis(cli_args));
-        let mut global_state = rt.block_on(global_state.lock_guard_mut());
-        let own_address = rt
-            .block_on(
-                global_state
-                    .wallet_state
-                    .next_unused_spending_key(KeyType::Generation),
-            )
-            .to_address();
         let genesis = Block::genesis(network);
-
         let mut blocks = vec![genesis];
-        for _ in 0..NUM_BLOCKS {
-            let prev = blocks.last().unwrap();
-            let timestamp = prev.header().timestamp + Timestamp::months(7);
-            let (block, _) = rt.block_on(next_block_incoming_utxos(
-                prev,
-                own_address.clone(),
-                NUM_OUTPUTS_IN_TX,
-                &global_state,
-                timestamp,
-                network,
-                UtxoNotificationMedium::OnChain,
-            ));
 
-            rt.block_on(global_state.set_new_tip(block.clone()))
-                .unwrap();
+        let mut global_state = devops_global_state_genesis(cli_args).await;
+        {
+            let mut global_state = global_state.lock_guard_mut().await;
+            let own_address = global_state
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation)
+                .await
+                .to_address();
+            for _ in 0..NUM_BLOCKS {
+                let prev = blocks.last().unwrap();
+                let timestamp = prev.header().timestamp + Timestamp::months(7);
+                let (block, _) = next_block_incoming_utxos(
+                    prev,
+                    own_address.clone(),
+                    NUM_OUTPUTS_PER_TX,
+                    &global_state,
+                    timestamp,
+                    network,
+                    UtxoNotificationMedium::OnChain,
+                )
+                .await;
 
-            blocks.push(block);
+                global_state.set_new_tip(block.clone()).await.unwrap();
+
+                blocks.push(block);
+            }
         }
+
+        (global_state, blocks[1..].to_vec().try_into().unwrap())
+    }
+
+    fn list_coins<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
+        bencher: Bencher,
+        use_archive: bool,
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let state = rt.block_on(global_state.lock_guard_mut());
+
+        let validity_checker = if use_archive {
+            UtxoValidityChecker::Archival(state.chain.archival_state())
+        } else {
+            let tip = state.chain.light_state();
+            let tip_hash = tip.hash();
+            let tip_msa = tip
+                .mutator_set_accumulator_after()
+                .expect("Block from state must have mutator set after");
+            UtxoValidityChecker::Light {
+                tip_digest: tip_hash,
+                mutator_set_accumulator: tip_msa,
+            }
+        };
+
+        bencher.bench_local(|| {
+            rt.block_on(
+                state
+                    .wallet_state
+                    .get_all_own_coins_with_possible_timelocks(&validity_checker),
+            );
+        });
+    }
+
+    fn update_state<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(bencher: Bencher) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, blocks) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let mut global_state = rt.block_on(global_state.lock_guard_mut());
 
         bencher.bench_local(|| {
             for block in blocks.clone() {
@@ -66,5 +109,15 @@ mod set_new_tip {
     #[divan::bench(sample_count = 10)]
     fn set_new_tip_1000_4(bencher: Bencher) {
         update_state::<1000, 4>(bencher);
+    }
+
+    #[divan::bench(sample_count = 10)]
+    fn list_coins_1000_4_with_archive(bencher: Bencher) {
+        list_coins::<1000, 4>(bencher, true);
+    }
+
+    #[divan::bench(sample_count = 10)]
+    fn list_coins_1000_4_with_light_state(bencher: Bencher) {
+        list_coins::<1000, 4>(bencher, false);
     }
 }
