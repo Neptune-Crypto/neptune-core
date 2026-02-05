@@ -525,33 +525,73 @@ impl Mempool {
             .map(|x| (&x.transaction, x.upgrade_priority))
     }
 
-    /// Returns the list of transactions already in the mempool that a
-    /// transaction conflicts with.
-    ///
-    /// Returns the empty list if there are no conflicts
-    fn transaction_conflicts_with(
+    /// Returns an iterator over mempool items that are in conflict (not
+    /// simultaneously confirmable with) the given transaction kernel.
+    fn transactions_in_conflict_with(
         &self,
-        transaction: &Transaction,
-    ) -> HashMap<TransactionKernelId, &Transaction> {
+        kernel: &TransactionKernel,
+    ) -> impl Iterator<Item = (&TransactionKernelId, &MempoolTransaction)> {
         // This check could be made a lot more efficient, for example with an invertible Bloom filter
-        let tx_sbf_indices: HashSet<_> = transaction
-            .kernel
+        let tx_sbf_index_sets: HashSet<_> = kernel
             .inputs
             .iter()
             .map(|x| x.absolute_indices.to_array())
             .collect();
 
-        let mut conflict_txs_in_mempool = HashMap::new();
-        for (txid, tx) in &self.tx_dictionary {
-            for mempool_tx_input in &tx.transaction.kernel.inputs {
-                if tx_sbf_indices.contains(&mempool_tx_input.absolute_indices.to_array()) {
-                    conflict_txs_in_mempool.insert(*txid, &tx.transaction);
-                    break;
-                }
-            }
-        }
+        self.tx_dictionary.iter().filter(move |(_txkid, mptx)| {
+            mptx.transaction
+                .kernel
+                .inputs
+                .iter()
+                .any(|rr| tx_sbf_index_sets.contains(&rr.absolute_indices.to_array()))
+        })
+    }
 
-        conflict_txs_in_mempool
+    /// Returns an iterator over mempool items that are either confirmed or made
+    /// unconfirmable by the given block.
+    fn transactions_kicked_by_block(
+        &self,
+        block: &Block,
+    ) -> impl Iterator<Item = (&TransactionKernelId, &MempoolTransaction)> {
+        self.transactions_in_conflict_with(block.body().transaction_kernel())
+    }
+
+    /// Returns an iterator over mempool items that are confirmed by the given
+    /// block.
+    fn transactions_confirmed_by_block(
+        &self,
+        block: &Block,
+    ) -> impl Iterator<Item = (&TransactionKernelId, &MempoolTransaction)> {
+        let kernel = block.body().transaction_kernel().clone();
+        self.transactions_kicked_by_block(block)
+            .filter(move |(_txkid, mptx)| {
+                mptx.transaction
+                    .kernel
+                    .outputs
+                    .iter()
+                    .all(|ar| kernel.outputs.contains(ar))
+            })
+    }
+
+    /// Returns a list of [`TransactionKernelId`]s corresponding to mempool
+    /// transactions that were initiated by as and are confirmed by the given
+    /// block
+    ///
+    /// The presence of a [`PrimitiveWitness`] is used as an indicator to
+    /// determine whether the transaction was initiated by us or not.
+    pub(crate) fn own_transactions_confirmed_by_block(
+        &self,
+        block: &Block,
+    ) -> Vec<TransactionKernelId> {
+        self.transactions_confirmed_by_block(block)
+            .filter_map(|(txkid, mptx)| {
+                if mptx.primitive_witness.is_some() {
+                    Some(*txkid)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Insert a transaction into the mempool. It is the caller's responsibility
@@ -630,7 +670,10 @@ impl Mempool {
         // that were merged since the merged transaction is *very* likely to
         // have a higher fee density that the lowest one of the ones that were
         // merged.
-        let conflicts = self.transaction_conflicts_with(&new_tx);
+        let conflicts: HashMap<TransactionKernelId, &Transaction> = self
+            .transactions_in_conflict_with(&new_tx.kernel)
+            .map(|(txkid, mptx)| (*txkid, &mptx.transaction))
+            .collect();
 
         // Do not insert an existing transaction again, if its an exact copy.
         let txid = new_tx.txid();
