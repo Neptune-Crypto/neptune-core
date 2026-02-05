@@ -44,7 +44,6 @@ mod tests {
     use tasm_lib::triton_vm::prelude::XFieldElement;
     use tasm_lib::twenty_first::math::x_field_element::EXTENSION_DEGREE;
     use tracing_test::traced_test;
-    use unlocked_utxo::UnlockedUtxo;
 
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;
@@ -76,7 +75,6 @@ mod tests {
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
-    use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
     use crate::tests::shared_tokio_runtime;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
@@ -290,7 +288,7 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn allocate_sufficient_input_funds_test() {
+    async fn spendable_utxos_test() {
         // Scenario:
         // Alice is not coinbase recipient. She mines many blocks. It is tested
         // that the method [WalletState::allocate_sufficient_input_funds]
@@ -322,38 +320,24 @@ mod tests {
             expected_utxos[1].utxo.release_date().is_some(),
             "2nd expected composer UTXO should be timelocked"
         );
-        let liquid_mining_reward = liquid_expected_utxo.utxo.get_native_currency_amount();
         let now = genesis_block.header().timestamp + Timestamp::months(10);
 
-        let allocate_input_utxos = |alice_: GlobalStateLock, amount: NativeCurrencyAmount| async move {
-            let (tip_digest, ms_acc) = alice_
-                .lock(|alice_global_state| {
-                    (
-                        alice_global_state.chain.light_state().hash(),
-                        alice_global_state
-                            .chain
-                            .light_state()
-                            .mutator_set_accumulator_after()
-                            .unwrap(),
-                    )
-                })
-                .await;
+        let spendable_utxos = |alice_: GlobalStateLock| async move {
             alice_
                 .lock_guard()
                 .await
-                .wallet_state
-                .allocate_sufficient_input_funds(amount, tip_digest, &ms_acc, now)
+                .wallet_spendable_inputs(now)
                 .await
+                .into_iter()
+                .collect_vec()
         };
-        let num_utxos_in_allocation = |alice_: GlobalStateLock, amount: NativeCurrencyAmount| async move {
-            allocate_input_utxos(alice_, amount).await.map(|x| x.len())
-        };
+        let num_spendable_utxos =
+            |alice_: GlobalStateLock| async move { spendable_utxos(alice_).await.len() };
 
-        assert!(
-            num_utxos_in_allocation(alice.clone(), NativeCurrencyAmount::coins(1),)
-                .await
-                .is_err(),
-            "Cannot allocate anything when wallet is empty"
+        assert_eq!(
+            0,
+            num_spendable_utxos(alice.clone()).await,
+            "Nothing spendable when wallet is empty"
         );
 
         // Add block 1 to wallet state
@@ -366,37 +350,9 @@ mod tests {
             alice_mut.set_new_tip(block_1.clone()).await.unwrap();
         }
 
-        // Verify that the allocater returns a sane amount
-        let one_coin = NativeCurrencyAmount::coins(1);
-        assert_eq!(
-            1,
-            num_utxos_in_allocation(alice.clone(), one_coin)
-                .await
-                .unwrap(),
-        );
-        assert_eq!(
-            1,
-            num_utxos_in_allocation(
-                alice.clone(),
-                liquid_mining_reward.checked_sub(&one_coin).unwrap(),
-            )
-            .await
-            .unwrap(),
-        );
-        assert_eq!(
-            1,
-            num_utxos_in_allocation(alice.clone(), liquid_mining_reward)
-                .await
-                .unwrap()
-        );
-        assert!(
-            num_utxos_in_allocation(alice.clone(), liquid_mining_reward + one_coin)
-                .await
-                .is_err()
-        );
+        assert_eq!(1, num_spendable_utxos(alice.clone()).await);
 
-        // Mine 21 more blocks and verify that 22 * `liquid_mining_reward` worth
-        // of UTXOs can be allocated.
+        // Mine 21 more blocks and verify that 22 UTXOs are now spendable
         let mut next_block = block_1.clone();
         {
             let mut alice = alice.lock_guard_mut().await;
@@ -410,120 +366,7 @@ mod tests {
             }
         }
 
-        assert_eq!(
-            5,
-            num_utxos_in_allocation(alice.clone(), liquid_mining_reward.scalar_mul(5))
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            6,
-            num_utxos_in_allocation(alice.clone(), liquid_mining_reward.scalar_mul(5) + one_coin)
-                .await
-                .unwrap()
-        );
-
-        let expected_balance = liquid_mining_reward.scalar_mul(22);
-        assert_eq!(
-            22,
-            num_utxos_in_allocation(alice.clone(), expected_balance)
-                .await
-                .unwrap()
-        );
-
-        // Cannot allocate more than we have: 22 * liquid mining reward
-        assert!(
-            num_utxos_in_allocation(alice.clone(), expected_balance + one_coin)
-                .await
-                .is_err()
-        );
-
-        // Make a block that spends an input, then verify that this is reflected by
-        // the allocator.
-        let tx_inputs_two_utxos = alice
-            .lock_guard()
-            .await
-            .wallet_state
-            .allocate_sufficient_input_funds(
-                liquid_mining_reward.scalar_mul(2),
-                next_block.hash(),
-                &next_block.mutator_set_accumulator_after().unwrap(),
-                now,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            2,
-            tx_inputs_two_utxos.len(),
-            "Must use two UTXOs when sending 2 x liquid mining reward"
-        );
-
-        // This block throws away four UTXOs.
-        let msa_tip_previous = next_block.mutator_set_accumulator_after().unwrap().clone();
-        let output_utxo = Utxo::new_native_currency(
-            LockScript::anyone_can_spend().hash(),
-            NativeCurrencyAmount::coins(200),
-        );
-        let tx_outputs: TxOutputList = vec![TxOutput::no_notification(
-            output_utxo,
-            random(),
-            random(),
-            false,
-        )]
-        .into();
-
-        let removal_records = tx_inputs_two_utxos
-            .iter()
-            .map(|txi| txi.removal_record(&msa_tip_previous))
-            .collect_vec();
-        let addition_records = tx_outputs.addition_records();
-        let tx = make_mock_block_transaction_with_mutator_set_hash(
-            removal_records,
-            addition_records,
-            next_block.mutator_set_accumulator_after().unwrap().hash(),
-        );
-
-        let next_block =
-            Block::block_template_invalid_proof(&next_block.clone(), tx, now, None, network);
-        let final_block_height = Into::<BlockHeight>::into(23u64);
-        assert_eq!(final_block_height, next_block.kernel.header.height);
-
-        alice.set_new_tip(next_block.clone()).await.unwrap();
-
-        // can make allocation of coins for entire liquid balance.
-        let alice_balance = {
-            let ags = alice.lock_guard().await;
-            let wallet_status = ags
-                .wallet_state
-                .get_wallet_status(
-                    next_block.hash(),
-                    &next_block.mutator_set_accumulator_after().unwrap(),
-                )
-                .await;
-            wallet_status.available_confirmed(next_block.header().timestamp)
-        };
-        assert!(
-            alice_balance
-                >= allocate_input_utxos(
-                    alice.clone(),
-                    alice_balance
-                        .checked_sub(&NativeCurrencyAmount::coins(1))
-                        .unwrap()
-                )
-                .await
-                .unwrap()
-                .into_iter()
-                .map(|unlocked_utxo: UnlockedUtxo| unlocked_utxo.utxo.get_native_currency_amount())
-                .sum::<NativeCurrencyAmount>()
-        );
-
-        // Cannot allocate more than we have liquid.
-        assert!(allocate_input_utxos(
-            alice.clone(),
-            alice_balance + NativeCurrencyAmount::coins(1)
-        )
-        .await
-        .is_err());
+        assert_eq!(22, num_spendable_utxos(alice.clone()).await);
     }
 
     #[traced_test]
@@ -738,24 +581,14 @@ mod tests {
         );
 
         // Check that `WalletStatus` is returned correctly
-        let alice_wallet_status = alice
-            .lock_guard()
-            .await
-            .wallet_state
-            .get_wallet_status(
-                first_block_after_spree.hash(),
-                &first_block_after_spree
-                    .mutator_set_accumulator_after()
-                    .unwrap(),
-            )
-            .await;
+        let alice_wallet_status = alice.lock_guard().await.get_wallet_status_for_tip().await;
         assert_eq!(
             expected_num_expected_mutxos_alice,
             alice_wallet_status.synced_unspent.len(),
             "Wallet must have {expected_num_expected_mutxos_alice} synced, unspent UTXOs",
         );
         assert!(
-            alice_wallet_status.synced_spent.is_empty(),
+            alice_wallet_status.spent.is_empty(),
             "Wallet must have 0 synced, spent UTXOs"
         );
         assert!(
@@ -1318,13 +1151,7 @@ mod tests {
                 let premine_recipient =
                     mock_genesis_global_state(0, wallet_secret, cli.clone()).await;
                 let gs = premine_recipient.global_state_lock.lock_guard().await;
-                let wallet_status = gs
-                    .wallet_state
-                    .get_wallet_status(
-                        genesis_block.hash(),
-                        &genesis_block.mutator_set_accumulator_after().unwrap(),
-                    )
-                    .await;
+                let wallet_status = gs.get_wallet_status_for_tip().await;
 
                 assert_eq!(
                     NativeCurrencyAmount::coins(1),
