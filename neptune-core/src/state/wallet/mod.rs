@@ -5,6 +5,7 @@ pub(crate) mod expected_utxo;
 pub(crate) mod incoming_utxo;
 pub(crate) mod migrate_db;
 pub(crate) mod monitored_utxo;
+pub(crate) mod monitored_utxo_state;
 pub(crate) mod rusty_wallet_database;
 pub(crate) mod scan_mode_configuration;
 pub mod secret_key_material;

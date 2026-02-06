@@ -13,8 +13,7 @@ fn main() {
 }
 
 mod set_new_tip {
-
-    use neptune_cash::state::{wallet::wallet_state::UtxoValidityChecker, GlobalStateLock};
+    use neptune_cash::state::GlobalStateLock;
 
     use super::*;
 
@@ -61,39 +60,69 @@ mod set_new_tip {
         (global_state, blocks[1..].to_vec().try_into().unwrap())
     }
 
-    fn list_coins<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
+    fn list_coins<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(bencher: Bencher) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let state = rt.block_on(global_state.lock_guard_mut());
+
+        bencher.bench_local(|| {
+            rt.block_on(state.coins_with_possible_timelocks());
+        });
+    }
+
+    fn wallet_history<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(bencher: Bencher) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let state = rt.block_on(global_state.lock_guard_mut());
+
+        bencher.bench_local(|| {
+            let _history = rt.block_on(state.get_balance_history());
+        });
+    }
+
+    fn wallet_status_for_tip<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
         bencher: Bencher,
-        use_archive: bool,
     ) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
 
         let state = rt.block_on(global_state.lock_guard_mut());
 
-        let validity_checker = if use_archive {
-            UtxoValidityChecker::Archival(state.chain.archival_state())
-        } else {
-            let tip = state.chain.light_state();
-            let tip_hash = tip.hash();
-            let tip_msa = tip
-                .mutator_set_accumulator_after()
-                .expect("Block from state must have mutator set after");
-            UtxoValidityChecker::Light {
-                tip_digest: tip_hash,
-                mutator_set_accumulator: tip_msa,
-            }
-        };
-
         bencher.bench_local(|| {
-            rt.block_on(
-                state
-                    .wallet_state
-                    .get_all_own_coins_with_possible_timelocks(&validity_checker),
-            );
+            let _spandable_inputs = rt.block_on(state.get_wallet_status_for_tip());
         });
     }
 
-    fn update_state<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(bencher: Bencher) {
+    fn spendable_inputs<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
+        bencher: Bencher,
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, blocks) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let state = rt.block_on(global_state.lock_guard_mut());
+
+        let timestamp = blocks.last().unwrap().header().timestamp;
+        bencher.bench_local(|| {
+            let _spandable_inputs = rt.block_on(state.wallet_spendable_inputs(timestamp));
+        });
+    }
+
+    fn coins_with_possible_timelocks<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
+        bencher: Bencher,
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let state = rt.block_on(global_state.lock_guard_mut());
+
+        bencher.bench_local(|| {
+            let _coins_list = rt.block_on(state.coins_with_possible_timelocks());
+        });
+    }
+
+    fn set_new_tip<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(bencher: Bencher) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut global_state, blocks) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
 
@@ -108,16 +137,31 @@ mod set_new_tip {
 
     #[divan::bench(sample_count = 10)]
     fn set_new_tip_1000_4(bencher: Bencher) {
-        update_state::<1000, 4>(bencher);
+        set_new_tip::<1000, 4>(bencher);
     }
 
     #[divan::bench(sample_count = 10)]
     fn list_coins_1000_4_with_archive(bencher: Bencher) {
-        list_coins::<1000, 4>(bencher, true);
+        list_coins::<1000, 4>(bencher);
     }
 
     #[divan::bench(sample_count = 10)]
-    fn list_coins_1000_4_with_light_state(bencher: Bencher) {
-        list_coins::<1000, 4>(bencher, false);
+    fn wallet_history_1000_4(bencher: Bencher) {
+        wallet_history::<1000, 4>(bencher);
+    }
+
+    #[divan::bench(sample_count = 10)]
+    fn wallet_status_for_tip_1000_4(bencher: Bencher) {
+        wallet_status_for_tip::<1000, 4>(bencher);
+    }
+
+    #[divan::bench(sample_count = 10)]
+    fn spendable_inputs_1000_4(bencher: Bencher) {
+        spendable_inputs::<1000, 4>(bencher);
+    }
+
+    #[divan::bench(sample_count = 10)]
+    fn coins_with_possible_timelocks_1000_4(bencher: Bencher) {
+        coins_with_possible_timelocks::<1000, 4>(bencher);
     }
 }
