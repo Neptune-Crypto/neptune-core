@@ -58,8 +58,8 @@ pub fn main() -> Result<()> {
 /// global collector configured based on RUST_LOG env var. Accepted `RUST_LOG`
 /// values are `trace`, `debug`, `info`, `warn`, and `error`.
 fn set_up_logger() {
-    let info_env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn"));
+    let info_env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn,libp2p=error"));
     let subscriber = FmtSubscriber::builder()
         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
         .with_env_filter(info_env_filter)
