@@ -1873,6 +1873,8 @@ impl GlobalState {
             .expect("Stored block must have valid MSA after");
         let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
         trace!("monitored_utxos.len() = {num_mutxos}");
+        let mut failures = vec![];
+        let mut orphans = vec![];
         for i in 0..num_mutxos {
             let monitored_utxo = self
                 .wallet_state
@@ -1897,6 +1899,7 @@ impl GlobalState {
                 )
                 .await
             else {
+                failures.push(aocl_leaf_index);
                 warn!(
                     "Failed to restore mutator set membership proof for UTXO \
                 with leaf index {aocl_leaf_index}.",
@@ -1906,17 +1909,18 @@ impl GlobalState {
 
             if monitored_utxo.spent_in_block.is_none() && !msa.verify(ms_item, &restored_msmp) {
                 // If the UTXO was spent *and* its membership proof is invalid
-                // after attempting to resync, then that expenditure must still
+                // after attempting to restore, then that expenditure must still
                 // be canonical.
-                // On the contrary, if the UTXO was spent and resync succeeded,
-                // then the expenditure was reverted. This is the reason why
-                // we do not filter out UTXOs that were marked as spent before
-                // attempting to resync the membership proof. However, if we
-                // get here, then we know that the resulting membership proof is
-                // invalid.
-                // So instead, we use the information that the UTXO was spent
-                // only for suppressing the following log message, which would
-                // be rather noisy otherwise.
+                // On the contrary, if the UTXO was spent and restoration
+                // succeeded resulting in a valid membership proof, then that
+                // expenditure was reverted. This type of event is the reason
+                // why we do not filter out UTXOs that were marked as spent
+                // before attempting to restore the membership proof.
+                // However, if we get here -- not spent and invalid membership
+                // proof after restoration -- then the most likely explanation
+                // is that the UTXO only ever existed on a fork that is now
+                // abandoned.
+                orphans.push(aocl_leaf_index);
                 warn!(
                     "Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. \
                  Maybe this UTXO is on an abandoned chain?",
@@ -1933,6 +1937,23 @@ impl GlobalState {
         }
 
         self.wallet_state.wallet_db.set_sync_label(tip_hash).await;
+
+        // Batch warning messages.
+        if !failures.is_empty() {
+            warn!(
+                "Failed to restore mutator set membership proof for UTXOs with \
+                AOCL leaf indices [{}].",
+                failures.into_iter().join(", ")
+            );
+        }
+        if !orphans.is_empty() {
+            warn!(
+                "Restored MSMPs are invalid for apparently unspent UTXOs with \
+                AOCL leaf indices [{}]. Most likely explanation: the UTXOs \
+                only ever existed on an orphaned branch.",
+                orphans.into_iter().join(", ")
+            );
+        }
     }
 
     /// Fix mutator set membership proofs that are unsynced.
