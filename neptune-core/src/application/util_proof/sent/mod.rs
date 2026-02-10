@@ -103,6 +103,10 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
     let rustfield_aoclleafindex = rustfield!(ProofOfTransferWitness::aocl_leaf_index);
 
     let main = triton_asm! {
+        /* Regarding `addi 0`. It's consistent pattern for `read_mem` to be between two `addi`; @skaunov could not find a construction which would fold/capture this pattern, 
+        and I feel it's too foundational (at least for my perception) to change it when the length is `1`. So for the negligible cost (if any) I preserve the pattern even when
+        [first step of it does nothing](https://github.com/Neptune-Crypto/neptune-core/pull/799#discussion_r2787593534). */
+
         // _
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxo}
@@ -128,7 +132,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // _ *aocl *aocl_peaks [receiver_digest]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        // _ *w
+        // _ *aocl *aocl_peaks [receiver_digest] *w
         {&ProofOfTransferWitness::get_field("sender_randomness")}
         addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1
         // _ *aocl *aocl_peaks [receiver_digest] [sender_randomness]
