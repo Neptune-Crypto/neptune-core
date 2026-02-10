@@ -107,7 +107,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxo}
         {&Utxo::get_field("lock_script_hash")}
-        addi 4 read_mem 5 pop 1
+        addi {Digest::LENGTH-1} read_mem {Digest::LENGTH} pop 1
         // _ [lock_script_digest]
         write_io 5
         // _
