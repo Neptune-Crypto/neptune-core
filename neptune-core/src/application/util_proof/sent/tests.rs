@@ -285,10 +285,10 @@ async fn aocl_proof_verification_failed(
     );
 
     proptest::prop_assume!(
-        aocl_mp_bad != sent.0.membership_proof,
+        aocl_mp_bad != sent.0.aocl_membership_proof,
         "The 'bad' AOCL membership proof must actually be invalid for the test to be meaningful"
     );
-    sent.0.membership_proof = aocl_mp_bad;
+    sent.0.aocl_membership_proof = aocl_mp_bad;
 
     // Run the program and expect a Triton VM panic with AOCL proof verification error id.
     if let Err(ConsensusError::TritonVMPanic(

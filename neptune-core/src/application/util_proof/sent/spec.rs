@@ -25,6 +25,9 @@ use crate::{
 impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification
     for super::ProofOfTransfer
 {
+    /* TODO
+    https://github.com/Neptune-Crypto/neptune-core/pull/799#pullrequestreview-3778560914
+    > There is a discrepancy between the spec and the tasm code. The first thing the spec reads is the release date. The first thing the tasm code reads is the receiver digest. */
     fn source(&self) {
         // get in the current program's hash digest
         // let self_digest: Digest = tasm::builtins::own_program_digest();
@@ -34,17 +37,18 @@ impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgram
         let publicinput_receiverdigest: Digest = tasm::builtins::tasmlib_io_read_stdin___digest();
 
         // divine witness from memory
-        let ram: super::ProofOfTransferWitness = tasm::builtins::decode_from_memory(
-            tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-        );
+        let proof_of_transfer_witness: super::ProofOfTransferWitness =
+            tasm::builtins::decode_from_memory(
+                tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            );
 
         // receiver: expose the address lock script part
-        tasmlib_io_write_to_stdout___digest(ram.utxo.lock_script_hash());
+        tasmlib_io_write_to_stdout___digest(proof_of_transfer_witness.utxo.lock_script_hash());
 
         // fill `Claim::output` with `sender_randomness_digest`
-        tasmlib_io_write_to_stdout___digest(ram.sender_randomness.hash());
+        tasmlib_io_write_to_stdout___digest(proof_of_transfer_witness.sender_randomness.hash());
 
-        let utxo_digest = Tip5::hash_varlen(ram.utxo.encode().as_slice());
+        let utxo_digest = Tip5::hash_varlen(proof_of_transfer_witness.utxo.encode().as_slice());
 
         // constraint consistency for two parts of the witness
         // assert_eq!(ram.utxo_digest, utxo_digest);
@@ -52,12 +56,12 @@ impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgram
         // constraint the UTXO addition record is in the AOCL
         assert!(
             tasm::builtins::mmr_verify_from_secret_in_leaf_index_on_stack(
-                ram.aocl.peaks().as_slice(),
-                ram.aocl.num_leafs(),
-                ram.aocl_leaf_index,
+                proof_of_transfer_witness.aocl.peaks().as_slice(),
+                proof_of_transfer_witness.aocl.num_leafs(),
+                proof_of_transfer_witness.aocl_leaf_index,
                 crate::util_types::mutator_set::commit(
                     utxo_digest,
-                    ram.sender_randomness,
+                    proof_of_transfer_witness.sender_randomness,
                     publicinput_receiverdigest
                 )
                 .canonical_commitment
@@ -65,14 +69,14 @@ impl crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgram
         );
 
         // output the bagged peaks of the AOCL used for the proof
-        tasmlib_io_write_to_stdout___digest(ram.aocl.bag_peaks());
+        tasmlib_io_write_to_stdout___digest(proof_of_transfer_witness.aocl.bag_peaks());
 
         // adapted from this trait implementation for `NativeCurrency`
         let mut total_amount_for_utxo = NativeCurrencyAmount::coins(0);
         let mut _time_locked = false;
         let mut j = 0;
-        while j < ram.utxo.coins().len() {
-            let coin_j = ram.utxo.coins()[j].clone();
+        while j < proof_of_transfer_witness.utxo.coins().len() {
+            let coin_j = proof_of_transfer_witness.utxo.coins()[j].clone();
             if coin_j.type_script_hash == ConsensusProgram::hash(&NativeCurrency) {
                 // decode state to get amount
                 let amount = *NativeCurrencyAmount::decode(&coin_j.state).unwrap();

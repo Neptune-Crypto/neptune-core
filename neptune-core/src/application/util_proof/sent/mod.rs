@@ -103,15 +103,16 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
     let rustfield_aoclleafindex = rustfield!(ProofOfTransferWitness::aocl_leaf_index);
 
     let main = triton_asm! {
-        /* Regarding `addi 0`. It's consistent pattern for `read_mem` to be between two `addi`; @skaunov could not find a construction which would fold/capture this pattern, 
-        and I feel it's too foundational (at least for my perception) to change it when the length is `1`. So for the negligible cost (if any) I preserve the pattern even when
-        [first step of it does nothing](https://github.com/Neptune-Crypto/neptune-core/pull/799#discussion_r2787593534). */
+        /* Regarding `addi 0`. It's consistent pattern for `read_mem` to be between two `addi`;
+        @skaunov could not find a construction which would fold/capture this pattern, and I feel it's
+        too foundational (at least for my perception) to change it when the length is `1`. So for
+        the negligible cost (if any) I preserve the pattern even when [first step of it does nothing](https://github.com/Neptune-Crypto/neptune-core/pull/799#discussion_r2787593534). */
 
         // _
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
         {&rustfield_utxo}
         {&Utxo::get_field("lock_script_hash")}
-        addi {Digest::LENGTH-1} read_mem {Digest::LENGTH} pop 1
+        addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1
         // _ [lock_script_digest]
         write_io 5
         // _
@@ -186,7 +187,7 @@ fn library_and_code() -> (Library, Vec<LabelledInstruction>) {
         // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment]
 
         push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-        {&ProofOfTransferWitness::get_field("membership_proof")}
+        {&ProofOfTransferWitness::get_field("aocl_membership_proof")}
         {&MmrMembershipProof::get_field("authentication_path")}
         // _ *aocl *aocl_peaks [num_leafs] [aocl_leaf_index] [canonical_commitment] *auth_path
 
@@ -271,7 +272,7 @@ impl ProofOfTransfer {
         ProofOfTransfer(
             ProofOfTransferWitness {
                 aocl: witness_aocl,
-                membership_proof: witness_membershipproof,
+                aocl_membership_proof: witness_membershipproof,
                 // utxo_digest: tasm_lib::prelude::Tip5::hash(&witness_utxo),
                 utxo: witness_utxo,
                 sender_randomness: witness_senderrandomness,
