@@ -855,7 +855,7 @@ impl MainLoopHandler {
                     let mut tx_initiator = self.global_state_lock().api_mut().tx_initiator();
                     tokio::task::spawn(async move {
                         let _ = tx_initiator
-                            .consolidate(timestamp, maybe_consolidation_address)
+                            .consolidate(Default::default(), maybe_consolidation_address, timestamp)
                             .await
                             .inspect_err(|err| warn!("{err}"));
                     });

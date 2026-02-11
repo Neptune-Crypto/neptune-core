@@ -4,6 +4,7 @@
 
 pub use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+pub use crate::api::tx_initiation::consolidate::ConsolidationError;
 pub use crate::api::wallet::WalletBalances;
 pub use crate::application::config::cli_args::Args;
 pub use crate::application::config::network::Network;
