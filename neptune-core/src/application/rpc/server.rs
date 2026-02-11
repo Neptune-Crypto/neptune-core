@@ -79,6 +79,7 @@ use tracing::warn;
 use super::auth;
 use crate::api;
 use crate::api::export::AnnouncementFlag;
+use crate::api::export::ConsolidationError;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
@@ -1808,6 +1809,21 @@ pub trait RPC {
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
+
+    /// Initiate a transaction that spends a batch of UTXOs to the node's own
+    /// wallet, reducing the total number of UTXOs under management.
+    ///
+    /// # Parameters
+    ///
+    ///  - `num_inputs` -- set to override the default (4) number of inputs to
+    ///    be consolidated.
+    ///  - `to_address` -- set to consolidate the UTXOs to the given address as
+    ///    opposed to the next symmetric address of the node's own wallet.
+    async fn consolidate(
+        token: auth::Token,
+        num_inputs: Option<usize>,
+        to_address: Option<ReceivingAddress>,
+    ) -> RpcResult<usize>;
 
     /// Upgrade a proof for a transaction found in the mempool. If the
     /// transaction cannot be in the mempool, or the transaction is not in need
@@ -3597,6 +3613,25 @@ impl RPC for NeptuneRPCServer {
             .await?)
     }
 
+    // Documented in trait. Do not add doc-comment.
+    async fn consolidate(
+        mut self,
+        _ctx: context::Context,
+        token: auth::Token,
+        num_inputs: Option<usize>,
+        to_address: Option<ReceivingAddress>,
+    ) -> RpcResult<usize> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api_mut()
+            .tx_initiator_mut()
+            .consolidate(num_inputs, to_address, Timestamp::now())
+            .await?)
+    }
+
     async fn upgrade(
         mut self,
         _ctx: context::Context,
@@ -4656,6 +4691,9 @@ pub mod error {
         #[error("send error: {0}")]
         SendError(String),
 
+        #[error("consolidation error: {0}")]
+        ConsolidationError(String),
+
         #[error("regtest error: {0}")]
         RegTestError(String),
 
@@ -4705,6 +4743,12 @@ pub mod error {
     impl From<tx_initiation::error::SendError> for RpcError {
         fn from(err: tx_initiation::error::SendError) -> Self {
             RpcError::SendError(err.to_string())
+        }
+    }
+
+    impl From<ConsolidationError> for RpcError {
+        fn from(err: ConsolidationError) -> Self {
+            RpcError::ConsolidationError(err.to_string())
         }
     }
 
