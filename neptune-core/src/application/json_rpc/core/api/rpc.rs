@@ -422,6 +422,105 @@ pub trait RpcApi: Sync + Send {
         request: RescanGuesserRewardsRequest,
     ) -> RpcResult<RescanGuesserRewardsResponse>;
 
+    async fn block_info(&self, selector: RpcBlockSelector) -> RpcResult<BlockInfoResponse> {
+        self.block_info_call(BlockInfoRequest { selector }).await
+    }
+    async fn block_info_call(&self, request: BlockInfoRequest) -> RpcResult<BlockInfoResponse>;
+
+    async fn generate_address(&self) -> RpcResult<GenerateAddressResponse> {
+        self.generate_address_call(GenerateAddressRequest {}).await
+    }
+    async fn generate_address_call(
+        &self,
+        request: GenerateAddressRequest,
+    ) -> RpcResult<GenerateAddressResponse>;
+
+    async fn get_balance(&self) -> RpcResult<GetBalanceResponse> {
+        self.get_balance_call(GetBalanceRequest {}).await
+    }
+    async fn get_balance_call(&self, request: GetBalanceRequest) -> RpcResult<GetBalanceResponse>;
+
+    async fn send_tx_call(&self, request: SendTxRequest) -> RpcResult<SendTxResponse>;
+
+    async fn validate_address(
+        &self,
+        address_string: String,
+    ) -> RpcResult<ValidateAddressResponse> {
+        self.validate_address_call(ValidateAddressRequest { address_string })
+            .await
+    }
+    async fn validate_address_call(
+        &self,
+        request: ValidateAddressRequest,
+    ) -> RpcResult<ValidateAddressResponse>;
+
+    async fn validate_amount(
+        &self,
+        amount_string: String,
+    ) -> RpcResult<ValidateAmountResponse> {
+        self.validate_amount_call(ValidateAmountRequest { amount_string })
+            .await
+    }
+    async fn validate_amount_call(
+        &self,
+        request: ValidateAmountRequest,
+    ) -> RpcResult<ValidateAmountResponse>;
+
+    async fn unspent_utxos(
+        &self,
+        exclude_recent_blocks: usize,
+    ) -> RpcResult<UnspentUtxosResponse> {
+        self.unspent_utxos_call(UnspentUtxosRequest {
+            exclude_recent_blocks,
+        })
+        .await
+    }
+    async fn unspent_utxos_call(
+        &self,
+        request: UnspentUtxosRequest,
+    ) -> RpcResult<UnspentUtxosResponse>;
+
+    async fn history(&self, request: HistoryRequest) -> RpcResult<HistoryResponse> {
+        self.history_call(request).await
+    }
+    async fn history_call(&self, request: HistoryRequest) -> RpcResult<HistoryResponse>;
+
+    async fn sent_transaction(&self, request: SentTransactionRequest) -> RpcResult<SentTransactionResponse> {
+        self.sent_transaction_call(request).await
+    }
+    async fn sent_transaction_call(
+        &self,
+        request: SentTransactionRequest,
+    ) -> RpcResult<SentTransactionResponse>;
+
+    async fn count_sent_transactions_at_block(
+        &self,
+        block: RpcBlockSelector,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse> {
+        self.count_sent_transactions_at_block_call(CountSentTransactionsAtBlockRequest { block })
+            .await
+    }
+    async fn count_sent_transactions_at_block_call(
+        &self,
+        request: CountSentTransactionsAtBlockRequest,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse>;
+
+    async fn find_utxo_leaf_index_call(
+        &self,
+        request: FindUtxoLeafIndexRequest,
+    ) -> RpcResult<FindUtxoLeafIndexResponse>;
+
+    async fn get_aocl_leaf_indices(
+        &self,
+        request: GetAoclLeafIndicesRequest,
+    ) -> RpcResult<GetAoclLeafIndicesResponse> {
+        self.get_aocl_leaf_indices_call(request).await
+    }
+    async fn get_aocl_leaf_indices_call(
+        &self,
+        request: GetAoclLeafIndicesRequest,
+    ) -> RpcResult<GetAoclLeafIndicesResponse>;
+
     /* Mining */
 
     async fn get_block_template(

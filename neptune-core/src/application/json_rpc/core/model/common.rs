@@ -153,15 +153,27 @@ mod tests {
 
     #[test]
     fn rpc_native_currency_amount_serde_roundtrip() {
-        let amount = NativeCurrencyAmount::from_nau(123i128);
+        // Test serialization: should serialize as naun format
+        let amount = NativeCurrencyAmount::coins(1); // 1 coin = 4 * 10^30 naun
         let rpc_amount: RpcNativeCurrencyAmount = amount.into();
 
         let json_amount = serde_json::to_string(&rpc_amount).unwrap();
-        assert_eq!(json_amount, "\"123\"");
+        // Should serialize as naun (e.g., "4000000000000000000000000000000")
+        // 1 coin = conversion_factor() = 10^30 * 2^2 = 4 * 10^30
+        let expected_naun = amount.to_nau().to_string();
+        assert_eq!(json_amount, format!("\"{}\"", expected_naun));
 
         let deserialized_amount: RpcNativeCurrencyAmount =
             serde_json::from_str(&json_amount).unwrap();
         assert_eq!(rpc_amount, deserialized_amount);
+
+        // Test deserialization: should accept naun format
+        let nau_amount = NativeCurrencyAmount::from_nau(123i128);
+        let nau_rpc_amount: RpcNativeCurrencyAmount = nau_amount.into();
+        let nau_json = "\"123\"";
+        let deserialized_nau: RpcNativeCurrencyAmount =
+            serde_json::from_str(nau_json).unwrap();
+        assert_eq!(nau_rpc_amount, deserialized_nau);
     }
 
     #[test]

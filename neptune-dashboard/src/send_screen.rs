@@ -157,6 +157,7 @@ impl SendScreen {
                     UtxoNotificationMedium::OnChain,
                 ),
                 valid_fee,
+                None,
             )
             .await
             .unwrap();

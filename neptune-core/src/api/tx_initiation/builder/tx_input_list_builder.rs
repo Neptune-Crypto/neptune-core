@@ -13,7 +13,6 @@
 //!
 //! see [builder](super) for examples of using the builders together.
 use get_size2::GetSize;
-use itertools::Itertools;
 use num_traits::Zero;
 use rand::rng;
 use rand::seq::SliceRandom;
@@ -72,6 +71,9 @@ pub struct TxInputListBuilder {
 
     // ##multicoin## : maybe this should be Coin or Vec<Coin> instead of NativeCurrencyAmount?
     spend_amount: NativeCurrencyAmount,
+
+    /// Maximum number of inputs to select. `None` means no limit.
+    max_inputs: Option<usize>,
 }
 
 impl TxInputListBuilder {
@@ -101,51 +103,85 @@ impl TxInputListBuilder {
         self
     }
 
-    /// build the list of transaction inputs
-    pub fn build(self) -> impl IntoIterator<Item = TxInput> {
+    /// set optional max number of inputs to select
+    pub fn max_inputs(mut self, max_inputs: Option<usize>) -> Self {
+        self.max_inputs = max_inputs;
+        self
+    }
+
+    /// build the list of transaction inputs.
+    ///
+    /// When `max_inputs` is set, uses a sliding window on the sorted inputs
+    /// to find the smallest subset (fewest inputs first) that covers the
+    /// spend amount. When `max_inputs` is `None`, uses a greedy scan.
+    pub fn build(self) -> Vec<TxInput> {
         let Self {
             mut spendable_inputs,
             policy,
             spend_amount,
+            max_inputs,
         } = self;
 
-        // create an ordering for the sequence
-        let ordered_iter = match policy {
+        // apply ordering
+        match policy {
             InputSelectionPolicy::Random => {
                 spendable_inputs.shuffle(&mut rng());
-                spendable_inputs.into_iter()
             }
-
-            InputSelectionPolicy::ByProvidedOrder => {
-                // leave input order unchanged.
-                spendable_inputs.into_iter()
-            }
-
+            InputSelectionPolicy::ByProvidedOrder => {}
             InputSelectionPolicy::ByNativeCoinAmount(order) => {
-                spendable_inputs.into_iter().sorted_by(|a, b| {
+                spendable_inputs.sort_by(|a, b| {
                     sort(
                         order,
                         &a.utxo.get_native_currency_amount(),
                         &b.utxo.get_native_currency_amount(),
                     )
-                })
+                });
             }
-
-            InputSelectionPolicy::ByUtxoSize(order) => spendable_inputs
-                .into_iter()
-                .sorted_by(|a, b| sort(order, &a.utxo.get_heap_size(), &b.utxo.get_heap_size())),
-        };
-
-        // scan sequence until we have enough
-        let zero: NativeCurrencyAmount = NativeCurrencyAmount::zero();
-        ordered_iter.scan((zero, spend_amount), |(current_amount, target), input| {
-            if *current_amount < *target {
-                *current_amount += input.utxo.get_native_currency_amount();
-                Some(input.clone())
-            } else {
-                None
+            InputSelectionPolicy::ByUtxoSize(order) => {
+                spendable_inputs
+                    .sort_by(|a, b| sort(order, &a.utxo.get_heap_size(), &b.utxo.get_heap_size()));
             }
-        })
+        }
+
+        match max_inputs {
+            Some(limit) => {
+                // UTXO consolidation: pick the best window of up to `limit`
+                // contiguous inputs (sorted ascending) that covers the spend
+                // amount while maximizing the number of small UTXOs consumed.
+                // Try from the smallest end first; slide right if needed.
+                let max_window = limit.min(spendable_inputs.len());
+
+                // Try full window first (max consolidation), slide to find
+                // the window starting at the smallest possible index.
+                for start in 0..=(spendable_inputs.len() - max_window) {
+                    let window = &spendable_inputs[start..start + max_window];
+                    let sum = window
+                        .iter()
+                        .fold(NativeCurrencyAmount::zero(), |acc, input| {
+                            acc + input.utxo.get_native_currency_amount()
+                        });
+                    if sum >= spend_amount {
+                        return window.to_vec();
+                    }
+                }
+
+                // No valid window found — return empty (caller handles insufficient funds)
+                Vec::new()
+            }
+            None => {
+                // Greedy scan: take inputs in order until target is met
+                let mut collected = Vec::new();
+                let mut current = NativeCurrencyAmount::zero();
+                for input in spendable_inputs {
+                    if current >= spend_amount {
+                        break;
+                    }
+                    current += input.utxo.get_native_currency_amount();
+                    collected.push(input);
+                }
+                collected
+            }
+        }
     }
 }
 

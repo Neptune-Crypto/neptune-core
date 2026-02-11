@@ -3327,7 +3327,7 @@ mod tests {
             let inputs = sender
                 .api()
                 .tx_initiator()
-                .select_spendable_inputs(InputSelectionPolicy::ByProvidedOrder, amount, timestamp)
+                .select_spendable_inputs(InputSelectionPolicy::ByProvidedOrder, amount, timestamp, None)
                 .await
                 .into_iter()
                 .collect_vec();

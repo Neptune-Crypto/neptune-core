@@ -18,8 +18,13 @@ use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplateMetadata;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
+use crate::application::json_rpc::core::model::wallet::adapter;
+use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
+use crate::application::database::storage::storage_vec::traits::StorageVecBase;
+use crate::application::database::storage::storage_vec::traits::StorageVecStream;
+use crate::twenty_first::prelude::{Digest, Mmr, Tip5};
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
@@ -1016,6 +1021,681 @@ impl RpcApi for RpcServer {
             Err(_e) => Err(RpcError::Timeout(timeout_period)),
         }
     }
+
+    async fn get_balance_call(&self, _request: GetBalanceRequest) -> RpcResult<GetBalanceResponse> {
+        let state = self.state.lock_guard().await;
+        let wallet_status = state.get_wallet_status_for_tip().await;
+        let timestamp = Timestamp::now();
+        let balance = wallet_status.available_confirmed(timestamp);
+
+        Ok(GetBalanceResponse {
+            balance: adapter::BalanceResponse {
+                balance: balance.to_string(),
+            },
+        })
+    }
+
+    async fn generate_address_call(
+        &self,
+        _request: GenerateAddressRequest,
+    ) -> RpcResult<GenerateAddressResponse> {
+        use crate::api::export::KeyType;
+
+        let mut state_lock = self.state.clone();
+        let (spending_key, _new_counter) = {
+            let mut state = state_lock.lock_guard_mut().await;
+            let old_counter = state.wallet_state.spending_key_counter(KeyType::Generation);
+            let spending_key = state
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation)
+                .await;
+            let new_counter = state.wallet_state.spending_key_counter(KeyType::Generation);
+            tracing::debug!(
+                "Generated new address: counter {} -> {}",
+                old_counter,
+                new_counter
+            );
+            (spending_key, new_counter)
+        };
+        
+        let address = spending_key.to_address();
+
+        let network = self.state.cli().network;
+        let address_string = address.to_bech32m(network).map_err(|e| {
+            RpcError::Server(JsonError::Custom {
+                code: -32603,
+                message: format!("Failed to encode address: {e}"),
+                data: None,
+            })
+        })?;
+
+        Ok(GenerateAddressResponse {
+            address: adapter::GenerateAddressResponse {
+                address: address_string,
+            },
+        })
+    }
+
+    async fn block_info_call(&self, request: BlockInfoRequest) -> RpcResult<BlockInfoResponse> {
+        let state = self.state.lock_guard().await;
+        let network = self.state.cli().network;
+
+        let Some(block_digest) = request.selector.as_digest(&state).await else {
+            return Ok(None);
+        };
+
+        let Some(block) = state
+            .chain
+            .archival_state()
+            .get_block(block_digest)
+            .await
+            .unwrap()
+        else {
+            return Ok(None);
+        };
+
+        let header = block.header();
+        let tx_kernel = block.body().transaction_kernel.clone();
+
+        let mut inputs = Vec::new();
+        for (n, rr) in tx_kernel.inputs.iter().enumerate() {
+            let index_set = &rr.absolute_indices;
+            if let Some((mutxo, _)) = state
+                .wallet_state
+                .wallet_db
+                .monitored_utxo_by_index_set(index_set)
+                .await
+            {
+                let (_, _, confirmed_height) = mutxo.confirmed_in_block;
+
+                inputs.push(BlockInfoInput {
+                    n,
+                    leaf_index: mutxo.aocl_leaf_index,
+                    utxo_digest: mutxo.addition_record().canonical_commitment,
+                    sender_randomness: mutxo.sender_randomness,
+                    confirmed_height,
+                    utxo: ApiUtxo::new(&mutxo.utxo),
+                });
+            }
+        }
+
+        // Get parent block to find starting AOCL index for outputs
+        let parent_digest = header.prev_block_digest;
+        let parent_aocl_num_leafs = if let Some(parent_block) = state
+            .chain
+            .archival_state()
+            .get_block(parent_digest)
+            .await
+            .unwrap()
+        {
+            parent_block
+                .mutator_set_accumulator_after()
+                .map(|msa| msa.aocl.num_leafs())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Collect known outputs from wallet
+        let known_outputs: std::collections::HashMap<Digest, _> = state
+            .wallet_state
+            .scan_for_utxos_announced_to_known_keys(&tx_kernel)
+            .map(|incoming| (incoming.addition_record().canonical_commitment, incoming))
+            .collect();
+
+        // Show all outputs, with wallet info when known
+        let outputs: Vec<BlockInfoOutput> = tx_kernel
+            .outputs
+            .iter()
+            .enumerate()
+            .map(|(n, ar)| {
+                let leaf_index = parent_aocl_num_leafs + n as u64;
+                let utxo_digest = ar.canonical_commitment;
+
+                if let Some(incoming) = known_outputs.get(&utxo_digest) {
+                    let spending_key = state
+                        .wallet_state
+                        .find_spending_key_for_utxo(&incoming.utxo);
+                    let receiving_address = spending_key
+                        .as_ref()
+                        .and_then(|key| key.to_address().to_bech32m(network).ok());
+                    let receiver_identifier = spending_key
+                        .as_ref()
+                        .map(|key| key.receiver_identifier().value());
+
+                    BlockInfoOutput {
+                        n,
+                        leaf_index,
+                        utxo_digest,
+                        sender_randomness: Some(incoming.sender_randomness),
+                        receiving_address,
+                        receiver_digest: Some(incoming.receiver_preimage),
+                        receiver_identifier,
+                        utxo: Some(ApiUtxo::new(&incoming.utxo)),
+                    }
+                } else {
+                    BlockInfoOutput {
+                        n,
+                        leaf_index,
+                        utxo_digest,
+                        sender_randomness: None,
+                        receiving_address: None,
+                        receiver_digest: None,
+                        receiver_identifier: None,
+                        utxo: None,
+                    }
+                }
+            })
+            .collect();
+
+        Ok(Some(BlockInfo {
+            height: header.height,
+            digest: block.hash(),
+            timestamp: header.timestamp,
+            difficulty: header.difficulty,
+            size: block.size(),
+            fee: tx_kernel.fee.to_string(),
+            inputs,
+            outputs,
+        }))
+    }
+
+    async fn send_tx_call(&self, request: SendTxRequest) -> RpcResult<SendTxResponse> {
+        use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+        use crate::api::tx_initiation::initiator::TransactionInitiator;
+        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use crate::state::wallet::address::ReceivingAddress;
+        use crate::state::wallet::change_policy::ChangePolicy;
+        use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
+        use crate::api::export::KeyType;
+
+        let Ok(valid_amount) = NativeCurrencyAmount::coins_from_str(&request.amount) else {
+            return Err(RpcError::Server(JsonError::Custom {
+                code: -32602,
+                message: "Invalid amount format".to_string(),
+                data: None,
+            }));
+        };
+
+        let Ok(valid_fee) = NativeCurrencyAmount::coins_from_str(&request.fee) else {
+            return Err(RpcError::Server(JsonError::Custom {
+                code: -32602,
+                message: "Invalid fee format".to_string(),
+                data: None,
+            }));
+        };
+
+        let network = self.state.cli().network;
+        let Ok(to_address) = ReceivingAddress::from_bech32m(&request.to_address, network) else {
+            return Err(RpcError::Server(JsonError::Custom {
+                code: -32602,
+                message: "Invalid address format".to_string(),
+                data: None,
+            }));
+        };
+
+        let outputs: Vec<OutputFormat> = vec![OutputFormat::AddressAndAmountAndMedium(
+            to_address,
+            valid_amount,
+            UtxoNotificationMedium::OnChain,
+        )];
+
+        let change_policy = ChangePolicy::recover_to_next_unused_key(
+            KeyType::Generation,
+            UtxoNotificationMedium::OnChain,
+        );
+
+        let mut tx_initiator: TransactionInitiator = self.state.clone().into();
+        let resp = tx_initiator
+            .send(
+                outputs,
+                change_policy,
+                valid_fee,
+                Timestamp::now(),
+                request.max_inputs,
+            )
+            .await
+            .map_err(|e| {
+                RpcError::Server(JsonError::Custom {
+                    code: -32000,
+                    message: format!("Failed to send transaction: {e}"),
+                    data: None,
+                })
+            })?;
+
+        let timestamp = resp.details().timestamp;
+        let tip_when_sent = self.state.lock_guard().await.chain.light_state().hash();
+
+        let inputs: Vec<SendTxInput> = resp
+            .details()
+            .tx_inputs
+            .iter()
+            .map(|input| SendTxInput {
+                leaf_index: input.mutator_set_mp().aocl_leaf_index,
+                utxo_digest: input.addition_record().canonical_commitment,
+                utxo: SendTxUtxo {
+                    lock_script_hash: input.utxo.lock_script_hash(),
+                    amount: input.utxo.get_native_currency_amount().to_string(),
+                },
+            })
+            .collect();
+
+        let outputs: Vec<SendTxOutput> = resp
+            .details()
+            .tx_outputs
+            .iter()
+            .map(|output| SendTxOutput {
+                utxo: SendTxUtxo {
+                    lock_script_hash: output.utxo().lock_script_hash(),
+                    amount: output.utxo().get_native_currency_amount().to_string(),
+                },
+                utxo_digest: output.addition_record().canonical_commitment,
+                sender_randomness: output.sender_randomness(),
+                is_owned: output.is_owned(),
+                is_change: output.is_change(),
+            })
+            .collect();
+
+        Ok(SendTxResponse {
+            timestamp,
+            tip_when_sent,
+            inputs,
+            outputs,
+        })
+    }
+
+    async fn validate_address_call(
+        &self,
+        request: ValidateAddressRequest,
+    ) -> RpcResult<ValidateAddressResponse> {
+        use crate::state::wallet::address::ReceivingAddress;
+
+        let network = self.state.cli().network;
+        let parsed = ReceivingAddress::from_bech32m(&request.address_string, network).ok();
+
+        match parsed {
+            Some(addr) => {
+                let address = addr.to_bech32m(network).ok();
+                let address_type = Some(match &addr {
+                    ReceivingAddress::Generation(_) => "generation".to_string(),
+                    ReceivingAddress::Symmetric(_) => "symmetric".to_string(),
+                });
+                let receiver_identifier = Some(addr.receiver_identifier().value());
+
+                Ok(ValidateAddressResponse {
+                    address,
+                    address_type,
+                    receiver_identifier,
+                    base_address: None,
+                })
+            }
+            None => Ok(ValidateAddressResponse {
+                address: None,
+                address_type: None,
+                receiver_identifier: None,
+                base_address: None,
+            }),
+        }
+    }
+
+    async fn validate_amount_call(
+        &self,
+        request: ValidateAmountRequest,
+    ) -> RpcResult<ValidateAmountResponse> {
+        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+        let amount = NativeCurrencyAmount::coins_from_str(&request.amount_string)
+            .ok()
+            .map(|amt| amt.to_string());
+
+        Ok(ValidateAmountResponse {
+            amount: adapter::ValidateAmountResponse {
+                amount: amount,
+            },
+        })
+    }
+
+    async fn unspent_utxos_call(
+        &self,
+        request: UnspentUtxosRequest,
+    ) -> RpcResult<UnspentUtxosResponse> {
+        use futures::StreamExt;
+
+        let state = self.state.lock_guard().await;
+        let wallet_status = state.get_wallet_status_for_tip().await;
+        let timestamp = Timestamp::now();
+
+        let recent_tips: HashSet<Digest> = if request.exclude_recent_blocks > 0 && state.chain.is_archival_node() {
+            let current_tip = state.chain.light_state().hash();
+            let mut tips = HashSet::new();
+            tips.insert(current_tip);
+
+            let ancestors = state
+                .chain
+                .archival_state()
+                .get_ancestor_block_digests(current_tip, request.exclude_recent_blocks)
+                .await;
+            tips.extend(ancestors);
+            tips
+        } else {
+            HashSet::new()
+        };
+
+        let excluded_aocl_indices: HashSet<u64> = if !recent_tips.is_empty() {
+            let sent_txs = state.wallet_state.wallet_db.sent_transactions();
+            let len = sent_txs.len().await;
+            let stream = sent_txs.stream_many_values((0..len).rev().take(1000));
+            let mut stream = Box::pin(stream);
+
+            let mut indices = HashSet::new();
+            while let Some(sent_tx) = stream.next().await {
+                // Only filter UTXOs from transactions sent within recent blocks
+                if recent_tips.contains(&sent_tx.tip_when_sent) {
+                    for (aocl_index, _utxo) in &sent_tx.tx_inputs {
+                        indices.insert(*aocl_index);
+                    }
+                }
+            }
+            indices
+        } else {
+            HashSet::new()
+        };
+
+        let mut utxos = Vec::new();
+        for (wse, _msmp) in &wallet_status.synced_unspent {
+            // Only include spendable UTXOs (not timelocked)
+            if !wse.utxo.can_spend_at(timestamp) {
+                continue;
+            }
+
+            // Exclude UTXOs from recent sent transactions
+            if excluded_aocl_indices.contains(&wse.aocl_leaf_index) {
+                continue;
+            }
+
+            let utxo = UnspentUtxo {
+                leaf_index: wse.aocl_leaf_index,
+                lock_script_hash: wse.utxo.lock_script_hash(),
+                amount: wse.utxo.get_native_currency_amount().to_string(),
+            };
+            utxos.push(utxo);
+        }
+
+        Ok(utxos)
+    }
+
+    async fn history_call(&self, request: HistoryRequest) -> RpcResult<HistoryResponse> {
+        use futures::StreamExt;
+
+        let state = self.state.lock_guard().await;
+        let network = self.state.cli().network;
+
+        let query_lock_script_hash = request
+            .receiving_address
+            .as_ref()
+            .and_then(|addr| ReceivingAddress::from_bech32m(addr, network).ok())
+            .map(|addr| addr.lock_script_hash());
+
+        let tip_digest = state.chain.light_state().hash();
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+        let num_leafs = aocl.num_leafs().await;
+        let current_msa = state
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .expect("block from state must have mutator set after");
+
+        let monitored_utxos = state.wallet_state.wallet_db.monitored_utxos();
+        let stream = monitored_utxos.stream_values().await;
+        futures::pin_mut!(stream);
+
+        let mut history_rows = Vec::new();
+
+        while let Some(mutxo) = stream.next().await {
+            let Some(msmp) = mutxo.membership_proof_ref_for_block(tip_digest) else {
+                continue;
+            };
+
+            let leaf_index = mutxo.aocl_leaf_index;
+            let lock_script_hash = mutxo.utxo.lock_script_hash();
+            let (block_digest, timestamp, confirmed_height) = mutxo.confirmed_in_block;
+
+            let utxo_digest = if leaf_index > 0 && leaf_index < num_leafs {
+                Some(aocl.get_leaf_async(leaf_index).await)
+            } else {
+                None
+            };
+
+            let spent_height = mutxo.spent_in_block.and_then(|(_, _, h)| {
+                let is_spent = !current_msa.verify(Tip5::hash(&mutxo.utxo), msmp);
+                is_spent.then_some(h)
+            });
+
+            let matches = request.leaf_index.is_none_or(|q| leaf_index == q)
+                && request.utxo_digest.is_none_or(|q| utxo_digest == Some(q))
+                && query_lock_script_hash.is_none_or(|q| lock_script_hash == q)
+                && request
+                    .sender_randomness
+                    .is_none_or(|q| msmp.sender_randomness == q)
+                && request
+                    .confirmed_height
+                    .is_none_or(|q| confirmed_height == q)
+                && request.spent_height.is_none_or(|q| spent_height == Some(q));
+
+            if !matches {
+                continue;
+            }
+
+            let receiving_address = state
+                .wallet_state
+                .get_all_known_addressable_spending_keys()
+                .find(|k| k.lock_script_hash() == lock_script_hash)
+                .and_then(|key| key.to_address().to_bech32m(network).ok());
+
+            history_rows.push(History {
+                leaf_index,
+                utxo_digest,
+                sender_randomness: msmp.sender_randomness,
+                digest: block_digest,
+                confirmed_height,
+                spent_height,
+                timestamp,
+                receiving_address,
+                utxo: ApiUtxo::new(&mutxo.utxo),
+            });
+        }
+
+        Ok(history_rows)
+    }
+
+    async fn sent_transaction_call(
+        &self,
+        request: SentTransactionRequest,
+    ) -> RpcResult<SentTransactionResponse> {
+        use futures::StreamExt;
+
+        let state = self.state.lock_guard().await;
+
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+        let num_leafs = aocl.num_leafs().await;
+
+        let matches_filter = |tx: &crate::state::wallet::sent_transaction::SentTransaction| {
+            request
+                .sender_randomness
+                .is_none_or(|q| tx.tx_outputs.iter().any(|o| o.sender_randomness() == q))
+                && request
+                    .receiver_digest
+                    .is_none_or(|q| tx.tx_outputs.iter().any(|o| o.receiver_digest() == q))
+                && request.lock_script_hash.is_none_or(|q| {
+                    tx.tx_outputs
+                        .iter()
+                        .any(|o| o.utxo().lock_script_hash() == q)
+                })
+                && request.utxo_digest.is_none_or(|q| {
+                    tx.tx_outputs
+                        .iter()
+                        .any(|o| o.addition_record().canonical_commitment == q)
+                })
+                && request.timestamp.is_none_or(|q| tx.timestamp == q)
+        };
+
+        let limit = request.limit.unwrap_or(100).min(1000) as usize;
+        let page = request.page.unwrap_or(1);
+        let offset = ((page.saturating_sub(1)) * limit as u64) as usize;
+
+        let send_txs_db = state.wallet_state.wallet_db.sent_transactions();
+        let stream = send_txs_db.stream_values().await;
+        futures::pin_mut!(stream);
+
+        let mut sent_txs = Vec::new();
+        let mut i = 0;
+
+        while let Some(tx) = stream.next().await {
+            if !matches_filter(&tx) {
+                continue;
+            }
+
+            i += 1;
+
+            if i <= offset {
+                continue;
+            }
+
+            if i > offset + limit {
+                break;
+            }
+
+            let tx_outputs: Vec<SentTxOutput> = tx
+                .tx_outputs
+                .iter()
+                .map(|o| SentTxOutput {
+                    utxo: ApiUtxo::new(&o.utxo()),
+                    utxo_digest: o.addition_record().canonical_commitment,
+                    sender_randomness: o.sender_randomness(),
+                    receiver_digest: o.receiver_digest(),
+                })
+                .collect();
+
+            let tx_inputs: Vec<SentTxInput> =
+                futures::future::join_all(tx.tx_inputs.iter().map(|(leaf_index, utxo)| async {
+                    let utxo_digest = if *leaf_index > 0 && *leaf_index < num_leafs {
+                        Some(aocl.get_leaf_async(*leaf_index).await)
+                    } else {
+                        None
+                    };
+                    SentTxInput {
+                        leaf_index: *leaf_index,
+                        utxo_digest,
+                        utxo: ApiUtxo::new(utxo),
+                    }
+                }))
+                .await;
+
+            sent_txs.push(SentTxToRespResponse {
+                tx_inputs,
+                tx_outputs,
+                fee: tx.fee.to_string(),
+                timestamp: tx.timestamp,
+                tip_when_sent: tx.tip_when_sent,
+            });
+        }
+
+        Ok(sent_txs)
+    }
+
+    async fn count_sent_transactions_at_block_call(
+        &self,
+        request: CountSentTransactionsAtBlockRequest,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse> {
+        let state = self.state.lock_guard().await;
+
+        let Some(digest) = request.block.as_digest(&state).await else {
+            return Ok(CountSentTransactionsAtBlockResponse { count: 0 });
+        };
+
+        let count = state
+            .wallet_state
+            .count_sent_transactions_at_block(digest)
+            .await;
+
+        Ok(CountSentTransactionsAtBlockResponse { count })
+    }
+
+    async fn find_utxo_leaf_index_call(
+        &self,
+        request: FindUtxoLeafIndexRequest,
+    ) -> RpcResult<FindUtxoLeafIndexResponse> {
+        let state = self.state.lock_guard().await;
+
+        // Check if utxo_digest is in mempool first
+        let in_mempool = state.mempool.fee_density_iter().any(|(txid, _)| {
+            state.mempool.get(txid).is_some_and(|tx| {
+                tx.kernel
+                    .outputs
+                    .iter()
+                    .any(|o| o.canonical_commitment == request.utxo_digest)
+            })
+        });
+
+        if in_mempool {
+            return Ok(FindUtxoLeafIndexResponse {
+                leaf_index: None,
+                mempool: true,
+                block_height: None,
+                block_digest: None,
+            });
+        }
+
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+        let num_leafs = aocl.num_leafs().await;
+
+        let to_leaf_index = request.to_leaf_index.unwrap_or(num_leafs).min(num_leafs);
+        let from_leaf_index = request.from_leaf_index.unwrap_or(0);
+
+        let max_range: u64 = if self.unrestricted { u64::MAX } else { 10000 };
+        let range = to_leaf_index.saturating_sub(from_leaf_index).min(max_range);
+        let from_leaf_index = to_leaf_index.saturating_sub(range);
+
+        match state
+            .chain
+            .archival_state()
+            .find_utxo_leaf_index(request.utxo_digest, from_leaf_index, to_leaf_index)
+            .await
+        {
+            Some((leaf_index, block_height, block_digest)) => Ok(FindUtxoLeafIndexResponse {
+                leaf_index: Some(leaf_index),
+                mempool: false,
+                block_height: Some(block_height),
+                block_digest: Some(block_digest),
+            }),
+            None => Ok(FindUtxoLeafIndexResponse {
+                leaf_index: None,
+                mempool: false,
+                block_height: None,
+                block_digest: None,
+            }),
+        }
+    }
+
+    async fn get_aocl_leaf_indices_call(
+        &self,
+        request: GetAoclLeafIndicesRequest,
+    ) -> RpcResult<GetAoclLeafIndicesResponse> {
+        let state = self.state.lock_guard().await;
+
+        let utxo_index = state
+            .chain
+            .archival_state()
+            .utxo_index
+            .as_ref()
+            .ok_or(RpcError::UtxoIndexNotPresent)?;
+
+        let indices = utxo_index
+            .get_aocl_leaf_indices(&request.commitments)
+            .await;
+
+        Ok(GetAoclLeafIndicesResponse { indices })
+    }
 }
 
 #[cfg(test)]
@@ -1357,6 +2037,7 @@ pub mod tests {
                 Default::default(),
                 mock_amount,
                 network.launch_date() + Timestamp::months(3),
+                None,
             )
             .await
             .unwrap();

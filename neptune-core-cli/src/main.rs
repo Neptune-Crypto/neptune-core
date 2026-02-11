@@ -878,6 +878,7 @@ async fn main() -> Result<()> {
                     )],
                     ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, notify_self),
                     fee,
+                    None,
                 )
                 .await?;
             let tx_artifacts = match resp {
@@ -936,6 +937,7 @@ async fn main() -> Result<()> {
                         UtxoNotificationMedium::OnChain,
                     ),
                     fee,
+                    None,
                 )
                 .await?;
             match res {
@@ -990,6 +992,7 @@ async fn main() -> Result<()> {
                         UtxoNotificationMedium::OnChain,
                     ),
                     fee,
+                    None,
                 )
                 .await?;
             match res {

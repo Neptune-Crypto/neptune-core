@@ -18,6 +18,10 @@ use crate::application::json_rpc::core::model::wallet::transaction::RpcTransacti
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
 use crate::application::json_rpc::core::model::wallet::RpcAnnouncementFlag;
 use crate::application::network::overview::NetworkOverview;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::difficulty_control::Difficulty;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::application::json_rpc::core::model::wallet::adapter;
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -582,4 +586,306 @@ pub struct NetworkOverviewRequest {}
 #[serde(rename_all = "camelCase")]
 pub struct NetworkOverviewResponse {
     pub network_overview: NetworkOverview,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockInfoRequest {
+    pub selector: RpcBlockSelector,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockInfoInput {
+    pub n: usize,
+    pub leaf_index: u64,
+    pub utxo_digest: Digest,
+    pub sender_randomness: Digest,
+    pub confirmed_height: BlockHeight,
+    pub utxo: ApiUtxo,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockInfoOutput {
+    pub n: usize,
+    pub leaf_index: u64,
+    pub utxo_digest: Digest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_randomness: Option<Digest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiving_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_digest: Option<Digest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_identifier: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub utxo: Option<ApiUtxo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockInfo {
+    pub height: BlockHeight,
+    pub digest: Digest,
+    pub timestamp: Timestamp,
+    pub difficulty: Difficulty,
+    pub size: usize,
+    pub fee: String,
+    pub inputs: Vec<BlockInfoInput>,
+    pub outputs: Vec<BlockInfoOutput>,
+}
+
+pub type BlockInfoResponse = Option<BlockInfo>;
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateAddressRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateAddressResponse {
+    #[serde(flatten)]
+    pub address: adapter::GenerateAddressResponse,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBalanceRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBalanceResponse {
+    #[serde(flatten)]
+    pub balance: adapter::BalanceResponse,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTxRequest {
+    pub amount: String,
+    pub fee: String,
+    pub to_address: String,
+    #[serde(default)]
+    pub exclude_recent_blocks: usize,
+    /// Maximum number of input UTXOs to select. `None` means no limit.
+    #[serde(default)]
+    pub max_inputs: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTxUtxo {
+    pub lock_script_hash: Digest,
+    pub amount: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTxInput {
+    pub leaf_index: u64,
+    pub utxo_digest: Digest,
+    pub utxo: SendTxUtxo,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTxOutput {
+    pub utxo: SendTxUtxo,
+    pub utxo_digest: Digest,
+    pub sender_randomness: Digest,
+    pub is_owned: bool,
+    pub is_change: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTxResponse {
+    pub timestamp: Timestamp,
+    pub tip_when_sent: Digest,
+    pub inputs: Vec<SendTxInput>,
+    pub outputs: Vec<SendTxOutput>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateAddressRequest {
+    pub address_string: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateAddressResponse {
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_identifier: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_address: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateAmountRequest {
+    pub amount_string: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateAmountResponse {
+    #[serde(flatten)]
+    pub amount: adapter::ValidateAmountResponse,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnspentUtxosRequest {
+    #[serde(default)]
+    pub exclude_recent_blocks: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnspentUtxo {
+    pub leaf_index: u64,
+    pub lock_script_hash: Digest,
+    pub amount: String,
+}
+
+pub type UnspentUtxosResponse = Vec<UnspentUtxo>;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryRequest {
+    pub leaf_index: Option<u64>,
+    pub utxo_digest: Option<Digest>,
+    pub receiving_address: Option<String>,
+    pub sender_randomness: Option<Digest>,
+    pub confirmed_height: Option<BlockHeight>,
+    pub spent_height: Option<BlockHeight>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct History {
+    pub utxo_digest: Option<Digest>,
+    pub leaf_index: u64,
+    pub sender_randomness: Digest,
+    pub digest: Digest,
+    pub confirmed_height: BlockHeight,
+    pub spent_height: Option<BlockHeight>,
+    pub timestamp: Timestamp,
+    pub receiving_address: Option<String>,
+    pub utxo: ApiUtxo,
+}
+
+pub type HistoryResponse = Vec<History>;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentTxInput {
+    pub leaf_index: u64,
+    pub utxo_digest: Option<Digest>,
+    pub utxo: ApiUtxo,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentTxOutput {
+    pub utxo: ApiUtxo,
+    pub utxo_digest: Digest,
+    pub sender_randomness: Digest,
+    pub receiver_digest: Digest,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentTxToRespResponse {
+    pub tx_inputs: Vec<SentTxInput>,
+    pub tx_outputs: Vec<SentTxOutput>,
+    pub fee: String,
+    pub timestamp: Timestamp,
+    pub tip_when_sent: Digest,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentTransactionRequest {
+    pub sender_randomness: Option<Digest>,
+    pub receiver_digest: Option<Digest>,
+    pub lock_script_hash: Option<Digest>,
+    pub utxo_digest: Option<Digest>,
+    pub timestamp: Option<Timestamp>,
+    pub limit: Option<u64>,
+    pub page: Option<u64>,
+}
+
+pub type SentTransactionResponse = Vec<SentTxToRespResponse>;
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CountSentTransactionsAtBlockRequest {
+    pub block: RpcBlockSelector,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CountSentTransactionsAtBlockResponse {
+    pub count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindUtxoLeafIndexRequest {
+    pub utxo_digest: Digest,
+
+    #[serde(default)]
+    pub from_leaf_index: Option<u64>,
+
+    #[serde(default)]
+    pub to_leaf_index: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindUtxoLeafIndexResponse {
+    pub leaf_index: Option<u64>,
+    pub mempool: bool,
+    pub block_height: Option<BlockHeight>,
+    pub block_digest: Option<Digest>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAoclLeafIndicesRequest {
+    pub commitments: Vec<Digest>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAoclLeafIndicesResponse {
+    pub indices: Vec<Option<u64>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiUtxo {
+    pub lock_script_hash: Digest,
+    pub amount: String,
+    pub can_spend: bool,
+    pub release_date: Option<Timestamp>,
+    pub valid: bool,
+}
+
+impl ApiUtxo {
+    pub fn new(utxo: &crate::protocol::consensus::transaction::utxo::Utxo) -> Self {
+        Self {
+            lock_script_hash: utxo.lock_script_hash(),
+            amount: utxo.get_native_currency_amount().to_string(),
+            can_spend: utxo.can_spend_at(Timestamp::now()),
+            release_date: utxo.release_date(),
+            valid: utxo.all_type_script_states_are_valid(),
+        }
+    }
 }

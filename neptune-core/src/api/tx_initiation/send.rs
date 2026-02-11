@@ -26,7 +26,8 @@
 //!             outputs,
 //!             change_policy,
 //!             fee,
-//!             Timestamp::now()
+//!             Timestamp::now(),
+//!             None,
 //!         ).await
 //! }
 //! ```
@@ -61,11 +62,12 @@ impl TransactionSender {
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
+        max_inputs: Option<usize>,
     ) -> Result<TxCreationArtifacts, error::SendError> {
         TransactionInitiator {
             global_state_lock: self.global_state_lock.clone(),
         }
-        .send(outputs, change_policy, fee, timestamp)
+        .send(outputs, change_policy, fee, timestamp, max_inputs)
         .await
     }
 }

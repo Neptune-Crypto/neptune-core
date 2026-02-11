@@ -77,11 +77,13 @@ impl TransactionInitiator {
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
         timestamp: Timestamp,
+        max_inputs: Option<usize>,
     ) -> impl IntoIterator<Item = TxInput> {
         TxInputListBuilder::new()
             .spendable_inputs(self.spendable_inputs(timestamp).await.into())
             .policy(policy)
             .spend_amount(spend_amount)
+            .max_inputs(max_inputs)
             .build()
     }
 
@@ -240,8 +242,9 @@ impl TransactionInitiator {
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
+        max_inputs: Option<usize>,
     ) -> Result<TxCreationArtifacts, error::SendError> {
-        self.send_inner(outputs, change_policy, fee, timestamp, false)
+        self.send_inner(outputs, change_policy, fee, timestamp, false, max_inputs)
             .await
     }
 
@@ -257,8 +260,9 @@ impl TransactionInitiator {
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
+        max_inputs: Option<usize>,
     ) -> Result<TxCreationArtifacts, error::SendError> {
-        self.send_inner(outputs, change_policy, fee, timestamp, true)
+        self.send_inner(outputs, change_policy, fee, timestamp, true, max_inputs)
             .await
     }
 
@@ -276,6 +280,7 @@ impl TransactionInitiator {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         transparent: bool,
+        max_inputs: Option<usize>,
     ) -> Result<TxCreationArtifacts, error::SendError> {
         self.private().check_proceed_with_send(fee).await?;
 
@@ -292,9 +297,11 @@ impl TransactionInitiator {
 
         // select inputs
         let spend_amount = tx_outputs.total_native_coins() + fee;
-        let policy = InputSelectionPolicy::Random;
+        let policy = InputSelectionPolicy::ByNativeCoinAmount(
+            super::builder::tx_input_list_builder::SortOrder::Ascending,
+        );
         let tx_inputs = self
-            .select_spendable_inputs(policy, spend_amount, timestamp)
+            .select_spendable_inputs(policy, spend_amount, timestamp, max_inputs)
             .await
             .into_iter()
             .collect::<Vec<_>>();

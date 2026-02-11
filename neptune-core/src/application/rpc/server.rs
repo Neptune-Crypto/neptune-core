@@ -1794,7 +1794,7 @@ pub trait RPC {
     /// let fee : NativeCurrencyAmount = NativeCurrencyAmount::coins(10);
     /// #
     /// // neptune-core server sends token to a single recipient
-    /// let send_result = client.send(context::current(), token, outputs, change_policy, fee).await??;
+    /// let send_result = client.send(context::current(), token, outputs, change_policy, fee, None).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1803,6 +1803,7 @@ pub trait RPC {
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        max_inputs: Option<usize>,
     ) -> RpcResult<TxCreationArtifacts>;
 
     /// Like `send` but the resulting transaction is *transparent*. No privacy.
@@ -1817,6 +1818,7 @@ pub trait RPC {
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        max_inputs: Option<usize>,
     ) -> RpcResult<TxCreationArtifacts>;
 
     /// Initiate a transaction that spends a batch of UTXOs to the node's own
@@ -3582,6 +3584,7 @@ impl RPC for NeptuneRPCServer {
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        max_inputs: Option<usize>,
     ) -> RpcResult<TxCreationArtifacts> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3590,7 +3593,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api_mut()
             .tx_sender_mut()
-            .send(outputs, change_policy, fee, Timestamp::now())
+            .send(outputs, change_policy, fee, Timestamp::now(), max_inputs)
             .await?)
     }
 
@@ -3602,6 +3605,7 @@ impl RPC for NeptuneRPCServer {
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        max_inputs: Option<usize>,
     ) -> RpcResult<TxCreationArtifacts> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3610,7 +3614,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api_mut()
             .tx_initiator_mut()
-            .send_transparent(outputs, change_policy, fee, Timestamp::now())
+            .send_transparent(outputs, change_policy, fee, Timestamp::now(), max_inputs)
             .await?)
     }
 
@@ -4287,7 +4291,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api()
             .tx_initiator()
-            .select_spendable_inputs(policy, spend_amount, Timestamp::now())
+            .select_spendable_inputs(policy, spend_amount, Timestamp::now(), None)
             .await
             .into())
     }
@@ -5127,6 +5131,7 @@ mod tests {
                 vec![output],
                 ChangePolicy::ExactChange,
                 NativeCurrencyAmount::one_nau(),
+                None,
             )
             .await;
         let _ = rpc_server
@@ -5145,6 +5150,7 @@ mod tests {
                 vec![my_output],
                 ChangePolicy::ExactChange,
                 NativeCurrencyAmount::one_nau(),
+                None,
             )
             .await;
 
@@ -6113,7 +6119,8 @@ mod tests {
                 token,
                 vec![output],
                 ChangePolicy::ExactChange,
-                NativeCurrencyAmount::zero()
+                NativeCurrencyAmount::zero(),
+                None,
             )
             .await
             .is_err());
@@ -6710,6 +6717,7 @@ mod tests {
                                 UtxoNotificationMedium::OffChain,
                             ),
                             fee,
+                            None,
                         )
                         .await
                         .unwrap();
@@ -6881,6 +6889,7 @@ mod tests {
                             UtxoNotificationMedium::OffChain,
                         ),
                         fee,
+                        None,
                     )
                     .await
                     .unwrap();
@@ -6916,6 +6925,7 @@ mod tests {
                                 vec![output],
                                 ChangePolicy::exact_change(),
                                 NativeCurrencyAmount::zero(),
+                                None,
                             )
                             .await
                             .unwrap();
@@ -7043,6 +7053,7 @@ mod tests {
                         outputs.clone().take(i).collect(),
                         ChangePolicy::ExactChange,
                         fee,
+                        None,
                     )
                     .await;
                 assert!(result.is_ok());
@@ -7094,7 +7105,7 @@ mod tests {
             for i in 0..10 {
                 let result = rpc_server
                     .clone()
-                    .send(ctx, token, outputs.clone(), ChangePolicy::Burn, fee)
+                    .send(ctx, token, outputs.clone(), ChangePolicy::Burn, fee, None)
                     .await;
 
                 // any attempts after the 2nd send should result in RateLimit error.
@@ -7258,6 +7269,7 @@ mod tests {
                             UtxoNotificationMedium::OffChain,
                         ),
                         fee,
+                        None,
                     )
                     .await;
 

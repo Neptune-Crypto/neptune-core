@@ -133,6 +133,42 @@ pub enum RpcMethods {
     #[namespace(Namespace::Wallet)]
     RescanGuesserRewards,
 
+    #[namespace(Namespace::Wallet)]
+    BlockInfo,
+
+    #[namespace(Namespace::Wallet)]
+    GenerateAddress,
+
+    #[namespace(Namespace::Wallet)]
+    GetBalance,
+
+    #[namespace(Namespace::Wallet)]
+    SendTx,
+
+    #[namespace(Namespace::Wallet)]
+    ValidateAddress,
+
+    #[namespace(Namespace::Wallet)]
+    ValidateAmount,
+
+    #[namespace(Namespace::Wallet)]
+    UnspentUtxos,
+
+    #[namespace(Namespace::Wallet)]
+    History,
+
+    #[namespace(Namespace::Wallet)]
+    SentTransaction,
+
+    #[namespace(Namespace::Wallet)]
+    CountSentTransactionsAtBlock,
+
+    #[namespace(Namespace::Archival)]
+    FindUtxoLeafIndex,
+
+    #[namespace(Namespace::Archival)]
+    GetAoclLeafIndices,
+
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
 

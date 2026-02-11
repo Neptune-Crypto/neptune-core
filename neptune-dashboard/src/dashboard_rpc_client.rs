@@ -204,18 +204,19 @@ impl DashboardRpcClient {
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        max_inputs: Option<usize>,
     ) -> ::core::result::Result<RpcResult<TxCreationArtifacts>, ::tarpc::client::RpcError> {
         match self {
             DashboardRpcClient::Authentic(rpcclient) => {
                 rpcclient
-                    .send(ctx, token, outputs, change_policy, fee)
+                    .send(ctx, token, outputs, change_policy, fee, max_inputs)
                     .await
             }
 
             #[cfg(feature = "mock")]
             DashboardRpcClient::Mock(mock_rpc_client) => {
                 mock_rpc_client
-                    .send(ctx, token, outputs, change_policy, fee)
+                    .send(ctx, token, outputs, change_policy, fee, max_inputs)
                     .await
             }
         }

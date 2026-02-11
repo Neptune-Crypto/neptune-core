@@ -332,6 +332,8 @@ impl ArchivalState {
 
             if utxo_index.is_empty().await {
                 utxo_index.index_block(&genesis_block).await;
+                // Index commitments for genesis block (AOCL starts at 0)
+                utxo_index.index_commitments(&genesis_block, 0).await;
             }
             debug!("UTXO index populated");
             Some(utxo_index)
@@ -718,26 +720,46 @@ impl ArchivalState {
                 continue;
             }
 
-            if missing == new_block_hash {
+            let block_to_index = if missing == new_block_hash {
                 // Avoid reading the new block from disk if it's already in
                 // memory.
-                self.utxo_index
-                    .as_mut()
-                    .unwrap()
-                    .index_block(new_block)
-                    .await;
+                new_block.clone()
             } else {
-                let missing = self
-                    .get_block(missing)
+                self.get_block(missing)
                     .await
                     .expect("Fetching block must succeed")
-                    .expect("missing block must exist before processed by UTXO index");
-                self.utxo_index
-                    .as_mut()
-                    .unwrap()
-                    .index_block(&missing)
-                    .await;
-            }
+                    .expect("missing block must exist before processed by UTXO index")
+            };
+
+            // Calculate prev_aocl_len from parent block
+            let prev_aocl_len = if block_to_index.header().height.is_genesis() {
+                0
+            } else {
+                self.get_block(block_to_index.header().prev_block_digest)
+                    .await
+                    .expect("Fetching parent block must succeed")
+                    .and_then(|parent| {
+                        parent
+                            .mutator_set_accumulator_after()
+                            .map(|msa| msa.aocl.num_leafs())
+                            .ok()
+                    })
+                    .unwrap_or(0)
+            };
+
+            // Index block
+            self.utxo_index
+                .as_mut()
+                .unwrap()
+                .index_block(&block_to_index)
+                .await;
+
+            // Index commitments with AOCL leaf indices
+            self.utxo_index
+                .as_mut()
+                .unwrap()
+                .index_commitments(&block_to_index, prev_aocl_len)
+                .await;
         }
 
         debug!("Done updating UTXO index");
@@ -880,6 +902,31 @@ impl ArchivalState {
                 .await;
             record = self.get_block_record(block_hash).await.unwrap();
         }
+    }
+
+    /// Find UTXO by digest in AOCL range.
+    pub async fn find_utxo_leaf_index(
+        &self,
+        utxo_digest: Digest,
+        from_leaf_index: u64,
+        to_leaf_index: u64,
+    ) -> Option<(u64, BlockHeight, Digest)> {
+        let aocl = &self.archival_mutator_set.ams().aocl;
+
+        for leaf_index in (from_leaf_index..to_leaf_index).rev() {
+            if aocl.try_get_leaf(leaf_index).await == Some(utxo_digest) {
+                let block_digest = self
+                    .canonical_block_digest_of_aocl_index(leaf_index)
+                    .await
+                    .ok()??;
+
+                let block_height = self.get_block_header(block_digest).await?.height;
+
+                return Some((leaf_index, block_height, block_digest));
+            }
+        }
+
+        None
     }
 
     /// searches max `max_search_depth` from tip for a matching transaction

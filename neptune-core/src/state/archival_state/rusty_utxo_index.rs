@@ -108,6 +108,11 @@ enum UtxoIndexKey {
     /// Can be used to serve an RPC endpoint that maps absolute index sets to
     /// block heights.
     BlockByIndexSetDigest(Digest),
+
+    /// Mapping from commitment (canonical commitment) to AOCL leaf index.
+    ///
+    /// Can be used to serve RPC requests for get_aocl_leaf_indices.
+    CommitmentIndex(Digest),
 }
 
 /// The values used by the UTXO index database.
@@ -121,6 +126,7 @@ enum UtxoIndexValue {
     BlocksByAnnouncementFlag(Vec<BlockHeight>),
     BlocksByAdditionRecord(Vec<BlockHeight>),
     BlockByIndexSetDigest(BlockHeight),
+    CommitmentIndex(u64),
 }
 
 impl UtxoIndexValue {
@@ -163,6 +169,13 @@ impl UtxoIndexValue {
         match self {
             UtxoIndexValue::BlockByIndexSetDigest(height) => height,
             _ => panic!("Expected BlockByIndexSetDigest found {:?}", self),
+        }
+    }
+
+    fn expect_commitment_index(self) -> u64 {
+        match self {
+            UtxoIndexValue::CommitmentIndex(index) => index,
+            _ => panic!("Expected CommitmentIndex found {:?}", self),
         }
     }
 }
@@ -426,9 +439,46 @@ impl RustyUtxoIndex {
             UtxoIndexValue::IndexSetDigestsByBlock(index_set_digests),
         );
 
+        // Note: Commitments are indexed separately via index_commitments() method
+        // which requires prev_aocl_len to calculate AOCL leaf indices correctly
+
         batch_writes.op_write(UtxoIndexKey::SyncLabel, UtxoIndexValue::SyncLabel(hash));
 
         self.db.batch_write(batch_writes).await;
+    }
+
+    /// Index commitments in a block with their AOCL leaf indices
+    /// This should be called after the block's outputs are added to AOCL
+    pub(crate) async fn index_commitments(&mut self, block: &Block, prev_aocl_len: u64) {
+        let outputs = &block.kernel.body.transaction_kernel.outputs;
+        let mut batch_writes = WriteBatchAsync::new();
+
+        for (i, output) in outputs.iter().enumerate() {
+            let aocl_leaf_index = prev_aocl_len + i as u64;
+            batch_writes.op_write(
+                UtxoIndexKey::CommitmentIndex(output.canonical_commitment),
+                UtxoIndexValue::CommitmentIndex(aocl_leaf_index),
+            );
+        }
+
+        self.db.batch_write(batch_writes).await;
+    }
+
+    /// Get AOCL leaf index for a commitment
+    pub(crate) async fn get_aocl_leaf_index(&self, commitment: &Digest) -> Option<u64> {
+        self.db
+            .get(UtxoIndexKey::CommitmentIndex(*commitment))
+            .await
+            .map(|x| x.expect_commitment_index())
+    }
+
+    /// Get AOCL leaf indices for multiple commitments
+    pub(crate) async fn get_aocl_leaf_indices(&self, commitments: &[Digest]) -> Vec<Option<u64>> {
+        let mut results = Vec::with_capacity(commitments.len());
+        for commitment in commitments {
+            results.push(self.get_aocl_leaf_index(commitment).await);
+        }
+        results
     }
 
     /// Return the hash of the latest block indexed. The default value means
