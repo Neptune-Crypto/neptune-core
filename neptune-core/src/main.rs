@@ -58,8 +58,13 @@ pub fn main() -> Result<()> {
 /// global collector configured based on RUST_LOG env var. Accepted `RUST_LOG`
 /// values are `trace`, `debug`, `info`, `warn`, and `error`.
 fn set_up_logger() {
-    let info_env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn,libp2p=error"));
+    // Use the log level set by the environment (which defaults to INFO) for
+    // messages logged in this crate. In upstream crates, hardcode it.
+    let info_env_filter = EnvFilter::from_default_env()
+        .add_directive("tarpc=warn".parse().unwrap())
+        .add_directive("libp2p=error".parse().unwrap())
+        .add_directive("libp2p_ping=off".parse().unwrap())
+        .add_directive("libp2p_kad=warn".parse().unwrap());
     let subscriber = FmtSubscriber::builder()
         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
         .with_env_filter(info_env_filter)

@@ -1194,7 +1194,7 @@ impl NetworkActor {
             // We successfully sent our Identify info to a peer at our own
             // behest.
             libp2p::identify::Event::Pushed { peer_id, info, .. } => {
-                tracing::debug!(peer = %peer_id, "Pushed identify info to peer");
+                tracing::trace!(peer = %peer_id, "Pushed identify info to peer");
 
                 // Cache the list of supported protocols for later comparison.
                 self.active_protocols = Some(info.protocols.into_iter().collect());
