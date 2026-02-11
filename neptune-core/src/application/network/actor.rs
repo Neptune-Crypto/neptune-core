@@ -876,7 +876,19 @@ impl NetworkActor {
                             )
                         }
                         Err(e) => {
-                            tracing::warn!(%peer_id, "Relay reservation failed or closed with error: {:?}", e)
+                            // The actual error lives so deep in the nested data
+                            // structure that it is impossible to pattern match
+                            // for. So format and parse the string instead.
+                            let is_resource_limit =
+                                format!("{e:?}").contains("ResourceLimitExceeded");
+
+                            // No cause for alarm if the remote has no relay
+                            // slots left.
+                            if is_resource_limit {
+                                tracing::trace!("Relay reservation with {peer_id} failed due to resource limit exceeded error, specifically {e:?}.");
+                            } else {
+                                tracing::warn!(%peer_id, "Relay reservation failed or closed with error: {:?}", e)
+                            }
                         }
                     }
 
