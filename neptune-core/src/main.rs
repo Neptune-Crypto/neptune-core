@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use neptune_cash::application::config::cli_args;
 use neptune_cash::display_banner;
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::FmtSubscriber;
 
@@ -60,7 +61,9 @@ pub fn main() -> Result<()> {
 fn set_up_logger() {
     // Use the log level set by the environment (which defaults to INFO) for
     // messages logged in this crate. In upstream crates, hardcode it.
-    let info_env_filter = EnvFilter::from_default_env()
+    let info_env_filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy()
         .add_directive("tarpc=warn".parse().unwrap())
         .add_directive("libp2p=error".parse().unwrap())
         .add_directive("libp2p_ping=off".parse().unwrap())
