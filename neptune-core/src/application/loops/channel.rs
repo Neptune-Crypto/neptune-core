@@ -116,7 +116,6 @@ pub enum RPCServerToMain {
     PauseMiner,
     RestartMiner,
     SetTipToStoredBlock(Digest),
-    UpdateStatus,
 
     // Used by JSON-RPC
     SubmitTx(Box<Transaction>),

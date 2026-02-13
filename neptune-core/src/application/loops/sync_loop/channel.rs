@@ -44,7 +44,6 @@ pub(crate) enum MainToSync {
         peer_handle: PeerHandle,
         coverage: SynchronizationBitMask,
     },
-    Status,
     TryFetchBlock {
         peer_handle: PeerHandle,
         height: BlockHeight,

@@ -3177,14 +3177,6 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        // Ask the main loop to update state, but do not wait for the answer.
-        if let Err(e) = self
-            .rpc_server_to_main_tx
-            .try_send(RPCServerToMain::UpdateStatus)
-        {
-            error!("Could not send message to main loop: {e}.");
-        }
-
         // Assemble data.
         let now = Timestamp::now();
         let state = self.state.lock_guard().await;

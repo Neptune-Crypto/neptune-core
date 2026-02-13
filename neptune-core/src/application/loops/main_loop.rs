@@ -2008,15 +2008,6 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
-            RPCServerToMain::UpdateStatus => {
-                trace!("main loop is updating status indicators ...");
-                if let Some(sync_loop_handle) = &main_loop_state.maybe_sync_loop {
-                    sync_loop_handle.send_status_request();
-                    trace!("sent status request to sync loop.");
-                }
-
-                Ok(false)
-            }
             RPCServerToMain::RescanAnnounced { first, last, keys } => {
                 info!("Rescanning block range {first}..={last} for announced UTXOs");
 

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
@@ -141,47 +139,6 @@ impl SyncLoopHandle {
                 self.sender.capacity(),
                 self.sender.max_capacity()
             );
-        }
-    }
-
-    pub(crate) fn send_status_request(&self) {
-        // Insist: in case of failure, wait a while then try again. Do this in a
-        // separate task so that control can return.
-        let moved_sender = self.sender.clone();
-        tokio::task::spawn(Self::weakly_insist_sending_status_request(moved_sender));
-    }
-
-    async fn weakly_insist_sending_status_request(sender: Sender<MainToSync>) {
-        let max_number_of_attempts = 20;
-        let mut counter = 1;
-        loop {
-            // Avoid contributing to reduce channel clog. Only attempt to send
-            // if the channel queue is empty.
-            let queue_is_empty = sender.capacity() == sender.max_capacity();
-            let mut send_failed = true;
-            if queue_is_empty {
-                send_failed = sender.try_send(MainToSync::Status).is_err();
-            }
-
-            if send_failed {
-                // failure: sleep a while and then try again
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                counter += 1;
-            } else {
-                // success sending
-                break;
-            }
-
-            // backstop: after too many failed attempts, just give up
-            if counter == max_number_of_attempts {
-                tracing::warn!("Failed to send status request message to sync loop.");
-                tracing::debug!(
-                    "Note: channel capacity is at {}/{}.",
-                    sender.capacity(),
-                    sender.max_capacity()
-                );
-                break;
-            }
         }
     }
 

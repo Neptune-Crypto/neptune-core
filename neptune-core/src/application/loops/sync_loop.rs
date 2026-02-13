@@ -45,7 +45,13 @@ const PEER_RESPONSE_REMINDER_TIMEOUT: Duration = Duration::from_millis(1);
 const PEER_RESPONSE_PUNISHMENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Time between successive ticks of the event loop's internal clock.
-const TICK_PERIOD: Duration = Duration::from_micros(100);
+const FAST_TICK_PERIOD: Duration = Duration::from_micros(100);
+
+/// Compute the status every so often.
+#[cfg(not(test))]
+const STATUS_TICK_PERIOD: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const STATUS_TICK_PERIOD: Duration = Duration::from_micros(200);
 
 type PeerHandle = libp2p::PeerId;
 
@@ -118,7 +124,10 @@ impl SyncLoop {
         let mut finished_processing = false;
 
         // Create an interval timer, triggering a tick event regularly.
-        let mut ticker = interval(TICK_PERIOD);
+        let mut fast_ticker = interval(FAST_TICK_PERIOD);
+
+        // Ticker for computing status updates.
+        let mut status_ticker = interval(STATUS_TICK_PERIOD);
 
         // The tip-successors subtask sends tip-successors to the main loop one
         // by one. Its return value comes to the sync loop over this channel.
@@ -324,46 +333,6 @@ impl SyncLoop {
                                 pending_block_requests.push(peer_handle);
                             }
                         }
-                        MainToSync::Status => {
-                            tracing::debug!("sync loop received status request, computing ...");
-                            let total_span = self.download_state.target().next().value();
-                            let num_blocks_processed = self.tip.header().height.value();
-
-                            // Calculating the proportion of blocks covered is
-                            // fast but not fast enough. So clone all the
-                            // necessary information and hand control off to
-                            // a new task that handles the computation and the
-                            // return message. This way, control returns to the
-                            // loop.
-                            let moved_coverage = self.download_state.coverage();
-                            let moved_main_channel_sender = self.main_channel_sender.clone();
-                            let _jh = tokio::task::spawn(async move {
-                                    let num_blocks_downloaded_but_not_processed = moved_coverage.pop_count();
-                                    let total_num_blocks_downloaded = num_blocks_processed + num_blocks_downloaded_but_not_processed;
-                                    tracing::debug!(
-                                        "Assembling new SyncProgress object with total span {total_span}, \
-                                        {num_blocks_downloaded_but_not_processed} blocks downloaded (but not \
-                                        processed)."
-                                    );
-                                    let status = SyncProgress::new(total_span).with_num_blocks_downloaded(total_num_blocks_downloaded);
-                                    let max_num_tries = 20;
-                                    let mut counter = 1;
-                                    loop {
-                                        if let Err(e) = moved_main_channel_sender.try_send(SyncToMain::Status(status)) {
-                                            tracing::warn!("Sync loop: failed to send Status({}) message to main loop: {e}.", status);
-                                            tracing::debug!("Channel capacity is at {}/{}", moved_main_channel_sender.capacity(), moved_main_channel_sender.max_capacity());
-                                            tokio::time::sleep(Duration::from_millis(counter * 50)).await;
-                                            counter += 1;
-                                        } else {
-                                            break;
-                                        }
-
-                                        if counter == max_num_tries {
-                                            break;
-                                        }
-                                    }
-                                });
-                        }
                         MainToSync::TryFetchBlock{ peer_handle, height } => {
                             tracing::debug!("sync loop received try-fetch-block message from peer {peer_handle} for block {height}");
 
@@ -405,8 +374,8 @@ impl SyncLoop {
                     }
                 }
 
-                // event: timer ticks
-                _ = ticker.tick() => {
+                // event: fast timer ticks
+                _ = fast_ticker.tick() => {
 
                     // If we are finished and there are no messages waiting to
                     // be read, then we can exit.
@@ -520,6 +489,49 @@ impl SyncLoop {
                         }
                     }
 
+                }
+
+                // event: status ticker ticks
+                _ = status_ticker.tick() => {
+
+                            tracing::debug!("sync loop: time to compute sync status ...");
+                            let total_span = self.download_state.target().next().value();
+                            let num_blocks_processed = self.tip.header().height.value();
+
+                            // Calculating the proportion of blocks covered is
+                            // fast but not fast enough. So clone all the
+                            // necessary information and hand off control to
+                            // a new task that handles the computation and the
+                            // return message. This way, control returns to the
+                            // loop.
+                            let moved_coverage = self.download_state.coverage();
+                            let moved_main_channel_sender = self.main_channel_sender.clone();
+                            let _jh = tokio::task::spawn(async move {
+                                    let num_blocks_downloaded_but_not_processed = moved_coverage.pop_count();
+                                    let total_num_blocks_downloaded = num_blocks_processed + num_blocks_downloaded_but_not_processed;
+                                    tracing::debug!(
+                                        "Assembling new SyncProgress object with total span {total_span}, \
+                                        {num_blocks_downloaded_but_not_processed} blocks downloaded (but not \
+                                        processed)."
+                                    );
+                                    let status = SyncProgress::new(total_span).with_num_blocks_downloaded(total_num_blocks_downloaded);
+                                    let max_num_tries = 20;
+                                    let mut counter = 1;
+                                    loop {
+                                        if let Err(e) = moved_main_channel_sender.try_send(SyncToMain::Status(status)) {
+                                            tracing::warn!("Sync loop: failed to send Status({}) message to main loop: {e}.", status);
+                                            tracing::debug!("Channel capacity is at {}/{}", moved_main_channel_sender.capacity(), moved_main_channel_sender.max_capacity());
+                                            tokio::time::sleep(Duration::from_millis(counter * 50)).await;
+                                            counter += 1;
+                                        } else {
+                                            break;
+                                        }
+
+                                        if counter == max_num_tries {
+                                            break;
+                                        }
+                                    }
+                                });
                 }
             }
         }
@@ -944,9 +956,6 @@ mod tests {
         }
 
         async fn run(&mut self) {
-            // Create an interval timer, triggering a tick event regularly.
-            let mut ticker = interval(Duration::from_millis(100));
-
             loop {
                 tokio::select! {
                     Some(message) = self.sync_loop_handle.recv() => {
@@ -1049,11 +1058,6 @@ mod tests {
                             }
                         }
                         tracing::debug!("mock main loop: done relaying new block.");
-                    }
-
-                    _ = ticker.tick() => {
-                        tracing::debug!("mock main loop: sending status request");
-                        self.sync_loop_handle.send_status_request();
                     }
                 }
             }
