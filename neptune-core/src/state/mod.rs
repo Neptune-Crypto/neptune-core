@@ -179,7 +179,7 @@ pub struct GlobalStateLock {
 }
 
 impl GlobalStateLock {
-    pub fn from_global_state(
+    pub(crate) fn from_global_state(
         global_state: GlobalState,
         rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
     ) -> Self {
@@ -336,7 +336,7 @@ impl GlobalStateLock {
     /// retrieve sender for channel from RPC to main loop
     ///
     /// note that the tx_initiator API now uses this sender also.
-    pub fn rpc_server_to_main_tx(&self) -> tokio::sync::mpsc::Sender<RPCServerToMain> {
+    pub(crate) fn rpc_server_to_main_tx(&self) -> tokio::sync::mpsc::Sender<RPCServerToMain> {
         self.rpc_server_to_main_tx.clone()
     }
 
