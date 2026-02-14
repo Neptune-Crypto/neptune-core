@@ -12,6 +12,12 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
 default-run = "neptune-cli"
 
+[package.metadata.wix]
+upgrade-guid = "5ECA2948-A196-4183-A017-A470C2D00FF6"
+path-guid = "F642EA18-96FF-421A-AE42-30190B67DCD1"
+license = false
+eula = false
+
 [[bin]]
 name = "neptune-cli"
 path = "src/main.rs"

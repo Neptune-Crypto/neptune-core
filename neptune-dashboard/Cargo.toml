@@ -10,6 +10,12 @@ license = "Apache-2.0"
 homepage = "https://neptune.cash/"
 repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
+[package.metadata.wix]
+upgrade-guid = "D7E23508-EDAB-4F38-BF78-453703CC6000"
+path-guid = "6C6F906C-1841-4C62-8038-7CD40E2A66E1"
+license = false
+eula = false
+
 [features]
 default = []
 mock = ["rand", "neptune-cash/mock-rpc"]

@@ -13,6 +13,12 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
 default-run = "neptune-core"
 
+[package.metadata.wix]
+upgrade-guid = "7F0ACE31-CFC9-435B-9FCD-C7C8D160A7C1"
+path-guid = "3CB5E683-EC1E-42EF-87F4-DDCF2860438A"
+license = false
+eula = false
+
 [features]
 
 # logs write-lock acquisitions that are held over 100 millis.  requires nightly.
