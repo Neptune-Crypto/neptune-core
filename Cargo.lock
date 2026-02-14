@@ -3272,7 +3272,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-cash"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -3349,7 +3349,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-core-cli"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3373,7 +3373,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-dashboard"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "bytesize",
@@ -3396,7 +3396,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-rpc-client"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "neptune-cash",
@@ -3407,7 +3407,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-rpc-macros"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "convert_case 0.8.0",
  "quote",

@@ -1,3 +1,28 @@
+## [0.6.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.6.0..v0.6.1) - 2026-02-14
+
+### ✨ Features
+
+- *(CLI)* Add command: version ([af87a8af](https://github.com/Neptune-Crypto/neptune-core/commit/af87a8af))
+- *(CLI)* Add command: consolidate ([b51d4c55](https://github.com/Neptune-Crypto/neptune-core/commit/b51d4c55))
+
+### 🐛 Bug Fixes
+
+- Consolidate ([b51d4c55](https://github.com/Neptune-Crypto/neptune-core/commit/b51d4c55))
+
+### ♻️ Refactor
+
+- *(sync-loop)!* Proactively push status instead of responding ([8a452cfc](https://github.com/Neptune-Crypto/neptune-core/commit/8a452cfc))
+- *(CLI)* Split commands into subcategories ([05a24d4a](https://github.com/Neptune-Crypto/neptune-core/commit/05a24d4a))
+
+### ⚙️ Miscellaneous
+
+- Add MSI installer ([837627d3](https://github.com/Neptune-Crypto/neptune-core/commit/837627d3), [daccbc93](https://github.com/Neptune-Crypto/neptune-core/commit/daccbc93))
+
+### 🪵 Log
+
+- Reduce noise ([d59dac78](https://github.com/Neptune-Crypto/neptune-core/commit/d59dac78), [743403cc](https://github.com/Neptune-Crypto/neptune-core/commit/743403cc), [08f3b46c](https://github.com/Neptune-Crypto/neptune-core/commit/08f3b46c), [ad588094](https://github.com/Neptune-Crypto/neptune-core/commit/ad588094), [41752652](https://github.com/Neptune-Crypto/neptune-core/commit/41752652))
+- Report on number of own txs confirmed by block proposal ([65064aac](https://github.com/Neptune-Crypto/neptune-core/commit/65064aac))
+
 ## [0.6.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.5.0..v0.6.0) - 2026-02-03
 
 ### 🔱 Fork

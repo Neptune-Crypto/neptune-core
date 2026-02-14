@@ -105,7 +105,7 @@ pub(crate) struct ClaimUtxoData {
 
 /// represents messages that can be sent from RPC server to main loop.
 #[derive(Debug, strum::Display)]
-pub enum RPCServerToMain {
+pub(crate) enum RPCServerToMain {
     BroadcastTx(Arc<Transaction>),
     PerformTxProofUpgrade(Box<UpgradeJob>),
     BroadcastMempoolTransactions,

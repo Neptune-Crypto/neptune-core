@@ -78,6 +78,8 @@ Make sure that the version bump conforms to semantic versioning.
 cargo semver-checks
 ```
 
+**Note:** when it comes public trait `RPC` in `application/rpc/server.rs` we apply a relaxed version of semantic versioning. According to this policy, *adding new RPC endpoints is not considered a breaking change.* However, according to strict semantic versioning such additions *are* breaking changes. The declarative macro `#[tarpc::service]` generates from this trait enums `RPCRequest` and `RPCResponse` which are not marked `#[non_exhaustive]` and which contain variants for each method in the trait. Adding new RPC endpoints means adding trait methods, and this operation results in new variants on public exhaustive enums.
+
 ### Generate Changelog Addition
 
 Summarize the changes introduced since the last version.

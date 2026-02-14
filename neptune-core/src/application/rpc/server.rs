@@ -144,6 +144,15 @@ use crate::DataDirectory;
 /// result returned by RPC methods
 pub type RpcResult<T> = Result<T, error::RpcError>;
 
+/// Tarpc generates enums `RPCRequest` and `RPCResponse` for each method
+/// declared in this trait. These enums are public and not marked
+/// `#[non_exhaustive]`. As a result, according to strict semantic versioning,
+/// adding new variants is a breaking change mandating a new major version.
+///
+/// We apply a relaxed rule set where adding new RPC endpoints is not considered
+/// a breaking change. Consequently, external users should note: if you match on
+/// `RPCRequest` or `RPCResponse`, make sure you match statement has a catch-all
+/// branch -- otherwise, minor version bumps might break your code.
 #[tarpc::service]
 pub trait RPC {
     /******** READ DATA ********/
