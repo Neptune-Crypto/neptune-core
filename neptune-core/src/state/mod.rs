@@ -1132,7 +1132,9 @@ impl GlobalState {
     /// maintain a UTXO index.
     ///
     /// # Panics
-    /// - If database is corrupted
+    ///
+    ///  - If database is corrupted.
+    ///  - If no block with the given height is known.
     async fn rescan_single_block_announced_incoming(
         &mut self,
         keys: &HashMap<AnnouncementFlag, SpendingKey>,
@@ -1155,32 +1157,52 @@ impl GlobalState {
             return Ok(());
         };
 
-        // get (flag, receiver_id) pairs in block, from the announcement index DB/table
-        let Some(announcement_flags) = self
-            .chain
-            .archival_state()
-            .utxo_index
-            .as_ref()
-            .unwrap()
-            .announcement_flags(block_hash)
-            .await
-        else {
-            bail!("Block {block_hash:x} not processed by the UTXO index.")
-        };
+        // If there is a UTXO index, if it is maintained, if it knows about this
+        // block, and if does not know about any notifications for us in this
+        // block, then we can return early. But it takes a little digging to get
+        // this information.
+        let maybe_utxo_index_with_flags =
+            if let Some(utxo_index) = self.chain.archival_state().utxo_index.as_ref() {
+                Some(utxo_index.announcement_flags(block_hash).await)
+            } else {
+                None
+            };
 
-        let announcement_flags = announcement_flags
-            .iter()
-            .filter(|ann| keys.contains_key(ann))
-            .collect_vec();
-        if announcement_flags.is_empty() {
-            trace!("Found no announced UTXOs for us in block {block_hash:x}");
-            return Ok(());
+        let mut matched_announcement_flags = HashSet::new();
+        match maybe_utxo_index_with_flags {
+            // UTXO index does not know about this block.
+            Some(None) => {
+                if self.cli().utxo_index {
+                    // The user is maintaining a UTXO index, so it is up to
+                    // date. Therefore, the block does not exist.
+                    bail!("Block {block_hash:x} not processed by the UTXO index.");
+                }
+                // } else {
+                // The UTXO index was activated at some point in the past,
+                // but the user is no longer maintaining it. The ignorance
+                // of the UTXO index with respect to the block does not
+                // indicate that no such block exists. So continue and
+                // handle non-existence (if any) later.
+                // ()
+            }
+
+            // UTXO index knows the block and which announcements it contains.
+            // Potential opportunity for early abort.
+            Some(Some(announcement_flags)) => {
+                matched_announcement_flags = announcement_flags
+                    .into_iter()
+                    .filter(|ann| keys.contains_key(ann))
+                    .collect::<HashSet<_>>();
+                if matched_announcement_flags.is_empty() {
+                    trace!("Found no announced UTXOs for us in block {block_hash:x}");
+                    return Ok(());
+                }
+            }
+
+            // There is no UTXO index.
+            None => (),
         }
 
-        // If instruction pointer reaches this place, it means that the
-        // block has announcements for our keys, identified by the
-        // announcement flags. So we need to load the entire block to disk
-        // to read and verify those announcements.
         let block = self
             .chain
             .archival_state()
@@ -1189,84 +1211,22 @@ impl GlobalState {
             .unwrap()
             .expect("Block in archival MMR must be present on disk");
 
-        // Collect all keys with announcement flag matches into a hash set
-        // to remove duplicates in case the same address receives multiple
-        // UTXOs in this block.
-        let keys: HashSet<_> = announcement_flags
-            .into_iter()
-            .map(|flag| keys[flag])
-            .collect();
-
-        let mut all_incoming_utxos = HashMap::default();
-        let tx_kernel = &block.body().transaction_kernel;
-        for key in keys {
-            // This loop is only over keys with matching announcement flags.
-            // So should be very fast. At max hundreds of iteration of this
-            // outer loop in the extreme case.
-            let incoming_utxos = key.scan_for_announced_utxos(tx_kernel);
-            let incoming_utxos = incoming_utxos.into_iter().filter(|announced_utxo| {
-                let transaction_contains_addition_record = tx_kernel
-                    .outputs
-                    .contains(&announced_utxo.addition_record());
-                if !transaction_contains_addition_record {
-                    warn!(
-                        "Transaction does not contain announced UTXO encrypted \
-                                to own receiving address. Announced UTXO was: {:#?}",
-                        announced_utxo.utxo
-                    );
-                }
-                transaction_contains_addition_record
-            });
-
-            for incoming_utxo in incoming_utxos {
-                all_incoming_utxos.insert(incoming_utxo.addition_record(), incoming_utxo);
-            }
-        }
-
-        debug!(
-            "Found {} claimable UTXOs in block {block_hash:x}, from announcements.",
-            all_incoming_utxos.len()
-        );
-
-        let num_addition_records_in_block: u64 = tx_kernel
-            .outputs
-            .len()
-            .try_into()
-            .expect("Can always convert usize to u64");
-        let num_aocl_leafs_before_block = block
-            .body()
-            .mutator_set_accumulator_without_guesser_fees()
-            .aocl
-            .num_leafs()
-            - num_addition_records_in_block;
-        let num_mps_per_utxo = self.cli.number_of_mps_per_utxo;
-
-        // recovery list will only contain not-already processed UTXOs, so
-        // there will be no duplication of records, either in the database
-        // nor in the incoming_randomness recovery file from this method.
-        let recovery_list = self
-            .wallet_state
-            .process_outputs_no_maintain_mps(
-                &block,
-                &all_incoming_utxos,
-                num_aocl_leafs_before_block,
-                num_mps_per_utxo,
-            )
-            .await;
-
-        debug!(
-            "Found {} new UTXOs in block {block_hash:x}, from announcements.",
-            recovery_list.len()
-        );
-
-        // write UTXO-recovery data to disk.
-        for incoming_randomness in recovery_list {
+        let have_matches = !matched_announcement_flags.is_empty();
+        if have_matches {
             self.wallet_state
-                .store_utxo_ms_recovery_data(incoming_randomness)
+                .rescan_block_for_announced_incoming(&block, keys.values())
                 .await
-                .expect("Failed to store mutator set recovery data to file.");
-        }
-
+        } else {
+            self.wallet_state
+                .rescan_block_for_announced_incoming(
+                    &block,
+                    matched_announcement_flags
+                        .into_iter()
+                        .map(|flag| &keys[&flag])
+                        .unique(),
+                )
+                .await
+        }?;
         Ok(())
     }
 
@@ -4177,6 +4137,15 @@ mod tests {
                         ),
                     ];
                     let block = block_with_outputs(&mut alice, outputs).await;
+                    let num_unique_outputs = block
+                        .body()
+                        .transaction_kernel
+                        .outputs
+                        .iter()
+                        .unique()
+                        .count();
+                    let total_num_outputs = block.body().transaction_kernel.outputs.len();
+                    assert_ne!(num_unique_outputs, total_num_outputs);
                     alice.set_new_tip(block).await.unwrap();
                 }
 

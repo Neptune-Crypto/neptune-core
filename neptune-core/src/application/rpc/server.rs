@@ -4075,10 +4075,15 @@ impl RPC for NeptuneRPCServer {
             return Ok(0);
         };
 
+        // Arrange keys into suitable format.
+        let keys = [state
+            .wallet_state
+            .nth_spending_key(key_type, derivation_index)];
+
         // Rescan block.
         let new_incoming_utxos_recovery_data = state
             .wallet_state
-            .rescan(block, &[(derivation_index, key_type)])
+            .rescan_block_for_announced_incoming(&block, &keys)
             .await?;
 
         Ok(new_incoming_utxos_recovery_data.len())
