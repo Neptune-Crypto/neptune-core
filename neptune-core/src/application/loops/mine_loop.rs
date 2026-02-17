@@ -1014,6 +1014,7 @@ pub(crate) mod tests {
     use crate::state::wallet::address::symmetric_key::SymmetricKey;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::state::GlobalState;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -1030,7 +1031,7 @@ pub(crate) mod tests {
     /// subsidy to the wallet in two UTXOs, one time-locked and one liquid.
     pub(crate) async fn make_coinbase_transaction_from_state(
         latest_block: &Block,
-        global_state_lock: &GlobalStateLock,
+        global_state: &GlobalState,
         timestamp: Timestamp,
         job_options: TritonVmProofJobOptions,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
@@ -1041,11 +1042,8 @@ pub(crate) mod tests {
         let next_block_height: BlockHeight = latest_block.header().height.next();
         let vm_job_queue = vm_job_queue();
 
-        let composer_parameters = global_state_lock
-            .lock_guard()
-            .await
-            .composer_parameters(next_block_height);
-        let network = global_state_lock.cli().network;
+        let composer_parameters = global_state.composer_parameters(next_block_height);
+        let network = global_state.cli().network;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
         let (transaction, composer_outputs) = make_coinbase_transaction_stateless(
             latest_block,
@@ -1060,6 +1058,19 @@ pub(crate) mod tests {
         let own_expected_utxos = composer_parameters.extract_expected_utxos(composer_outputs);
 
         Ok((transaction, own_expected_utxos))
+    }
+
+    /// Produce a transaction that allocates the given fraction of the block
+    /// subsidy to the wallet in two UTXOs, one time-locked and one liquid.
+    pub(crate) async fn make_coinbase_transaction_from_state_lock(
+        latest_block: &Block,
+        global_state: &GlobalStateLock,
+        timestamp: Timestamp,
+        job_options: TritonVmProofJobOptions,
+    ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+        let global_state = global_state.lock_guard().await;
+        make_coinbase_transaction_from_state(latest_block, &global_state, timestamp, job_options)
+            .await
     }
 
     /// Estimates the hash rate in number of hashes per milliseconds
@@ -1148,7 +1159,7 @@ pub(crate) mod tests {
         let global_state_lock =
             mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
         let tick = std::time::SystemTime::now();
-        let (transaction, _coinbase_utxo_info) = make_coinbase_transaction_from_state(
+        let (transaction, _coinbase_utxo_info) = make_coinbase_transaction_from_state_lock(
             &genesis_block,
             &global_state_lock,
             network.launch_date(),
@@ -1575,7 +1586,7 @@ pub(crate) mod tests {
         let launch_date = tip_block_orig.header().timestamp;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
-        let (transaction, _composer_utxo_info) = make_coinbase_transaction_from_state(
+        let (transaction, _composer_utxo_info) = make_coinbase_transaction_from_state_lock(
             &tip_block_orig,
             &global_state_lock,
             launch_date,
@@ -1659,7 +1670,7 @@ pub(crate) mod tests {
         // pretend/simulate that it takes at least 10 seconds to mine the block.
         let ten_seconds_ago = now - Timestamp::seconds(10);
 
-        let (transaction, _composer_utxo_info) = make_coinbase_transaction_from_state(
+        let (transaction, _composer_utxo_info) = make_coinbase_transaction_from_state_lock(
             &tip_block_orig,
             &global_state_lock,
             ten_seconds_ago,
@@ -1951,7 +1962,7 @@ pub(crate) mod tests {
             let genesis_block = Block::genesis(network);
             let launch_date = genesis_block.header().timestamp;
 
-            let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(
+            let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state_lock(
                 &genesis_block,
                 &global_state_lock,
                 launch_date,
@@ -2102,7 +2113,7 @@ pub(crate) mod tests {
                 let genesis_block = Block::genesis(cli_args.network);
                 let launch_date = genesis_block.header().timestamp;
 
-                let (transaction, expected_utxos) = make_coinbase_transaction_from_state(
+                let (transaction, expected_utxos) = make_coinbase_transaction_from_state_lock(
                     &genesis_block,
                     &global_state_lock,
                     launch_date,

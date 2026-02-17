@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::bail;
 use anyhow::Result;
 use itertools::Itertools;
 use num_traits::CheckedAdd;
@@ -30,7 +29,6 @@ use super::address::generation_address;
 use super::address::symmetric_key;
 use super::address::KeyType;
 use super::address::SpendingKey;
-use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::expected_utxo::ExpectedUtxo;
 use super::expected_utxo::UtxoNotifier;
 use super::incoming_utxo::IncomingUtxo;
@@ -59,10 +57,11 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::archival_state::ArchivalState;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
+use crate::state::utxo_validity_checker::UtxoValidator;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::rusty_wallet_database::WalletDbConnectError;
 use crate::state::wallet::transaction_output::TxOutput;
@@ -111,20 +110,14 @@ impl IncomingUtxoRecoveryData {
     }
 }
 
-impl TryFrom<&MonitoredUtxo> for IncomingUtxoRecoveryData {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &MonitoredUtxo) -> std::result::Result<Self, Self::Error> {
-        let Some((_block_digest, msmp)) = value.get_latest_membership_proof_entry() else {
-            bail!("Cannot create recovery data without a membership proof.");
-        };
-
-        Ok(Self {
+impl From<&MonitoredUtxo> for IncomingUtxoRecoveryData {
+    fn from(value: &MonitoredUtxo) -> Self {
+        Self {
             utxo: value.utxo.clone(),
-            sender_randomness: msmp.sender_randomness,
-            receiver_preimage: msmp.receiver_preimage,
-            aocl_index: msmp.aocl_leaf_index,
-        })
+            sender_randomness: value.sender_randomness,
+            receiver_preimage: value.receiver_preimage,
+            aocl_index: value.aocl_leaf_index,
+        }
     }
 }
 
@@ -141,119 +134,6 @@ impl Debug for WalletState {
                 &self.configuration.data_directory().wallet_directory_path(),
             )
             .finish()
-    }
-}
-
-/// Enumerates the ways in which UTXO validity (spent status and AOCL inclusion
-/// status) can be verified relative to a mutator set.
-pub enum UtxoValidityChecker<'a> {
-    Light {
-        tip_digest: Digest,
-        mutator_set_accumulator: MutatorSetAccumulator,
-    },
-    Archival(&'a ArchivalState),
-}
-
-enum MonitoredUtxoState {
-    SyncedAndUnspent,
-    Spent,
-    Unsynced,
-}
-
-impl<'a> UtxoValidityChecker<'a> {
-    async fn fetch_ms_membership_proof(
-        &self,
-        monitored_utxo: &MonitoredUtxo,
-    ) -> Option<MsMembershipProof> {
-        match self {
-            UtxoValidityChecker::Light { tip_digest, .. } => {
-                monitored_utxo.get_membership_proof_for_block(*tip_digest)
-            }
-            UtxoValidityChecker::Archival(archival_state) => {
-                let item = Tip5::hash(&monitored_utxo.utxo);
-                archival_state
-                    .archival_mutator_set
-                    .ams()
-                    .restore_membership_proof(
-                        item,
-                        monitored_utxo.sender_randomness,
-                        monitored_utxo.receiver_preimage,
-                        monitored_utxo.aocl_leaf_index,
-                    )
-                    .await
-                    .ok()
-            }
-        }
-    }
-
-    #[inline]
-    async fn synced_and_spent(&self, monitored_utxo: &MonitoredUtxo) -> MonitoredUtxoState {
-        match self {
-            UtxoValidityChecker::Light {
-                tip_digest,
-                mutator_set_accumulator,
-            } => {
-                if let Some(mp) = monitored_utxo.get_membership_proof_for_block(*tip_digest) {
-                    let spent =
-                        !mutator_set_accumulator.verify(Tip5::hash(&monitored_utxo.utxo), &mp);
-                    if spent {
-                        MonitoredUtxoState::Spent
-                    } else {
-                        MonitoredUtxoState::SyncedAndUnspent
-                    }
-                } else {
-                    MonitoredUtxoState::Unsynced
-                }
-            }
-            UtxoValidityChecker::Archival(archival_state) => {
-                let synced = {
-                    let (block_hash, _, block_height) = monitored_utxo.confirmed_in_block;
-                    archival_state
-                        .is_canonical_block(block_hash, block_height)
-                        .await
-                };
-
-                if !synced {
-                    return MonitoredUtxoState::Unsynced;
-                }
-
-                let Some((spending_hash, _, spending_height)) = monitored_utxo.spent_in_block
-                else {
-                    return MonitoredUtxoState::SyncedAndUnspent;
-                };
-
-                // If MUTXO was ever observed as spent, we need to check
-                // the archival mutator set to see if the spend was
-                // reorganized away. If a spend was never observed, then
-                // it is assumed that the monitored UTXO was never
-                // spent.
-                let spend_is_canonical = archival_state
-                    .is_canonical_block(spending_hash, spending_height)
-                    .await;
-
-                if spend_is_canonical {
-                    MonitoredUtxoState::Spent
-                } else {
-                    // Corner case: Even *if* latest spend is not
-                    // canonical, this spending block could have been
-                    // reorganized away to a chain where the spend also
-                    // occurred. So we have to check the mutator set to
-                    // see if the UTXO was spent or not.
-                    let absolute_index_set = monitored_utxo.absolute_indices();
-                    let is_spent = archival_state
-                        .archival_mutator_set
-                        .ams()
-                        .absolute_index_set_was_applied(absolute_index_set)
-                        .await;
-
-                    if is_spent {
-                        MonitoredUtxoState::Spent
-                    } else {
-                        MonitoredUtxoState::SyncedAndUnspent
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -1926,11 +1806,18 @@ impl WalletState {
         Ok(())
     }
 
-    pub async fn is_synced_to(&self, tip_hash: Digest) -> bool {
+    pub async fn is_synced_to(&self, tip_hash: Digest, is_true_archival: bool) -> bool {
         let db_sync_digest = self.wallet_db.get_sync_label();
         if db_sync_digest != tip_hash {
             return false;
         }
+
+        // We don't care about membership proofs if node maintains an archival
+        // state.
+        if is_true_archival {
+            return true;
+        }
+
         let monitored_utxos = self.wallet_db.monitored_utxos();
 
         // We assume that the membership proof can only be stored
@@ -1947,7 +1834,7 @@ impl WalletState {
     /// see [WalletStatus] for a description
     pub(in crate::state) async fn get_wallet_status<'a>(
         &self,
-        validity_checker: &UtxoValidityChecker<'a>,
+        validity_checker: &UtxoValidator<'a>,
     ) -> WalletStatus {
         let mut synced_unspent = vec![];
         let mut spent = vec![];
@@ -1957,7 +1844,7 @@ impl WalletState {
         let stream = monitored_utxos.stream().await;
         pin_mut!(stream); // needed for iteration
         while let Some((_i, mutxo)) = stream.next().await {
-            let mutxo_status = validity_checker.synced_and_spent(&mutxo).await;
+            let mutxo_status = validity_checker.mutxo_state(&mutxo).await;
 
             let mut wse = WalletStatusElement::new(
                 mutxo.aocl_leaf_index,
@@ -1968,7 +1855,10 @@ impl WalletState {
 
             match mutxo_status {
                 MonitoredUtxoState::SyncedAndUnspent => {
-                    if let UtxoValidityChecker::Light { tip_digest, .. } = validity_checker {
+                    if let UtxoValidator::Light {
+                        tip: tip_digest, ..
+                    } = validity_checker
+                    {
                         let msmp = mutxo.get_membership_proof_for_block(*tip_digest).expect("light-state node must have mutator set membership proof for UTXO if UTXO is synced and not spent");
                         wse = wse.with_membership_proof(msmp);
                     }
@@ -1986,38 +1876,6 @@ impl WalletState {
             spent,
             unsynced,
         }
-    }
-
-    pub async fn get_all_own_coins_with_possible_timelocks(
-        &self,
-        mutator_set_accumulator: &MutatorSetAccumulator,
-        tip_digest: Digest,
-    ) -> Vec<CoinWithPossibleTimeLock> {
-        let monitored_utxos = self.wallet_db.monitored_utxos();
-        let mut own_coins = vec![];
-
-        let stream = monitored_utxos.stream_values().await;
-        pin_mut!(stream); // needed for iteration
-
-        while let Some(mutxo) = stream.next().await {
-            if mutxo.abandoned_at.is_some() || mutxo.get_latest_membership_proof_entry().is_none() {
-                continue;
-            }
-            let Some(msmp) = mutxo.membership_proof_ref_for_block(tip_digest) else {
-                continue;
-            };
-            let is_spent = !mutator_set_accumulator.verify(Tip5::hash(&mutxo.utxo), msmp);
-            if is_spent {
-                continue;
-            }
-            let coin = CoinWithPossibleTimeLock {
-                amount: mutxo.utxo.get_native_currency_amount(),
-                confirmed: mutxo.confirmed_in_block.1,
-                release_date: mutxo.utxo.release_date(),
-            };
-            own_coins.push(coin);
-        }
-        own_coins
     }
 }
 
@@ -2652,7 +2510,6 @@ pub(crate) mod tests {
                 .unwrap()
                 .len(),
         );
-        assert!(wallet_state_has_all_valid_mps(&bob.wallet_state, &block_1a).await);
         assert!(mutxos_1a
             .iter()
             .all(|mutxo| mutxo.confirmed_in_block.0 == block_1a.hash()));
@@ -2710,13 +2567,15 @@ pub(crate) mod tests {
         // orphaned with block 1b.
         for mutxo in final_mutxos.iter().take((0..=1).count()) {
             let item = Tip5::hash(&mutxo.utxo);
-            let (mutxo_sync_block_digest, msmp) =
-                mutxo.get_latest_membership_proof_entry().unwrap();
+            let msmp = bob
+                .utxo_validator()
+                .fetch_ms_membership_proof(&mutxo)
+                .await
+                .unwrap();
             assert!(block_1b
                 .mutator_set_accumulator_after()
                 .unwrap()
                 .verify(item, &msmp));
-            assert_eq!(block_1b.hash(), mutxo_sync_block_digest);
             assert_eq!(block_1b.hash(), mutxo.confirmed_in_block.0);
         }
 
@@ -4304,9 +4163,9 @@ pub(crate) mod tests {
                 )
                 .await;
 
-                let validity_checker = UtxoValidityChecker::Light {
-                    tip_digest: block_1.hash(),
-                    mutator_set_accumulator: block_1.mutator_set_accumulator_after().unwrap(),
+                let validity_checker = UtxoValidator::Light {
+                    tip: block_1.hash(),
+                    tip_msa: block_1.mutator_set_accumulator_after().unwrap(),
                 };
                 let wallet_status_ = alice_wallet_state
                     .get_wallet_status(&validity_checker)
