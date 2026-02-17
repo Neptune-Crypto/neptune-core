@@ -184,12 +184,7 @@ impl WalletStatusExportFormat {
                     {header}\n\
                     {}\n\n\
                     Total:      {:>44} \n",
-                    wallet_status
-                        .synced_unspent
-                        .iter()
-                        .map(|wse| wse)
-                        .map(row)
-                        .join("\n"),
+                    wallet_status.synced_unspent.iter().map(row).join("\n"),
                     wallet_status
                         .synced_unspent
                         .iter()

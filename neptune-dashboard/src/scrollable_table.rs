@@ -1,7 +1,12 @@
-use crate::dashboard_app::DashboardEvent;
-use crossterm::event::{Event, KeyCode, KeyEventKind};
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use crossterm::event::Event;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEventKind;
 use ratatui::widgets::TableState;
-use std::sync::{Arc, Mutex};
+
+use crate::dashboard_app::DashboardEvent;
 
 #[derive(Debug, Clone)]
 pub struct ScrollableTable<T> {

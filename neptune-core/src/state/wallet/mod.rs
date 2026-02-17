@@ -668,7 +668,7 @@ mod tests {
                 first_block_after_spree
                     .mutator_set_accumulator_after()
                     .unwrap()
-                    .verify(item, &utxo.mutator_set_mp()),
+                    .verify(item, utxo.mutator_set_mp()),
                 "All membership proofs must be valid after first block of continued spree"
             );
         }

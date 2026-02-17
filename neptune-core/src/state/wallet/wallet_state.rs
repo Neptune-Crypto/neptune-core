@@ -1955,7 +1955,7 @@ impl WalletState {
         monitored_utxo: MonitoredUtxo,
     ) -> Result<()> {
         // write to disk.
-        let recovery_data: IncomingUtxoRecoveryData = (&monitored_utxo).try_into()?;
+        let recovery_data: IncomingUtxoRecoveryData = (&monitored_utxo).into();
         self.store_utxo_ms_recovery_data(recovery_data).await?;
 
         // add monitored_utxo
@@ -2727,7 +2727,7 @@ pub(crate) mod tests {
             let item = Tip5::hash(&mutxo.utxo);
             let msmp = bob
                 .utxo_validator()
-                .fetch_ms_membership_proof(&mutxo)
+                .fetch_ms_membership_proof(mutxo)
                 .await
                 .unwrap();
             assert!(block_1b

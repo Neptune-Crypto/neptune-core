@@ -1654,7 +1654,7 @@ impl GlobalState {
 
         // filter spendable inputs.
         let mut unlocked_utxos = vec![];
-        for wse in wallet_status.synced_unspent.into_iter() {
+        for wse in wallet_status.synced_unspent {
             // filter out UTXOs that are still timelocked.
             if !wse.utxo.can_spend_at(timestamp) {
                 continue;
@@ -1749,7 +1749,7 @@ impl GlobalState {
 
     /// Return all coins owned by the wallet. Only returns synced and unspent
     /// UTXOs.
-    pub async fn coins_with_possible_timelocks<'a>(&self) -> Vec<CoinWithPossibleTimeLock> {
+    pub async fn coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
         let mut own_coins = vec![];
 
@@ -4382,8 +4382,8 @@ mod tests {
 
                     // Demand equality under permutation, so sort by block height,
                     // then amount.
-                    balance_history_again.sort_unstable_by(|a, b| (a.2, a.3).cmp(&(b.2, b.3)));
-                    balance_history.sort_unstable_by(|a, b| (a.2, a.3).cmp(&(b.2, b.3)));
+                    balance_history_again.sort_unstable_by_key(|a| (a.2, a.3));
+                    balance_history.sort_unstable_by_key(|a| (a.2, a.3));
 
                     assert_eq!(
                         balance_history, balance_history_again,
