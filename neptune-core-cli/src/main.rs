@@ -860,7 +860,7 @@ async fn main() -> Result<()> {
                 },
         }) => {
             // Parse address.
-            let (key_type, derivation_index) = if let Some(address) = address {
+            let derivation_path = if let Some(address) = address {
                 // Get network from server.
                 let network = client.network(ctx).await??;
 
@@ -884,22 +884,15 @@ async fn main() -> Result<()> {
                     find_index_of(full_or_abbreviated_address, wallet_entropy, network).await?;
                 println!("derivation index: {derivation_index}");
 
-                (Some(key_type), Some(derivation_index))
+                Some((key_type, derivation_index))
             } else {
-                (None, None)
+                None
             };
 
             // Make RPC call.
             let range_end = last.unwrap_or(first);
             client
-                .rescan_announced(
-                    ctx,
-                    token,
-                    first.into(),
-                    range_end.into(),
-                    // key_type,
-                    // derivation_index,
-                )
+                .rescan_announced(ctx, token, first.into(), range_end.into(), derivation_path)
                 .await??;
             println!("Rescan started. Please check application log for progress.");
         }

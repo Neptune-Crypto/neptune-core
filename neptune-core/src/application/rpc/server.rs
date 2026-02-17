@@ -1697,33 +1697,43 @@ pub trait RPC {
         tx_artifacts: TxCreationArtifacts,
     ) -> RpcResult<()>;
 
-    /// Rescan the specified inclusive range for incoming UTXOS that were sent
+    /// Rescan the specified range of blocks for incoming UTXOS that were sent
     /// with associated on-chain announements.
+    ///
+    /// Any found UTXOs are monitored going forward.
     async fn rescan_announced(
         token: auth::Token,
         first: BlockHeight,
         last: BlockHeight,
+        derivation_path: Option<(KeyType, u64)>,
     ) -> RpcResult<()>;
 
-    /// Rescan the specified inclusive range for incoming UTXOS that were have
+    /// Rescan the specified range of blocks for incoming UTXOS that have
     /// been added as expected UTXOs to the node's wallet.
+    ///
+    /// Any found UTXOs are monitored going forward.
     async fn rescan_expected(
         token: auth::Token,
         first: BlockHeight,
         last: BlockHeight,
     ) -> RpcResult<()>;
 
-    /// Rescan the specified inclusive range for outgoing UTXOs, i.e. the
-    /// spending of UTXOs by the node's wallet. Can be used to recreate a
-    /// transaction history.
+    /// Rescan the specified range of blocks for outgoing UTXOs, *i.e.*, UTXOs
+    /// spent by the node's wallet.
+    ///
+    /// Can be used to recreate a transaction history. Requires a UTXO index.
+    ///
+    /// Any found UTXOs are monitored going forward.
     async fn rescan_outgoing(
         token: auth::Token,
         first: BlockHeight,
         last: BlockHeight,
     ) -> RpcResult<()>;
 
-    /// Rescan the specified inclusive range for blocks that were successfully
-    /// guessed by this node.
+    /// Rescan the specified range for blocks that were successfully guessed by
+    /// this node.
+    ///
+    /// Any found UTXOs are monitored going forward.
     async fn rescan_guesser_rewards(
         token: auth::Token,
         first: BlockHeight,
@@ -2088,16 +2098,6 @@ pub trait RPC {
     /// hash. The block must be stored, but it does not need to live on the
     /// canonical chain.
     async fn set_tip(token: auth::Token, indicated_tip: Digest) -> RpcResult<()>;
-
-    /// Rescan a given block for UTXOs bound to a given key. Any found UTXOs
-    /// are returned as well as passed on to the wallet and hence monitored
-    /// going forward.
-    async fn rescan(
-        token: auth::Token,
-        block: BlockSelector,
-        derivation_index: u64,
-        key_type: KeyType,
-    ) -> RpcResult<usize>;
 
     /// Gracious shutdown.
     ///
@@ -3479,6 +3479,7 @@ impl RPC for NeptuneRPCServer {
         token: auth::Token,
         first: BlockHeight,
         last: BlockHeight,
+        derivation_path: Option<(KeyType, u64)>,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3491,21 +3492,25 @@ impl RPC for NeptuneRPCServer {
             return Err(RpcError::UtxoIndexNotPresent);
         }
 
-        let all_keys = self
-            .state
-            .lock_guard()
-            .await
-            .wallet_state
-            .get_all_known_spending_keys()
-            .collect_vec();
+        let keys = if let Some((key_type, derivation_index)) = derivation_path {
+            vec![self
+                .state
+                .lock_guard()
+                .await
+                .wallet_state
+                .nth_spending_key(key_type, derivation_index)]
+        } else {
+            self.state
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_all_known_spending_keys()
+                .collect_vec()
+        };
 
         let _ = self
             .rpc_server_to_main_tx
-            .send(RPCServerToMain::RescanAnnounced {
-                first,
-                last,
-                keys: all_keys,
-            })
+            .send(RPCServerToMain::RescanAnnounced { first, last, keys })
             .await;
 
         Ok(())
@@ -4048,45 +4053,6 @@ impl RPC for NeptuneRPCServer {
             .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
 
         Ok(())
-    }
-
-    // Documented in trait. Do not add doc-comment.
-    async fn rescan(
-        mut self,
-        _context: tarpc::context::Context,
-        token: auth::Token,
-        block_selector: BlockSelector,
-        derivation_index: u64,
-        key_type: KeyType,
-    ) -> RpcResult<usize> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        // Get block digest.
-        let mut state = self.state.lock_guard_mut().await;
-        let Some(block_digest) = block_selector.as_digest(&state).await else {
-            tracing::error!("Can not find block digest associated with {block_selector}.");
-            return Ok(0);
-        };
-
-        // Get block.
-        let Some(block) = state.chain.archival_state().get_block(block_digest).await? else {
-            tracing::error!("Can not find block {block_digest:x} / {block_selector}.");
-            return Ok(0);
-        };
-
-        // Arrange keys into suitable format.
-        let keys = [state
-            .wallet_state
-            .nth_spending_key(key_type, derivation_index)];
-
-        // Rescan block.
-        let new_incoming_utxos_recovery_data = state
-            .wallet_state
-            .rescan_block_for_announced_incoming(&block, &keys)
-            .await?;
-
-        Ok(new_incoming_utxos_recovery_data.len())
     }
 
     // documented in trait. do not add doc-comment.
@@ -5154,7 +5120,7 @@ mod tests {
             .into();
         let _ = rpc_server
             .clone()
-            .rescan_announced(ctx, token, 0u64.into(), 14u64.into())
+            .rescan_announced(ctx, token, 0u64.into(), 14u64.into(), None)
             .await;
         let _ = rpc_server
             .clone()

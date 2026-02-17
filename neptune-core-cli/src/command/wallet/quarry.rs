@@ -10,8 +10,8 @@ pub(crate) enum RescanQuarry {
     /// Rescan the range of blocks for announced UTXOs.
     ///
     /// Specifically, this method searches for incoming UTXOs with a
-    /// notification sent to the given address or, if none is set, to all
-    /// addresses registered by the node's wallet.
+    /// notification sent to the given address (full or abbreviated) or, if none
+    /// is set, to all addresses registered by the node's wallet.
     ///
     /// This command does not require the node to maintain a UTXO index, but is
     /// faster if it does.

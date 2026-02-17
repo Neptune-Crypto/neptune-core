@@ -9,6 +9,7 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
 use crate::api::export::AnnouncementFlag;
+use crate::api::export::KeyType;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
@@ -370,9 +371,14 @@ pub trait RpcApi: Sync + Send {
         &self,
         first: RpcBlockHeight,
         last: RpcBlockHeight,
+        derivation_path: Option<(KeyType, u64)>,
     ) -> RpcResult<RescanAnnouncedResponse> {
-        self.rescan_announced_call(RescanAnnouncedRequest { first, last })
-            .await
+        self.rescan_announced_call(RescanAnnouncedRequest {
+            first,
+            last,
+            derivation_path,
+        })
+        .await
     }
 
     async fn rescan_announced_call(

@@ -6,6 +6,7 @@ use serde_tuple::Serialize_tuple;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
+use crate::api::export::KeyType;
 use crate::application::json_rpc::core::model::block::body::*;
 use crate::application::json_rpc::core::model::block::header::*;
 use crate::application::json_rpc::core::model::block::transaction_kernel::*;
@@ -350,6 +351,7 @@ pub struct SubmitTransactionResponse {
 pub struct RescanAnnouncedRequest {
     pub first: RpcBlockHeight,
     pub last: RpcBlockHeight,
+    pub derivation_path: Option<(KeyType, u64)>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
