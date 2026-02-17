@@ -55,6 +55,7 @@ use crate::command::network::NetworkCommand;
 use crate::command::node::NodeCommand;
 use crate::command::payment::PaymentCommand;
 use crate::command::statistics::StatisticsCommand;
+use crate::command::wallet::quarry::RescanQuarry;
 use crate::command::wallet::WalletCommand;
 use crate::command::Command;
 use crate::models::claim_utxo::ClaimUtxoFormat;
@@ -850,27 +851,82 @@ async fn main() -> Result<()> {
                 println!("This claim has already been registered.");
             }
         }
-        Command::Wallet(WalletCommand::RescanAnnounced { first, last }) => {
+        Command::Wallet(WalletCommand::Rescan {
+            quarry:
+                RescanQuarry::Announced {
+                    address,
+                    first,
+                    last,
+                },
+        }) => {
+            // Parse address.
+            let (key_type, derivation_index) = if let Some(address) = address {
+                // Get network from server.
+                let network = client.network(ctx).await??;
+
+                // Parse on client.
+                let Some(full_or_abbreviated_address) =
+                    FullOrAbbreviatedAddress::parse(&address, network)
+                else {
+                    println!("Could not parse address.");
+                    return Ok(());
+                };
+
+                // Read from disk directly.
+                let wallet_entropy = get_wallet_entropy(network, args.data_dir.clone())?;
+
+                // Report on key type.
+                let key_type = full_or_abbreviated_address.key_type();
+                println!("key type: {}", key_type);
+
+                // Iterate until match.
+                let derivation_index =
+                    find_index_of(full_or_abbreviated_address, wallet_entropy, network).await?;
+                println!("derivation index: {derivation_index}");
+
+                (Some(key_type), Some(derivation_index))
+            } else {
+                (None, None)
+            };
+
+            // Make RPC call.
+            let range_end = last.unwrap_or(first);
             client
-                .rescan_announced(ctx, token, first.into(), last.into())
+                .rescan_announced(
+                    ctx,
+                    token,
+                    first.into(),
+                    range_end.into(),
+                    // key_type,
+                    // derivation_index,
+                )
                 .await??;
             println!("Rescan started. Please check application log for progress.");
         }
-        Command::Wallet(WalletCommand::RescanExpected { first, last }) => {
+        Command::Wallet(WalletCommand::Rescan {
+            quarry: RescanQuarry::Expected { first, last },
+        }) => {
+            let range_end = last.unwrap_or(first);
             client
-                .rescan_expected(ctx, token, first.into(), last.into())
+                .rescan_expected(ctx, token, first.into(), range_end.into())
                 .await??;
             println!("Rescan started. Please check application log for progress.");
         }
-        Command::Wallet(WalletCommand::RescanOutgoing { first, last }) => {
+        Command::Wallet(WalletCommand::Rescan {
+            quarry: RescanQuarry::Outgoing { first, last },
+        }) => {
+            let range_end = last.unwrap_or(first);
             client
-                .rescan_outgoing(ctx, token, first.into(), last.into())
+                .rescan_outgoing(ctx, token, first.into(), range_end.into())
                 .await??;
             println!("Rescan started. Please check application log for progress.");
         }
-        Command::Wallet(WalletCommand::RescanGuesserRewards { first, last }) => {
+        Command::Wallet(WalletCommand::Rescan {
+            quarry: RescanQuarry::GuesserRewards { first, last },
+        }) => {
+            let range_end = last.unwrap_or(first);
             client
-                .rescan_guesser_rewards(ctx, token, first.into(), last.into())
+                .rescan_guesser_rewards(ctx, token, first.into(), range_end.into())
                 .await??;
             println!("Rescan started. Please check application log for progress.");
         }
@@ -1102,45 +1158,6 @@ async fn main() -> Result<()> {
         Command::Wallet(WalletCommand::PruneAbandonedMonitoredUtxos) => {
             let prunt_res_count = client.prune_abandoned_monitored_utxos(ctx, token).await??;
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
-        }
-
-        Command::Wallet(WalletCommand::Rescan { block, address }) => {
-            // Get network from server.
-            let network = client.network(ctx).await??;
-
-            // Parse on client.
-            let Some(full_or_abbreviated_address) =
-                FullOrAbbreviatedAddress::parse(&address, network)
-            else {
-                println!("Could not parse address.");
-                return Ok(());
-            };
-
-            // Read from disk directly.
-            let wallet_entropy = get_wallet_entropy(network, args.data_dir.clone())?;
-
-            // Report on key type.
-            let key_type = full_or_abbreviated_address.key_type();
-            println!("key type: {}", key_type);
-
-            // Iterate until match.
-            let derivation_index =
-                find_index_of(full_or_abbreviated_address, wallet_entropy, network).await?;
-
-            // Make RPC call.
-            match client
-                .rescan(ctx, token, block, derivation_index, key_type)
-                .await?
-            {
-                Ok(number) => {
-                    println!("Recovered {number} previously unknown UTXOs.");
-                }
-                Err(e) => {
-                    println!("Failed to scan block {block}: {e}.");
-                }
-            }
-
-            return Ok(());
         }
 
         /******** RegTest Mode *********/

@@ -1,10 +1,9 @@
-use std::str::FromStr;
+pub(crate) mod quarry;
 
 use clap::Parser;
-use neptune_cash::{
-    api::export::Network, protocol::consensus::block::block_selector::BlockSelector,
-};
+use neptune_cash::api::export::Network;
 
+use crate::command::wallet::quarry::RescanQuarry;
 use crate::models::claim_utxo::ClaimUtxoFormat;
 
 /// Wallet Command -- a command related to spending keys, receiving addresses,
@@ -72,46 +71,26 @@ pub(crate) enum WalletCommand {
         max_search_depth: Option<u64>,
     },
 
-    /// Rescan the selected (inclusive) range of blocks for announced, incoming
-    /// UTXOs to all addresses registered by the client's wallet. Requires the
-    /// client to be launched with the UTXO index activated.
-    RescanAnnounced { first: u64, last: u64 },
-
-    /// Rescan the selected (inclusive) range of blocks for UTXOs that were
-    /// registered as expected. Works regardless of UTXO index status.
-    RescanExpected { first: u64, last: u64 },
-
-    /// Rescan the selected (inclusive) range of blocks for spent UTXOs. Useful
-    /// to rebuild transaction history. Requires the client to be launched with
-    /// the UTXO index activated.
-    RescanOutgoing { first: u64, last: u64 },
-
-    /// Rescan the selected (inclusive) range of blocks for guesser rewards.
-    /// Useful if the client's seed has been used to guess on correct proof-of-
-    /// work solutions in the past but wallet state was somehow lost. Works
-    /// regardless of UTXO index status.
-    RescanGuesserRewards { first: u64, last: u64 },
-
-    /// Re-scan a single block for incoming UTXOs sent to a given address.
+    /// Rescan a single block or a range of blocks for transactions that may
+    /// have been missed due to reorgs or moving keys across machines.
     ///
-    /// If for whatever reason something went wrong in the course of scanning
-    /// blocks for incoming UTXOs, an inbound UTXO would be undetected by the
-    /// wallet. In that case, this command forces the wallet to look again at
-    /// the indicated block with the given address or derivation index as hint.
+    /// If for whatever reason something goes wrong in the course of scanning
+    /// blocks for incoming or outgoing UTXOs, some input or output may be
+    /// missed and the wallet will report a incorrect balance as a result. In
+    /// this case, this family of commands can be used to force the node to look
+    /// again at a specific block or block range.
     ///
-    /// Usage:
-    ///
-    /// `> neptune-cli rescan --block 13 --address nolgam1...`
+    /// The first block height of the range is mandatory. The last block height
+    /// is optional: if not set, the range will contain just the one block.
     Rescan {
-        /// block height
-        #[arg(long, value_parser = BlockSelector::from_str)]
-        block: BlockSelector,
-
-        /// address to which the UTXO was supposedly sent
-        #[clap(long)]
-        address: String,
+        #[clap(subcommand)]
+        quarry: RescanQuarry,
     },
 
+    //     /// address to which the UTXO was supposedly sent
+    //     #[clap(long)]
+    //     address: String,
+    // },
     /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
 
