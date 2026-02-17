@@ -17,6 +17,9 @@ pub struct WalletStatusElement {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
+
+    /// The membership proof of the UTXO. Should only be set if the node does
+    /// *not* maintain an archival mutator set.
     pub ms_membership_proof: Option<MsMembershipProof>,
 }
 

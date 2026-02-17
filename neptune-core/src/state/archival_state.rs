@@ -2108,7 +2108,7 @@ pub(super) mod tests {
     use crate::application::config::data_directory::DataDirectory;
     use crate::application::config::network::Network;
     use crate::application::database::storage::storage_vec::traits::*;
-    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
@@ -2811,7 +2811,7 @@ pub(super) mod tests {
         let tx_to_alice_and_bob = artifacts_alice_and_bob.transaction;
         println!("Generated transaction for Alice and Bob.");
 
-        let (cbtx, _composer_expected_utxos) = make_coinbase_transaction_from_state(
+        let (cbtx, _composer_expected_utxos) = make_coinbase_transaction_from_state_lock(
             &premine_rec
                 .global_state_lock
                 .lock_guard()
@@ -3068,7 +3068,7 @@ pub(super) mod tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 7 outputs: 2 from Alice to premine rec, 3 from Bob to premine rec, and 2 coinbases to premine rec
-        let (cbtx2, expected_composer_utxos2) = make_coinbase_transaction_from_state(
+        let (cbtx2, expected_composer_utxos2) = make_coinbase_transaction_from_state_lock(
             &premine_rec
                 .global_state_lock
                 .lock_guard()
