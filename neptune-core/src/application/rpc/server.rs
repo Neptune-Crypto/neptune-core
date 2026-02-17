@@ -2538,7 +2538,7 @@ impl RPC for NeptuneRPCServer {
 
         let state = self.state.lock_guard().await;
 
-        let current_counter = state.wallet_state.spending_key_counter(key_type);
+        let current_counter = state.wallet_state.spending_key_counter(key_type).await;
         let index = current_counter.checked_sub(1);
         let Some(index) = index else {
             return Err(RpcError::WalletKeyCounterIsZero);
@@ -4079,13 +4079,7 @@ impl RPC for NeptuneRPCServer {
         let mut ui_utxos = vec![];
         let mut present_addition_records = HashSet::new();
         let state = self.state.lock_guard().await;
-        for monitored_utxo in state
-            .wallet_state
-            .wallet_db
-            .monitored_utxos()
-            .get_all()
-            .await
-        {
+        for monitored_utxo in state.wallet_state.wallet_db.all_monitored_utxos().await {
             let received = UtxoStatusEvent::Confirmed {
                 block_height: monitored_utxo.confirmed_in_block.2,
                 timestamp: monitored_utxo.confirmed_in_block.1,
@@ -6779,8 +6773,7 @@ mod tests {
                             .await
                             .wallet_state
                             .wallet_db
-                            .expected_utxos()
-                            .get_all()
+                            .all_expected_utxos()
                             .await
                             .iter()
                             .map(|eu| eu.utxo.get_native_currency_amount())
@@ -6947,8 +6940,7 @@ mod tests {
                         .await
                         .wallet_state
                         .wallet_db
-                        .expected_utxos()
-                        .get_all()
+                        .all_expected_utxos()
                         .await
                         .iter()
                         .map(|eu| eu.utxo.get_native_currency_amount())
@@ -7233,8 +7225,7 @@ mod tests {
                     .await
                     .wallet_state
                     .wallet_db
-                    .expected_utxos()
-                    .len()
+                    .num_expected_utxos()
                     .await;
 
                 // --- Operation: perform send_to_many
@@ -7277,8 +7268,7 @@ mod tests {
                         .await
                         .wallet_state
                         .wallet_db
-                        .expected_utxos()
-                        .len()
+                        .num_expected_utxos()
                         .await,
                     num_expected_utxo + 2
                 );

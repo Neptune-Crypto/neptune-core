@@ -887,8 +887,7 @@ impl GlobalState {
                 if let Some(mutxo_list_index) = self
                     .wallet_state
                     .wallet_db
-                    .index_set_to_mutxo()
-                    .get(&index_set_digest)
+                    .index_set_to_mutxo(index_set_digest)
                     .await
                 {
                     spent_mutxo_list_indices.push(mutxo_list_index);
@@ -1571,9 +1570,7 @@ impl GlobalState {
     /// if storage could keep track of latest spend utxo for the active
     /// tip, then this could be o(1).
     async fn get_latest_balance_height_internal(&self) -> Option<BlockHeight> {
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
-
-        if monitored_utxos.is_empty().await {
+        if self.wallet_state.wallet_db.num_monitored_utxos().await == 0 {
             return None;
         }
 
@@ -1587,17 +1584,17 @@ impl GlobalState {
         //
         // We then continue working backward through all entries to
         // determine max(spent_in_block)
-
-        // note: Stream trait does not have a way to reverse, so instead
-        // of stream_values() we use stream_many_values() and supply
-        // an iterator of indexes that are already reversed.
-
-        let stream = monitored_utxos.stream_many_values((0..monitored_utxos.len().await).rev());
+        let reverse_order = true;
+        let stream = self
+            .wallet_state
+            .wallet_db
+            .stream_monitored_utxos(reverse_order)
+            .await;
         pin_mut!(stream); // needed for iteration
 
         let is_archival = self.chain.is_archival_node();
 
-        while let Some(mutxo) = stream.next().await {
+        while let Some((_, mutxo)) = stream.next().await {
             if is_archival {
                 // if archival, don't assume presence of membership proofs.
                 if max_confirmed_in_block.is_none() {
@@ -1654,10 +1651,13 @@ impl GlobalState {
 
         let mut history = vec![];
 
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
-        let stream = monitored_utxos.stream_values().await;
+        let stream = self
+            .wallet_state
+            .wallet_db
+            .stream_monitored_utxos(false)
+            .await;
         pin_mut!(stream); // needed for iteration
-        while let Some(monitored_utxo) = stream.next().await {
+        while let Some((_, monitored_utxo)) = stream.next().await {
             let amount = monitored_utxo.utxo.get_native_currency_amount();
             let (confirming_block, confirmation_timestamp, confirmation_height) =
                 monitored_utxo.confirmed_in_block;
@@ -1813,13 +1813,16 @@ impl GlobalState {
     /// Return all coins owned by the wallet. Only returns synced and unspent
     /// UTXOs.
     pub async fn coins_with_possible_timelocks<'a>(&self) -> Vec<CoinWithPossibleTimeLock> {
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
         let mut own_coins = vec![];
 
         let validity_checker = self.utxo_validator();
-        let stream = monitored_utxos.stream_values().await;
+        let stream = self
+            .wallet_state
+            .wallet_db
+            .stream_monitored_utxos(false)
+            .await;
         pin_mut!(stream); // needed for iteration
-        while let Some(mutxo) = stream.next().await {
+        while let Some((_, mutxo)) = stream.next().await {
             let status = validity_checker.mutxo_state(&mutxo).await;
 
             if !matches!(status, MonitoredUtxoState::SyncedAndUnspent) {
@@ -1876,10 +1879,9 @@ impl GlobalState {
             let mutxos: HashMap<(u64, AdditionRecord), MonitoredUtxo> = self
                 .wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .stream_values()
+                .stream_monitored_utxos(false)
                 .await
-                .map(|x| ((x.aocl_leaf_index, x.addition_record()), x))
+                .map(|(_, mutxo)| ((mutxo.aocl_leaf_index, mutxo.addition_record()), mutxo))
                 .collect()
                 .await;
             let mut seen_recovery_entries = HashSet::<Digest>::default();
@@ -2001,7 +2003,7 @@ impl GlobalState {
         // not merely if they are not synced. In other words: This function only
         // guarantees that all membership proofs are synced to current tip in
         // the case that all monitored UTXOs are new to the wallet database.
-        if self.wallet_state.wallet_db.get_sync_label() == Digest::default() {
+        if self.wallet_state.wallet_db.get_sync_label().await == Digest::default() {
             self.wallet_state.wallet_db.set_sync_label(tip_hash).await;
         }
 
@@ -2053,7 +2055,7 @@ impl GlobalState {
             .light_state()
             .mutator_set_accumulator_after()
             .expect("Stored block must have valid MSA after");
-        let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
+        let num_mutxos = self.wallet_state.wallet_db.num_monitored_utxos().await;
         trace!("monitored_utxos.len() = {num_mutxos}");
         let mut failures = vec![];
         let mut orphans = vec![];
@@ -2163,7 +2165,7 @@ impl GlobalState {
         tip_hash: Digest,
     ) -> Result<()> {
         // loop over all monitored utxos
-        let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
+        let num_mutxos = self.wallet_state.wallet_db.num_monitored_utxos().await;
         'outer: for i in 0..num_mutxos {
             let monitored_utxo = self
                 .wallet_state
@@ -2383,7 +2385,7 @@ impl GlobalState {
             current_tip_header.timestamp,
             current_tip_header.height,
         );
-        let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
+        let num_mutxos = self.wallet_state.wallet_db.num_monitored_utxos().await;
         let mut removed_count = 0;
         for i in 0..num_mutxos {
             let mutxo = self
@@ -4216,7 +4218,7 @@ mod tests {
                     .await;
                 assert_eq!(
                     num_expected,
-                    alice.wallet_state.wallet_db.monitored_utxos().len().await,
+                    alice.wallet_state.wallet_db.num_monitored_utxos().await,
                     "Expected {num_expected} after scanning range {first}..={last}"
                 );
             }
@@ -4404,12 +4406,7 @@ mod tests {
                 // Clear tables and rescan, and verify restored history.
                 alice.wallet_state.wallet_db.clear_mutxos().await;
                 assert!(
-                    alice
-                        .wallet_state
-                        .wallet_db
-                        .monitored_utxos()
-                        .is_empty()
-                        .await,
+                    alice.wallet_state.wallet_db.num_monitored_utxos().await == 0,
                     "MUTXO list must be empty after clear"
                 );
                 assert!(
@@ -4450,12 +4447,7 @@ mod tests {
                         "Balance histories must agree after clear and rescan"
                     );
                     assert!(
-                        !alice
-                            .wallet_state
-                            .wallet_db
-                            .monitored_utxos()
-                            .is_empty()
-                            .await,
+                        alice.wallet_state.wallet_db.num_monitored_utxos().await > 0,
                         "Must be non-empty after rescan"
                     );
                 }
@@ -4477,12 +4469,7 @@ mod tests {
             let mut state =
                 state_with_premine_and_self_mined_blocks(cli_args, [rand::rng().random()]).await;
             let mut state = state.lock_guard_mut().await;
-            let orignal_mutxos = state
-                .wallet_state
-                .wallet_db
-                .monitored_utxos()
-                .get_all()
-                .await;
+            let orignal_mutxos = state.wallet_state.wallet_db.all_monitored_utxos().await;
             assert_eq!(
                 5,
                 orignal_mutxos.len(),
@@ -4523,12 +4510,7 @@ mod tests {
                 "Expected ten entries in recovery data"
             );
             assert!(
-                state
-                    .wallet_state
-                    .wallet_db
-                    .monitored_utxos()
-                    .is_empty()
-                    .await,
+                state.wallet_state.wallet_db.num_monitored_utxos().await == 0,
                 "List of monitored UTXOs must be empty before attempting recovery"
             );
 
@@ -4538,12 +4520,7 @@ mod tests {
                 .restore_monitored_utxos_from_recovery_data()
                 .await
                 .unwrap();
-            let recovered_mutxos = state
-                .wallet_state
-                .wallet_db
-                .monitored_utxos()
-                .get_all()
-                .await;
+            let recovered_mutxos = state.wallet_state.wallet_db.all_monitored_utxos().await;
             for (original, recovered) in orignal_mutxos.into_iter().zip_eq(recovered_mutxos) {
                 assert_eq!(original.utxo, recovered.utxo);
                 assert_eq!(original.aocl_leaf_index, recovered.aocl_leaf_index);
@@ -4568,8 +4545,7 @@ mod tests {
                     global_state
                         .wallet_state
                         .wallet_db
-                        .monitored_utxos()
-                        .len()
+                        .num_monitored_utxos()
                         .await,
                     "MUTXO must have genesis element, composer rewards, and guesser rewards"
                 );
@@ -4585,18 +4561,16 @@ mod tests {
                     global_state
                         .wallet_state
                         .wallet_db
-                        .monitored_utxos()
-                        .is_empty()
+                        .num_monitored_utxos()
                         .await
+                        == 0
                 );
-                assert!(
-                    global_state
-                        .wallet_state
-                        .wallet_db
-                        .expected_utxos()
-                        .is_empty()
-                        .await
-                );
+                assert!(global_state
+                    .wallet_state
+                    .wallet_db
+                    .num_expected_utxos()
+                    .await
+                    .is_zero(),);
             }
 
             // Recover the MUTXO from the recovery data, and verify that MUTXOs are restored
@@ -4608,25 +4582,33 @@ mod tests {
                     .restore_monitored_utxos_from_recovery_data()
                     .await
                     .unwrap();
-                let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
+                let monitored_utxos = global_state
+                    .wallet_state
+                    .wallet_db
+                    .all_monitored_utxos()
+                    .await;
                 assert_eq!(
                     5,
-                    monitored_utxos.len().await,
+                    monitored_utxos.len(),
                     "MUTXO must have genesis elements and premine after recovery"
                 );
 
-                let mutxos = monitored_utxos.get_all().await;
                 assert_eq!(
                     (
                         genesis_block.hash(),
                         genesis_block.header().timestamp,
                         genesis_block.header().height
                     ),
-                    mutxos[0].confirmed_in_block,
+                    monitored_utxos[0].confirmed_in_block,
                     "Historical information must be restored for premine UTXO"
                 );
 
-                for (i, mutxo) in mutxos.iter().enumerate().skip(1).take((1..=4).count()) {
+                for (i, mutxo) in monitored_utxos
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .take((1..=4).count())
+                {
                     assert_eq!(
                     (
                         block1.hash(),
@@ -4640,7 +4622,7 @@ mod tests {
 
                 // Verify that the restored MUTXOs has accessible, valid
                 // membership proofs.
-                for mutxo in mutxos {
+                for mutxo in monitored_utxos {
                     let ms_item = Tip5::hash(&mutxo.utxo);
                     let msmp = global_state
                         .utxo_validator()
@@ -4821,18 +4803,14 @@ mod tests {
 
                 // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
                 // genesis block is not.
-                let monitored_utxos = alice.wallet_state.wallet_db.monitored_utxos();
+                let monitored_utxos = alice.wallet_state.wallet_db.all_monitored_utxos().await;
                 assert!(
-                    !monitored_utxos
-                        .get(0)
-                        .await
+                    !monitored_utxos[0]
                         .was_abandoned(alice.chain.archival_state())
                         .await
                 );
                 assert!(
-                    monitored_utxos
-                        .get(1)
-                        .await
+                    monitored_utxos[1]
                         .was_abandoned(alice.chain.archival_state())
                         .await
                 );
@@ -5014,19 +4992,15 @@ mod tests {
                 assert_eq!(2, alice_ws_c_after_resync.unsynced.len());
 
                 // Also check that UTXO from 1a is considered abandoned
-                let alice_mutxos = alice.wallet_state.wallet_db.monitored_utxos();
+                let alice_mutxos = alice.wallet_state.wallet_db.all_monitored_utxos().await;
                 assert!(
-                    !alice_mutxos
-                        .get(0)
-                        .await
+                    !alice_mutxos[0]
                         .was_abandoned(alice.chain.archival_state())
                         .await
                 );
                 for i in 1..=2 {
                     assert!(
-                        alice_mutxos
-                            .get(i)
-                            .await
+                        alice_mutxos[i]
                             .was_abandoned(alice.chain.archival_state())
                             .await
                     );
@@ -5265,8 +5239,8 @@ mod tests {
                 .await
                 .wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .len().await, "Premine receiver must have 4 monitored UTXOs after block 1: change from transaction, 2 coinbases from block 1, and premine UTXO"
+                .num_monitored_utxos()
+                .await, "Premine receiver must have 4 monitored UTXOs after block 1: change from transaction, 2 coinbases from block 1, and premine UTXO"
         );
 
         assert_eq!(
@@ -5768,8 +5742,7 @@ mod tests {
             let mutxos = global_state
                 .wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .get_all()
+                .all_monitored_utxos()
                 .await;
             let mut mutxos_on_tip = vec![];
             for mutxo in mutxos {
@@ -6576,8 +6549,8 @@ mod tests {
                     .await
                         .wallet_state
                         .wallet_db
-                        .monitored_utxos()
-                        .len().await, "Alice must have 2 UTXOs after block 1: change from transaction, and the spent premine UTXO"
+                        .num_monitored_utxos()
+                        .await, "Alice must have 2 UTXOs after block 1: change from transaction, and the spent premine UTXO"
                 );
 
                 // Now alice should have a balance of 9.

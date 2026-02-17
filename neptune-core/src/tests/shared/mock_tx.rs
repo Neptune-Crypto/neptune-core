@@ -184,7 +184,6 @@ pub(crate) async fn genesis_tx_with_proof_type(
     network: Network,
     fee: NativeCurrencyAmount,
 ) -> std::sync::Arc<Transaction> {
-    let genesis_block = Block::genesis(network);
     let bob_wallet_secret = WalletEntropy::devnet_wallet();
     let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
     let bob = mock_genesis_global_state(
@@ -193,12 +192,14 @@ pub(crate) async fn genesis_tx_with_proof_type(
         cli_args::Args::default_with_network(network),
     )
     .await;
+
+    let genesis_block = Block::genesis(network);
     let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
     let config = TxCreationConfig::default()
         .recover_change_on_chain(bob_spending_key.into())
         .with_prover_capability(proof_type);
 
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis().next());
 
     let transaction = bob
         .api()

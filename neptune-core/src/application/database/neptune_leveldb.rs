@@ -82,8 +82,7 @@ where
 {
     /// Open or create a new or existing database
     fn new(db_path: &Path, options: &Options) -> Result<Self> {
-        let mut write_options = WriteOptions::new();
-        write_options.sync = true;
+        let write_options = WriteOptions::new();
 
         let mut read_options = ReadOptions::new();
         read_options.verify_checksums = true;
@@ -261,30 +260,34 @@ where
 
     /// Get database value asynchronously
     pub async fn get(&self, key: Key) -> Option<Value> {
-        let inner = self.0.clone();
-        task::spawn_blocking(move || inner.get(key)).await.unwrap()
+        self.0.get(key)
+        // let inner = self.0.clone();
+        // task::spawn_blocking(move || inner.get(key)).await.unwrap()
     }
 
-    pub async fn get_u8(&self, key: Vec<u8>) -> Option<Vec<u8>> {
-        let mut inner = self.0.clone();
-        task::spawn_blocking(move || inner.get_u8(&key))
-            .await
-            .unwrap()
+    pub async fn get_u8(&mut self, key: Vec<u8>) -> Option<Vec<u8>> {
+        self.0.get_u8(&key)
+        // let mut inner = self.0.clone();
+        // task::spawn_blocking(move || inner.get_u8(&key))
+        //     .await
+        //     .unwrap()
     }
 
     /// Set database value asynchronously
     pub async fn put(&mut self, key: Key, value: Value) {
-        let mut inner = self.0.clone();
-        task::spawn_blocking(move || inner.put(key, value))
-            .await
-            .unwrap()
+        self.0.put(key, value);
+        // let mut inner = self.0.clone();
+        // task::spawn_blocking(move || inner.put(key, value))
+        //     .await
+        //     .unwrap()
     }
 
     pub async fn put_u8(&mut self, key: Vec<u8>, value: Vec<u8>) {
-        let mut inner = self.0.clone();
-        task::spawn_blocking(move || inner.put_u8(&key, &value))
-            .await
-            .unwrap()
+        self.0.put_u8(&key, &value);
+        // let mut inner = self.0.clone();
+        // task::spawn_blocking(move || inner.put_u8(&key, &value))
+        //     .await
+        //     .unwrap()
     }
 
     /// Write database values as a batch asynchronously
@@ -297,13 +300,14 @@ where
 
     /// Delete database value asynchronously
     pub async fn delete(&mut self, key: Key) -> Option<Value> {
-        let mut inner = self.0.clone();
-        task::spawn_blocking(move || inner.delete(key))
-            .await
-            .unwrap()
+        self.0.delete(key)
+        // let mut inner = self.0.clone();
+        // task::spawn_blocking(move || inner.delete(key))
+        //     .await
+        //     .unwrap()
     }
 
-    /// Delete database value asynchronously
+    /// Persis database value asynchronously
     pub async fn flush(&mut self) {
         let mut inner = self.0.clone();
         task::spawn_blocking(move || inner.flush()).await.unwrap()

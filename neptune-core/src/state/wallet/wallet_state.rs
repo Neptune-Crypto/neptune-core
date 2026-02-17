@@ -4,6 +4,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use futures::Stream;
 use itertools::Itertools;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
@@ -284,32 +285,32 @@ impl WalletState {
 
         let wallet_database_path = configuration.data_directory().wallet_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&wallet_database_path).await?;
-        let wallet_db = Self::open_wallet_db(&wallet_database_path).await?;
 
-        let rusty_wallet_database = match RustyWalletDatabase::try_connect(wallet_db).await {
-            Err(WalletDbConnectError::SchemaVersionTooLow { found, expected: _ }) => {
-                // DB schema version is too low, so we need to migrate it.
-                // note: wallet_db was moved into try_connect() and is now dropped/closed.
+        let rusty_wallet_database =
+            match RustyWalletDatabase::try_connect(&wallet_database_path).await {
+                Err(WalletDbConnectError::SchemaVersionTooLow { found, expected: _ }) => {
+                    // DB schema version is too low, so we need to migrate it.
+                    // note: wallet_db was moved into try_connect() and is now dropped/closed.
 
-                // safety first! backup wallet DB before migrating schema.
-                Self::backup_database(&configuration, found).await?;
+                    // safety first! backup wallet DB before migrating schema.
+                    Self::backup_database(&configuration, found).await?;
 
-                // attempt to connect and migrate the DB to latest version.
-                let db = Self::open_wallet_db(&wallet_database_path).await?;
-                RustyWalletDatabase::try_connect_and_migrate(db).await
-            }
-            other => other,
-        }?;
+                    // attempt to connect and migrate the DB to latest version.
+                    // let db = Self::open_wallet_db(&wallet_database_path).await?;
+                    RustyWalletDatabase::try_connect_and_migrate(&wallet_database_path).await
+                }
+                other => other,
+            }?;
 
-        let sync_label = rusty_wallet_database.get_sync_label();
+        let sync_label = rusty_wallet_database.get_sync_label().await;
 
         // generate and cache all used generation keys
-        let known_generation_keys = (0..rusty_wallet_database.get_generation_key_counter())
+        let known_generation_keys = (0..rusty_wallet_database.get_generation_key_counter().await)
             .map(|idx| wallet_entropy.nth_generation_spending_key(idx).into())
             .collect_vec();
 
         // generate and cache all used symmetric keys
-        let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter())
+        let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter().await)
             .map(|idx| wallet_entropy.nth_symmetric_key(idx).into())
             .collect_vec();
 
@@ -625,10 +626,7 @@ impl WalletState {
 
     /// adds a [SentTransaction] to the wallet db
     pub(crate) async fn add_sent_transaction(&mut self, sent_transaction: SentTransaction) {
-        self.wallet_db
-            .sent_transactions_mut()
-            .push(sent_transaction)
-            .await;
+        self.wallet_db.add_sent_transaction(sent_transaction).await;
     }
 
     /// returns a count of transactions this wallet sent at given block.
@@ -641,11 +639,9 @@ impl WalletState {
     ///
     /// once send-rate limiting is disabled, this fn can probably be removed.
     pub(crate) async fn count_sent_transactions_at_block(&self, block: Digest) -> usize {
-        let list = self.wallet_db.sent_transactions();
-        let len = list.len().await;
-
         // iterate over list in reverse order (newest blocks first)
-        let stream = list.stream_many_values((0..len).rev());
+        let reverse_order = true;
+        let stream = self.wallet_db.stream_sent_transactions(reverse_order).await;
         pin_mut!(stream); // needed for iteration
 
         let mut count: usize = 0;
@@ -751,13 +747,14 @@ impl WalletState {
     ///
     /// Only announced UTXOs actually present in the transaction are returned
     /// here, it's not sufficient that they are announced.
-    fn scan_for_utxos_announced_to_future_keys<'a>(
+    async fn scan_for_utxos_announced_to_future_keys<'a>(
         &'a self,
         num_future_keys: usize,
         tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = (KeyType, u64, IncomingUtxo)> + 'a {
-        self.get_future_spending_keys(num_future_keys).flat_map(
-            |(key_type, derivation_index, key)| {
+        self.get_future_spending_keys(num_future_keys)
+            .await
+            .flat_map(|(key_type, derivation_index, key)| {
                 key.scan_for_announced_utxos(tx_kernel)
                     .into_iter()
                     .filter(|au| {
@@ -773,8 +770,7 @@ impl WalletState {
                         transaction_contains_addition_record
                     })
                     .map(move |au| (key_type, derivation_index, au))
-            },
-        )
+            })
     }
 
     /// Scan the given list of addition records for items that match with list
@@ -856,14 +852,11 @@ impl WalletState {
         utxo: &Utxo,
         sender_randomness: Digest,
     ) -> Option<MonitoredUtxo> {
-        let len = self.wallet_db.monitored_utxos().len().await;
-        let stream = self
-            .wallet_db
-            .monitored_utxos()
-            .stream_many_values((0..len).rev());
+        let reverse_order = true;
+        let stream = self.wallet_db.stream_monitored_utxos(reverse_order).await;
         pin_mut!(stream); // needed for iteration
 
-        while let Some(mu) = stream.next().await {
+        while let Some((_, mu)) = stream.next().await {
             if mu.sender_randomness == sender_randomness && mu.utxo == *utxo {
                 return Some(mu);
             }
@@ -964,15 +957,17 @@ impl WalletState {
     /// index, spending key) for the next `num_future_keys` to be derived, for
     /// key types "Generation" and "Symmetric Key". This function does **not**
     /// increment the derivation counter.
-    pub(crate) fn get_future_spending_keys(
+    pub(crate) async fn get_future_spending_keys(
         &self,
         num_future_keys: usize,
     ) -> impl Iterator<Item = (KeyType, u64, SpendingKey)> + '_ {
         let future_generation_keys = self
             .get_future_generation_spending_keys(num_future_keys)
+            .await
             .map(|(i, gsk)| (KeyType::Generation, i, SpendingKey::from(gsk)));
         let future_symmetric_keys = self
             .get_future_symmetric_keys(num_future_keys)
+            .await
             .map(|(i, sk)| (KeyType::Symmetric, i, SpendingKey::from(sk)));
         future_generation_keys.chain(future_symmetric_keys)
     }
@@ -1039,7 +1034,7 @@ impl WalletState {
 
     pub async fn bump_derivation_counter(&mut self, key_type: KeyType, max_used_index: u64) {
         let new_counter = max_used_index + 1;
-        let current_counter = self.spending_key_counter(key_type);
+        let current_counter = self.spending_key_counter(key_type).await;
 
         if current_counter < new_counter {
             debug!(
@@ -1068,10 +1063,10 @@ impl WalletState {
     }
 
     /// Get index of the next unused spending key of a given type.
-    pub fn spending_key_counter(&self, key_type: KeyType) -> u64 {
+    pub async fn spending_key_counter(&self, key_type: KeyType) -> u64 {
         match key_type {
-            KeyType::Generation => self.wallet_db.get_generation_key_counter(),
-            KeyType::Symmetric => self.wallet_db.get_symmetric_key_counter(),
+            KeyType::Generation => self.wallet_db.get_generation_key_counter().await,
+            KeyType::Symmetric => self.wallet_db.get_symmetric_key_counter().await,
         }
     }
 
@@ -1096,7 +1091,7 @@ impl WalletState {
     async fn next_unused_generation_spending_key(
         &mut self,
     ) -> generation_address::GenerationSpendingKey {
-        let index = self.wallet_db.get_generation_key_counter();
+        let index = self.wallet_db.get_generation_key_counter().await;
         self.wallet_db.set_generation_key_counter(index + 1).await;
         let key = self.wallet_entropy.nth_generation_spending_key(index);
         self.known_generation_keys.push(key.into());
@@ -1111,7 +1106,7 @@ impl WalletState {
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
     pub async fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
-        let index = self.wallet_db.get_symmetric_key_counter();
+        let index = self.wallet_db.get_symmetric_key_counter().await;
         self.wallet_db.set_symmetric_key_counter(index + 1).await;
         let key = self.wallet_entropy.nth_symmetric_key(index);
         self.known_symmetric_keys.push(key.into());
@@ -1120,22 +1115,22 @@ impl WalletState {
 
     /// Get the next n generation spending keys (with derivation indices)
     /// without modifying the counter.
-    pub(crate) fn get_future_generation_spending_keys(
+    pub(crate) async fn get_future_generation_spending_keys(
         &self,
         num_future_keys: usize,
     ) -> impl Iterator<Item = (u64, generation_address::GenerationSpendingKey)> + use<'_> {
-        let index = self.wallet_db.get_generation_key_counter();
+        let index = self.wallet_db.get_generation_key_counter().await;
         (index..index + (num_future_keys as u64))
             .map(|i| (i, self.wallet_entropy.nth_generation_spending_key(i)))
     }
 
     /// Get the next n symmetric spending keys (with derivation indices)
     /// without modifying the counter.
-    pub(crate) fn get_future_symmetric_keys(
+    pub(crate) async fn get_future_symmetric_keys(
         &self,
         num_future_keys: usize,
     ) -> impl Iterator<Item = (u64, symmetric_key::SymmetricKey)> + use<'_> {
-        let index = self.wallet_db.get_symmetric_key_counter();
+        let index = self.wallet_db.get_symmetric_key_counter().await;
         (index..index + (num_future_keys as u64))
             .map(|i| (i, self.wallet_entropy.nth_symmetric_key(i)))
     }
@@ -1186,6 +1181,7 @@ impl WalletState {
                 scan_mode_configuration.num_future_keys(),
                 &new_block.body().transaction_kernel,
             )
+            .await
         {
             if max_counters
                 .get(&key_type)
@@ -1305,7 +1301,7 @@ impl WalletState {
         /// Returns
         /// all membership proofs that need to be maintained
         async fn all_wallet_membership_proofs(
-            monitored_utxos: &DbtVec<MonitoredUtxo>,
+            stream: impl Stream<Item = (u64, MonitoredUtxo)>,
             new_block: &Block,
         ) -> HashMap<StrongUtxoKey, (MsMembershipProof, u64, Digest)> {
             // Find the membership proofs that were valid at the previous tip. They have
@@ -1314,7 +1310,6 @@ impl WalletState {
                 StrongUtxoKey,
                 (MsMembershipProof, u64, Digest),
             > = HashMap::default();
-            let stream = monitored_utxos.stream().await;
             pin_mut!(stream); // needed for iteration
 
             while let Some((i, monitored_utxo)) = stream.next().await {
@@ -1377,13 +1372,17 @@ impl WalletState {
         let mut removal_records: Vec<&mut RemovalRecord> =
             removal_records.iter_mut().collect::<Vec<_>>();
 
-        let mut valid_membership_proofs_and_own_utxo_count =
-            all_wallet_membership_proofs(self.wallet_db.monitored_utxos(), block).await;
+        let reverse_order = false;
+        let mut valid_membership_proofs_and_own_utxo_count = all_wallet_membership_proofs(
+            self.wallet_db.stream_monitored_utxos(reverse_order).await,
+            block,
+        )
+        .await;
 
         debug!(
             "doing maintenance on {}/{} monitored UTXOs",
             valid_membership_proofs_and_own_utxo_count.len(),
-            self.wallet_db.monitored_utxos().len().await
+            self.wallet_db.num_monitored_utxos().await
         );
 
         let mut changed_mps = vec![];
@@ -1732,7 +1731,7 @@ impl WalletState {
         // block does not affect our balance
         if spent_inputs.is_empty()
             && incoming.is_empty()
-            && self.wallet_db.monitored_utxos().is_empty().await
+            && self.wallet_db.num_monitored_utxos().await == 0
         {
             self.wallet_db.set_sync_label(block.hash()).await;
             return;
@@ -1807,7 +1806,7 @@ impl WalletState {
     }
 
     pub async fn is_synced_to(&self, tip_hash: Digest, is_true_archival: bool) -> bool {
-        let db_sync_digest = self.wallet_db.get_sync_label();
+        let db_sync_digest = self.wallet_db.get_sync_label().await;
         if db_sync_digest != tip_hash {
             return false;
         }
@@ -1818,16 +1817,16 @@ impl WalletState {
             return true;
         }
 
-        let monitored_utxos = self.wallet_db.monitored_utxos();
-
         // We assume that the membership proof can only be stored
         // if it is valid for the given block hash, so there is
         // no need to test validity here.
-        let stream = monitored_utxos.stream_values().await;
+        let stream = self.wallet_db.stream_monitored_utxos(false).await;
         pin_mut!(stream); // needed for iteration
 
         stream
-            .all(|m| futures::future::ready(m.get_membership_proof_for_block(tip_hash).is_some()))
+            .all(|(_, m)| {
+                futures::future::ready(m.get_membership_proof_for_block(tip_hash).is_some())
+            })
             .await
     }
 
@@ -1840,8 +1839,7 @@ impl WalletState {
         let mut spent = vec![];
         let mut unsynced = vec![];
 
-        let monitored_utxos = self.wallet_db.monitored_utxos();
-        let stream = monitored_utxos.stream().await;
+        let stream = self.wallet_db.stream_monitored_utxos(false).await;
         pin_mut!(stream); // needed for iteration
         while let Some((_i, mutxo)) = stream.next().await {
             let mutxo_status = validity_checker.mutxo_state(&mutxo).await;
@@ -1928,12 +1926,6 @@ pub(crate) mod tests {
             Self::try_new(configuration, wallet_entropy, &genesis_block)
                 .await
                 .unwrap()
-        }
-
-        /// Assert that monitored UTXOs are stored correctly in database, with
-        /// the correct lookup tables populated.
-        async fn assert_mutxo_lookup_integrity(&self) {
-            self.wallet_db.assert_mutxo_lookup_integrity().await;
         }
     }
 
@@ -2168,12 +2160,6 @@ pub(crate) mod tests {
             .set_new_tip(block1.clone())
             .await
             .unwrap();
-        alice
-            .lock_guard()
-            .await
-            .wallet_state
-            .assert_mutxo_lookup_integrity()
-            .await;
 
         // Bob sends two identical coins (=identical addition records) to Alice.
         let fee = NativeCurrencyAmount::coins(1);
@@ -2261,13 +2247,6 @@ pub(crate) mod tests {
                 "All four UTXOs must be registered by wallet and contribute to balance"
             );
         }
-
-        alice
-            .lock_guard()
-            .await
-            .wallet_state
-            .assert_mutxo_lookup_integrity()
-            .await;
     }
 
     #[apply(shared_tokio_runtime)]
@@ -2358,8 +2337,7 @@ pub(crate) mod tests {
                 .await
                 .wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .len()
+                .num_monitored_utxos()
                 .await
                 .is_zero(),
             "UTXO with unknown typescript may not added to MUTXO list"
@@ -2455,8 +2433,7 @@ pub(crate) mod tests {
                 .await
                 .wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .len()
+                .num_monitored_utxos()
                 .await
                 .is_zero(),
             "UTXO with unknown typescript may not added to MUTXO list"
@@ -2496,12 +2473,12 @@ pub(crate) mod tests {
             .await;
 
         let mut bob = bob_global_lock.lock_guard_mut().await;
-        let mutxos_1a = bob.wallet_state.wallet_db.monitored_utxos().get_all().await;
+        let mutxos_1a = bob.wallet_state.wallet_db.all_monitored_utxos().await;
         bob.wallet_state
             .add_expected_utxos(expected_utxos_block_1a.clone())
             .await;
         bob.set_new_tip(block_1a.clone()).await.unwrap();
-        assert_eq!(4, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
+        assert_eq!(4, bob.wallet_state.wallet_db.num_monitored_utxos().await,);
         assert_eq!(
             4,
             bob.wallet_state
@@ -2550,7 +2527,7 @@ pub(crate) mod tests {
             .add_expected_utxos(expected_utxos_block_1a.clone())
             .await;
         bob.set_new_tip(block_1b.clone()).await.unwrap();
-        let final_mutxos = bob.wallet_state.wallet_db.monitored_utxos().get_all().await;
+        let final_mutxos = bob.wallet_state.wallet_db.all_monitored_utxos().await;
         assert_eq!(4, final_mutxos.len());
         assert_eq!(
             4,
@@ -2578,8 +2555,6 @@ pub(crate) mod tests {
                 .verify(item, &msmp));
             assert_eq!(block_1b.hash(), mutxo.confirmed_in_block.0);
         }
-
-        bob.wallet_state.assert_mutxo_lookup_integrity().await;
     }
 
     #[apply(shared_tokio_runtime)]
@@ -2606,9 +2581,9 @@ pub(crate) mod tests {
         assert!(
             bob.wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .is_empty()
-                .await,
+                .num_monitored_utxos()
+                .await
+                .is_zero(),
             "Monitored UTXO list must be empty at init"
         );
 
@@ -2619,7 +2594,7 @@ pub(crate) mod tests {
                 true,
             )
             .await;
-        assert_eq!(2, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
+        assert_eq!(2, bob.wallet_state.wallet_db.num_monitored_utxos().await,);
         assert_eq!(
             2,
             bob.wallet_state
@@ -2628,7 +2603,7 @@ pub(crate) mod tests {
                 .unwrap()
                 .len(),
         );
-        let original_mutxo = bob.wallet_state.wallet_db.monitored_utxos().get(0).await;
+        let original_mutxo = bob.wallet_state.wallet_db.all_monitored_utxos().await[0].clone();
         let original_recovery_entry =
             &bob.wallet_state.read_utxo_ms_recovery_data().await.unwrap()[0];
 
@@ -2641,7 +2616,7 @@ pub(crate) mod tests {
                     wallet_maintains_mp,
                 )
                 .await;
-            assert_eq!(2, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
+            assert_eq!(2, bob.wallet_state.wallet_db.num_monitored_utxos().await,);
             assert_eq!(
                 2,
                 bob.wallet_state
@@ -2651,7 +2626,7 @@ pub(crate) mod tests {
                     .len(),
             );
 
-            let new_mutxo = bob.wallet_state.wallet_db.monitored_utxos().get(0).await;
+            let new_mutxo = bob.wallet_state.wallet_db.all_monitored_utxos().await[0].clone();
             let new_recovery_entry =
                 &bob.wallet_state.read_utxo_ms_recovery_data().await.unwrap()[0];
 
@@ -2665,8 +2640,6 @@ pub(crate) mod tests {
                 assert!(wallet_state_has_all_valid_mps(&bob.wallet_state, &block1).await);
             }
         }
-
-        bob.wallet_state.assert_mutxo_lookup_integrity().await;
     }
 
     #[apply(shared_tokio_runtime)]
@@ -2698,7 +2671,7 @@ pub(crate) mod tests {
         .await;
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let genesis_block = Block::genesis(network);
-        let monitored_utxos_count_init = bob.wallet_state.wallet_db.monitored_utxos().len().await;
+        let monitored_utxos_count_init = bob.wallet_state.wallet_db.num_monitored_utxos().await;
         assert!(
             monitored_utxos_count_init.is_zero(),
             "Monitored UTXO list must be empty at init"
@@ -2734,8 +2707,7 @@ pub(crate) mod tests {
         assert!(
             bob.wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .len()
+                .num_monitored_utxos()
                 .await
                 .is_zero(),
             "Monitored UTXO list must be empty at height 2"
@@ -2761,14 +2733,13 @@ pub(crate) mod tests {
 
         assert_eq!(
             2,
-            bob.wallet_state.wallet_db.monitored_utxos().len().await,
+            bob.wallet_state.wallet_db.num_monitored_utxos().await,
             "Monitored UTXO list must have length 2 at block 3a"
         );
         assert!(
             bob.wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .get_all()
+                .all_monitored_utxos()
                 .await
                 .iter()
                 .all(|x| x.abandoned_at.is_none()),
@@ -2788,8 +2759,7 @@ pub(crate) mod tests {
         assert!(
             bob.wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .get_all()
+                .all_monitored_utxos()
                 .await
                 .iter()
                 .all(|x| x.abandoned_at.is_none()),
@@ -2817,8 +2787,7 @@ pub(crate) mod tests {
         assert!(
             bob.wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .get_all()
+                .all_monitored_utxos()
                 .await
                 .iter()
                 .all(|x| x.abandoned_at.is_none()),
@@ -2837,8 +2806,7 @@ pub(crate) mod tests {
         assert!(
             bob.wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .get_all()
+                .all_monitored_utxos()
                 .await
                 .iter()
                 .all(|x| x.abandoned_at.is_none()),
@@ -2854,11 +2822,7 @@ pub(crate) mod tests {
                     block_12.kernel.header.timestamp,
                     12u64.into()
                 ),
-                bob.wallet_state
-                    .wallet_db
-                    .monitored_utxos()
-                    .get(i)
-                    .await
+                bob.wallet_state.wallet_db.all_monitored_utxos().await[i]
                     .abandoned_at
                     .unwrap(),
                 "MUTXO must be marked as abandoned at height 12, after pruning"
@@ -2882,16 +2846,15 @@ pub(crate) mod tests {
 
         // are we synchronized to the genesis block?
         assert_eq!(
-            wallet_state.wallet_db.get_sync_label(),
+            wallet_state.wallet_db.get_sync_label().await,
             genesis_block.hash()
         );
 
         // Do we have valid membership proofs for all UTXOs received in the genesis block?
-        let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
-        let num_monitored_utxos = monitored_utxos.len().await;
+        let monitored_utxos = wallet_state.wallet_db.all_monitored_utxos().await;
+        let num_monitored_utxos = monitored_utxos.len();
         assert!(num_monitored_utxos > 0);
-        for i in 0..num_monitored_utxos {
-            let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i).await;
+        for monitored_utxo in monitored_utxos {
             let (digest, _, _) = monitored_utxo.confirmed_in_block;
             assert_eq!(digest, genesis_block.hash());
             let utxo = monitored_utxo.utxo;
@@ -3015,8 +2978,7 @@ pub(crate) mod tests {
                 .await
                 .wallet_state
                 .wallet_db
-                .expected_utxos()
-                .get_all()
+                .all_expected_utxos()
                 .await;
             assert_eq!(
                 guesser_expected_utxos.len(),
@@ -3048,8 +3010,7 @@ pub(crate) mod tests {
                 .await
                 .wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .get_all()
+                .all_monitored_utxos()
                 .await;
             assert_eq!(
                 2,
@@ -3556,7 +3517,7 @@ pub(crate) mod tests {
                     wallet.wallet_db.persist().await;
 
                     (
-                        wallet.spending_key_counter(key_type),
+                        wallet.spending_key_counter(key_type).await,
                         wallet
                             .get_known_addressable_spending_keys(key_type)
                             .collect_vec(),
@@ -3567,7 +3528,7 @@ pub(crate) mod tests {
                 let wallet =
                     WalletState::new_from_wallet_entropy(&data_dir, wallet_secret, &cli_args).await;
 
-                let persisted_counter = wallet.spending_key_counter(key_type);
+                let persisted_counter = wallet.spending_key_counter(key_type).await;
                 let persisted_known_keys = wallet
                     .get_known_addressable_spending_keys(key_type)
                     .collect_vec();
@@ -3631,11 +3592,6 @@ pub(crate) mod tests {
                         .len(),
                 );
             }
-
-            wallet_state
-                .wallet_db
-                .assert_expected_utxo_integrity()
-                .await;
         }
 
         #[traced_test]
@@ -3646,8 +3602,8 @@ pub(crate) mod tests {
             let mut wallet =
                 mock_genesis_wallet_state(WalletEntropy::new_random(), &cli_args).await;
 
-            assert!(wallet.wallet_db.expected_utxos().is_empty().await);
-            assert!(wallet.wallet_db.expected_utxos().len().await.is_zero());
+            assert!(wallet.wallet_db.num_expected_utxos().await.is_zero());
+            assert!(wallet.wallet_db.all_expected_utxos().await.len().is_zero());
 
             let mock_utxo = Utxo::new_native_currency(
                 LockScript::anyone_can_spend().hash(),
@@ -3670,8 +3626,9 @@ pub(crate) mod tests {
                     UtxoNotifier::Myself,
                 ))
                 .await;
-            assert!(!wallet.wallet_db.expected_utxos().is_empty().await);
-            assert_eq!(1, wallet.wallet_db.expected_utxos().len().await);
+            assert!(!wallet.wallet_db.all_expected_utxos().await.is_empty());
+            assert_eq!(1, wallet.wallet_db.all_expected_utxos().await.len());
+            assert_eq!(1, wallet.wallet_db.num_expected_utxos().await);
 
             let mock_tx_containing_expected_utxo =
                 make_mock_transaction(vec![], vec![expected_addition_record]);
@@ -3693,8 +3650,6 @@ pub(crate) mod tests {
                 .scan_for_expected_utxos(&tx_without_utxo.kernel.outputs)
                 .await;
             assert!(ret_with_tx_without_utxo.is_empty());
-
-            wallet.wallet_db.assert_expected_utxo_integrity().await;
         }
 
         #[traced_test]
@@ -3724,10 +3679,9 @@ pub(crate) mod tests {
             }
 
             // Verify nothing happens when no expected UTXOs are received
-            assert_eq!(4, wallet.wallet_db.expected_utxos().len().await);
+            assert_eq!(4, wallet.wallet_db.num_expected_utxos().await);
             wallet.prune_stale_expected_utxos().await;
-            assert_eq!(4, wallet.wallet_db.expected_utxos().len().await);
-            wallet.wallet_db.assert_expected_utxo_integrity().await;
+            assert_eq!(4, wallet.wallet_db.num_expected_utxos().await);
 
             // Test with a UTXO that was received two weeks ago
             let two_weeks_ago = Timestamp::now() - Timestamp::days(14);
@@ -3736,10 +3690,9 @@ pub(crate) mod tests {
                 .mark_expected_utxo_as_received(&addition_records[0], rand::random(), two_weeks_ago)
                 .await;
 
-            assert_eq!(4, wallet.wallet_db.expected_utxos().len().await);
+            assert_eq!(4, wallet.wallet_db.num_expected_utxos().await);
             wallet.prune_stale_expected_utxos().await;
-            assert_eq!(3, wallet.wallet_db.expected_utxos().len().await);
-            wallet.wallet_db.assert_expected_utxo_integrity().await;
+            assert_eq!(3, wallet.wallet_db.num_expected_utxos().await);
 
             // Mark all as received
             for ar in addition_records {
@@ -3749,112 +3702,9 @@ pub(crate) mod tests {
                     .await;
             }
 
-            assert_eq!(3, wallet.wallet_db.expected_utxos().len().await);
+            assert_eq!(3, wallet.wallet_db.num_expected_utxos().await);
             wallet.prune_stale_expected_utxos().await;
-            assert_eq!(0, wallet.wallet_db.expected_utxos().len().await);
-
-            wallet.wallet_db.assert_expected_utxo_integrity().await;
-        }
-
-        /// demonstrates/tests that if wallet-db is not persisted after an
-        /// ExpectedUtxo is added, then the ExpectedUtxo will not exist after
-        /// wallet is dropped from RAM and re-created from disk.
-        ///
-        /// This is a regression test for issue #172.
-        ///
-        /// https://github.com/Neptune-Crypto/neptune-core/issues/172
-        #[traced_test]
-        #[apply(shared_tokio_runtime)]
-        async fn persisted_exists_after_wallet_restored() {
-            worker::restore_wallet(true).await
-        }
-
-        /// demonstrates/tests that if wallet-db is not persisted after an
-        /// ExpectedUtxo is added, then the ExpectedUtxo will not exist after
-        /// wallet is dropped from RAM and re-created from disk.
-        #[traced_test]
-        #[apply(shared_tokio_runtime)]
-        async fn unpersisted_gone_after_wallet_restored() {
-            worker::restore_wallet(false).await
-        }
-
-        mod worker {
-            use super::*;
-            use crate::application::database::storage::storage_schema::traits::StorageWriter;
-            use crate::tests::shared::files::unit_test_data_directory;
-
-            /// implements a test with 2 variations via `persist` param.
-            ///
-            /// The basic test is to add an ExpectedUtxo to a wallet, drop and
-            /// re-create the wallet, and then check if the ExpectedUtxo still
-            /// exists.
-            ///
-            /// Variations:
-            ///   persist = true:
-            ///    the wallet db is persisted to disk after the ExpectedUtxo
-            ///    is added. asserts that the restored wallet has 1 ExpectedUtxo.
-            ///
-            ///   persist = false:
-            ///    the wallet db is NOT persisted to disk after the ExpectedUtxo
-            ///    is added. asserts that the restored wallet has 0 ExpectedUtxo.
-            pub(super) async fn restore_wallet(persist: bool) {
-                let network = Network::RegTest;
-                let wallet_secret = WalletEntropy::new_random();
-                let data_dir = unit_test_data_directory(network).unwrap();
-                let cli_args = cli_args::Args::default();
-
-                // create initial wallet in a new directory
-                let mut wallet = WalletState::new_from_wallet_entropy(
-                    &data_dir,
-                    wallet_secret.clone(),
-                    &cli_args,
-                )
-                .await;
-
-                let mock_utxo = Utxo::new_native_currency(
-                    LockScript::anyone_can_spend().hash(),
-                    NativeCurrencyAmount::coins(14),
-                );
-
-                assert!(wallet.wallet_db.expected_utxos().is_empty().await);
-
-                // Add an ExpectedUtxo to the wallet.
-                wallet
-                    .add_expected_utxo(ExpectedUtxo::new(
-                        mock_utxo.clone(),
-                        rand::random(),
-                        rand::random(),
-                        UtxoNotifier::Myself,
-                    ))
-                    .await;
-
-                assert_eq!(1, wallet.wallet_db.expected_utxos().len().await);
-
-                // persist wallet-db to disk, if testing that case.
-                if persist {
-                    wallet.wallet_db.persist().await;
-                }
-
-                // drop wallet state.  this simulates the node being stopped,
-                // crashing, power outage, etc.
-                drop(wallet);
-
-                // re-create wallet state from same seed and same directory
-                let restored_wallet =
-                    WalletState::new_from_wallet_entropy(&data_dir, wallet_secret, &cli_args).await;
-
-                // if wallet state was persisted to DB then we should have
-                // 1 (restored) ExpectedUtxo, else 0.
-                let expect = if persist { 1 } else { 0 };
-                assert_eq!(
-                    expect,
-                    restored_wallet.wallet_db.expected_utxos().len().await
-                );
-                restored_wallet
-                    .wallet_db
-                    .assert_expected_utxo_integrity()
-                    .await;
-            }
+            assert_eq!(0, wallet.wallet_db.num_expected_utxos().await);
         }
     }
 
@@ -4190,7 +4040,10 @@ pub(crate) mod tests {
                     assert_eq!(NativeCurrencyAmount::coins(1), balance);
                     assert_eq!(
                         21,
-                        alice_wallet_state.wallet_db.get_generation_key_counter()
+                        alice_wallet_state
+                            .wallet_db
+                            .get_generation_key_counter()
+                            .await
                     );
                     assert_eq!(
                         21,
@@ -4200,7 +4053,13 @@ pub(crate) mod tests {
                     );
                 } else {
                     assert_eq!(NativeCurrencyAmount::coins(0), balance);
-                    assert_eq!(1, alice_wallet_state.wallet_db.get_generation_key_counter());
+                    assert_eq!(
+                        1,
+                        alice_wallet_state
+                            .wallet_db
+                            .get_generation_key_counter()
+                            .await
+                    );
                     assert_eq!(
                         1,
                         alice_wallet_state
@@ -4225,26 +4084,28 @@ pub(crate) mod tests {
             .await;
 
             // generate iterators for future keys
-            let generation_counter = wallet_state.wallet_db.get_generation_key_counter();
-            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter();
+            let generation_counter = wallet_state.wallet_db.get_generation_key_counter().await;
+            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter().await;
 
             // don't just generate the iterators; run through them also
             let num_future_keys = 100;
             let future_generation_keys = wallet_state
                 .get_future_generation_spending_keys(num_future_keys)
+                .await
                 .collect_vec();
             let future_symmetric_keys = wallet_state
                 .get_future_symmetric_keys(num_future_keys)
+                .await
                 .collect_vec();
 
             // verify that the counters haven't changed
             assert_eq!(
                 generation_counter,
-                wallet_state.wallet_db.get_generation_key_counter(),
+                wallet_state.wallet_db.get_generation_key_counter().await,
             );
             assert_eq!(
                 symmetric_counter,
-                wallet_state.wallet_db.get_symmetric_key_counter(),
+                wallet_state.wallet_db.get_symmetric_key_counter().await,
             );
 
             // make sure passing over the iterators is not being optimized away
@@ -4306,8 +4167,8 @@ pub(crate) mod tests {
             .await;
             println!("(ignore all log messages above 😆)");
 
-            let generation_counter = wallet_state.wallet_db.get_generation_key_counter();
-            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter();
+            let generation_counter = wallet_state.wallet_db.get_generation_key_counter().await;
+            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter().await;
 
             future_generation_relative_indices.sort();
             let future_generation_keys = future_generation_relative_indices
@@ -4396,6 +4257,7 @@ pub(crate) mod tests {
             // scan
             let caught_utxos = wallet_state
                 .scan_for_utxos_announced_to_future_keys(NUM_FUTURE_KEYS, &new_kernel)
+                .await
                 .collect_vec();
 
             // filter master list according to expectation
@@ -4910,7 +4772,8 @@ pub(crate) mod tests {
             )
             .await?
             .wallet_db
-            .schema_version();
+            .schema_version()
+            .await;
 
             // perform db backup
             let backup_dir = WalletState::backup_database(&configuration, schema_version).await?;
@@ -4934,7 +4797,8 @@ pub(crate) mod tests {
                 WalletState::try_new(configuration, wallet_entropy, &genesis_block)
                     .await?
                     .wallet_db
-                    .schema_version();
+                    .schema_version()
+                    .await;
 
             // verify that schema version from backup DB matches original DB.
             assert_eq!(schema_version, schema_version_from_backup);

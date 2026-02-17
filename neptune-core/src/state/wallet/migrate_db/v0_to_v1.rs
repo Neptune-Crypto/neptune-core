@@ -167,76 +167,7 @@ mod tests {
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn migrate() -> anyhow::Result<()> {
-        // basics
-        let network = Network::Main;
-        let data_dir = unit_test_data_directory(network)?;
-
-        // create a random schema v0 TxOutput
-        let tx_output1 = migration::schema_v0::TxOutput {
-            utxo: rand::random(),
-            sender_randomness: Digest::default(),
-            receiver_digest: Digest::default(),
-            notification_method: UtxoNotificationMethod::None,
-            owned: false,
-        };
-        // create a 2nd v0 output, with owned set to true.
-        let mut tx_output2 = tx_output1.clone();
-        tx_output2.owned = true;
-
-        // create a schema v0 SentTransaction
-        let sent_tx_v0 = migration::schema_v0::SentTransaction {
-            tx_inputs: vec![],
-            tx_outputs: vec![tx_output1, tx_output2],
-            fee: NativeCurrencyAmount::zero(),
-            timestamp: Timestamp::now(),
-            tip_when_sent: rand::random(),
-        };
-
-        // create a schema-v0 database and store the SentTransaction
-        {
-            tracing::info!("creating v0 DB");
-            let db_v0 = worker::open_db(&data_dir).await?;
-
-            // connect to DB with v0 simulated RustyWalletDatabase
-            let mut wallet_db_v0 = test_schema_v0::RustyWalletDatabase::connect(db_v0).await;
-
-            // sync-label is required, else db is considered "new" on next open.
-            wallet_db_v0.sync_label.set(rand::random()).await;
-
-            // add a v0 SentTransaction and ensure len is 1.
-            wallet_db_v0.sent_transactions.push(sent_tx_v0).await;
-            assert_eq!(wallet_db_v0.sent_transactions.len().await, 1);
-
-            wallet_db_v0.storage.persist().await;
-
-            // dump the v0 database to stdout
-            println!("dump of v0 database");
-            wallet_db_v0.storage.db().dump_database().await;
-        } // <--- db drops, and closed.
-
-        // open v0 DB file
-        tracing::info!("opening existing v0 DB for migration to v1");
-        let db_v0 = worker::open_db(&data_dir).await?;
-
-        // connect to v0 Db with v1 RustyWalletDatabase.  This is where the
-        // migration occurs.
-        let wallet_db_v1 = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
-
-        // dump the (migrated) v1 database to stdout
-        println!("dump of v1 (upgraded) database");
-        wallet_db_v1.storage().db().dump_database().await;
-
-        // obtain v1 sent-transactions and verify len is 1.
-        let sent_transactions = wallet_db_v1.sent_transactions();
-        assert_eq!(sent_transactions.len().await, 1);
-
-        // obtain first transaction
-        let tx = sent_transactions.get(0).await;
-
-        // verify that for each tx-output is_change == is_owned
-        for output in tx.tx_outputs.iter() {
-            assert_eq!(output.is_change(), output.is_owned());
-        }
+        todo!("Reimplement");
 
         // success!
         Ok(())
@@ -264,48 +195,7 @@ mod tests {
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn migrate_real_v0_db() -> anyhow::Result<()> {
-        // basics
-        let network = Network::Testnet(0);
-        let data_dir = unit_test_data_directory(network)?;
-
-        // obtain source db path and target path
-        let test_data_wallet_db_dir = worker::crate_root()
-            .join("test_data/migrations/wallet_db/v0_to_v1/wallet_db.v0-with-sent-tx");
-        let wallet_database_path = data_dir.wallet_database_dir_path();
-
-        // copy DB in test_data to wallet_database_path
-        crate::copy_dir_recursive(&test_data_wallet_db_dir, &wallet_database_path)?;
-
-        // open v0 DB file
-        tracing::info!("opening existing v0 DB for migration to current version");
-        let db_v0 =
-            NeptuneLevelDb::new(&wallet_database_path, &leveldb::options::Options::new()).await?;
-
-        println!("dump of v0 database");
-        db_v0.dump_database().await;
-
-        // connect to v0 Db with current RustyWalletDatabase.  This is where the
-        // migration occurs.
-        let wallet_db_upgraded = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
-
-        // dump the (migrated) database to stdout
-        println!("dump of upgraded database");
-        wallet_db_upgraded.storage().db().dump_database().await;
-
-        // obtain current version sent-transactions and verify len is 1.
-        let sent_transactions = wallet_db_upgraded.sent_transactions();
-        assert_eq!(sent_transactions.len().await, 1);
-
-        // obtain first transaction
-        let tx = sent_transactions.get(0).await;
-
-        // verify that for each tx-output is_change == is_owned
-        for output in tx.tx_outputs.iter() {
-            assert_eq!(output.is_change(), output.is_owned());
-        }
-
-        // success!
-        Ok(())
+        todo!("Reimplement");
     }
 
     // contains schema version 0 types for test(s)

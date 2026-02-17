@@ -71,6 +71,7 @@ mod tests {
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared_tokio_runtime;
 
+    #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn wallet_state_constructor_with_genesis_block_test() {
         // This test is designed to verify that the genesis block is applied
@@ -88,7 +89,7 @@ mod tests {
             let cli_args = cli_args::Args::default_with_network(network);
             let mut alice =
                 mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
-            let alice_wallet = alice.wallet_db.monitored_utxos().get_all().await;
+            let alice_wallet = alice.wallet_db.all_monitored_utxos().await;
             assert_eq!(
                 1,
                 alice_wallet.len(),
@@ -103,7 +104,7 @@ mod tests {
 
             let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
             let bob_wallet = mock_genesis_wallet_state(bob_wallet, &cli_args).await;
-            let bob_mutxos = bob_wallet.wallet_db.monitored_utxos().get_all().await;
+            let bob_mutxos = bob_wallet.wallet_db.all_monitored_utxos().await;
             assert!(
                 bob_mutxos.is_empty(),
                 "Monitored UTXO list must be empty at init if wallet is not premine-wallet"
@@ -130,7 +131,7 @@ mod tests {
                     .await;
             }
 
-            let alice_mutxos = alice.wallet_db.monitored_utxos().get_all().await;
+            let alice_mutxos = alice.wallet_db.all_monitored_utxos().await;
             assert_eq!(
                 1,
                 alice_mutxos.len(),
@@ -162,12 +163,7 @@ mod tests {
         let bob_key = bob_wallet.nth_generation_spending_key_for_tests(0);
 
         assert!(
-            alice_wallet
-                .wallet_db
-                .monitored_utxos()
-                .get_all()
-                .await
-                .is_empty(),
+            alice_wallet.wallet_db.num_monitored_utxos().await == 0,
             "Monitored UTXO list must be empty at init"
         );
 
@@ -183,7 +179,7 @@ mod tests {
             .await;
         assert_eq!(
             2,
-            alice_wallet.wallet_db.expected_utxos().len().await,
+            alice_wallet.wallet_db.num_expected_utxos().await,
             "Expected UTXO list must have length 2 before block registration"
         );
         let maintain_mps = true;
@@ -196,11 +192,11 @@ mod tests {
             .await;
         assert_eq!(
             2,
-            alice_wallet.wallet_db.expected_utxos().len().await,
+            alice_wallet.wallet_db.num_expected_utxos().await,
             "A: Expected UTXO list must still be 2 after receiving tx, due to potential reorganization."
         );
 
-        let alice_expected_utxos = alice_wallet.wallet_db.expected_utxos().get_all().await;
+        let alice_expected_utxos = alice_wallet.wallet_db.all_expected_utxos().await;
 
         assert_eq!(2, alice_expected_utxos.len(), "B: Expected UTXO list must have length 2 after block registration, due to potential reorganizations");
         assert_eq!(
@@ -208,7 +204,7 @@ mod tests {
             alice_expected_utxos[0].mined_in_block.unwrap().0,
             "Expected UTXO must be registered as being mined"
         );
-        let alice_mutxos_block1 = alice_wallet.wallet_db.monitored_utxos().get_all().await;
+        let alice_mutxos_block1 = alice_wallet.wallet_db.all_monitored_utxos().await;
         assert_eq!(
             2,
             alice_mutxos_block1.len(),
@@ -260,7 +256,7 @@ mod tests {
             )
             .await;
 
-        let alice_mutxos_block3 = alice_wallet.wallet_db.monitored_utxos().get_all().await;
+        let alice_mutxos_block3 = alice_wallet.wallet_db.all_monitored_utxos().await;
         assert_eq!(2, alice_mutxos_block3.len(), "Still only two MUTXOs");
 
         let items_and_msmps_block3 = block1_composer_expected
@@ -452,13 +448,7 @@ mod tests {
 
         // Update wallet state with block_1
         assert!(
-            alice
-                .wallet_state
-                .wallet_db
-                .monitored_utxos()
-                .get_all()
-                .await
-                .is_empty(),
+            alice.wallet_state.wallet_db.num_monitored_utxos().await == 0,
             "List of monitored UTXOs must be empty prior to updating wallet state"
         );
 
@@ -490,12 +480,7 @@ mod tests {
 
         // Verify that update added 2 UTXOs to list of monitored transactions,
         // from Bob's tx.
-        let mut alice_monitored_utxos = alice
-            .wallet_state
-            .wallet_db
-            .monitored_utxos()
-            .get_all()
-            .await;
+        let mut alice_monitored_utxos = alice.wallet_state.wallet_db.all_monitored_utxos().await;
         assert_eq!(
             2,
             alice_monitored_utxos.len(),
@@ -542,12 +527,7 @@ mod tests {
         }
 
         let last_block_in_spree = next_block;
-        alice_monitored_utxos = alice
-            .wallet_state
-            .wallet_db
-            .monitored_utxos()
-            .get_all()
-            .await;
+        alice_monitored_utxos = alice.wallet_state.wallet_db.all_monitored_utxos().await;
 
         // - Received in block 1: 2
         // - Coinbase per block mined: 2

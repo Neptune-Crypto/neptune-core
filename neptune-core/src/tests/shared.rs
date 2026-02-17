@@ -242,8 +242,7 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
     wallet_state: &WalletState,
     tip_block: &Block,
 ) -> bool {
-    let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
-    for monitored_utxo in &monitored_utxos.get_all().await {
+    for monitored_utxo in wallet_state.wallet_db.all_monitored_utxos().await {
         let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
 
         match current_mp {

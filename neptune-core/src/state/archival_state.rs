@@ -2719,8 +2719,7 @@ pub(super) mod tests {
                 .await
                 .wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .len()
+                .num_monitored_utxos()
                 .await,
             "Premine receiver must have non-empty list of monitored UTXOs"
         );
@@ -2910,8 +2909,7 @@ pub(super) mod tests {
                 premine_rec.lock_guard().await
                     .wallet_state
                     .wallet_db
-                    .monitored_utxos()
-                    .len().await, "Premine receiver must have 4 UTXOs after block 1: 1 change from transaction, 2 coinbases from block 1, and 1 spent premine UTXO"
+                    .num_monitored_utxos().await, "Premine receiver must have 4 UTXOs after block 1: 1 change from transaction, 2 coinbases from block 1, and 1 spent premine UTXO"
             );
         }
 
@@ -3162,8 +3160,7 @@ pub(super) mod tests {
             premine_rec.lock_guard().await
                 .wallet_state
                 .wallet_db
-                .monitored_utxos()
-                .len().await, "Premine receiver must have 11 UTXOs after block 2: 4 after block 1, and 7 added by block 2"
+                .num_monitored_utxos().await, "Premine receiver must have 11 UTXOs after block 2: 4 after block 1, and 7 added by block 2"
         );
 
         // Verify that mutator sets are updated correctly and that last block is block 2
