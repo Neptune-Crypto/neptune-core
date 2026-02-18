@@ -333,6 +333,7 @@ pub(crate) mod tests {
             compose: true,
             guess: true,
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            number_of_mps_per_utxo: 3,
             ..Default::default()
         };
 
@@ -414,6 +415,7 @@ pub(crate) mod tests {
                 compose: true,
                 guess: true,
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                number_of_mps_per_utxo: 3,
                 ..Default::default()
             };
 

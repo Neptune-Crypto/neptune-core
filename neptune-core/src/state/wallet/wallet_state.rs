@@ -1626,8 +1626,10 @@ impl WalletState {
             self.wallet_db
                 .add_msmp_to_monitored_utxo(mutxo_list_index, block.hash(), updated_ms_mp)
                 .await;
+            trace!("Added MSMP to MUTXO");
         }
 
+        trace!("Exiting input/output processing");
         incoming_utxo_recovery_data_list
     }
 
@@ -2162,15 +2164,7 @@ pub(crate) mod tests {
             .await
             .expect("Must be able to find premine MUTXO with this method");
         assert_eq!(premine_utxo, premine_mutxo.utxo);
-
-        let genesis_digest = Block::genesis(network).hash();
-        assert_eq!(
-            premine_sender_randomness,
-            premine_mutxo
-                .get_membership_proof_for_block(genesis_digest)
-                .unwrap()
-                .sender_randomness
-        );
+        assert_eq!(premine_sender_randomness, premine_mutxo.sender_randomness);
 
         // Using another sender randomness returns nothing
         assert!(alice_global_lock
@@ -2748,12 +2742,13 @@ pub(crate) mod tests {
         let bob_wallet_secret = WalletEntropy::new_random();
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
 
-        let mut bob_global_lock = mock_genesis_global_state(
-            0,
-            bob_wallet_secret.clone(),
-            cli_args::Args::default_with_network(network),
-        )
-        .await;
+        let cli_args = cli_args::Args {
+            network,
+            number_of_mps_per_utxo: 3,
+            ..Default::default()
+        };
+        let mut bob_global_lock =
+            mock_genesis_global_state(0, bob_wallet_secret.clone(), cli_args).await;
         let mut bob = bob_global_lock.lock_guard_mut().await;
 
         let genesis_block = Block::genesis(network);
@@ -2770,12 +2765,9 @@ pub(crate) mod tests {
             "Monitored UTXO list must be empty at init"
         );
 
+        let genesis_msa = genesis_block.mutator_set_accumulator_after().unwrap();
         bob.wallet_state
-            .update_wallet_state_with_new_block(
-                &genesis_block.mutator_set_accumulator_after().unwrap(),
-                &block1,
-                true,
-            )
+            .update_wallet_state_with_new_block(&genesis_msa, &block1, true)
             .await;
         assert_eq!(2, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
         assert_eq!(
@@ -2793,11 +2785,7 @@ pub(crate) mod tests {
         // Apply block again and verify that nothing new is stored.
         for wallet_maintains_mp in [false, true] {
             bob.wallet_state
-                .update_wallet_state_with_new_block(
-                    &genesis_block.mutator_set_accumulator_after().unwrap(),
-                    &block1,
-                    wallet_maintains_mp,
-                )
+                .update_wallet_state_with_new_block(&genesis_msa, &block1, wallet_maintains_mp)
                 .await;
             assert_eq!(2, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
             assert_eq!(
@@ -3035,7 +3023,11 @@ pub(crate) mod tests {
         let wallet = WalletEntropy::devnet_wallet();
         let genesis_block = Block::genesis(network);
 
-        let cli_args = cli_args::Args::default_with_network(network);
+        let cli_args = cli_args::Args {
+            network,
+            number_of_mps_per_utxo: 1,
+            ..Default::default()
+        };
         let wallet_state = mock_genesis_wallet_state(wallet, &cli_args).await;
 
         // are we synchronized to the genesis block?
@@ -4290,28 +4282,40 @@ pub(crate) mod tests {
             let block_1 = invalid_block_with_transaction(&genesis_block, transaction.into());
 
             // some possible CLI configurations:
+            // All CLI configurations store MSMPs, since we don't have an
+            // archival state in this context.
             // scan mode is inactive
-            let cli_default = cli_args::Args::default();
+            let cli_with_msmp_storing = cli_args::Args {
+                network,
+                number_of_mps_per_utxo: 3,
+                ..Default::default()
+            };
             // scan mode is active but looking in the wrong blocks
             let cli_wrong_range = cli_args::Args {
+                network,
                 scan_blocks: Some(10..=100),
+                number_of_mps_per_utxo: 3,
                 ..Default::default()
             };
             // scan mode is active but scanning for too few keys
             let cli_too_few_keys = cli_args::Args {
+                network,
                 scan_keys: Some(5),
+                number_of_mps_per_utxo: 3,
                 ..Default::default()
             };
             // scan mode is active and scanning for the right keys in the right
             // blocks
             let cli_well_configured = cli_args::Args {
+                network,
                 scan_blocks: Some(0..=u64::MAX),
                 scan_keys: Some(25),
+                number_of_mps_per_utxo: 3,
                 ..Default::default()
             };
 
             for (cli_args, should_catch_utxo) in [
-                (cli_default, false),
+                (cli_with_msmp_storing, false),
                 (cli_wrong_range, false),
                 (cli_too_few_keys, false),
                 (cli_well_configured, true),

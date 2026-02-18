@@ -183,10 +183,6 @@ impl MonitoredUtxo {
         block_digest: Digest,
         updated_membership_proof: MsMembershipProof,
     ) {
-        if self.number_of_mps_per_utxo.is_zero() {
-            return;
-        }
-
         // Don't add MSMP for this block if it's already there.
         if self
             .blockhash_to_membership_proof
@@ -196,8 +192,15 @@ impl MonitoredUtxo {
             return;
         }
 
-        while self.blockhash_to_membership_proof.len() >= self.number_of_mps_per_utxo {
+        while self.blockhash_to_membership_proof.len() >= self.number_of_mps_per_utxo
+            && !self.blockhash_to_membership_proof.is_empty()
+        {
             self.blockhash_to_membership_proof.pop_back();
+        }
+
+        // Ensure *no* MSMP is stored if max length is zero
+        if self.number_of_mps_per_utxo.is_zero() {
+            return;
         }
 
         self.blockhash_to_membership_proof

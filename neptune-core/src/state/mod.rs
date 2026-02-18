@@ -4612,12 +4612,13 @@ mod tests {
             ] {
                 let mut rng = rand::rng();
                 let network = Network::RegTest;
-                let mut alice_state_lock = mock_genesis_global_state(
-                    2,
-                    WalletEntropy::devnet_wallet(),
-                    cli_args::Args::default_with_network(network),
-                )
-                .await;
+                let cli_args = cli_args::Args {
+                    network,
+                    number_of_mps_per_utxo: 3,
+                    ..Default::default()
+                };
+                let mut alice_state_lock =
+                    mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
                 let mut alice = alice_state_lock.lock_guard_mut().await;
 
                 // Verify that Alice has a monitored UTXO (from genesis)
@@ -4788,12 +4789,13 @@ mod tests {
                 RestoreMsMpMethod::Blocks,
                 RestoreMsMpMethod::ArchivalMutatorSet,
             ] {
-                let mut alice = mock_genesis_global_state(
-                    2,
-                    WalletEntropy::devnet_wallet(),
-                    cli_args::Args::default_with_network(network),
-                )
-                .await;
+                let cli_args = cli_args::Args {
+                    network,
+                    number_of_mps_per_utxo: 3,
+                    ..Default::default()
+                };
+                let mut alice =
+                    mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
                 alice.force_wallet_membership_proof_maintance().await;
 
                 let mut alice = alice.lock_guard_mut().await;

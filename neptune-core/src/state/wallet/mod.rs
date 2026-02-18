@@ -91,7 +91,11 @@ mod tests {
             Network::Testnet(1),
             Network::Testnet(17),
         ] {
-            let cli_args = cli_args::Args::default_with_network(network);
+            let cli_args = cli_args::Args {
+                network,
+                number_of_mps_per_utxo: 3,
+                ..Default::default()
+            };
             let mut alice =
                 mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
             let alice_wallet = alice.wallet_db.monitored_utxos().get_all().await;
@@ -161,7 +165,11 @@ mod tests {
     async fn wallet_state_correctly_updates_monitored_and_expected_utxos() {
         let mut rng = rand::rng();
         let network = Network::RegTest;
-        let cli_args = cli_args::Args::default_with_network(network);
+        let cli_args = cli_args::Args {
+            network,
+            number_of_mps_per_utxo: 3,
+            ..Default::default()
+        };
         let alice_wallet = WalletEntropy::new_random();
         let mut alice_wallet = mock_genesis_wallet_state(alice_wallet.clone(), &cli_args).await;
         let bob_wallet = WalletEntropy::new_random();
