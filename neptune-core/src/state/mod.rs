@@ -1,5 +1,6 @@
 pub mod archival_state;
 pub mod blockchain_state;
+pub mod claim_error;
 pub mod database;
 pub mod light_state;
 pub mod mempool;
@@ -37,6 +38,7 @@ use networking_state::NetworkingState;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tracing::debug;
 use tracing::error;
@@ -61,6 +63,7 @@ use crate::application::database::storage::storage_vec::traits::*;
 use crate::application::locks::tokio as sync_tokio;
 use crate::application::locks::tokio::AtomicRwReadGuard;
 use crate::application::locks::tokio::AtomicRwWriteGuard;
+use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
 use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
@@ -86,11 +89,13 @@ use crate::protocol::peer::SyncChallenge;
 use crate::protocol::peer::SyncChallengeResponse;
 use crate::protocol::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::claim_error::ClaimError;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::utxo_validitor::UtxoValidator;
 use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
+use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
@@ -1770,6 +1775,169 @@ impl GlobalState {
             });
         }
         own_coins
+    }
+
+    /// Register a UTXO to the wallet. The UTXO is expected to not be associated
+    /// with an on-chain announcement, as this method requires an encrypted UTXO
+    /// notification.
+    ///
+    /// `max_search_depth` denotes how many blocks back from tip we attempt
+    /// to find the transaction in a block. `None` means unlimited.
+    ///
+    /// `encrypted_utxo_notification` is expected to hold encrypted data about
+    /// a future or past UTXO, which can be claimed by this client.
+    pub(crate) async fn claim_utxo(
+        &self,
+        encrypted_utxo_notification: String,
+        max_search_depth: Option<u64>,
+    ) -> Result<Option<ClaimUtxoData>, ClaimError> {
+        // deserialize UtxoTransferEncrypted from bech32m string.
+        let network = self.cli().network;
+        let utxo_transfer_encrypted =
+            EncryptedUtxoNotification::from_bech32m(&encrypted_utxo_notification, network)?;
+
+        // find known spending key by receiver_identifier
+        let spending_key = self
+            .wallet_state
+            .find_known_spending_key_for_receiver_identifier(
+                utxo_transfer_encrypted.receiver_identifier,
+            )
+            .ok_or(ClaimError::UtxoUnknown)?;
+
+        // decrypt utxo_transfer_encrypted into UtxoTransfer
+        let utxo_notification = utxo_transfer_encrypted.decrypt_with_spending_key(&spending_key)?;
+
+        debug!("claim-utxo: decrypted {:#?}", utxo_notification);
+
+        // Has wallet already registered this UTXO?
+        if self
+            .wallet_state
+            .find_monitored_utxo(&utxo_notification.utxo, utxo_notification.sender_randomness)
+            .await
+            .is_some()
+        {
+            info!("found monitored utxo. Returning early.");
+            return Ok(None);
+        }
+
+        let incoming_utxo = IncomingUtxo::from_utxo_notification_payload(
+            utxo_notification,
+            spending_key.privacy_preimage(),
+        );
+
+        if !incoming_utxo.utxo.all_type_script_states_are_valid() {
+            let err = ClaimError::InvalidTypeScript;
+            warn!("{}", err.to_string());
+            return Err(err);
+        }
+
+        // check if wallet is already expecting this utxo.
+        let addition_record = incoming_utxo.addition_record();
+        let has_expected_utxo = self.wallet_state.has_expected_utxo(addition_record).await;
+
+        // Check if UTXO has already been mined in a transaction.
+        let mined_in_block = self
+            .chain
+            .archival_state()
+            .find_canonical_block_with_output(addition_record, max_search_depth)
+            .await;
+        let maybe_prepared_mutxo = match mined_in_block {
+            Some(block) => {
+                let aocl_leaf_index = {
+                    // Find matching AOCL leaf index that must be in this block
+                    let last_aocl_index_in_block = block
+                        .mutator_set_accumulator_after()
+                        .expect("Block from state must have mutator set after")
+                        .aocl
+                        .num_leafs()
+                        - 1;
+                    let num_outputs_in_block: u64 = block
+                        .mutator_set_update()
+                        .expect("Block from state must have mutator set update")
+                        .additions
+                        .len()
+                        .try_into()
+                        .unwrap();
+                    let min_aocl_leaf_index = last_aocl_index_in_block - num_outputs_in_block + 1;
+                    let mut haystack = last_aocl_index_in_block;
+                    let ams = self.chain.archival_state().archival_mutator_set.ams();
+                    while ams.aocl.get_leaf_async(haystack).await
+                        != addition_record.canonical_commitment
+                    {
+                        assert!(haystack > min_aocl_leaf_index);
+                        haystack -= 1;
+                    }
+
+                    haystack
+                };
+
+                let mut monitored_utxo = MonitoredUtxo::new(
+                    incoming_utxo.utxo.clone(),
+                    self.cli().number_of_mps_per_utxo,
+                    aocl_leaf_index,
+                    incoming_utxo.sender_randomness,
+                    incoming_utxo.receiver_preimage,
+                    &block,
+                );
+
+                let item = Tip5::hash(&incoming_utxo.utxo);
+                let ams = self.chain.archival_state().archival_mutator_set.ams();
+                let msmp = ams
+                    .restore_membership_proof(
+                        item,
+                        incoming_utxo.sender_randomness,
+                        incoming_utxo.receiver_preimage,
+                        aocl_leaf_index,
+                    )
+                    .await
+                    .map_err(|x| anyhow::anyhow!("Could not restore mutator set membership proof. Is archival mutator set corrupted? Got error: {x}"))?;
+
+                let tip_digest = self.chain.light_state().hash();
+
+                if !self.is_true_archival() {
+                    monitored_utxo.add_membership_proof_for_tip(tip_digest, msmp.clone());
+                }
+
+                // Was UTXO already spent? If so, register it as such.
+                let msa = ams.accumulator().await;
+                if !msa.verify(item, &msmp) {
+                    warn!("Claimed UTXO was already spent. Marking it as such.");
+
+                    if let Some(spending_block) = self
+                        .chain
+                        .archival_state()
+                        .find_canonical_block_with_input(
+                            msmp.compute_indices(item),
+                            max_search_depth,
+                        )
+                        .await
+                    {
+                        let block_hash = spending_block.hash();
+                        let block_height = spending_block.header().height;
+                        warn!(
+                            "Claimed UTXO was spent in block {block_hash:x}; which has height {block_height}",
+                        );
+                        monitored_utxo.mark_as_spent(
+                            spending_block.hash(),
+                            spending_block.header().timestamp,
+                            spending_block.header().height,
+                        );
+                    } else {
+                        error!("Claimed UTXO's mutator set membership proof was invalid but we could not find the block in which it was spent. This is most likely a bug in the software.");
+                    }
+                }
+
+                Some(monitored_utxo)
+            }
+            None => None,
+        };
+
+        let expected_utxo = incoming_utxo.into_expected_utxo(UtxoNotifier::Cli);
+        Ok(Some(ClaimUtxoData {
+            prepared_monitored_utxo: maybe_prepared_mutxo,
+            has_expected_utxo,
+            expected_utxo,
+        }))
     }
 
     /// In case the wallet database is corrupted or deleted, this method will restore

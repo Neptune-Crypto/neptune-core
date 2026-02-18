@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::path::Path;
 use std::path::PathBuf;
@@ -1946,12 +1947,11 @@ impl WalletState {
     }
 
     /// writes prepared utxo claim data to disk
+    /// writes prepared utxo claim data to disk and to the database.
     ///
-    /// Informs wallet of a Utxo *after* parent Tx is confirmed in a block
+    /// Inform wallet of a Utxo *after* parent transaction is mined.
     ///
     /// no validation. assumes input data is valid/correct.
-    ///
-    /// The caller should persist wallet DB to disk after this returns.
     pub(crate) async fn register_incoming_utxo(
         &mut self,
         monitored_utxo: MonitoredUtxo,

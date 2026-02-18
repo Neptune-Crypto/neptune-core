@@ -56,7 +56,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -68,7 +67,6 @@ use serde::Serialize;
 use systemstat::Platform;
 use systemstat::System;
 use tarpc::context;
-use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -85,7 +83,6 @@ use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPol
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::application::config::network::Network;
 use crate::application::database::storage::storage_vec::traits::StorageVecBase;
-use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
@@ -117,26 +114,22 @@ use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::claim_error::ClaimError;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
-use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::address::SpendingKey;
 use crate::state::wallet::change_policy::ChangePolicy;
 use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
-use crate::state::wallet::incoming_utxo::IncomingUtxo;
-use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::wallet_status::WalletStatus;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
-use crate::twenty_first::prelude::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ResponseMsMembershipProofPrivacyPreserving;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -2201,172 +2194,6 @@ impl NeptuneRPCServer {
         current_system.cpu_temp().ok()
     }
 
-    /// Assemble a data for the wallet to register the UTXO. Returns `Ok(None)`
-    /// if the UTXO has already been claimed by the wallet.
-    ///
-    /// `max_search_depth` denotes how many blocks back from tip we attempt
-    /// to find the transaction in a block. `None` means unlimited.
-    ///
-    /// `encrypted_utxo_notification` is expected to hold encrypted data about
-    /// a future or past UTXO, which can be claimed by this client.
-    async fn claim_utxo_inner(
-        &self,
-        encrypted_utxo_notification: String,
-        max_search_depth: Option<u64>,
-    ) -> Result<Option<ClaimUtxoData>, error::ClaimError> {
-        let span = tracing::debug_span!("Claim UTXO inner");
-        let _enter = span.enter();
-
-        // deserialize UtxoTransferEncrypted from bech32m string.
-        let network = self.state.cli().network;
-        let utxo_transfer_encrypted =
-            EncryptedUtxoNotification::from_bech32m(&encrypted_utxo_notification, network)?;
-
-        // // acquire global state read lock
-        let state = self.state.lock_guard().await;
-
-        // find known spending key by receiver_identifier
-        let spending_key = state
-            .wallet_state
-            .find_known_spending_key_for_receiver_identifier(
-                utxo_transfer_encrypted.receiver_identifier,
-            )
-            .ok_or(error::ClaimError::UtxoUnknown)?;
-
-        // decrypt utxo_transfer_encrypted into UtxoTransfer
-        let utxo_notification = utxo_transfer_encrypted.decrypt_with_spending_key(&spending_key)?;
-
-        tracing::debug!("claim-utxo: decrypted {:#?}", utxo_notification);
-
-        // search for matching monitored utxo and return early if found.
-        if state
-            .wallet_state
-            .find_monitored_utxo(&utxo_notification.utxo, utxo_notification.sender_randomness)
-            .await
-            .is_some()
-        {
-            info!("found monitored utxo. Returning early.");
-            return Ok(None);
-        }
-
-        // construct an IncomingUtxo
-        let incoming_utxo = IncomingUtxo::from_utxo_notification_payload(
-            utxo_notification,
-            spending_key.privacy_preimage(),
-        );
-
-        // Check if we can satisfy typescripts
-        if !incoming_utxo.utxo.all_type_script_states_are_valid() {
-            let err = error::ClaimError::InvalidTypeScript;
-            warn!("{}", err.to_string());
-            return Err(err);
-        }
-
-        // check if wallet is already expecting this utxo.
-        let addition_record = incoming_utxo.addition_record();
-        let has_expected_utxo = state.wallet_state.has_expected_utxo(addition_record).await;
-
-        // Check if UTXO has already been mined in a transaction.
-        let mined_in_block = state
-            .chain
-            .archival_state()
-            .find_canonical_block_with_output(addition_record, max_search_depth)
-            .await;
-        let maybe_prepared_mutxo = match mined_in_block {
-            Some(block) => {
-                let aocl_leaf_index = {
-                    // Find matching AOCL leaf index that must be in this block
-                    let last_aocl_index_in_block = block
-                        .mutator_set_accumulator_after()
-                        .expect("Block from state must have mutator set after")
-                        .aocl
-                        .num_leafs()
-                        - 1;
-                    let num_outputs_in_block: u64 = block
-                        .mutator_set_update()
-                        .expect("Block from state must have mutator set update")
-                        .additions
-                        .len()
-                        .try_into()
-                        .unwrap();
-                    let min_aocl_leaf_index = last_aocl_index_in_block - num_outputs_in_block + 1;
-                    let mut haystack = last_aocl_index_in_block;
-                    let ams = state.chain.archival_state().archival_mutator_set.ams();
-                    while ams.aocl.get_leaf_async(haystack).await
-                        != addition_record.canonical_commitment
-                    {
-                        assert!(haystack > min_aocl_leaf_index);
-                        haystack -= 1;
-                    }
-
-                    haystack
-                };
-                let item = Tip5::hash(&incoming_utxo.utxo);
-                let ams = state.chain.archival_state().archival_mutator_set.ams();
-                let msmp = ams
-                    .restore_membership_proof(
-                        item,
-                        incoming_utxo.sender_randomness,
-                        incoming_utxo.receiver_preimage,
-                        aocl_leaf_index,
-                    )
-                    .await
-                    .map_err(|x| anyhow!("Could not restore mutator set membership proof. Is archival mutator set corrupted? Got error: {x}"))?;
-
-                let tip_digest = state.chain.light_state().hash();
-
-                let mut monitored_utxo = MonitoredUtxo::new(
-                    incoming_utxo.utxo.clone(),
-                    self.state.cli().number_of_mps_per_utxo,
-                    msmp.aocl_leaf_index,
-                    msmp.sender_randomness,
-                    msmp.receiver_preimage,
-                    &block,
-                );
-                monitored_utxo.add_membership_proof_for_tip(tip_digest, msmp.clone());
-
-                // Was UTXO already spent? If so, register it as such.
-                let msa = ams.accumulator().await;
-                if !msa.verify(item, &msmp) {
-                    warn!("Claimed UTXO was already spent. Marking it as such.");
-
-                    if let Some(spending_block) = state
-                        .chain
-                        .archival_state()
-                        .find_canonical_block_with_input(
-                            msmp.compute_indices(item),
-                            max_search_depth,
-                        )
-                        .await
-                    {
-                        let block_hash = spending_block.hash();
-                        let block_height = spending_block.header().height;
-                        warn!(
-                            "Claimed UTXO was spent in block {block_hash:x}; which has height {block_height}",
-                        );
-                        monitored_utxo.mark_as_spent(
-                            spending_block.hash(),
-                            spending_block.header().timestamp,
-                            spending_block.header().height,
-                        );
-                    } else {
-                        error!("Claimed UTXO's mutator set membership proof was invalid but we could not find the block in which it was spent. This is most likely a bug in the software.");
-                    }
-                }
-
-                Some(monitored_utxo)
-            }
-            None => None,
-        };
-
-        let expected_utxo = incoming_utxo.into_expected_utxo(UtxoNotifier::Cli);
-        Ok(Some(ClaimUtxoData {
-            prepared_monitored_utxo: maybe_prepared_mutxo,
-            has_expected_utxo,
-            expected_utxo,
-        }))
-    }
-
     /// Return a PoW puzzle with the provided guesser address.
     async fn pow_puzzle_inner(
         mut self,
@@ -3815,7 +3642,10 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let claim_data = self
-            .claim_utxo_inner(encrypted_utxo_notification, max_search_depth)
+            .state
+            .lock_guard()
+            .await
+            .claim_utxo(encrypted_utxo_notification, max_search_depth)
             .await?;
 
         let Some(claim_data) = claim_data else {
@@ -3831,7 +3661,7 @@ impl RPC for NeptuneRPCServer {
             .wallet_state
             .claim_utxo(claim_data)
             .await
-            .map_err(error::ClaimError::from)?;
+            .map_err(ClaimError::from)?;
 
         Ok(expected_utxo_was_new)
     }
@@ -4848,38 +4678,9 @@ pub mod error {
         }
     }
 
-    impl From<ClaimError> for RpcError {
-        fn from(err: ClaimError) -> Self {
-            RpcError::ClaimError(err.to_string())
-        }
-    }
-
     // convert anyhow::Error to an RpcError::Failed.
     // note that anyhow Error is not serializable.
     impl From<anyhow::Error> for RpcError {
-        fn from(e: anyhow::Error) -> Self {
-            Self::Failed(e.to_string())
-        }
-    }
-
-    /// enumerates possible transaction send errors
-    #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
-    #[non_exhaustive]
-    pub enum ClaimError {
-        #[error("utxo does not match any known wallet key")]
-        UtxoUnknown,
-
-        #[error("invalid type script in claim utxo")]
-        InvalidTypeScript,
-
-        // catch-all error, eg for anyhow errors
-        #[error("claim unsuccessful")]
-        Failed(String),
-    }
-
-    // convert anyhow::Error to a ClaimError::Failed.
-    // note that anyhow Error is not serializable.
-    impl From<anyhow::Error> for ClaimError {
         fn from(e: anyhow::Error) -> Self {
             Self::Failed(e.to_string())
         }
@@ -4898,6 +4699,7 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
+    use tasm_lib::prelude::Tip5;
     use tasm_lib::twenty_first::bfe;
     use tracing_test::traced_test;
 
