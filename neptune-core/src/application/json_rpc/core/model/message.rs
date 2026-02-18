@@ -391,6 +391,29 @@ pub struct RescanGuesserRewardsRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RescanGuesserRewardsResponse {}
 
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct DerivationIndexRequest {
+    pub key_type: KeyType,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DerivationIndexResponse {
+    pub derivation_index: u64,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDerivationIndexRequest {
+    pub key_type: KeyType,
+    pub derivation_index: u64,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDerivationIndexResponse {}
+
 /* Mining */
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]

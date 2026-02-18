@@ -133,6 +133,7 @@ use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::wallet_status::WalletStatus;
+use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::twenty_first::prelude::Tip5;
@@ -963,6 +964,16 @@ pub trait RPC {
         token: auth::Token,
         key_type: KeyType,
     ) -> RpcResult<ReceivingAddress>;
+
+    /// Get the current derivation index for keys of the given type.
+    async fn get_derivation_index(token: auth::Token, key_type: KeyType) -> RpcResult<u64>;
+
+    /// Set the current derivation index for keys of the given type.
+    async fn set_derivation_index(
+        token: auth::Token,
+        key_type: KeyType,
+        derivation_index: u64,
+    ) -> RpcResult<()>;
 
     /// Return all known keys, for every [KeyType]
     ///
@@ -3085,6 +3096,69 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn get_derivation_index(
+        self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        key_type: KeyType,
+    ) -> RpcResult<u64> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let counter = match key_type {
+            KeyType::Generation => self
+                .state
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .get_generation_key_counter(),
+            KeyType::Symmetric => self
+                .state
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .get_symmetric_key_counter(),
+        };
+
+        let derivation_index = counter
+            .checked_sub(1)
+            .ok_or(RpcError::WalletKeyCounterIsZero)?;
+
+        Ok(derivation_index)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn set_derivation_index(
+        mut self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        key_type: KeyType,
+        derivation_index: u64,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let wallet_state = &mut self.state.lock_guard_mut().await.wallet_state;
+        let current = wallet_state.key_counter(key_type);
+        let max = current + MAX_DERIVATION_INDEX_BUMP;
+
+        if current > derivation_index {
+            return Err(RpcError::InvalidDerivationIndexRange(current, max));
+        }
+        if derivation_index > max {
+            return Err(RpcError::InvalidDerivationIndexRange(current, max));
+        }
+
+        wallet_state
+            .bump_derivation_index(key_type, derivation_index)
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn known_keys(
         self,
         _context: tarpc::context::Context,
@@ -4738,6 +4812,9 @@ pub mod error {
 
         #[error("Access to this endpoint is restricted")]
         RestrictedAccess,
+
+        #[error("Derivation index must be in interval [{0}, {1}]")]
+        InvalidDerivationIndexRange(u64, u64),
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {

@@ -75,6 +75,7 @@ use crate::state::mining::block_proposal::BlockProposal;
 use crate::state::networking_state::SyncAnchor;
 use crate::state::sync_status::SyncStatus;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::SUCCESS_EXIT_CODE;
@@ -2243,7 +2244,6 @@ impl MainLoopHandler {
                 log_slow_scope!(fn_name!() + "::RPCServerToMain::ResetRelayReservations");
 
                 // Pass on message to NetworkActor.
-
                 if let Err(e) = self
                     .network_command_tx
                     .send(NetworkActorCommand::GetNetworkOverview(channel))
@@ -2252,6 +2252,22 @@ impl MainLoopHandler {
                     error!("Cannot send GetNetworkOverview message to NetworkActor: {e}.");
                 }
 
+                Ok(false)
+            }
+            RPCServerToMain::BumpKeyDerivationIndex(key_type, derivation_index) => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::BumpKeyDerivationIndex");
+
+                let wallet_state = &mut self.global_state_lock.lock_guard_mut().await.wallet_state;
+                let current_counter = wallet_state.key_counter(key_type);
+                let max_index = current_counter + MAX_DERIVATION_INDEX_BUMP;
+                if derivation_index < current_counter || derivation_index > max_index {
+                    warn!("New derivation index {derivation_index} for key type {key_type} not in range [{current_counter}; {max_index}]. Operation declined.");
+                    return Ok(false);
+                }
+
+                wallet_state
+                    .bump_derivation_index(key_type, derivation_index)
+                    .await;
                 Ok(false)
             }
         }

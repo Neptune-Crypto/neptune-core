@@ -133,6 +133,12 @@ pub enum RpcMethods {
     #[namespace(Namespace::Wallet)]
     RescanGuesserRewards,
 
+    #[namespace(Namespace::Wallet)]
+    DerivationIndex,
+
+    #[namespace(Namespace::Wallet)]
+    SetDerivationIndex,
+
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
 
