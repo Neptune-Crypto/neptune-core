@@ -884,8 +884,12 @@ impl ArchivalState {
         }
     }
 
+    /// Returns the 1st block containing this addition record. Returns
+    /// `None` if no canonical block with this output is known.
+    ///
     /// searches max `max_search_depth` from tip for a matching transaction
-    /// input.
+    /// output. Unless the node maintain a UTXO index in which case all blocks
+    /// are searched and this parameter is ignored.
     ///
     /// If `max_search_depth` is set to `None`, then all blocks are searched
     /// until a match is found. A `max_search_depth` of `Some(0)` will only
@@ -895,42 +899,113 @@ impl ArchivalState {
         output: AdditionRecord,
         max_search_depth: Option<u64>,
     ) -> Option<Block> {
-        let mut block = self.get_tip().await;
-        let mut search_depth = 0;
-
-        loop {
-            if block.body().transaction_kernel.outputs.contains(&output) {
-                break Some(block);
-            }
-
-            if max_search_depth.is_some_and(|max| max <= search_depth) {
-                return None;
-            }
-
-            block = self
-                .get_block(block.header().prev_block_digest)
+        let block_hash = self
+            .find_canonical_block_hash_with_output(output, max_search_depth)
+            .await?;
+        Some(
+            self.get_block(block_hash)
                 .await
-                .ok()??;
-
-            search_depth += 1;
-        }
+                .expect("Database reading of block must succeed")
+                .expect("Block reported to contain addition record must exist"),
+        )
     }
 
+    /// Returns the 1st block hash containing this addition record. Returns
+    /// `None` if no canonical block with this output is known.
+    ///
     /// searches max `max_search_depth` from tip for a matching transaction
-    /// input.
+    /// output. Unless the node maintain a UTXO index in which case all blocks
+    /// are searched and this parameter is ignored.
     ///
     /// If `max_search_depth` is set to `None`, then all blocks are searched
     /// until a match is found. A `max_search_depth` of `Some(0)` will only
     /// consider the tip.
+    ///
+    /// Never loads blocks from disk, so performance should be good.
+    async fn find_canonical_block_hash_with_output(
+        &self,
+        output: AdditionRecord,
+        max_search_depth: Option<u64>,
+    ) -> Option<Digest> {
+        let block_heights = match &self.utxo_index {
+            Some(utxo_index) => {
+                let heights = utxo_index
+                    .blocks_by_addition_record(output)
+                    .await
+                    .into_iter()
+                    .map(|x| x.value())
+                    .sorted_unstable();
+                itertools::Either::Left(heights)
+            }
+            None => {
+                let tip_height = self.tip_header().await.height.value();
+
+                let end = match max_search_depth {
+                    Some(num) => tip_height.saturating_sub(num),
+                    None => 0,
+                };
+
+                let heights = (end..=tip_height).rev();
+                itertools::Either::Right(heights)
+            }
+        };
+
+        for block_height in block_heights {
+            let (addition_records, block_hash) = self
+                .addition_record_indices_for_block_by_height(block_height)
+                .await
+                .expect("Block height from UTXO index must be known");
+
+            if addition_records.contains_key(&output) {
+                return Some(block_hash);
+            }
+        }
+
+        None
+    }
+
+    /// Returns the block containing this input. Returns `None` if no canonical
+    /// block with this input is known.
+    ///
+    /// searches max `max_search_depth` from tip for a matching transaction
+    /// input.
+    ///
+    /// searches max `max_search_depth` from tip for a matching transaction
+    /// input. Unless the node maintain a UTXO index in which case all blocks
+    /// are searched and this parameter is ignored.
     pub(crate) async fn find_canonical_block_with_input(
         &self,
         input: AbsoluteIndexSet,
         max_search_depth: Option<u64>,
     ) -> Option<Block> {
-        let mut block = self.get_tip().await;
-        let mut search_depth = 0;
+        let block_heights = match &self.utxo_index {
+            Some(utxo_index) => {
+                let heights = utxo_index
+                    .block_by_index_set(&input)
+                    .await
+                    .into_iter()
+                    .map(|x| x.value())
+                    .sorted_unstable();
+                itertools::Either::Left(heights)
+            }
+            None => {
+                let tip_height = self.tip_header().await.height.value();
 
-        loop {
+                let end = match max_search_depth {
+                    Some(num) => tip_height.saturating_sub(num),
+                    None => 0,
+                };
+
+                let heights = (end..=tip_height).rev();
+                itertools::Either::Right(heights)
+            }
+        };
+
+        for block_height in block_heights {
+            let block = self
+                .canonical_block_by_height(block_height.into())
+                .await
+                .expect("Canonical block with in-range height must exist");
             if block
                 .body()
                 .transaction_kernel
@@ -938,20 +1013,11 @@ impl ArchivalState {
                 .iter()
                 .any(|rr| rr.absolute_indices == input)
             {
-                break Some(block);
+                return Some(block);
             }
-
-            if max_search_depth.is_some_and(|max| max <= search_depth) {
-                return None;
-            }
-
-            block = self
-                .get_block(block.header().prev_block_digest)
-                .await
-                .ok()??;
-
-            search_depth += 1;
         }
+
+        None
     }
 
     /// Return all block heights of blocks belonging to the canonical chain
@@ -1172,6 +1238,22 @@ impl ArchivalState {
         let block = self.get_block_from_block_record(record).await?;
 
         Ok(Some(block))
+    }
+
+    /// Return the canonical block with the given height. None if no height of
+    /// this block is known yet.
+    async fn canonical_block_by_height(&self, block_height: BlockHeight) -> Option<Block> {
+        let block_hash = self
+            .archival_block_mmr
+            .ammr()
+            .try_get_leaf(block_height.value())
+            .await?;
+        Some(
+            self.get_block(block_hash)
+                .await
+                .expect("Block loading must work")
+                .expect("Canonical block with in-range height must exist"),
+        )
     }
 
     /// Return the list of `[StrongUtxoKey]` of the guesser rewards for the
@@ -2098,6 +2180,10 @@ pub(super) mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use proptest::collection;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -2127,6 +2213,7 @@ pub(super) mod tests {
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::transaction_output::TxOutputList;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::block_with_puts;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::make_mock_block;
@@ -3673,43 +3760,6 @@ pub(super) mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn find_canonical_block_with_output_genesis_block_test() {
-        let network = Network::Main;
-        let archival_state = make_test_archival_state(&Args::default_with_network(network)).await;
-        let genesis_block = Block::genesis(network);
-
-        let addition_records = Block::genesis(network)
-            .body()
-            .transaction_kernel
-            .outputs
-            .clone();
-
-        for ar in &addition_records {
-            let found_block = archival_state
-                .find_canonical_block_with_output(*ar, None)
-                .await
-                .unwrap();
-            assert_eq!(genesis_block.hash(), found_block.hash());
-        }
-    }
-
-    #[traced_test]
-    #[test_strategy::proptest(async = "tokio")]
-    async fn find_canonical_block_with_input_genesis_block_test(
-        #[strategy(crate::tests::shared::strategies::absindset())]
-        random_index_set: AbsoluteIndexSet,
-    ) {
-        let network = Network::Main;
-        let archival_state = make_test_archival_state(&Args::default_with_network(network)).await;
-
-        assert!(archival_state
-            .find_canonical_block_with_input(random_index_set, None)
-            .await
-            .is_none());
-    }
-
-    #[traced_test]
-    #[apply(shared_tokio_runtime)]
     async fn ms_update_to_tip_fork_depth_1() {
         let mut rng = rand::rng();
         let network = Network::Main;
@@ -4713,6 +4763,260 @@ pub(super) mod tests {
             .unwrap();
     }
 
+    mod find_canonical_block_with_puts {
+        use super::*;
+        use crate::tests::shared::blocks::block_with_num_puts;
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn find_canonical_block_with_output_genesis() {
+            let network = Network::Main;
+
+            for maintain_utxo_index in [false, true] {
+                let cli = Args {
+                    utxo_index: maintain_utxo_index,
+                    network,
+                    ..Default::default()
+                };
+                let archival_state = make_test_archival_state(&cli).await;
+                let genesis_block = Block::genesis(network);
+                let addition_records = Block::genesis(network)
+                    .body()
+                    .transaction_kernel
+                    .outputs
+                    .clone();
+
+                for ar in &addition_records {
+                    let found_block = archival_state
+                        .find_canonical_block_with_output(*ar, None)
+                        .await
+                        .unwrap();
+                    assert_eq!(genesis_block.hash(), found_block.hash());
+                }
+            }
+        }
+
+        #[traced_test]
+        #[test_strategy::proptest(async = "tokio", cases = 3)]
+        async fn only_reports_on_canonical_blocks_with_outputs(
+            #[strategy(collection::vec(arb::<AdditionRecord>(), 0usize..22))]
+            addition_records_1a: Vec<AdditionRecord>,
+        ) {
+            let network = Network::Main;
+
+            for maintain_utxo_index in [false, true] {
+                let cli = Args {
+                    utxo_index: maintain_utxo_index,
+                    network,
+                    ..Default::default()
+                };
+
+                let genesis = Block::genesis(network);
+                let block1a =
+                    block_with_puts(network, &genesis, addition_records_1a.clone(), vec![]).await;
+                let block1b = invalid_empty_block(&genesis, network);
+                let mut archival_state = make_test_archival_state(&cli).await;
+                archival_state.set_new_tip(&block1a).await.unwrap();
+                archival_state.set_new_tip(&block1b).await.unwrap();
+
+                for ar in &addition_records_1a {
+                    prop_assert!(
+                        archival_state
+                            .find_canonical_block_hash_with_output(*ar, None)
+                            .await
+                            .is_none(),
+                        "No match when block is buried to deep and UTXO index is not maintained"
+                    );
+                }
+            }
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn max_search_depth_is_respected_when_no_utxo_index_is_maintained() {
+            let network = Network::Main;
+            let cli = Args {
+                utxo_index: false,
+                network,
+                ..Default::default()
+            };
+            let mut archival_state = make_test_archival_state(&cli).await;
+            let genesis = Block::genesis(network);
+            let genesis_outputs = genesis.body().transaction_kernel.outputs.clone();
+
+            for ar in &genesis_outputs {
+                let found_block = archival_state
+                    .find_canonical_block_with_output(*ar, Some(0))
+                    .await
+                    .unwrap();
+                assert_eq!(genesis.hash(), found_block.hash());
+            }
+
+            let block1 = invalid_empty_block(&Block::genesis(network), network);
+            archival_state.set_new_tip(&block1).await.unwrap();
+
+            for ar in &genesis_outputs {
+                assert!(
+                    archival_state
+                        .find_canonical_block_with_output(*ar, Some(0))
+                        .await
+                        .is_none(),
+                    "No match when block is buried to deep and UTXO index is not maintained"
+                );
+            }
+
+            for ar in &genesis_outputs {
+                assert_eq!(
+                    genesis.hash(),
+                    archival_state
+                        .find_canonical_block_with_output(*ar, Some(1))
+                        .await
+                        .unwrap()
+                        .hash(),
+                    "Must match when search depth is set high enough"
+                );
+
+                assert_eq!(
+                    genesis.hash(),
+                    archival_state
+                        .find_canonical_block_with_output(*ar, Some(100))
+                        .await
+                        .unwrap()
+                        .hash(),
+                    "Must match when search depth exceeds tip height"
+                );
+            }
+        }
+
+        #[traced_test]
+        #[test_strategy::proptest(async = "tokio", cases = 3)]
+        async fn find_canonical_block_with_output_block1(
+            #[strategy(collection::vec(arb::<AdditionRecord>(), 0usize..22))] addition_records: Vec<
+                AdditionRecord,
+            >,
+        ) {
+            let network = Network::Main;
+
+            for maintain_utxo_index in [false, true] {
+                let cli = Args {
+                    utxo_index: maintain_utxo_index,
+                    network,
+                    ..Default::default()
+                };
+                let mut archival_state = make_test_archival_state(&cli).await;
+
+                for ar in &addition_records {
+                    prop_assert!(archival_state
+                        .find_canonical_block_with_output(*ar, None)
+                        .await
+                        .is_none());
+                }
+
+                let block1 = block_with_puts(
+                    network,
+                    &Block::genesis(network),
+                    addition_records.clone(),
+                    vec![],
+                )
+                .await;
+                archival_state.set_new_tip(&block1).await.unwrap();
+
+                for ar in &addition_records {
+                    let found_block = archival_state
+                        .find_canonical_block_with_output(*ar, None)
+                        .await
+                        .unwrap();
+                    prop_assert_eq!(block1.hash(), found_block.hash());
+                }
+            }
+        }
+
+        #[traced_test]
+        #[test_strategy::proptest(async = "tokio", cases = 3)]
+        async fn find_canonical_block_with_input_genesis_block_test(
+            #[strategy(crate::tests::shared::strategies::absindset())]
+            random_index_set: AbsoluteIndexSet,
+        ) {
+            let network = Network::Main;
+
+            for maintain_utxo_index in [false, true] {
+                let cli = Args {
+                    utxo_index: maintain_utxo_index,
+                    network,
+                    ..Default::default()
+                };
+                let archival_state = make_test_archival_state(&cli).await;
+
+                assert!(archival_state
+                    .find_canonical_block_with_input(random_index_set, None)
+                    .await
+                    .is_none());
+            }
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn canonical_block_with_input_block1() {
+            let network = Network::Main;
+            let genesis = Block::genesis(network);
+            for maintain_utxo_index in [false, true] {
+                let cli = Args {
+                    utxo_index: maintain_utxo_index,
+                    network,
+                    ..Default::default()
+                };
+                let mut archival_state = make_test_archival_state(&cli).await;
+                let block1a = block_with_num_puts(network, &genesis, 2, 3).await;
+
+                let block1a_inputs = block1a
+                    .body()
+                    .transaction_kernel
+                    .inputs
+                    .iter()
+                    .map(|x| x.absolute_indices);
+                archival_state.set_new_tip(&block1a).await.unwrap();
+
+                for input in block1a_inputs.clone() {
+                    let found_block = archival_state
+                        .find_canonical_block_with_input(input, None)
+                        .await
+                        .unwrap();
+                    assert_eq!(block1a.hash(), found_block.hash());
+                }
+
+                // Ensure we only report on canonical blocks
+                let block1b = invalid_empty_block(&genesis, network);
+                archival_state.set_new_tip(&block1b).await.unwrap();
+                for input in block1a_inputs.clone() {
+                    assert!(archival_state
+                        .find_canonical_block_with_input(input, Some(12))
+                        .await
+                        .is_none());
+                }
+
+                // Verify max search depth is respected if UTXO index is not
+                // maintained. Note that block 1a becomes canonical again.
+                let block2a = invalid_empty_block(&block1a, network);
+                archival_state.set_new_tip(&block2a).await.unwrap();
+                for input in block1a_inputs.clone() {
+                    let res_search_depth_0 = archival_state
+                        .find_canonical_block_with_input(input, Some(0))
+                        .await;
+                    if maintain_utxo_index {
+                        assert!(res_search_depth_0.is_some());
+                    } else {
+                        assert!(res_search_depth_0.is_none());
+                    }
+                    let found_block = archival_state
+                        .find_canonical_block_with_input(input, Some(1))
+                        .await
+                        .unwrap();
+                    assert_eq!(block1a.hash(), found_block.hash());
+                }
+            }
+        }
+    }
+
     mod block_hash_witness {
         use super::*;
         use crate::tests::shared::blocks::invalid_empty_block;
@@ -4768,33 +5072,8 @@ pub(super) mod tests {
     /// archival state
     mod utxo_index {
         use super::*;
-        use crate::api::export::GenerationSpendingKey;
         use crate::tests::shared::blocks::block_with_num_puts;
         use crate::tests::shared::blocks::invalid_empty_block;
-        use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
-
-        /// Return a block with the specified puts, along with randomized
-        /// composer rewards.
-        async fn block_with_puts(
-            network: Network,
-            predecessor: &Block,
-            outputs: Vec<AdditionRecord>,
-            inputs: Vec<RemovalRecord>,
-        ) -> Block {
-            let mut rng = rand::rng();
-            let (block, _) = make_mock_block_with_inputs_and_outputs(
-                predecessor,
-                inputs,
-                outputs,
-                None,
-                GenerationSpendingKey::derive_from_seed(rng.random()),
-                rng.random(),
-                network,
-            )
-            .await;
-
-            block
-        }
 
         #[apply(shared_tokio_runtime)]
         async fn only_canonical_addition_records_are_matched() {
