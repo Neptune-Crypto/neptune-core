@@ -1,6 +1,7 @@
 pub(crate) mod quarry;
 
 use clap::Parser;
+use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::Network;
 
 use crate::command::wallet::quarry::RescanQuarry;
@@ -134,6 +135,15 @@ pub(crate) enum WalletCommand {
 
         #[clap(long, default_value_t)]
         network: Network,
+    },
+
+    /// Get the current key derivation index for the given key type.
+    GetDerivationIndex { key_type: KeyType },
+
+    /// Set the derivation index for the given key type to the given value.
+    SetDerivationIndex {
+        key_type: KeyType,
+        derivation_index: u64,
     },
 
     /// Given a receiving address derived by this wallet, find the associated

@@ -2,6 +2,7 @@ use anyhow::bail;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
+use strum_macros::EnumString;
 use tasm_lib::triton_vm::prelude::Digest;
 use tracing::warn;
 
@@ -18,9 +19,11 @@ use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, EnumString)]
+#[strum(serialize_all = "snake_case", ascii_case_insensitive)]
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum KeyType {
     /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]
     ///
@@ -278,5 +281,36 @@ impl SpendingKey {
     /// returns true if the [Announcement] has a type-flag that matches the type of this key
     pub(super) fn matches_announcement_key_type(&self, pa: &Announcement) -> bool {
         matches!(KeyType::try_from(pa), Ok(kt) if kt == KeyType::from(self))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use strum::IntoEnumIterator;
+
+    use super::*;
+
+    #[test]
+    fn keytype_to_string_is_as_defined() {
+        assert_eq!(KeyType::Generation.to_string(), "Generation");
+        assert_eq!(KeyType::Symmetric.to_string(), "Symmetric");
+    }
+
+    #[test]
+    fn keytype_from_str_works_when_all_lowercase() {
+        assert_eq!(
+            KeyType::Generation,
+            KeyType::from_str("generation").unwrap()
+        );
+        assert_eq!(KeyType::Symmetric, KeyType::from_str("symmetric").unwrap());
+    }
+
+    #[test]
+    fn keytype_string_roundtrip() {
+        for v in KeyType::iter() {
+            assert_eq!(v, KeyType::from_str(&v.to_string()).unwrap());
+        }
     }
 }

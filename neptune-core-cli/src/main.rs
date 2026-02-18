@@ -609,6 +609,19 @@ async fn main() -> Result<()> {
                 .await??;
             println!("{}", receiving_address.to_display_bech32m(network).unwrap())
         }
+        Command::Wallet(WalletCommand::GetDerivationIndex { key_type }) => {
+            let derivation_index = client.get_derivation_index(ctx, token, key_type).await??;
+            println!("{derivation_index}");
+        }
+        Command::Wallet(WalletCommand::SetDerivationIndex {
+            key_type,
+            derivation_index,
+        }) => {
+            client
+                .set_derivation_index(ctx, token, key_type, derivation_index)
+                .await??;
+            println!("done");
+        }
         Command::Mempool(MempoolCommand::MempoolTxCount) => {
             let count: usize = client.mempool_tx_count(ctx, token).await??;
             println!("{count}");
