@@ -45,7 +45,7 @@ mod rescan {
         rt.block_on(
             global_state
                 .wallet_state
-                .bump_derivation_counter(KeyType::Generation, 200),
+                .bump_derivation_index(KeyType::Generation, 200),
         );
 
         let notification_medium = if operation == RescanOperation::Announced {

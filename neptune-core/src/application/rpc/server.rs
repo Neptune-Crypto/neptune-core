@@ -2548,7 +2548,7 @@ impl RPC for NeptuneRPCServer {
 
         let state = self.state.lock_guard().await;
 
-        let current_counter = state.wallet_state.spending_key_counter(key_type);
+        let current_counter = state.wallet_state.key_counter(key_type);
         let index = current_counter.checked_sub(1);
         let Some(index) = index else {
             return Err(RpcError::WalletKeyCounterIsZero);

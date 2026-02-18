@@ -3883,13 +3883,13 @@ mod tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .bump_derivation_counter(KeyType::Generation, 104)
+                .bump_derivation_index(KeyType::Generation, 104)
                 .await;
             alice
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .bump_derivation_counter(KeyType::Symmetric, 104)
+                .bump_derivation_index(KeyType::Symmetric, 104)
                 .await;
 
             // Create four blocks, where the two first has two outputs to
@@ -4089,13 +4089,13 @@ mod tests {
                     .lock_guard_mut()
                     .await
                     .wallet_state
-                    .bump_derivation_counter(KeyType::Generation, 233)
+                    .bump_derivation_index(KeyType::Generation, 233)
                     .await;
                 alice
                     .lock_guard_mut()
                     .await
                     .wallet_state
-                    .bump_derivation_counter(KeyType::Symmetric, 104)
+                    .bump_derivation_index(KeyType::Symmetric, 104)
                     .await;
 
                 // Build a list of blocks sending lots of UTXOs around to self,
