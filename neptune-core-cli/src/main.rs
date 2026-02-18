@@ -644,78 +644,6 @@ async fn main() -> Result<()> {
             }
         }
 
-        Command::Statistics(StatisticsCommand::MeanBlockInterval {
-            last_block,
-            max_num_blocks,
-        }) => {
-            let intervals = client
-                .block_intervals(ctx, token, last_block, max_num_blocks)
-                .await??;
-            if intervals.as_ref().is_none_or(|x| x.is_empty()) {
-                println!("Not found");
-                return Ok(());
-            }
-            let intervals = intervals.unwrap();
-
-            let num_samples: u64 = intervals.len().try_into().unwrap();
-            let mut acc = 0;
-            let mut acc_squared = 0;
-            for (_height, interval) in intervals {
-                acc += interval;
-                acc_squared += interval * interval;
-            }
-
-            let fst_moment = acc / num_samples;
-            let snd_moment = acc_squared / num_samples;
-            let std_dev = (snd_moment as f64).sqrt();
-
-            println!(
-                "Average block interval of specified range: {fst_moment}, std. dev: {std_dev}."
-            )
-        }
-
-        Command::Statistics(StatisticsCommand::MaxBlockInterval {
-            last_block,
-            max_num_blocks,
-        }) => {
-            let intervals = client
-                .block_intervals(ctx, token, last_block, max_num_blocks)
-                .await??;
-            if intervals.as_ref().is_none_or(|x| x.is_empty()) {
-                println!("Not found");
-                return Ok(());
-            }
-            let intervals = intervals.unwrap();
-
-            let (height, interval) = intervals
-                .iter()
-                .max_by_key(|(_height, interval)| interval)
-                .unwrap();
-
-            println!("Biggest block interval in specified range:\n{interval}ms at block height {height}.")
-        }
-
-        Command::Statistics(StatisticsCommand::MinBlockInterval {
-            last_block,
-            max_num_blocks,
-        }) => {
-            let intervals = client
-                .block_intervals(ctx, token, last_block, max_num_blocks)
-                .await??;
-            if intervals.as_ref().is_none_or(|x| x.is_empty()) {
-                println!("Not found");
-                return Ok(());
-            }
-            let intervals = intervals.unwrap();
-
-            let (height, interval) = intervals
-                .iter()
-                .min_by_key(|(_height, interval)| interval)
-                .unwrap();
-
-            println!("Smallest block interval in specified range:\n{interval}ms at block height {height}.")
-        }
-
         Command::Statistics(StatisticsCommand::BlockDifficulties {
             last_block,
             max_num_blocks,
@@ -730,28 +658,6 @@ async fn main() -> Result<()> {
                     .iter()
                     .map(|(height, difficulty)| format!("{height}: {difficulty}"))
                     .join("\n")
-            )
-        }
-
-        Command::Statistics(StatisticsCommand::MaxBlockDifficulty {
-            last_block,
-            max_num_blocks,
-        }) => {
-            let difficulties = client
-                .block_difficulties(ctx, token, last_block, max_num_blocks)
-                .await??;
-            if difficulties.is_empty() {
-                println!("Not found");
-                return Ok(());
-            }
-
-            let (height, difficulty) = difficulties
-                .iter()
-                .max_by_key(|(_height, difficulty)| difficulty)
-                .unwrap();
-
-            println!(
-                "Greatest difficulty in specified range:\n{difficulty} at block height {height}."
             )
         }
 
