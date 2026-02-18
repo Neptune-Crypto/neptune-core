@@ -52,18 +52,26 @@ enum RelayStatus {
 }
 
 impl RelayStatus {
-    /// Set the status to `Active(now, listener_id)`.
+    /// Set the status to `Active(now, listener_id)` if possible.
     ///
-    /// Works regardless of whether previous status was
+    /// Specifically, set the status to `Active` if previous status was
     ///  - `Waiting(listener_id)`, or
     ///  - `Active(previous_timestamp, listener_id)`.
     ///
-    /// # Panics
-    ///
-    ///  - If status was `Closed(_)`
+    /// If the previous status was `Closed(_)`, do nothing.
     fn activate(&mut self) {
-        let listener_id = self.listener_id().expect("Cannot activate `Closed` relay.");
-        *self = RelayStatus::Active(SystemTime::now(), listener_id);
+        match self {
+            RelayStatus::Waiting(listener_id) | RelayStatus::Active(_, listener_id) => {
+                let id = *listener_id;
+                *self = RelayStatus::Active(SystemTime::now(), id);
+            }
+            RelayStatus::Closed(_) => {
+                // Got `ReservationReqAccepted` message for a relay we already
+                // closed. Could be flaky network conditions. Log warning and
+                // ignore otherwise.
+                tracing::warn!("Trying to activate reservation that was already closed.");
+            }
+        }
     }
 
     /// Fetch the listener ID, if any; otherwise `None`.
@@ -868,11 +876,11 @@ impl NetworkActor {
                 if let Some(peer_id) = failing_relay {
                     match reason {
                         Ok(_) => {
-                            tracing::warn!(
+                            tracing::debug!(
                                 %peer_id,
                                 "Relay listener closed gracefully, but a match \
-                                was still found! Reason: unexpected race \
-                                condition."
+                                was still found! Possible reasons: a) remote \
+                                closed it; b) unexpected race condition."
                             )
                         }
                         Err(e) => {
