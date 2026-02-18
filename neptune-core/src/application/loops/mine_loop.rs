@@ -55,6 +55,7 @@ use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurr
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::shared::SIZE_20MB_IN_BYTES;
+use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::transaction_output::TxOutputList;
@@ -555,6 +556,8 @@ pub(crate) async fn create_block_transaction_from(
                 .wallet_entropy
                 .clone();
             let notification_policy = global_state_lock.cli().fee_notification;
+
+            let upgrade_incentive = update_job.upgrade_incentive();
             if let Ok((updated_tx, _)) = update_job
                 .upgrade(
                     vm_job_queue.clone(),
@@ -566,6 +569,15 @@ pub(crate) async fn create_block_transaction_from(
                 .await
             {
                 info!("Successfully updated transaction for merge");
+
+                // Insert updated transaction into mempool, so we don't have to
+                // update it again if we build more than one block proposal.
+                global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .mempool_insert(updated_tx.clone(), upgrade_incentive.into())
+                    .await;
+
                 transactions_to_merge = vec![updated_tx];
             }
         } else {
@@ -595,6 +607,14 @@ pub(crate) async fn create_block_transaction_from(
             kernel: nop.kernel,
             proof,
         };
+
+        // Insert nop transaction into mempool, so we don't have to build it
+        // again if we build more than one block proposal.
+        global_state_lock
+            .lock_guard_mut()
+            .await
+            .mempool_insert(nop.clone(), UpgradePriority::Irrelevant)
+            .await;
 
         transactions_to_merge = vec![nop];
     }
@@ -1278,7 +1298,7 @@ pub(crate) mod tests {
         let now = now + Timestamp::hours(1);
         let (block2_tx, _) = create_block_transaction_from(
             &block1,
-            alice,
+            alice.clone(),
             now,
             TritonVmProofJobOptions::default_with_network(network),
             TxMergeOrigin::Mempool,
@@ -1298,6 +1318,16 @@ pub(crate) mod tests {
             1,
             block2_tx.kernel.inputs.len(),
             "Block tx must have exactly one input from Alice's tx"
+        );
+
+        assert!(
+            !alice
+                .lock_guard_mut()
+                .await
+                .mempool
+                .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, None)
+                .is_empty(),
+            "Updated transaction must have been inserted into mempool"
         );
     }
 
@@ -1399,10 +1429,10 @@ pub(crate) mod tests {
 
             {
                 let mut alice_gsm = alice.lock_guard_mut().await;
+                alice_gsm.mempool_clear().await;
                 alice_gsm
                     .mempool_insert(tx_from_alice.clone(), UpgradePriority::Critical)
                     .await;
-                assert_eq!(1, alice_gsm.mempool.len());
             }
 
             // Build transaction for block
@@ -1486,6 +1516,12 @@ pub(crate) mod tests {
         let (block_1, _) = receiver_1.await.unwrap();
         let validation_result = block_1.validate(&genesis_block, mocked_now, network).await;
         assert!(validation_result.is_ok(), "{:?}", validation_result);
+
+        assert!(
+            !alice.lock_guard().await.mempool.is_empty(),
+            "Mempool must be non-empty after insertion of nop-transaction, and prior to update of tip"
+        );
+
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();

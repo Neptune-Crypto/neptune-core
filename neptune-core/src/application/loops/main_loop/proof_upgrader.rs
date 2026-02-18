@@ -308,7 +308,7 @@ impl UpgradeJob {
         }
     }
 
-    fn upgrade_incentive(&self) -> UpgradeIncentive {
+    pub(crate) fn upgrade_incentive(&self) -> UpgradeIncentive {
         match self {
             UpgradeJob::PrimitiveWitnessToProofCollection(_) => {
                 // If primitive witness is known, transaction must originate
