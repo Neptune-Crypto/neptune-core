@@ -1076,24 +1076,26 @@ impl ArchivalState {
         }
     }
 
-    /// Return parent of tip block. Returns `None` iff tip is genesis block.
-    pub(crate) async fn get_tip_parent(&self) -> Option<Block> {
-        // Tip can be genesis block in two cases: If no block tip key is known,
-        // or if one is known and it matches with the genesis block.
+    /// Return the header of tip, without loading a whole block from disk.
+    async fn tip_header(&self) -> BlockHeader {
         let tip_digest = self
             .block_index_db
             .get(BlockIndexKey::BlockTipDigest)
-            .await?
+            .await
+            .unwrap_or_else(|| BlockIndexValue::BlockTipDigest(self.genesis_block().hash()))
             .as_tip_digest();
-        if tip_digest == self.genesis_block().hash() {
+
+        self.get_block_header(tip_digest)
+            .await
+            .expect("Header must be known for tip.")
+    }
+
+    /// Return parent of tip block. Returns `None` iff tip is genesis block.
+    pub(crate) async fn get_tip_parent(&self) -> Option<Block> {
+        let tip_header = self.tip_header().await;
+        if tip_header.height.is_genesis() {
             return None;
         }
-
-        let tip_header = self
-            .get_block_record(tip_digest)
-            .await
-            .map(|record| record.block_header)
-            .expect("tip must have block record");
 
         let parent = self
             .get_block(tip_header.prev_block_digest)
@@ -2126,6 +2128,7 @@ pub(super) mod tests {
     use crate::state::wallet::transaction_output::TxOutputList;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -4446,6 +4449,30 @@ pub(super) mod tests {
             .get_ancestor_block_digests(mock_block_4.hash(), 0)
             .await
             .is_empty());
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn tip_header_genesis() {
+        let network = Network::Main;
+        let archival_state = make_test_archival_state(&Args::default_with_network(network)).await;
+
+        assert_eq!(
+            Block::genesis(network).header(),
+            &archival_state.tip_header().await
+        );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn tip_header_block_1() {
+        let network = Network::Main;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
+        let block1 = invalid_empty_block(archival_state.genesis_block(), network);
+        archival_state.write_block_as_tip(&block1).await.unwrap();
+
+        assert_eq!(block1.header(), &archival_state.tip_header().await);
     }
 
     #[traced_test]
