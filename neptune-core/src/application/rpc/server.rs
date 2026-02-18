@@ -3488,10 +3488,6 @@ impl RPC for NeptuneRPCServer {
             return Err(RpcError::BlockRangeError);
         }
 
-        if !self.state.cli().utxo_index {
-            return Err(RpcError::UtxoIndexNotPresent);
-        }
-
         let keys = if let Some((key_type, derivation_index)) = derivation_path {
             vec![self
                 .state

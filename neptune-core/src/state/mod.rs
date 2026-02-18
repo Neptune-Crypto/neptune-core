@@ -1248,11 +1248,6 @@ impl GlobalState {
             "Must call function with a non-empty range. Got range: {first}..={last}."
         );
 
-        ensure!(
-            self.cli.utxo_index,
-            "Node must be started with the UTXO index flag set for this function to work."
-        );
-
         let keys: HashMap<AnnouncementFlag, SpendingKey> = keys
             .into_iter()
             .map(|key| ((&key.to_address()).into(), key))
