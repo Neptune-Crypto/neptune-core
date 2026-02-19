@@ -23,6 +23,7 @@ use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
+use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 #[async_trait]
@@ -645,6 +646,55 @@ impl RpcApi for RpcServer {
             .await;
 
         Ok(RescanGuesserRewardsResponse {})
+    }
+
+    async fn derivation_index_call(
+        &self,
+        request: DerivationIndexRequest,
+    ) -> RpcResult<DerivationIndexResponse> {
+        let counter = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .key_counter(request.key_type);
+        let derivation_index = counter
+            .checked_sub(1)
+            .ok_or(RpcError::WalletKeyCounterIsZero)?;
+        Ok(DerivationIndexResponse { derivation_index })
+    }
+
+    async fn set_derivation_index_call(
+        &self,
+        request: SetDerivationIndexRequest,
+    ) -> RpcResult<SetDerivationIndexResponse> {
+        let wallet_state = &self.state.lock_guard().await.wallet_state;
+        let current_counter = wallet_state.key_counter(request.key_type);
+        let current_derivation_index = current_counter.saturating_sub(1);
+        let max_derivation_index = current_derivation_index + MAX_DERIVATION_INDEX_BUMP;
+
+        if current_derivation_index > request.derivation_index {
+            return Err(RpcError::InvalidDerivationIndexRange(
+                current_derivation_index,
+                max_derivation_index,
+            ));
+        }
+        if request.derivation_index > max_derivation_index {
+            return Err(RpcError::InvalidDerivationIndexRange(
+                current_derivation_index,
+                max_derivation_index,
+            ));
+        }
+
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::BumpKeyDerivationIndex(
+                request.key_type,
+                request.derivation_index,
+            ))
+            .await;
+
+        Ok(SetDerivationIndexResponse {})
     }
 
     async fn get_block_template_call(

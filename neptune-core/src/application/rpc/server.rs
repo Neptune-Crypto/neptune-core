@@ -133,6 +133,7 @@ use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::wallet_status::WalletStatus;
+use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::twenty_first::prelude::Tip5;
@@ -964,6 +965,16 @@ pub trait RPC {
         key_type: KeyType,
     ) -> RpcResult<ReceivingAddress>;
 
+    /// Get the current derivation index for keys of the given type.
+    async fn get_derivation_index(token: auth::Token, key_type: KeyType) -> RpcResult<u64>;
+
+    /// Set the current derivation index for keys of the given type.
+    async fn set_derivation_index(
+        token: auth::Token,
+        key_type: KeyType,
+        derivation_index: u64,
+    ) -> RpcResult<()>;
+
     /// Return all known keys, for every [KeyType]
     ///
     /// ```no_run
@@ -1697,33 +1708,43 @@ pub trait RPC {
         tx_artifacts: TxCreationArtifacts,
     ) -> RpcResult<()>;
 
-    /// Rescan the specified inclusive range for incoming UTXOS that were sent
+    /// Rescan the specified range of blocks for incoming UTXOS that were sent
     /// with associated on-chain announements.
+    ///
+    /// Any found UTXOs are monitored going forward.
     async fn rescan_announced(
         token: auth::Token,
         first: BlockHeight,
         last: BlockHeight,
+        derivation_path: Option<(KeyType, u64)>,
     ) -> RpcResult<()>;
 
-    /// Rescan the specified inclusive range for incoming UTXOS that were have
+    /// Rescan the specified range of blocks for incoming UTXOS that have
     /// been added as expected UTXOs to the node's wallet.
+    ///
+    /// Any found UTXOs are monitored going forward.
     async fn rescan_expected(
         token: auth::Token,
         first: BlockHeight,
         last: BlockHeight,
     ) -> RpcResult<()>;
 
-    /// Rescan the specified inclusive range for outgoing UTXOs, i.e. the
-    /// spending of UTXOs by the node's wallet. Can be used to recreate a
-    /// transaction history.
+    /// Rescan the specified range of blocks for outgoing UTXOs, *i.e.*, UTXOs
+    /// spent by the node's wallet.
+    ///
+    /// Can be used to recreate a transaction history. Requires a UTXO index.
+    ///
+    /// Any found UTXOs are monitored going forward.
     async fn rescan_outgoing(
         token: auth::Token,
         first: BlockHeight,
         last: BlockHeight,
     ) -> RpcResult<()>;
 
-    /// Rescan the specified inclusive range for blocks that were successfully
-    /// guessed by this node.
+    /// Rescan the specified range for blocks that were successfully guessed by
+    /// this node.
+    ///
+    /// Any found UTXOs are monitored going forward.
     async fn rescan_guesser_rewards(
         token: auth::Token,
         first: BlockHeight,
@@ -2538,7 +2559,7 @@ impl RPC for NeptuneRPCServer {
 
         let state = self.state.lock_guard().await;
 
-        let current_counter = state.wallet_state.spending_key_counter(key_type);
+        let current_counter = state.wallet_state.key_counter(key_type);
         let index = current_counter.checked_sub(1);
         let Some(index) = index else {
             return Err(RpcError::WalletKeyCounterIsZero);
@@ -3075,6 +3096,69 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn get_derivation_index(
+        self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        key_type: KeyType,
+    ) -> RpcResult<u64> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let counter = match key_type {
+            KeyType::Generation => self
+                .state
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .get_generation_key_counter(),
+            KeyType::Symmetric => self
+                .state
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .get_symmetric_key_counter(),
+        };
+
+        let derivation_index = counter
+            .checked_sub(1)
+            .ok_or(RpcError::WalletKeyCounterIsZero)?;
+
+        Ok(derivation_index)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn set_derivation_index(
+        mut self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        key_type: KeyType,
+        derivation_index: u64,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let wallet_state = &mut self.state.lock_guard_mut().await.wallet_state;
+        let current = wallet_state.key_counter(key_type);
+        let max = current + MAX_DERIVATION_INDEX_BUMP;
+
+        if current > derivation_index {
+            return Err(RpcError::InvalidDerivationIndexRange(current, max));
+        }
+        if derivation_index > max {
+            return Err(RpcError::InvalidDerivationIndexRange(current, max));
+        }
+
+        wallet_state
+            .bump_derivation_index(key_type, derivation_index)
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn known_keys(
         self,
         _context: tarpc::context::Context,
@@ -3469,6 +3553,7 @@ impl RPC for NeptuneRPCServer {
         token: auth::Token,
         first: BlockHeight,
         last: BlockHeight,
+        derivation_path: Option<(KeyType, u64)>,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3477,25 +3562,25 @@ impl RPC for NeptuneRPCServer {
             return Err(RpcError::BlockRangeError);
         }
 
-        if !self.state.cli().utxo_index {
-            return Err(RpcError::UtxoIndexNotPresent);
-        }
-
-        let all_keys = self
-            .state
-            .lock_guard()
-            .await
-            .wallet_state
-            .get_all_known_spending_keys()
-            .collect_vec();
+        let keys = if let Some((key_type, derivation_index)) = derivation_path {
+            vec![self
+                .state
+                .lock_guard()
+                .await
+                .wallet_state
+                .nth_spending_key(key_type, derivation_index)]
+        } else {
+            self.state
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_all_known_spending_keys()
+                .collect_vec()
+        };
 
         let _ = self
             .rpc_server_to_main_tx
-            .send(RPCServerToMain::RescanAnnounced {
-                first,
-                last,
-                keys: all_keys,
-            })
+            .send(RPCServerToMain::RescanAnnounced { first, last, keys })
             .await;
 
         Ok(())
@@ -4727,6 +4812,9 @@ pub mod error {
 
         #[error("Access to this endpoint is restricted")]
         RestrictedAccess,
+
+        #[error("Derivation index must be in interval [{0}, {1}]")]
+        InvalidDerivationIndexRange(u64, u64),
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
@@ -5105,7 +5193,7 @@ mod tests {
             .into();
         let _ = rpc_server
             .clone()
-            .rescan_announced(ctx, token, 0u64.into(), 14u64.into())
+            .rescan_announced(ctx, token, 0u64.into(), 14u64.into(), None)
             .await;
         let _ = rpc_server
             .clone()

@@ -9,6 +9,7 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
 use crate::api::export::AnnouncementFlag;
+use crate::api::export::KeyType;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
@@ -90,6 +91,12 @@ pub enum RpcError {
 
     #[error("Sender dropped while awaiting response.")]
     RxChannel,
+
+    #[error("Derivation index must be in range [{0}; {1}].")]
+    InvalidDerivationIndexRange(u64, u64),
+
+    #[error("Wallet key counter is zero.")]
+    WalletKeyCounterIsZero,
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -370,9 +377,14 @@ pub trait RpcApi: Sync + Send {
         &self,
         first: RpcBlockHeight,
         last: RpcBlockHeight,
+        derivation_path: Option<(KeyType, u64)>,
     ) -> RpcResult<RescanAnnouncedResponse> {
-        self.rescan_announced_call(RescanAnnouncedRequest { first, last })
-            .await
+        self.rescan_announced_call(RescanAnnouncedRequest {
+            first,
+            last,
+            derivation_path,
+        })
+        .await
     }
 
     async fn rescan_announced_call(
@@ -421,6 +433,33 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: RescanGuesserRewardsRequest,
     ) -> RpcResult<RescanGuesserRewardsResponse>;
+
+    async fn derivation_index(&self, key_type: KeyType) -> RpcResult<DerivationIndexResponse> {
+        self.derivation_index_call(DerivationIndexRequest { key_type })
+            .await
+    }
+
+    async fn derivation_index_call(
+        &self,
+        request: DerivationIndexRequest,
+    ) -> RpcResult<DerivationIndexResponse>;
+
+    async fn set_derivation_index(
+        &self,
+        key_type: KeyType,
+        derivation_index: u64,
+    ) -> RpcResult<SetDerivationIndexResponse> {
+        self.set_derivation_index_call(SetDerivationIndexRequest {
+            key_type,
+            derivation_index,
+        })
+        .await
+    }
+
+    async fn set_derivation_index_call(
+        &self,
+        request: SetDerivationIndexRequest,
+    ) -> RpcResult<SetDerivationIndexResponse>;
 
     /* Mining */
 

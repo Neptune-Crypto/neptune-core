@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 
+use crate::api::export::KeyType;
 use crate::api::export::SpendingKey;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::network::overview::NetworkOverview;
@@ -143,6 +144,7 @@ pub(crate) enum RPCServerToMain {
     ProbeNat,
     ResetRelayReservations,
     GetNetworkOverview(tokio::sync::oneshot::Sender<NetworkOverview>),
+    BumpKeyDerivationIndex(KeyType, u64),
 }
 
 pub trait Cancelable: Send + Sync {

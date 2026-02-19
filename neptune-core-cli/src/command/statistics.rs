@@ -11,32 +11,8 @@ pub(crate) enum StatisticsCommand {
         max_num_blocks: Option<usize>,
     },
 
-    /// Show mean block interval in milliseconds within the specified range.
-    MeanBlockInterval {
-        last_block: BlockSelector,
-        max_num_blocks: Option<usize>,
-    },
-
-    /// Show biggest block interval in the specified range.
-    MaxBlockInterval {
-        last_block: BlockSelector,
-        max_num_blocks: Option<usize>,
-    },
-
-    /// Show smallest block interval in the specified range.
-    MinBlockInterval {
-        last_block: BlockSelector,
-        max_num_blocks: Option<usize>,
-    },
-
     /// Show difficulties for a list of blocks.
     BlockDifficulties {
-        last_block: BlockSelector,
-        max_num_blocks: Option<usize>,
-    },
-
-    /// Show largest difficulty in the specified range.
-    MaxBlockDifficulty {
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
     },

@@ -1,6 +1,10 @@
+pub(crate) mod quarry;
+
 use clap::Parser;
+use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::Network;
 
+use crate::command::wallet::quarry::RescanQuarry;
 use crate::models::claim_utxo::ClaimUtxoFormat;
 
 /// Wallet Command -- a command related to spending keys, receiving addresses,
@@ -68,26 +72,28 @@ pub(crate) enum WalletCommand {
         max_search_depth: Option<u64>,
     },
 
-    /// Rescan the selected (inclusive) range of blocks for announced, incoming
-    /// UTXOs to all addresses registered by the client's wallet. Requires the
-    /// client to be launched with the UTXO index activated.
-    RescanAnnounced { first: u64, last: u64 },
+    /// Rescan a single block or a range of blocks for transactions that may
+    /// have been missed due to reorgs or moving keys across machines.
+    ///
+    /// If for whatever reason something goes wrong in the course of scanning
+    /// blocks for incoming or outgoing UTXOs, some input or output may be
+    /// missed and the wallet will report an incorrect balance as a result. In
+    /// this case, this family of commands can be used to force the node to look
+    /// again at a specific block or block range. This command is especially
+    /// useful if the wallet was not aware of all derived keys when the block
+    /// was first processed.
+    ///
+    /// The first block height of the range is mandatory. The last block height
+    /// is optional: if not set, the range will contain just the one block.
+    Rescan {
+        #[clap(subcommand)]
+        quarry: RescanQuarry,
+    },
 
-    /// Rescan the selected (inclusive) range of blocks for UTXOs that were
-    /// registered as expected. Works regardless of UTXO index status.
-    RescanExpected { first: u64, last: u64 },
-
-    /// Rescan the selected (inclusive) range of blocks for spent UTXOs. Useful
-    /// to rebuild transaction history. Requires the client to be launched with
-    /// the UTXO index activated.
-    RescanOutgoing { first: u64, last: u64 },
-
-    /// Rescan the selected (inclusive) range of blocks for guesser rewards.
-    /// Useful if the client's seed has been used to guess on correct proof-of-
-    /// work solutions in the past but wallet state was somehow lost. Works
-    /// regardless of UTXO index status.
-    RescanGuesserRewards { first: u64, last: u64 },
-
+    //     /// address to which the UTXO was supposedly sent
+    //     #[clap(long)]
+    //     address: String,
+    // },
     /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
 
@@ -128,6 +134,36 @@ pub(crate) enum WalletCommand {
     ShamirShare {
         t: usize,
         n: usize,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
+    /// Get the derivation index of the most recently generated address, of this
+    /// key type.
+    GetDerivationIndex { key_type: KeyType },
+
+    /// Set the derivation index for the given key type to the given value.
+    ///
+    /// All addresses derived between the current value and the new value
+    /// (inclusive) will be added to the wallet's list of monitored addresses.
+    /// However, historical blocks are *not* automatically rescanned.
+    SetDerivationIndex {
+        key_type: KeyType,
+        derivation_index: u64,
+    },
+
+    /// Given a receiving address derived from this wallet's seed, find the
+    /// associated derivation index.
+    ///
+    /// This command does not require a connection to neptune-core; it reads the
+    /// wallet directly. Also, this command iterates until a match is found;
+    /// if the given address does not come from the current wallet then this
+    /// command will run indefinitely and the user must manually abort it.
+    ///
+    /// Usage: `neptune-cli index-of <address>`
+    IndexOf {
+        address: String,
 
         #[clap(long, default_value_t)]
         network: Network,

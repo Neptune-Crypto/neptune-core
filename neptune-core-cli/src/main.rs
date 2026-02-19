@@ -37,6 +37,7 @@ use neptune_cash::state::wallet::coin_with_possible_timelock::CoinWithPossibleTi
 use neptune_cash::state::wallet::secret_key_material::SecretKeyMaterial;
 use neptune_cash::state::wallet::utxo_notification::PrivateNotificationData;
 use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
 use neptune_cash::state::wallet::wallet_file::WalletFile;
 use neptune_cash::state::wallet::wallet_file::WalletFileContext;
 use neptune_cash::state::wallet::wallet_status::WalletStatus;
@@ -54,11 +55,13 @@ use crate::command::network::NetworkCommand;
 use crate::command::node::NodeCommand;
 use crate::command::payment::PaymentCommand;
 use crate::command::statistics::StatisticsCommand;
+use crate::command::wallet::quarry::RescanQuarry;
 use crate::command::wallet::WalletCommand;
 use crate::command::Command;
 use crate::models::claim_utxo::ClaimUtxoFormat;
 use crate::models::utxo_transfer_entry::UtxoTransferEntry;
 use crate::parser::beneficiary::Beneficiary;
+use crate::parser::full_or_abbreviated_address::FullOrAbbreviatedAddress;
 
 const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
@@ -209,10 +212,10 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Command::Wallet(WalletCommand::NthReceivingAddress { network, index }) => {
-            return get_nth_receiving_address(*network, args.data_dir.clone(), *index);
+            return print_nth_receiving_address(*network, args.data_dir.clone(), *index);
         }
         Command::Wallet(WalletCommand::PremineReceivingAddress { network }) => {
-            return get_nth_receiving_address(*network, args.data_dir.clone(), 0);
+            return print_nth_receiving_address(*network, args.data_dir.clone(), 0);
         }
         Command::Wallet(WalletCommand::ShamirCombine { t, network }) => {
             let wallet_dir =
@@ -399,6 +402,27 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
+        Command::Wallet(WalletCommand::IndexOf { address, network }) => {
+            // Parse on client.
+            let Some(full_or_abbreviated_address) =
+                FullOrAbbreviatedAddress::parse(address, *network)
+            else {
+                println!("Could not parse address.");
+                return Ok(());
+            };
+
+            // Read from disk directly.
+            let wallet_entropy = get_wallet_entropy(*network, args.data_dir.clone())?;
+
+            // Report on key type.
+            let key_type = full_or_abbreviated_address.key_type();
+            println!("key type: {}", key_type);
+
+            // Iterate until match.
+            find_index_of(full_or_abbreviated_address, wallet_entropy, *network).await?;
+
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -445,7 +469,8 @@ async fn main() -> Result<()> {
             | WalletCommand::ShamirCombine { .. }
             | WalletCommand::ShamirShare { .. }
             | WalletCommand::NthReceivingAddress { .. }
-            | WalletCommand::PremineReceivingAddress { .. },
+            | WalletCommand::PremineReceivingAddress { .. }
+            | WalletCommand::IndexOf { .. },
         ) => {
             unreachable!("Case should be handled earlier.")
         }
@@ -584,6 +609,19 @@ async fn main() -> Result<()> {
                 .await??;
             println!("{}", receiving_address.to_display_bech32m(network).unwrap())
         }
+        Command::Wallet(WalletCommand::GetDerivationIndex { key_type }) => {
+            let derivation_index = client.get_derivation_index(ctx, token, key_type).await??;
+            println!("{derivation_index}");
+        }
+        Command::Wallet(WalletCommand::SetDerivationIndex {
+            key_type,
+            derivation_index,
+        }) => {
+            client
+                .set_derivation_index(ctx, token, key_type, derivation_index)
+                .await??;
+            println!("done");
+        }
         Command::Mempool(MempoolCommand::MempoolTxCount) => {
             let count: usize = client.mempool_tx_count(ctx, token).await??;
             println!("{count}");
@@ -619,78 +657,6 @@ async fn main() -> Result<()> {
             }
         }
 
-        Command::Statistics(StatisticsCommand::MeanBlockInterval {
-            last_block,
-            max_num_blocks,
-        }) => {
-            let intervals = client
-                .block_intervals(ctx, token, last_block, max_num_blocks)
-                .await??;
-            if intervals.as_ref().is_none_or(|x| x.is_empty()) {
-                println!("Not found");
-                return Ok(());
-            }
-            let intervals = intervals.unwrap();
-
-            let num_samples: u64 = intervals.len().try_into().unwrap();
-            let mut acc = 0;
-            let mut acc_squared = 0;
-            for (_height, interval) in intervals {
-                acc += interval;
-                acc_squared += interval * interval;
-            }
-
-            let fst_moment = acc / num_samples;
-            let snd_moment = acc_squared / num_samples;
-            let std_dev = (snd_moment as f64).sqrt();
-
-            println!(
-                "Average block interval of specified range: {fst_moment}, std. dev: {std_dev}."
-            )
-        }
-
-        Command::Statistics(StatisticsCommand::MaxBlockInterval {
-            last_block,
-            max_num_blocks,
-        }) => {
-            let intervals = client
-                .block_intervals(ctx, token, last_block, max_num_blocks)
-                .await??;
-            if intervals.as_ref().is_none_or(|x| x.is_empty()) {
-                println!("Not found");
-                return Ok(());
-            }
-            let intervals = intervals.unwrap();
-
-            let (height, interval) = intervals
-                .iter()
-                .max_by_key(|(_height, interval)| interval)
-                .unwrap();
-
-            println!("Biggest block interval in specified range:\n{interval}ms at block height {height}.")
-        }
-
-        Command::Statistics(StatisticsCommand::MinBlockInterval {
-            last_block,
-            max_num_blocks,
-        }) => {
-            let intervals = client
-                .block_intervals(ctx, token, last_block, max_num_blocks)
-                .await??;
-            if intervals.as_ref().is_none_or(|x| x.is_empty()) {
-                println!("Not found");
-                return Ok(());
-            }
-            let intervals = intervals.unwrap();
-
-            let (height, interval) = intervals
-                .iter()
-                .min_by_key(|(_height, interval)| interval)
-                .unwrap();
-
-            println!("Smallest block interval in specified range:\n{interval}ms at block height {height}.")
-        }
-
         Command::Statistics(StatisticsCommand::BlockDifficulties {
             last_block,
             max_num_blocks,
@@ -705,28 +671,6 @@ async fn main() -> Result<()> {
                     .iter()
                     .map(|(height, difficulty)| format!("{height}: {difficulty}"))
                     .join("\n")
-            )
-        }
-
-        Command::Statistics(StatisticsCommand::MaxBlockDifficulty {
-            last_block,
-            max_num_blocks,
-        }) => {
-            let difficulties = client
-                .block_difficulties(ctx, token, last_block, max_num_blocks)
-                .await??;
-            if difficulties.is_empty() {
-                println!("Not found");
-                return Ok(());
-            }
-
-            let (height, difficulty) = difficulties
-                .iter()
-                .max_by_key(|(_height, difficulty)| difficulty)
-                .unwrap();
-
-            println!(
-                "Greatest difficulty in specified range:\n{difficulty} at block height {height}."
             )
         }
 
@@ -826,27 +770,75 @@ async fn main() -> Result<()> {
                 println!("This claim has already been registered.");
             }
         }
-        Command::Wallet(WalletCommand::RescanAnnounced { first, last }) => {
+        Command::Wallet(WalletCommand::Rescan {
+            quarry:
+                RescanQuarry::Announced {
+                    address,
+                    first,
+                    last,
+                },
+        }) => {
+            // Parse address.
+            let derivation_path = if let Some(address) = address {
+                // Get network from server.
+                let network = client.network(ctx).await??;
+
+                // Parse on client.
+                let Some(full_or_abbreviated_address) =
+                    FullOrAbbreviatedAddress::parse(&address, network)
+                else {
+                    println!("Could not parse address.");
+                    return Ok(());
+                };
+
+                // Read from disk directly.
+                let wallet_entropy = get_wallet_entropy(network, args.data_dir.clone())?;
+
+                // Report on key type.
+                let key_type = full_or_abbreviated_address.key_type();
+                println!("key type: {}", key_type);
+
+                // Iterate until match.
+                let derivation_index =
+                    find_index_of(full_or_abbreviated_address, wallet_entropy, network).await?;
+                println!("derivation index: {derivation_index}");
+
+                Some((key_type, derivation_index))
+            } else {
+                None
+            };
+
+            // Make RPC call.
+            let range_end = last.unwrap_or(first);
             client
-                .rescan_announced(ctx, token, first.into(), last.into())
+                .rescan_announced(ctx, token, first.into(), range_end.into(), derivation_path)
                 .await??;
             println!("Rescan started. Please check application log for progress.");
         }
-        Command::Wallet(WalletCommand::RescanExpected { first, last }) => {
+        Command::Wallet(WalletCommand::Rescan {
+            quarry: RescanQuarry::Expected { first, last },
+        }) => {
+            let range_end = last.unwrap_or(first);
             client
-                .rescan_expected(ctx, token, first.into(), last.into())
+                .rescan_expected(ctx, token, first.into(), range_end.into())
                 .await??;
             println!("Rescan started. Please check application log for progress.");
         }
-        Command::Wallet(WalletCommand::RescanOutgoing { first, last }) => {
+        Command::Wallet(WalletCommand::Rescan {
+            quarry: RescanQuarry::Outgoing { first, last },
+        }) => {
+            let range_end = last.unwrap_or(first);
             client
-                .rescan_outgoing(ctx, token, first.into(), last.into())
+                .rescan_outgoing(ctx, token, first.into(), range_end.into())
                 .await??;
             println!("Rescan started. Please check application log for progress.");
         }
-        Command::Wallet(WalletCommand::RescanGuesserRewards { first, last }) => {
+        Command::Wallet(WalletCommand::Rescan {
+            quarry: RescanQuarry::GuesserRewards { first, last },
+        }) => {
+            let range_end = last.unwrap_or(first);
             client
-                .rescan_guesser_rewards(ctx, token, first.into(), last.into())
+                .rescan_guesser_rewards(ctx, token, first.into(), range_end.into())
                 .await??;
             println!("Rescan started. Please check application log for progress.");
         }
@@ -1122,15 +1114,9 @@ async fn get_cookie_hint(client: &RPCClient, args: &Config) -> anyhow::Result<au
     }
 }
 
-/// Get the nth receiving address directly from the wallet.
-///
-/// Read the wallet file directly; avoid going through the RPC interface of
-/// `neptune-core`.
-fn get_nth_receiving_address(
-    network: Network,
-    data_dir: Option<PathBuf>,
-    index: usize,
-) -> Result<()> {
+/// Get the [`WalletEntropy`] directly from the file system; without going
+/// through neptune-core.
+fn get_wallet_entropy(network: Network, data_dir: Option<PathBuf>) -> Result<WalletEntropy> {
     let wallet_dir = DataDirectory::get(data_dir.clone(), network)?.wallet_directory_path();
 
     // Get wallet object, create various wallet secret files
@@ -1141,19 +1127,28 @@ fn get_nth_receiving_address(
         wallet_file_name.display(),
     );
 
-    println!("{}", wallet_file_name.display());
-
     let wallet_file = match WalletFile::read_from_file(&wallet_file_name) {
         Ok(ws) => ws,
         Err(e) => {
-            eprintln!(
+            bail!(
                 "Could not open wallet file at {}. Got error: {e}",
                 wallet_file_name.to_string_lossy()
             );
-            return Ok(());
         }
     };
-    let wallet_entropy = wallet_file.entropy();
+    Ok(wallet_file.entropy())
+}
+
+/// Print the nth receiving address.
+///
+/// Read the wallet file directly; avoid going through the RPC interface of
+/// `neptune-core`.
+fn print_nth_receiving_address(
+    network: Network,
+    data_dir: Option<PathBuf>,
+    index: usize,
+) -> Result<()> {
+    let wallet_entropy = get_wallet_entropy(network, data_dir)?;
 
     let nth_spending_key = wallet_entropy.nth_generation_spending_key(index as u64);
     let nth_receiving_address = nth_spending_key.to_address();
@@ -1169,6 +1164,43 @@ fn get_nth_receiving_address(
 
     println!("{nth_address_as_string}");
     Ok(())
+}
+
+async fn find_index_of(
+    full_or_abbreviated_address: FullOrAbbreviatedAddress,
+    wallet_entropy: WalletEntropy,
+    network: Network,
+) -> Result<u64> {
+    let key_type = full_or_abbreviated_address.key_type();
+
+    for index in 0u64.. {
+        let nth_address = wallet_entropy.nth_receiving_address(index, key_type);
+        match &full_or_abbreviated_address {
+            FullOrAbbreviatedAddress::Full(receiving_address) => {
+                if receiving_address == &nth_address {
+                    println!("index: {index}");
+                    return Ok(index);
+                }
+            }
+            FullOrAbbreviatedAddress::Abbreviated(abb) => {
+                if abb.to_string(network) == nth_address.to_bech32m_abbreviated(network)?
+                    || abb.to_string(network)
+                        == nth_address.to_display_bech32m_abbreviated(network)?
+                {
+                    println!("index: {index}");
+                    return Ok(index);
+                }
+            }
+        }
+
+        if index.is_multiple_of(1000) && index != 0 {
+            println!("Tried indices [0:{index}], no match yet ...");
+        }
+
+        tokio::time::sleep(Duration::from_micros(250)).await;
+    }
+
+    bail!("unreachable");
 }
 
 // processes utxo-notifications in TxParams outputs, if any.

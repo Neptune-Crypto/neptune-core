@@ -20,6 +20,12 @@ pub mod wallet_file;
 pub(crate) mod wallet_state;
 pub mod wallet_status;
 
+/// Limits by how much a derivation index can be bumped at once.
+//
+// If this is a problem for you, and you got here, then these training
+// wheels are not for you. Happy sailing!
+pub const MAX_DERIVATION_INDEX_BUMP: u64 = 100_u64;
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

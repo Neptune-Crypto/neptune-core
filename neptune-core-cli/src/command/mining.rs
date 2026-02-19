@@ -21,8 +21,16 @@ pub(crate) enum MiningCommand {
         file: PathBuf,
     },
 
-    /// Reset coinbase distribution to reward own wallet
+    /// Reset coinbase distribution to reward own wallet, with amount specified
+    /// in CLI arguments.
     UnsetCoinbaseDistribution,
+
+    /// Broadcast a block proposal notification
+    BroadcastBlockProposal,
+
+    /// Upgrade the specified transaction. Transaction must be either unsynced
+    /// or not have a Single Proof for this to work.
+    Upgrade { tx_kernel_id: TransactionKernelId },
 
     /******** RegTest Mode ********/
     /// mine a series of blocks to the node's wallet. (regtest network only)
@@ -31,11 +39,4 @@ pub(crate) enum MiningCommand {
         #[clap(default_value = "1")]
         num_blocks: u32,
     },
-
-    /// Broadcast a block proposal notification
-    BroadcastBlockProposal,
-
-    /// Upgrade the specified transaction. Transaction must be either unsynced
-    /// or not have a Single Proof for this to work.
-    Upgrade { tx_kernel_id: TransactionKernelId },
 }
