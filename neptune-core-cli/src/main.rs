@@ -21,6 +21,7 @@ use clap::Parser;
 use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
+use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::application::config::network::Network;
@@ -478,7 +479,8 @@ async fn main() -> Result<()> {
         /******** READ STATE ********/
         Command::Wallet(WalletCommand::ListCoins) => {
             let list = client.list_own_coins(ctx, token).await??;
-            println!("{}", CoinWithPossibleTimeLock::report(&list));
+            let now = Timestamp::now();
+            println!("{}", CoinWithPossibleTimeLock::report(&list, now));
         }
         Command::Blockchain(BlockchainCommand::Network) => {
             // we already queried the network above.

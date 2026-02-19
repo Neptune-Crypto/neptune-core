@@ -8,12 +8,18 @@ use serde::Serialize;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
-/// An amount of Neptune coins, with confirmation timestamp and (if time-locked) its
-/// release date. For reporting purposes.
+/// An amount of Neptune coins, with confirmation timestamp and (if it has a
+/// time-lock) its release date.
+///
+/// For reporting purposes. Time-locks whose release dates are in the past are
+/// still set; they are only `None` if there never was a time-lock to begin
+/// with.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct CoinWithPossibleTimeLock {
     pub amount: NativeCurrencyAmount,
     pub confirmed: Timestamp,
+
+    /// The earliest time at which the UTXO can be spent.
     pub release_date: Option<Timestamp>,
 }
 
@@ -48,7 +54,7 @@ impl Display for CoinWithPossibleTimeLock {
 }
 
 impl CoinWithPossibleTimeLock {
-    pub fn report(coins: &[Self]) -> String {
+    pub fn report(coins: &[Self], now: Timestamp) -> String {
         let confirmed_total_length = 25;
         let release_total_length = 25;
         let amount_total_length = 15;
@@ -69,7 +75,7 @@ impl CoinWithPossibleTimeLock {
         let mut result = format!("# coins available\n{heading_without_release}\n");
         result = format!("{result}{}\n", "-".repeat(total_length));
         for coin in coins {
-            if coin.release_date.is_some() {
+            if coin.release_date.is_some_and(|rd| rd >= now) {
                 continue;
             }
             result = format!("{result}{coin}\n");
@@ -79,7 +85,7 @@ impl CoinWithPossibleTimeLock {
         let mut result = format!("{result}# time-locked coins\n{heading_with_release}\n");
         result = format!("{result}{}\n", "-".repeat(total_length));
         for coin in coins {
-            if coin.release_date.is_none() {
+            if coin.release_date.is_none_or(|rd| rd < now) {
                 continue;
             }
             result = format!("{result}{coin}\n");
@@ -88,14 +94,14 @@ impl CoinWithPossibleTimeLock {
 
         let total_available = coins
             .iter()
-            .filter(|c| c.release_date.is_none())
+            .filter(|c| c.release_date.is_none_or(|rd| rd < now))
             .map(|c| c.amount)
             .sum::<NativeCurrencyAmount>();
         result = format!("{result}total available: {total_available} NPT\n");
 
         let total_timelocked = coins
             .iter()
-            .filter(|c| c.release_date.is_some())
+            .filter(|c| c.release_date.is_some_and(|rd| rd >= now))
             .map(|c| c.amount)
             .sum::<NativeCurrencyAmount>();
         if !total_timelocked.is_zero() {
@@ -142,6 +148,8 @@ mod tests {
             coins.push(coin);
         }
 
-        println!("{}", CoinWithPossibleTimeLock::report(&coins));
+        let now = Timestamp::now();
+
+        println!("{}", CoinWithPossibleTimeLock::report(&coins, now));
     }
 }
