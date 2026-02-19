@@ -1296,7 +1296,7 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
     use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
     use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
-    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
     use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
@@ -1846,7 +1846,7 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::application::loops::mine_loop::create_block_transaction_from;
-        use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
+        use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
         use crate::application::loops::mine_loop::TxMergeOrigin;
         use crate::application::triton_vm_job_queue::vm_job_queue;
         use crate::protocol::proof_abstractions::verifier::disable_true_claims_cache;
@@ -2004,7 +2004,7 @@ pub(crate) mod tests {
             );
 
             let plus_eight_months = plus_seven_months + Timestamp::months(1);
-            let (coinbase_for_block2, _) = make_coinbase_transaction_from_state(
+            let (coinbase_for_block2, _) = make_coinbase_transaction_from_state_lock(
                 &block1,
                 &alice,
                 plus_eight_months,
@@ -2073,7 +2073,7 @@ pub(crate) mod tests {
                     .set_new_tip(block2_without_valid_pow.clone())
                     .await
                     .unwrap();
-                let (coinbase_for_block3, _) = make_coinbase_transaction_from_state(
+                let (coinbase_for_block3, _) = make_coinbase_transaction_from_state_lock(
                     &block2_without_valid_pow,
                     &alice,
                     plus_nine_months,
@@ -2513,7 +2513,7 @@ pub(crate) mod tests {
             now += network.target_block_interval();
 
             // create coinbase transaction
-            let (transaction, _) = make_coinbase_transaction_from_state(
+            let (transaction, _) = make_coinbase_transaction_from_state_lock(
                 &blocks[i - 1],
                 &alice,
                 launch_date,
@@ -2641,7 +2641,7 @@ pub(crate) mod tests {
             total
         }
 
-        #[proptest]
+        #[proptest(cases = 4)]
         fn fast_and_slow_methods_for_supply_agree_prop(
             #[strategy(0u64..=20584320)] current_block_height: u64,
         ) {

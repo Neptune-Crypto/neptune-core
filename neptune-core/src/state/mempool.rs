@@ -1370,7 +1370,7 @@ mod tests {
     use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
     use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
     use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
-    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -2146,7 +2146,7 @@ mod tests {
         }
 
         // Create next block which includes Bob's, but not Alice's, transaction.
-        let (coinbase_transaction, _expected_utxo) = make_coinbase_transaction_from_state(
+        let (coinbase_transaction, _expected_utxo) = make_coinbase_transaction_from_state_lock(
             &bob.global_state_lock
                 .lock_guard()
                 .await
@@ -2215,7 +2215,7 @@ mod tests {
         tx_by_alice_updated =
             mempool.get_transactions_for_block_composition(usize::MAX, None)[0].clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
-        let (cbtx, _eutxo) = make_coinbase_transaction_from_state(
+        let (cbtx, _eutxo) = make_coinbase_transaction_from_state_lock(
             &alice
                 .global_state_lock
                 .lock_guard()

@@ -12,207 +12,146 @@ fn main() {
     divan::main();
 }
 
-mod resync_membership_proofs {
+mod wallet_state {
+    use neptune_cash::state::GlobalState;
+    use neptune_cash::state::GlobalStateLock;
+
     use super::*;
 
-    mod sync_200_msmps_over_10_blocks {
+    async fn next_block(global_state: &mut GlobalState, num_outputs_in_tx: usize) -> Block {
+        let own_address = global_state
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await
+            .to_address();
+        let prev = global_state.chain.light_state().clone();
+        let timestamp = prev.header().timestamp + Timestamp::months(7);
+        let (block, _) = next_block_incoming_utxos(
+            &prev,
+            own_address.clone(),
+            num_outputs_in_tx,
+            global_state,
+            timestamp,
+            UtxoNotificationMedium::OnChain,
+        )
+        .await;
 
-        use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
-
-        use super::*;
-
-        fn resync_msmps(bencher: Bencher) {
-            // Start a fork with a LUCA of block height 1.
-            // Each fork has length 10 and contain many UTXOs for the wallet.
-            // The benchmark measures how long it takes to resync the mutator
-            // set membership proofs from the tip of one fork to the other.
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let network = Network::Main;
-            let cli_args = cli_args::Args::default_with_network(network);
-            let mut global_state_lock = rt.block_on(devops_global_state_genesis(cli_args));
-
-            let genesis = Block::genesis(network);
-            let own_address = rt
-                .block_on(
-                    rt.block_on(global_state_lock.lock_guard_mut())
-                        .wallet_state
-                        .next_unused_spending_key(KeyType::Generation),
-                )
-                .to_address();
-
-            let block1_timestamp = genesis.header().timestamp + Timestamp::months(7);
-            let (block1, _) = rt.block_on(next_block_incoming_utxos(
-                &genesis,
-                own_address.clone(),
-                10,
-                &rt.block_on(global_state_lock.lock_guard()).wallet_state,
-                block1_timestamp,
-                network,
-                UtxoNotificationMedium::OnChain,
-            ));
-            rt.block_on(global_state_lock.set_new_tip(block1.clone()))
-                .unwrap();
-
-            let mut block_a_tip = None;
-            for j in 0..=1 {
-                let mut block = block1.clone();
-                for i in 0..=10 {
-                    if i == 0 && j == 1 {
-                        // Sync membership proofs to ensure we can create
-                        // transactions on the 2nd fork.
-                        rt.block_on(global_state_lock.set_new_tip(block1.clone()))
-                            .unwrap();
-                        rt.block_on(async {
-                            global_state_lock
-                                .lock_guard_mut()
-                                .await
-                                .resync_membership_proofs()
-                                .await
-                                .unwrap()
-                        });
-                    }
-
-                    // Different block times on each fork to ensure the forks
-                    // contain distinct blocks.
-                    let block_time = block.header().timestamp + Timestamp::hours(1 + j);
-                    let (next_block, _) = rt.block_on(next_block_incoming_utxos(
-                        &block,
-                        own_address.clone(),
-                        10,
-                        &rt.block_on(global_state_lock.lock_guard()).wallet_state,
-                        block_time,
-                        network,
-                        UtxoNotificationMedium::OnChain,
-                    ));
-                    rt.block_on(global_state_lock.set_new_tip(next_block.clone()))
-                        .unwrap();
-                    block = next_block;
-                }
-                if j == 0 {
-                    block_a_tip = Some(block);
-                }
-            }
-
-            // Force MSMPs to become unsynced, such that we can resync them and
-            // benchmark how long that takes.
-            rt.block_on(global_state_lock.set_new_tip(block_a_tip.unwrap()))
-                .unwrap();
-            let mut global_state = rt.block_on(global_state_lock.lock_guard_mut());
-            bencher.bench_local(|| {
-                rt.block_on(async { global_state.resync_membership_proofs().await.unwrap() });
-            });
-        }
-
-        #[divan::bench(sample_count = 10)]
-        fn resync_msmps_bench(bencher: Bencher) {
-            resync_msmps(bencher);
-        }
+        block
     }
-}
 
-mod maintain_membership_proofs {
-    use super::*;
+    async fn setup<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
+    ) -> (GlobalStateLock, [Block; NUM_BLOCKS]) {
+        // The goal is to benchmark various parts of state updating or reading
+        // when the blocks have many inputs and outputs. To build a block with
+        // many inputs, we first need to get the wallet to a state where it has
+        // many UTXOs.
 
-    /// Maintain membership proofs, while receiving additional UTXOs.
-    mod maintain_msmps {
+        let network = Network::Main;
+        let cli_args = cli_args::Args::default_with_network(network);
+        let genesis = Block::genesis(network);
+        let mut blocks = vec![genesis];
 
-        use super::*;
+        let mut global_state = devops_global_state_genesis(cli_args).await;
+        {
+            let mut global_state = global_state.lock_guard_mut().await;
+            for _ in 0..NUM_BLOCKS {
+                let block = next_block(&mut global_state, NUM_OUTPUTS_PER_TX).await;
+                global_state.set_new_tip(block.clone()).await.unwrap();
 
-        fn update_wallet_with_block2<
-            const NUM_UTXOS_MAINTAINED: usize,
-            const NUM_NEW_UTXOS: usize,
-        >(
-            bencher: Bencher,
-            maintain_msmps_from_block_data: bool,
-            update_msmps: bool,
-        ) {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let network = Network::Main;
-            let cli_args = cli_args::Args::default_with_network(network);
-            let mut global_state_lock = rt.block_on(devops_global_state_genesis(cli_args));
-            let mut global_state = rt.block_on(global_state_lock.lock_guard_mut());
+                blocks.push(block);
+            }
+        }
 
-            let genesis = Block::genesis(network);
-            let own_address = rt
-                .block_on(
-                    global_state
-                        .wallet_state
-                        .next_unused_spending_key(KeyType::Generation),
-                )
-                .to_address();
-            let block1_time = Network::Main.launch_date() + Timestamp::months(7);
-            let (block1, _) = rt.block_on(next_block_incoming_utxos(
-                &genesis,
-                own_address.clone(),
-                NUM_UTXOS_MAINTAINED,
-                &global_state.wallet_state,
-                block1_time,
-                network,
-                UtxoNotificationMedium::OnChain,
-            ));
+        (global_state, blocks[1..].to_vec().try_into().unwrap())
+    }
 
-            rt.block_on(global_state.set_new_tip(block1.clone()))
+    fn wallet_history<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(bencher: Bencher) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let state = rt.block_on(global_state.lock_guard_mut());
+
+        bencher.bench_local(|| {
+            let _history = rt.block_on(state.get_balance_history());
+        });
+    }
+
+    fn wallet_status_for_tip<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
+        bencher: Bencher,
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let state = rt.block_on(global_state.lock_guard_mut());
+
+        bencher.bench_local(|| {
+            let _spandable_inputs = rt.block_on(state.get_wallet_status_for_tip());
+        });
+    }
+
+    fn spendable_inputs<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
+        bencher: Bencher,
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, blocks) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let state = rt.block_on(global_state.lock_guard_mut());
+
+        let timestamp = blocks.last().unwrap().header().timestamp;
+        bencher.bench_local(|| {
+            let _spandable_inputs = rt.block_on(state.wallet_spendable_inputs(timestamp));
+        });
+    }
+
+    fn coins_with_possible_timelocks<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(
+        bencher: Bencher,
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let state = rt.block_on(global_state.lock_guard_mut());
+
+        bencher.bench_local(|| {
+            let _coins_list = rt.block_on(state.coins_with_possible_timelocks());
+        });
+    }
+
+    fn set_new_tip<const NUM_OUTPUTS_PER_TX: usize, const NUM_BLOCKS: usize>(bencher: Bencher) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+
+        let mut global_state = rt.block_on(global_state.lock_guard_mut());
+
+        let next_block = rt.block_on(next_block(&mut global_state, NUM_OUTPUTS_PER_TX));
+
+        bencher.bench_local(|| {
+            rt.block_on(global_state.set_new_tip(next_block.clone()))
                 .unwrap();
+        });
+    }
 
-            let block2_time = block1_time + Timestamp::hours(1);
-            let (block2, _) = rt.block_on(next_block_incoming_utxos(
-                &block1,
-                own_address,
-                NUM_NEW_UTXOS,
-                &global_state.wallet_state,
-                block2_time,
-                network,
-                UtxoNotificationMedium::OnChain,
-            ));
+    #[divan::bench(sample_count = 10)]
+    fn set_new_tip_1000_4(bencher: Bencher) {
+        set_new_tip::<1000, 4>(bencher);
+    }
 
-            // update the mutator set with the UTXOs from this block
-            rt.block_on(
-                global_state
-                    .chain
-                    .archival_state_mut()
-                    .update_mutator_set(&block2),
-            )
-            .unwrap();
-            *global_state.chain.light_state_mut() = std::sync::Arc::new(block2.clone());
+    #[divan::bench(sample_count = 10)]
+    fn wallet_history_1000_4(bencher: Bencher) {
+        wallet_history::<1000, 4>(bencher);
+    }
 
-            bencher.bench_local(|| {
-                rt.block_on(async {
-                    global_state
-                        .wallet_state
-                        .update_wallet_state_with_new_block(
-                            &block1.mutator_set_accumulator_after().unwrap(),
-                            &block2,
-                            maintain_msmps_from_block_data,
-                        )
-                        .await;
+    #[divan::bench(sample_count = 10)]
+    fn wallet_status_for_tip_1000_4(bencher: Bencher) {
+        wallet_status_for_tip::<1000, 4>(bencher);
+    }
 
-                    if update_msmps {
-                        global_state
-                            .restore_monitored_utxos_from_archival_mutator_set()
-                            .await
-                    }
-                });
-            });
-        }
+    #[divan::bench(sample_count = 10)]
+    fn spendable_inputs_1000_4(bencher: Bencher) {
+        spendable_inputs::<1000, 4>(bencher);
+    }
 
-        #[divan::bench(sample_count = 10)]
-        fn apply_block2_maintain_msmps_400_10(bencher: Bencher) {
-            update_wallet_with_block2::<400, 10>(bencher, true, true);
-        }
-
-        #[divan::bench(sample_count = 10)]
-        fn apply_block2_no_maintain_msmps_400_10(bencher: Bencher) {
-            update_wallet_with_block2::<400, 10>(bencher, false, true);
-        }
-
-        #[divan::bench(sample_count = 10)]
-        fn apply_block2_no_maintain_msmps_1000_10_no_msmp_update(bencher: Bencher) {
-            update_wallet_with_block2::<1000, 10>(bencher, false, false);
-        }
-
-        #[divan::bench(sample_count = 10)]
-        fn apply_block2_no_maintain_msmps_1000_10_with_msmp_update(bencher: Bencher) {
-            update_wallet_with_block2::<1000, 10>(bencher, false, true);
-        }
+    #[divan::bench(sample_count = 10)]
+    fn coins_with_possible_timelocks_1000_4(bencher: Bencher) {
+        coins_with_possible_timelocks::<1000, 4>(bencher);
     }
 }

@@ -519,6 +519,7 @@ where
     /// Returns true iff all indices in the absolute index set are set.
     ///
     /// Returns false if any index is a future index.
+    #[inline]
     pub async fn absolute_index_set_was_applied(&self, absolute_indices: AbsoluteIndexSet) -> bool {
         let batch_index = self.get_batch_index_async().await;
         let active_window_start = batch_index * u128::from(CHUNK_SIZE);
@@ -560,6 +561,7 @@ where
 
     /// The number of times the active window has slid. Equal to the number of
     /// leafs in the inactive part of the sliding-window Bloom filter.
+    #[inline]
     pub async fn get_batch_index_async(&self) -> u128 {
         u128::from(self.aocl.num_leafs().await.saturating_sub(1)) / u128::from(BATCH_SIZE)
     }

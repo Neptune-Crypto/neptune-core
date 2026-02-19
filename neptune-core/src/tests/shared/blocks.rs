@@ -113,6 +113,29 @@ pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block
     child
 }
 
+/// Return a block with the specified puts, along with randomized
+/// composer rewards.
+pub(crate) async fn block_with_puts(
+    network: Network,
+    predecessor: &Block,
+    outputs: Vec<AdditionRecord>,
+    inputs: Vec<RemovalRecord>,
+) -> Block {
+    let mut rng = rand::rng();
+    let (block, _) = make_mock_block_with_inputs_and_outputs(
+        predecessor,
+        inputs,
+        outputs,
+        None,
+        GenerationSpendingKey::derive_from_seed(rng.random()),
+        rng.random(),
+        network,
+    )
+    .await;
+
+    block
+}
+
 /// Create an invalid block with the provided transaction kernel, using the
 /// provided mutator set as the predessor block's mutator set. Invalid block in
 /// most ways you can think of but the mutator set evolution is consistent.

@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::fmt::Display;
 
 use itertools::Itertools;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
@@ -30,7 +31,9 @@ use crate::util_types::mutator_set::removal_record::absolute_index_set::Absolute
 pub struct MonitoredUtxo {
     pub utxo: Utxo,
 
-    /// The AOCL leaf index that the monitored UTXO pertains to.
+    /// The AOCL leaf index that the monitored UTXO pertains to. This is the
+    /// MMR leaf index in the AOCL that contains all historical transaction
+    /// outputs.
     pub aocl_leaf_index: u64,
 
     /// The sender's randomness.
@@ -39,18 +42,20 @@ pub struct MonitoredUtxo {
     /// The preimage of the receiver digest.
     pub receiver_preimage: Digest,
 
-    /// Mapping from block digest to membership proof. The struct is assumed
-    /// to have at least one membership proof, and all its AOCL indices are
-    /// assumed to be the same. AOCL index, sender randomness, and receiver
-    /// preimage must agree across all instances for this struct.
+    /// Mapping from block digest to membership proof. Only non-archival nodes
+    /// should maintain membership proofs, as archival nodes can simply generate
+    /// them on-demand when needed.
     pub blockhash_to_membership_proof: VecDeque<(Digest, MsMembershipProof)>,
 
+    /// The number of membership proofs maintained per monitored UTXO. Should be
+    /// 0 for all archival nodes.
     pub number_of_mps_per_utxo: usize,
 
-    /// hash of the block, if any, in which this UTXO was spent
+    /// Hash and other metadata of the block, if any, in which this UTXO was
+    /// spent.
     pub spent_in_block: Option<(Digest, Timestamp, BlockHeight)>,
 
-    /// hash of the block in which this UTXO was confirmed
+    /// Hash and other metadata of the block in which this UTXO was confirmed.
     pub confirmed_in_block: (Digest, Timestamp, BlockHeight),
 
     /// Indicator used to mark the UTXO as belonging to an abandoned fork
@@ -166,6 +171,9 @@ impl MonitoredUtxo {
 
     /// Determine whether the attached membership proof is synced to the given
     /// block.
+    ///
+    /// Is only relevant for non-archival nodes as archival nodes can get their
+    /// membership proofs from the archival mutator set.
     pub fn is_synced_to(&self, block_hash: Digest) -> bool {
         self.get_membership_proof_for_block(block_hash).is_some()
     }
@@ -184,8 +192,15 @@ impl MonitoredUtxo {
             return;
         }
 
-        while self.blockhash_to_membership_proof.len() >= self.number_of_mps_per_utxo {
+        while self.blockhash_to_membership_proof.len() >= self.number_of_mps_per_utxo
+            && !self.blockhash_to_membership_proof.is_empty()
+        {
             self.blockhash_to_membership_proof.pop_back();
+        }
+
+        // Ensure *no* MSMP is stored if max length is zero
+        if self.number_of_mps_per_utxo.is_zero() {
+            return;
         }
 
         self.blockhash_to_membership_proof

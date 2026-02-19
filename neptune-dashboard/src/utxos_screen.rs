@@ -4,10 +4,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crate::dashboard_app::DashboardEvent;
-use crate::dashboard_rpc_client::DashboardRpcClient;
-use crate::screen::Screen;
-use crate::scrollable_table::ScrollableTable;
 use crossterm::event::Event;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
@@ -30,6 +26,11 @@ use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use unicode_width::UnicodeWidthStr;
+
+use crate::dashboard_app::DashboardEvent;
+use crate::dashboard_rpc_client::DashboardRpcClient;
+use crate::screen::Screen;
+use crate::scrollable_table::ScrollableTable;
 
 #[derive(Debug, Clone)]
 pub struct UtxosScreen {

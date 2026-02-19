@@ -462,8 +462,9 @@ pub struct Args {
     #[structopt(long, default_value = "main", short)]
     pub network: Network,
 
-    /// Max number of membership proofs stored per owned UTXO
-    #[structopt(long, default_value = "3")]
+    /// Max number of membership proofs stored per owned UTXO. Archival nodes
+    /// do not need to store membership proofs.
+    #[structopt(long, default_value = "0")]
     pub(crate) number_of_mps_per_utxo: usize,
 
     /// Configure how complicated proofs this machine is capable of producing.
