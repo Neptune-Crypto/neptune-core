@@ -105,8 +105,10 @@ pub struct ArchivalState {
     pub archival_block_mmr: RustyArchivalBlockMmr,
 
     /// Mapping from block digest to a list of (flag, receiver_id) pairs for all
-    /// announcement in the block. This index is only maintained if the node has
-    /// been started with the CLI flag `--utxo-index`.
+    /// announcement in the block, and other indexing data related to historical
+    /// blocks. This index is only maintained if the node has been started with
+    /// the CLI flag `--utxo-index`, which implies that this value is Some(T).
+    /// If the node is not started with this flag, this value is `None`.
     pub(crate) utxo_index: Option<RustyUtxoIndex>,
 
     /// The network that this node is on. Used to simplify method interfaces.

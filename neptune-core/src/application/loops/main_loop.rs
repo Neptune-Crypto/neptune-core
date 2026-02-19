@@ -2032,10 +2032,15 @@ impl MainLoopHandler {
                 let mut global_state_lock = self.global_state_lock.clone();
                 tokio::task::spawn(async move {
                     let mut state = global_state_lock.lock_guard_mut().await;
-                    let _ = state.rescan_announced_incoming(keys, first, last).await;
-                    state
-                        .restore_monitored_utxos_from_archival_mutator_set()
-                        .await;
+                    let res = state.rescan_announced_incoming(keys, first, last).await;
+                    match res {
+                        Ok(_) => {
+                            state
+                                .restore_monitored_utxos_from_archival_mutator_set()
+                                .await
+                        }
+                        Err(err) => error!("{err}"),
+                    }
                 });
 
                 Ok(false)

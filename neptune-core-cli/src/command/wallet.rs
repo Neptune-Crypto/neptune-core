@@ -139,17 +139,22 @@ pub(crate) enum WalletCommand {
         network: Network,
     },
 
-    /// Get the current key derivation index for the given key type.
+    /// Get the derivation index of the most recently generated address, of this
+    /// key type.
     GetDerivationIndex { key_type: KeyType },
 
     /// Set the derivation index for the given key type to the given value.
+    ///
+    /// All addresses derived between the current value and the new value
+    /// (inclusive) will be added to the wallet's list of monitored addresses.
+    /// However, historical blocks are *not* automatically rescanned.
     SetDerivationIndex {
         key_type: KeyType,
         derivation_index: u64,
     },
 
-    /// Given a receiving address derived by this wallet, find the associated
-    /// derivation index.
+    /// Given a receiving address derived from this wallet's seed, find the
+    /// associated derivation index.
     ///
     /// This command does not require a connection to neptune-core; it reads the
     /// wallet directly. Also, this command iterates until a match is found;

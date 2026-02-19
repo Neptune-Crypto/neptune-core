@@ -788,13 +788,10 @@ impl WalletState {
     ///
     /// This function verifies that the announced UTXOs are actually present in
     /// the transaction kernel outputs. Otherwise they are not returned.
-    pub(crate) fn scan_block_for_utxos_announced_to_given_keys<'a, SpendingKeyIterator>(
+    fn scan_block_for_utxos_announced_to_given_keys(
         tx_kernel: &TransactionKernel,
-        keys: SpendingKeyIterator,
-    ) -> HashSet<(AdditionRecord, IncomingUtxo)>
-    where
-        SpendingKeyIterator: IntoIterator<Item = &'a SpendingKey>,
-    {
+        keys: HashSet<&SpendingKey>,
+    ) -> HashSet<(AdditionRecord, IncomingUtxo)> {
         keys.into_iter()
             .flat_map(|key| {
                 key.scan_for_announced_utxos(tx_kernel)
@@ -1870,14 +1867,11 @@ impl WalletState {
     ///
     /// Appraise the wallet of all *new* UTXOs, and return all new UTXOs in the
     /// block announced to any of the given keys.
-    pub(crate) async fn rescan_block_for_announced_incoming<'a, SpendingKeyIterator>(
+    pub(crate) async fn rescan_block_for_announced_incoming(
         &mut self,
         block: &Block,
-        keys: SpendingKeyIterator,
-    ) -> Result<Vec<IncomingUtxoRecoveryData>>
-    where
-        SpendingKeyIterator: IntoIterator<Item = &'a SpendingKey>,
-    {
+        keys: HashSet<&SpendingKey>,
+    ) -> Result<()> {
         debug!(
             "Re-scanning block {:x} for UTXOs bound to any own keys.",
             block.hash(),
@@ -1893,7 +1887,7 @@ impl WalletState {
         // Return early if no UTXOs were found.
         if incoming_utxos.is_empty() {
             debug!("No incoming UTXOs were found in block {block_height} / {block_hash:x}",);
-            return Ok(vec![]);
+            return Ok(());
         }
         let num_incoming_utxos = incoming_utxos.len();
         debug!(
@@ -1918,7 +1912,7 @@ impl WalletState {
 
         // Return early if no UTXOs are left.
         if incoming_hashmap.is_empty() {
-            return Ok(vec![]);
+            return Ok(());
         }
 
         // Modify existing `MonitoredUtxo`s or insert new entries.
@@ -1946,7 +1940,7 @@ impl WalletState {
         // adding them will not result in duplicates.
 
         // Write UTXO-recovery data (incoming randomness) to disk.
-        info!(
+        debug!(
             "Storing recovery data for {} new incoming UTXOs to disk.",
             recovery_list.len()
         );
@@ -1954,7 +1948,7 @@ impl WalletState {
             self.store_utxo_ms_recovery_data(item).await?;
         }
 
-        Ok(recovery_list)
+        Ok(())
     }
 
     /// writes prepared utxo claim data to disk
