@@ -77,9 +77,11 @@ pub(crate) enum WalletCommand {
     ///
     /// If for whatever reason something goes wrong in the course of scanning
     /// blocks for incoming or outgoing UTXOs, some input or output may be
-    /// missed and the wallet will report a incorrect balance as a result. In
+    /// missed and the wallet will report an incorrect balance as a result. In
     /// this case, this family of commands can be used to force the node to look
-    /// again at a specific block or block range.
+    /// again at a specific block or block range. This command is especially
+    /// useful if the wallet was not aware of all derived keys when the block
+    /// was first processed.
     ///
     /// The first block height of the range is mandatory. The last block height
     /// is optional: if not set, the range will contain just the one block.
