@@ -1648,7 +1648,7 @@ impl WalletState {
     /// # Return Value
     ///
     ///  - A vector of `IncomingUtxoRecoveryData` for all new incoming UTXOs.
-    pub(crate) async fn process_outputs_no_maintain_mps(
+    async fn process_outputs_no_maintain_mps(
         &mut self,
         block: &Block,
         incoming: &HashMap<AdditionRecord, IncomingUtxo>,
@@ -1860,8 +1860,8 @@ impl WalletState {
 
     /// Rescan the given block for UTXOs announced to the given keys.
     ///
-    /// Appraise the wallet of all *new* UTXOs, and return all new UTXOs in the
-    /// block announced to any of the given keys.
+    /// Appraise the wallet of all *new* UTXOs, i.e. UTXOs that were not
+    /// previously known to the wallet.
     pub(crate) async fn rescan_block_for_announced_incoming(
         &mut self,
         block: &Block,

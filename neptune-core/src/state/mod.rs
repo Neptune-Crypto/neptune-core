@@ -1258,8 +1258,9 @@ impl GlobalState {
     }
 
     /// Rescan the specified (inclusive) range of blocks for incoming UTXOs that
-    /// were announced on-chain, for the specified list of spending keys. Only
-    /// works for nodes that maintain a UTXO index.
+    /// were announced on-chain, for the specified list of spending keys.
+    ///
+    /// Fast if node maintains a UTXO index, otherwise potentially slow.
     ///
     /// # Panics
     /// - If start block height is greater than end block height
