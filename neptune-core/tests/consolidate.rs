@@ -159,6 +159,20 @@ pub async fn consolidation_basic() {
         .await
         .unwrap();
 
+    // Block contains 3 announcements: 2 for the composer UTXOs and one for the
+    // consolidation.
+    let num_announcements_observed = alice
+        .gsl
+        .lock_guard()
+        .await
+        .chain
+        .light_state()
+        .body()
+        .transaction_kernel()
+        .announcements
+        .len();
+    assert_eq!(3, num_announcements_observed);
+
     // alice checks that confirmed and unconfirmed balances are equal.
     let alice_balances_after_confirmed = alice.gsl.api().wallet().balances(Timestamp::now()).await;
     println!(

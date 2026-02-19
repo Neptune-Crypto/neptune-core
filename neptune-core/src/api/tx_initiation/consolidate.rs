@@ -10,9 +10,11 @@ use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::TxInputList;
 use crate::api::export::TxProvingCapability;
+use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::api::tx_initiation::error::CreateTxError;
 use crate::api::tx_initiation::error::SendError;
 use crate::api::tx_initiation::initiator::TransactionInitiator;
+use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 
 pub const CONSOLIDATION_FEE_PC: NativeCurrencyAmount =
     NativeCurrencyAmount::from_nau(NativeCurrencyAmount::coin_as_nau() / 10);
@@ -75,8 +77,10 @@ impl TransactionInitiator {
             });
         };
 
-        let outputs = self
-            .generate_tx_outputs(vec![(receiving_address, output_amount)])
+        let outputs = TxOutputListBuilder::new()
+            .owned_utxo_notification_medium(UtxoNotificationMedium::OnChain)
+            .outputs(vec![(receiving_address, output_amount)])
+            .build(&self.global_state_lock.clone().into())
             .await;
 
         let tx_details = self
