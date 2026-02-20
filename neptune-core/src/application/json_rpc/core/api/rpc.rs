@@ -406,13 +406,8 @@ pub trait RpcApi: Sync + Send {
         request: RescanExpectedRequest,
     ) -> RpcResult<RescanExpectedResponse>;
 
-    async fn rescan_outgoing(
-        &self,
-        first: RpcBlockHeight,
-        last: RpcBlockHeight,
-    ) -> RpcResult<RescanOutgoingResponse> {
-        self.rescan_outgoing_call(RescanOutgoingRequest { first, last })
-            .await
+    async fn rescan_outgoing(&self) -> RpcResult<RescanOutgoingResponse> {
+        self.rescan_outgoing_call(RescanOutgoingRequest {}).await
     }
 
     async fn rescan_outgoing_call(

@@ -36,14 +36,13 @@ pub(crate) enum RescanQuarry {
     /// is optional: if not set, the range will contain just the one block.
     Expected { first: u64, last: Option<u64> },
 
-    /// Rescan the range of blocks for spent UTXOs.
+    /// Rescan all monitored UTXOs for expenditures.
     ///
-    /// Useful to rebuild transaction history. This command requires the node
-    /// to maintain a UTXO index.
-    ///
-    /// The first block height of the range is mandatory. The last block height
-    /// is optional: if not set, the range will contain just the one block.
-    Outgoing { first: u64, last: Option<u64> },
+    /// Can be used to rebuild a transaction history if the node maintains a
+    /// UTXO index. If expenditures are observed but no UTXO index is maintained
+    /// the monitored UTXO is marked as spent without information of when it was
+    /// spent.
+    Outgoing,
 
     /// Rescan the range of blocks for guesser rewards.
     ///

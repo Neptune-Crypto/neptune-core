@@ -61,7 +61,7 @@ impl From<&UnlockedUtxo> for StrongUtxoKey {
 ///  [migrate_db](super::migrate_db).
 ///
 /// note: the very first schema version was 0, ie u16::default()
-pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 2;
+pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 3;
 
 /// represents logical "tables" in the Wallet database as used by `DbtSchema`.
 ///

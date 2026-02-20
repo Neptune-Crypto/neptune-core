@@ -827,12 +827,9 @@ async fn main() -> Result<()> {
             println!("Rescan started. Please check application log for progress.");
         }
         Command::Wallet(WalletCommand::Rescan {
-            quarry: RescanQuarry::Outgoing { first, last },
+            quarry: RescanQuarry::Outgoing,
         }) => {
-            let range_end = last.unwrap_or(first);
-            client
-                .rescan_outgoing(ctx, token, first.into(), range_end.into())
-                .await??;
+            client.rescan_outgoing(ctx, token).await??;
             println!("Rescan started. Please check application log for progress.");
         }
         Command::Wallet(WalletCommand::Rescan {

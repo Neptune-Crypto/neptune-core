@@ -608,23 +608,9 @@ impl RpcApi for RpcServer {
 
     async fn rescan_outgoing_call(
         &self,
-        request: RescanOutgoingRequest,
+        _request: RescanOutgoingRequest,
     ) -> RpcResult<RescanOutgoingResponse> {
-        if request.first > request.last {
-            return Err(RpcError::BlockRangeError);
-        }
-
-        if !self.state.cli().utxo_index {
-            return Err(RpcError::UtxoIndexNotPresent);
-        }
-
-        let _ = self
-            .to_main_tx
-            .send(RPCServerToMain::RescanOutgoing {
-                first: request.first,
-                last: request.last,
-            })
-            .await;
+        let _ = self.to_main_tx.send(RPCServerToMain::RescanOutgoing).await;
 
         Ok(RescanOutgoingResponse {})
     }

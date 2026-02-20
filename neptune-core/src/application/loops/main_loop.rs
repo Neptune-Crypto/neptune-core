@@ -2033,13 +2033,17 @@ impl MainLoopHandler {
                 tokio::task::spawn(async move {
                     let mut state = global_state_lock.lock_guard_mut().await;
                     let res = state.rescan_announced_incoming(keys, first, last).await;
-                    match res {
-                        Ok(_) => {
-                            state
-                                .restore_monitored_utxos_from_archival_mutator_set()
-                                .await
-                        }
-                        Err(err) => error!("{err}"),
+
+                    if let Err(err) = res {
+                        error!("{err}");
+                    }
+
+                    // Scan for expenditures to ensure wallet doesn't
+                    // erroneously count some new UTXOs as unspent.
+                    let res_outgoing = state.rescan_outgoing().await;
+
+                    if let Err(err) = res_outgoing {
+                        error!("{err}");
                     }
                 });
 
@@ -2056,15 +2060,20 @@ impl MainLoopHandler {
                 tokio::task::spawn(async move {
                     let mut state = global_state_lock.lock_guard_mut().await;
                     let _ = state.rescan_expected_incoming(first, last).await;
-                    state
-                        .restore_monitored_utxos_from_archival_mutator_set()
-                        .await;
+
+                    // Scan for expenditures to ensure wallet doesn't
+                    // erroneously count some new UTXOs as unspent.
+                    let res_outgoing = state.rescan_outgoing().await;
+
+                    if let Err(err) = res_outgoing {
+                        error!("{err}");
+                    }
                 });
 
                 Ok(false)
             }
-            RPCServerToMain::RescanOutgoing { first, last } => {
-                info!("Rescanning block range {first}..={last} for spent UTXOs");
+            RPCServerToMain::RescanOutgoing => {
+                info!("Rescanning all monitored UTXOs for spent UTXOs");
 
                 // Holds a write-lock over global state, so problematic if it
                 // takes too long.
@@ -2073,10 +2082,11 @@ impl MainLoopHandler {
                 let mut global_state_lock = self.global_state_lock.clone();
                 tokio::task::spawn(async move {
                     let mut state = global_state_lock.lock_guard_mut().await;
-                    let _ = state.rescan_outgoing(first, last).await;
-                    state
-                        .restore_monitored_utxos_from_archival_mutator_set()
-                        .await;
+                    let res = state.rescan_outgoing().await;
+
+                    if let Err(err) = res {
+                        error!("{err}");
+                    }
                 });
 
                 Ok(false)
@@ -2092,9 +2102,14 @@ impl MainLoopHandler {
                 tokio::task::spawn(async move {
                     let mut state = global_state_lock.lock_guard_mut().await;
                     let _ = state.rescan_guesser_rewards(first, last).await;
-                    state
-                        .restore_monitored_utxos_from_archival_mutator_set()
-                        .await;
+
+                    // Scan for expenditures to ensure wallet doesn't
+                    // erroneously count some new UTXOs as unspent.
+                    let res_outgoing = state.rescan_outgoing().await;
+
+                    if let Err(err) = res_outgoing {
+                        error!("{err}");
+                    }
                 });
 
                 Ok(false)

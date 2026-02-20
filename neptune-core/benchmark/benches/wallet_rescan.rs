@@ -107,9 +107,7 @@ mod rescan {
             RescanOperation::Expected => {
                 rt.block_on(global_state.rescan_expected_incoming(first, last))
             }
-            RescanOperation::Outgoing => rt
-                .block_on(global_state.rescan_outgoing(first, last))
-                .unwrap(),
+            RescanOperation::Outgoing => rt.block_on(global_state.rescan_outgoing()).unwrap(),
         });
     }
 
