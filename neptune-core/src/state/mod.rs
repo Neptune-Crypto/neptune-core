@@ -101,6 +101,7 @@ use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
@@ -842,93 +843,121 @@ impl GlobalState {
         height
     }
 
-    /// Rescan the specified (inclusive) range of blocks for spends of UTXOs.
-    /// Only works for nodes that maintain a UTXO index.
+    /// Reescan all monitored UTXOs for expenditures to set the "spent" status,
+    /// indicating if the UTXO was spent or not.
     ///
     /// Never loads the entire block from disk, so performance is good.
-    ///
-    /// # Panics
-    /// - If start block height is greater than end block height
-    pub async fn rescan_outgoing(&mut self, first: BlockHeight, last: BlockHeight) -> Result<()> {
-        ensure!(
-            self.chain.archival_state().utxo_index.is_some(),
-            "Cannot rescan for spent UTXOs when node does not maintain a UTXO index"
-        );
+    pub async fn rescan_outgoing(&mut self) -> Result<()> {
+        /// Return spending status about all UTXOs monitored by the wallet by
+        /// inspecting the archival state for applied absolute index sets.
+        ///
+        /// Returns a mapping from list index into the list of monitored UTXO to
+        /// information about the block in which a UTXO was spent. If the list
+        /// index is present in the return value, it means that the UTXO was
+        /// spent. Does not consider UTXOs that were already marked as spent.
+        ///
+        /// Returns the block in which a UTXO was spent, if such a block can be
+        /// found. If the UTXO was spent but it is not known in which block it
+        /// was spent, then the value `None` is returned.
+        async fn spend_info(
+            state: &GlobalState,
+        ) -> HashMap<u64, Option<(Digest, Timestamp, BlockHeight)>> {
+            let utxo_index = &state.chain.archival_state().utxo_index;
 
-        let first: u64 = first.into();
-        let last: u64 = last.into();
-        assert!(
-            first <= last,
-            "Must call function with a non-empty range. Got range: {first}..={last}."
-        );
+            let monitored_utxos = state
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .stream_values()
+                .await;
+            pin_mut!(monitored_utxos); // needed for iteration
 
-        for block_height in first..=last {
-            let Some(block_hash) = self
-                .chain
-                .archival_state()
-                .archival_block_mmr
-                .ammr()
-                .try_get_leaf(block_height)
-                .await
-            else {
-                warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
-                return Ok(());
-            };
+            let mut spend_info = HashMap::new();
+            let mut mutxo_list_index = -1i64;
+            while let Some(mutxo) = monitored_utxos.next().await {
+                mutxo_list_index += 1;
 
-            let Some(index_set_digests) = self
-                .chain
-                .archival_state()
-                .utxo_index
-                .as_ref()
-                .unwrap()
-                .index_set_digests(block_hash)
-                .await
-            else {
-                bail!("Block with hash {block_hash:x} not processed by the UTXO index.")
-            };
-
-            let mut spent_mutxo_list_indices = vec![];
-            for index_set_digest in index_set_digests {
-                if let Some(mutxo_list_index) = self
-                    .wallet_state
-                    .wallet_db
-                    .index_set_to_mutxo()
-                    .get(&index_set_digest)
-                    .await
-                {
-                    spent_mutxo_list_indices.push(mutxo_list_index);
+                // Was monitored UTXO already marked as spent?
+                if !matches!(mutxo.spent, MonitoredUtxoSpentStatus::Unspent) {
+                    continue;
                 }
+
+                // Is UTXO spent?
+                let index_set = mutxo.absolute_indices();
+                let spent = state
+                    .chain
+                    .archival_state()
+                    .archival_mutator_set
+                    .ams()
+                    .absolute_index_set_was_applied(index_set)
+                    .await;
+
+                if !spent {
+                    continue;
+                }
+
+                let spent_in_block = if let Some(utxo_index) = utxo_index {
+                    // Only with the UTXO index can we efficiently determine the
+                    // block in which the UTXO was spent.
+                    let block_height = utxo_index.block_by_index_set(&index_set).await;
+
+                    let Some(block_height) = block_height else {
+                        error!(
+                        "UTXO was spent according to archival mutator set, but no block could be
+                     found in the UTXO index. Try rescanning again later."
+                    );
+                        continue;
+                    };
+                    let block_hash = state
+                        .chain
+                        .archival_state()
+                        .archival_block_mmr
+                        .ammr()
+                        .try_get_leaf(block_height.value())
+                        .await
+                        .expect("Known block height must have block hash");
+                    let block_timestamp = state
+                        .chain
+                        .archival_state()
+                        .get_block_header(block_hash)
+                        .await
+                        .expect("Known block hash must have block header")
+                        .timestamp;
+
+                    Some((block_hash, block_timestamp, block_height))
+                } else {
+                    // One could still determine that the UTXO was spent by
+                    // iterating through all blocks and checking their applied
+                    // mutator sets, but this would be too slow, I think.
+                    None
+                };
+
+                spend_info.insert(u64::try_from(mutxo_list_index).unwrap(), spent_in_block);
             }
 
-            // If no matches, do not load block. Continue to next block.
-            if spent_mutxo_list_indices.is_empty() {
-                continue;
-            }
+            spend_info
+        }
 
-            debug!(
-                "Found {} spent UTXOs in block with height {block_height}",
-                spent_mutxo_list_indices.len()
-            );
-
-            // Only getting the header from the archival state and not the whole
-            // block is very fast.
-            let block_header = self
-                .chain
-                .archival_state()
-                .get_block_header(block_hash)
-                .await
-                .expect("Must have block header for known block");
-
-            for mutxo_list_index in spent_mutxo_list_indices {
-                self.wallet_state
-                    .wallet_db
-                    .mark_mutxo_as_spent(
-                        mutxo_list_index,
-                        block_hash,
-                        block_header.timestamp,
-                        block_header.height,
-                    )
-                    .await
+        let spend_info = spend_info(self).await;
+        for (mutxo_list_index, spent_in_block) in spend_info {
+            match spent_in_block {
+                Some((block_hash, block_timestamp, block_height)) => {
+                    self.wallet_state
+                        .wallet_db
+                        .mark_mutxo_as_spent_known_block(
+                            mutxo_list_index,
+                            block_hash,
+                            block_timestamp,
+                            block_height,
+                        )
+                        .await
+                }
+                None => {
+                    self.wallet_state
+                        .wallet_db
+                        .mark_mutxo_as_spent_unknown_block(mutxo_list_index)
+                        .await
+                }
             }
         }
 
@@ -1257,8 +1286,9 @@ impl GlobalState {
         Ok(())
     }
 
-    /// Rescan the specified (inclusive) range of blocks for incoming UTXOs that
-    /// were announced on-chain, for the specified list of spending keys.
+    /// Rescan the specified (inclusive) range of canonical blocks for incoming
+    /// UTXOs that were announced on-chain, for the specified list of spending
+    /// keys.
     ///
     /// Fast if node maintains a UTXO index, otherwise potentially slow.
     ///
@@ -1555,11 +1585,12 @@ impl GlobalState {
                     }
                 }
 
-                if let Some((_, _, spent_in_block)) = mutxo.spent_in_block {
+                // Only spends with known blocks are counted.
+                if let MonitoredUtxoSpentStatus::SpentIn { block_height, .. } = mutxo.spent {
                     if max_spent_in_block.is_none()
-                        || max_spent_in_block.is_some_and(|x| x < spent_in_block)
+                        || max_spent_in_block.is_some_and(|x| x < block_height)
                     {
-                        max_spent_in_block = Some(spent_in_block);
+                        max_spent_in_block = Some(block_height);
                     }
                 }
             } else {
@@ -1573,14 +1604,15 @@ impl GlobalState {
                     max_confirmed_in_block = Some(confirmed_in_block);
                 }
 
-                if let Some((.., spent_in_block)) = mutxo.spent_in_block {
+                // Only spends with known blocks are counted.
+                if let MonitoredUtxoSpentStatus::SpentIn { block_height, .. } = mutxo.spent {
                     if mutxo
                         .get_membership_proof_for_block(current_tip_digest)
                         .is_some()
                         && (max_spent_in_block.is_none()
-                            || max_spent_in_block.is_some_and(|x| x < spent_in_block))
+                            || max_spent_in_block.is_some_and(|x| x < block_height))
                     {
-                        max_spent_in_block = Some(spent_in_block);
+                        max_spent_in_block = Some(block_height);
                     }
                 }
             }
@@ -1618,12 +1650,26 @@ impl GlobalState {
             history.push(received);
 
             if matches!(state, MonitoredUtxoState::Spent) {
-                if let Some((spending_block, spending_timestamp, spending_height)) =
-                    monitored_utxo.spent_in_block
-                {
-                    let spent = (spending_block, spending_timestamp, spending_height, -amount);
-                    history.push(spent);
-                }
+                let spend = match monitored_utxo.spent {
+                    MonitoredUtxoSpentStatus::SpentIn {
+                        block_hash,
+                        block_height,
+                        block_timestamp,
+                    } => (block_hash, block_timestamp, block_height, -amount),
+                    MonitoredUtxoSpentStatus::SpentInUnknownBlock => {
+                        // If UTXO was spent but we don't know when, then record
+                        // it as spent when it was received.
+                        (
+                            confirming_block,
+                            confirmation_timestamp,
+                            confirmation_height,
+                            -amount,
+                        )
+                    }
+                    MonitoredUtxoSpentStatus::Unspent => continue,
+                };
+
+                history.push(spend);
             }
         }
 
@@ -1918,13 +1964,17 @@ impl GlobalState {
                         warn!(
                             "Claimed UTXO was spent in block {block_hash:x}; which has height {block_height}",
                         );
-                        monitored_utxo.mark_as_spent(
+                        monitored_utxo.mark_as_spent(Some((
                             spending_block.hash(),
                             spending_block.header().timestamp,
                             spending_block.header().height,
-                        );
+                        )));
                     } else {
-                        error!("Claimed UTXO's mutator set membership proof was invalid but we could not find the block in which it was spent. This is most likely a bug in the software.");
+                        error!(
+                            "Claimed UTXO's mutator set membership proof was invalid but we could \
+                         not find the block in which it was spent. Was it spent a long time ago?"
+                        );
+                        monitored_utxo.mark_as_spent(None);
                     }
                 }
 
@@ -2195,7 +2245,9 @@ impl GlobalState {
                 continue;
             };
 
-            if monitored_utxo.spent_in_block.is_none() && !msa.verify(ms_item, &restored_msmp) {
+            if monitored_utxo.spent == MonitoredUtxoSpentStatus::Unspent
+                && !msa.verify(ms_item, &restored_msmp)
+            {
                 // If the UTXO was spent *and* its membership proof is invalid
                 // after attempting to restore, then that expenditure must still
                 // be canonical.
@@ -2363,14 +2415,18 @@ impl GlobalState {
                 membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
 
                 // unset spent_in_block field if the UTXO was spent in this block
-                if let Some((spent_block_hash, _, _)) = monitored_utxo.spent_in_block {
+                if let MonitoredUtxoSpentStatus::SpentIn {
+                    block_hash: spent_block_hash,
+                    ..
+                } = monitored_utxo.spent
+                {
                     if spent_block_hash == revert_block_hash {
-                        monitored_utxo.spent_in_block = None;
+                        monitored_utxo.spent = MonitoredUtxoSpentStatus::Unspent;
                     }
                 }
 
                 // assert valid (if unspent)
-                assert!(monitored_utxo.spent_in_block.is_some() || previous_mutator_set
+                assert!(monitored_utxo.spent != MonitoredUtxoSpentStatus::Unspent || previous_mutator_set
                     .verify(Tip5::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
             }
 
@@ -2502,7 +2558,7 @@ impl GlobalState {
             //    once the spending block is buried sufficiently deep
             // 2. If synced to current tip, there is nothing more to do with this MUTXO
             // 3. If already marked as abandoned, we don't do that again
-            if mutxo.spent_in_block.is_some()
+            if mutxo.spent != MonitoredUtxoSpentStatus::Unspent
                 || mutxo.is_synced_to(current_tip_info.0)
                 || mutxo.abandoned_at.is_some()
             {
@@ -3217,9 +3273,13 @@ mod tests {
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum AnnouncementScanMode {
+        /// Rescan for announced incoming over a range of blocks.
         Range,
+
+        /// Rescan for announced incoming with help from the UTXO index. Only
+        /// works for nodes that maintain a UTXO index.
         FlagIndex,
     }
 
@@ -3237,8 +3297,7 @@ mod tests {
 
     impl GlobalState {
         /// Rescan the specified (inclusive) range of blocks for transactions
-        /// involving all keys known to the wallet. Only works for nodes that
-        /// maintain a UTXO index.
+        /// involving all keys known to the wallet.
         ///
         /// # Panics
         /// - If start block height is greater than end block height
@@ -3257,15 +3316,14 @@ mod tests {
                 "Must call function with a non-empty range. Got range: {first}..={last}."
             );
 
-            let all_keys = self
-                .wallet_state
-                .get_all_known_spending_keys()
-                .collect_vec();
-
             // All incoming UTXOs must be registered before handling the spending of
             // UTXOs, otherwise spends will not be registered.
             self.rescan_guesser_rewards(first, last).await;
 
+            let all_keys = self
+                .wallet_state
+                .get_all_known_spending_keys()
+                .collect_vec();
             match announcement_scan_mode {
                 AnnouncementScanMode::Range => {
                     self.rescan_announced_incoming(all_keys, first, last)
@@ -3278,9 +3336,7 @@ mod tests {
             }
 
             self.rescan_expected_incoming(first, last).await;
-            self.rescan_outgoing(first, last).await?;
-            self.restore_monitored_utxos_from_archival_mutator_set()
-                .await;
+            self.rescan_outgoing().await?;
 
             Ok(())
         }
@@ -4173,6 +4229,7 @@ mod tests {
 
     mod rescan_wallet {
         use super::*;
+        use crate::api::export::TxInputList;
         use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
 
         /// Build a block with the specified outputs. Includes change outputs if
@@ -4386,23 +4443,23 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn wallet_history_from_rescan() {
-            let network = Network::Main;
+            async fn prop(
+                scan_mode: AnnouncementScanMode,
+                notification_medium: UtxoNotificationMedium,
+                maintain_utxo_index: bool,
+            ) {
+                if scan_mode == AnnouncementScanMode::FlagIndex && !maintain_utxo_index {
+                    return;
+                }
 
-            let cli_args = cli_args::Args {
-                network,
-                utxo_index: true,
-                ..Default::default()
-            };
+                let network = Network::Main;
+                println!("maintain_utxo_index: {maintain_utxo_index}");
 
-            let notification_mediums = [
-                UtxoNotificationMedium::OffChain,
-                UtxoNotificationMedium::OnChain,
-            ];
-            let scan_modes = [AnnouncementScanMode::Range, AnnouncementScanMode::FlagIndex];
-            for (notification_medium, scan_mode) in notification_mediums
-                .into_iter()
-                .cartesian_product(scan_modes.into_iter())
-            {
+                let cli_args = cli_args::Args {
+                    network,
+                    utxo_index: maintain_utxo_index,
+                    ..Default::default()
+                };
                 let mut alice =
                     mock_genesis_global_state(0, WalletEntropy::devnet_wallet(), cli_args.clone())
                         .await;
@@ -4422,8 +4479,6 @@ mod tests {
                     .await
                     .wallet_state
                     .nth_spending_key(KeyType::Symmetric, 103);
-                let third_party_address =
-                    GenerationReceivingAddress::derive_from_seed(Digest::default());
 
                 alice
                     .lock_guard_mut()
@@ -4485,6 +4540,8 @@ mod tests {
 
                 // Balance is still 20. Now send 15 coins to someone else, over
                 // multiple blocks.
+                let third_party_address =
+                    GenerationReceivingAddress::derive_from_seed(Digest::default());
                 for i in 1..=5 {
                     let output = vec![(third_party_address.into(), NativeCurrencyAmount::coins(i))];
                     let block = block_with_outputs(&mut alice, output).await;
@@ -4510,6 +4567,11 @@ mod tests {
                     "History list must not be empty after balance changes"
                 );
 
+                let spendable_utxos: TxInputList = alice
+                    .wallet_spendable_inputs(balance_timestamp)
+                    .await
+                    .into();
+
                 // Clear tables and rescan, and verify restored history.
                 alice.wallet_state.wallet_db.clear_mutxos().await;
                 assert!(
@@ -4528,6 +4590,11 @@ mod tests {
 
                 // Loop with two iterations to ensure wallet rescan is
                 // idempotent.
+                let tip_msa = alice
+                    .chain
+                    .light_state()
+                    .mutator_set_accumulator_after()
+                    .unwrap();
                 for _ in 0..2 {
                     alice
                         .rescan_wallet(0u64.into(), 15u64.into(), scan_mode)
@@ -4546,18 +4613,45 @@ mod tests {
                     assert_eq!(
                         balance_history.len(),
                         balance_history_again.len(),
-                        "balance history from rescan must agree with original"
+                        "balance history length from rescan must agree with original"
                     );
 
-                    // Demand equality under permutation, so sort by block height,
-                    // then amount.
-                    balance_history_again.sort_unstable_by_key(|a| (a.2, a.3));
-                    balance_history.sort_unstable_by_key(|a| (a.2, a.3));
+                    // Only with a UTXO index can expenditure history be
+                    // correctly restored.
+                    if maintain_utxo_index {
+                        // Demand equality under permutation, so sort by block height,
+                        // then amount.
+                        balance_history_again.sort_unstable_by_key(|a| (a.2, a.3));
+                        balance_history.sort_unstable_by_key(|a| (a.2, a.3));
+                        assert_eq!(
+                            balance_history, balance_history_again,
+                            "Balance histories must agree after clear and rescan"
+                        );
+                    }
 
+                    let spendable_utxos_again: TxInputList = alice
+                        .wallet_spendable_inputs(balance_timestamp)
+                        .await
+                        .into();
                     assert_eq!(
-                        balance_history, balance_history_again,
-                        "Balance histories must agree after clear and rescan"
+                        spendable_utxos.total_native_coins(),
+                        spendable_utxos_again.total_native_coins()
                     );
+
+                    let utxos_orig: HashSet<_> = spendable_utxos.utxos().into_iter().collect();
+                    let utxos_again: HashSet<_> =
+                        spendable_utxos_again.utxos().into_iter().collect();
+                    assert_eq!(utxos_orig, utxos_again);
+
+                    for tx_input in spendable_utxos_again.iter() {
+                        let item = tx_input.mutator_set_item();
+                        let msmp = tx_input.mutator_set_mp();
+                        assert!(
+                            tip_msa.verify(item, msmp),
+                            "Must produce correct MSMPs after rescan"
+                        );
+                    }
+
                     assert!(
                         !alice
                             .wallet_state
@@ -4568,6 +4662,21 @@ mod tests {
                         "Must be non-empty after rescan"
                     );
                 }
+            }
+
+            let notification_mediums = [
+                UtxoNotificationMedium::OffChain,
+                UtxoNotificationMedium::OnChain,
+            ];
+            let scan_modes = [AnnouncementScanMode::Range, AnnouncementScanMode::FlagIndex];
+            let utxo_index_options = [false, true];
+
+            for ((notification_medium, scan_mode), with_utxo_index) in notification_mediums
+                .into_iter()
+                .cartesian_product(scan_modes.into_iter())
+                .cartesian_product(utxo_index_options.into_iter())
+            {
+                prop(scan_mode, notification_medium, with_utxo_index).await;
             }
         }
     }

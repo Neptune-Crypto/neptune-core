@@ -7,7 +7,8 @@ use tracing::trace;
 
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::storage::storage_vec::traits::*;
-use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::migrate_db::v2_to_v3::migration::schema_v2;
+use crate::state::wallet::migrate_db::v2_to_v3::migration::schema_v2::load_v2_schema_in_order;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::wallet_db_tables::WalletDbTables;
 
@@ -21,7 +22,7 @@ use crate::state::wallet::wallet_db_tables::WalletDbTables;
 /// - Add mapping from hash(absolute index set) to index into the list of
 ///   monitored UTXOs.
 /// - Change monitored UTXO field `confirmed_in_block` from `Option<T>` to `T`
-///   since [`MonitoredUtxo`] always represents a mined UTXO.
+///   since `MonitoredUtxo` always represents a mined UTXO.
 /// - Add fields to monitored UTXOs:
 ///   - aocl_leaf_index: u64 (was always read from MSMP previously)
 ///   - sender_randomness: Digest (as above)
@@ -54,7 +55,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
     storage.reset_schema();
 
     // load v2 schema tables
-    let mut tables = WalletDbTables::load_schema_in_order(storage).await;
+    let mut tables = load_v2_schema_in_order(storage).await;
     let mutxos_v2 = &mut tables.monitored_utxos;
     let strong_key_to_mutxo = &mut tables.strong_key_to_mutxo;
     let index_set_to_mutxo = &mut tables.index_set_to_mutxo;
@@ -89,7 +90,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
 
         let aocl_leaf_index = msmp.aocl_leaf_index;
         let utxo = mutxo_v1.utxo;
-        let mutxo_v2 = MonitoredUtxo {
+        let mutxo_v2 = schema_v2::MonitoredUtxo {
             utxo: utxo.clone(),
             aocl_leaf_index,
             sender_randomness: msmp.sender_randomness,
@@ -446,7 +447,7 @@ mod tests {
     )]
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn migrate_real_v1_db() -> anyhow::Result<()> {
+    async fn migrate_real_v1_db_to_current_version() -> anyhow::Result<()> {
         // obtain source db path and target path
         let data_dir = unit_test_data_directory(Network::Testnet(0))?;
         let test_data_wallet_db_dir = worker::crate_root()
@@ -480,11 +481,11 @@ mod tests {
         let db_v1 =
             NeptuneLevelDb::new(&wallet_database_path, &leveldb::options::Options::new()).await?;
 
-        // connect to v1 Db with v2 RustyWalletDatabase.  This is where the
-        // migration occurs.
-        let wallet_db_v2 = RustyWalletDatabase::try_connect_and_migrate(db_v1).await?;
+        // connect to v1 Db with current version of database. This is where
+        // the migration happens.
+        let wallet_db_current = RustyWalletDatabase::try_connect_and_migrate(db_v1).await?;
 
-        let monitored_utxos = wallet_db_v2.monitored_utxos();
+        let monitored_utxos = wallet_db_current.monitored_utxos();
         assert_eq!(monitored_utxos.len().await, 2);
 
         Ok(())

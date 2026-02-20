@@ -19,6 +19,26 @@ use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
+/// Enumerates the possible spent spend-statuses of a monitored UTXO.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MonitoredUtxoSpentStatus {
+    /// No spend of this UTXO was ever recorded.
+    Unspent,
+
+    /// UTXO is spent but the node does not know in which block it was spent.
+    /// To correctly handle reorganizations of the block in which the UTXO was
+    /// spent, a check against the archival mutator set must be performed each
+    /// time its status is queried.
+    SpentInUnknownBlock,
+
+    /// UTXO is spent and the block in which it was spent is known.
+    SpentIn {
+        block_hash: Digest,
+        block_height: BlockHeight,
+        block_timestamp: Timestamp,
+    },
+}
+
 /// A mined [`Utxo`] managed by this wallet.
 ///
 /// The UTXO must, at one point, have  been mined, although the block in which
@@ -53,7 +73,7 @@ pub struct MonitoredUtxo {
 
     /// Hash and other metadata of the block, if any, in which this UTXO was
     /// spent.
-    pub spent_in_block: Option<(Digest, Timestamp, BlockHeight)>,
+    pub spent: MonitoredUtxoSpentStatus,
 
     /// Hash and other metadata of the block in which this UTXO was confirmed.
     pub confirmed_in_block: (Digest, Timestamp, BlockHeight),
@@ -69,20 +89,23 @@ impl Display for MonitoredUtxo {
             Some(msmp) => msmp.1.aocl_leaf_index.to_string(),
             None => "not mined".to_owned(),
         };
-        let spent = match self.spent_in_block {
-            Some((block_hash, block_timestamp, block_height)) => {
-                format!(
-                    "spent in {block_hash:x}, at {block_timestamp}, block height {block_height}."
-                )
-            }
-            None => "not spent".to_owned(),
+        let spent = match self.spent {
+            MonitoredUtxoSpentStatus::Unspent => "not spent".to_owned(),
+            MonitoredUtxoSpentStatus::SpentInUnknownBlock => "spent in unknown block".to_owned(),
+            MonitoredUtxoSpentStatus::SpentIn {
+                block_hash,
+                block_timestamp,
+                block_height,
+            } => format!(
+                "spent in {block_hash:x}, at {block_timestamp}, block height {block_height}."
+            ),
         };
         let confirmed = {
             let (block_hash, timestamp, height) = self.confirmed_in_block;
             format!("received in {block_hash:x}, at {timestamp}, block height {height}.")
         };
         let msmp_for_blocks = format!(
-            "valid MSMPs for blocks\n{}\n",
+            "tracekd MSMPs for blocks\n{}\n",
             self.blockhash_to_membership_proof
                 .iter()
                 .map(|(digest, _)| digest.to_hex())
@@ -116,7 +139,7 @@ impl MonitoredUtxo {
             receiver_preimage,
             blockhash_to_membership_proof: VecDeque::default(),
             number_of_mps_per_utxo: max_number_of_mps_stored,
-            spent_in_block: None,
+            spent: MonitoredUtxoSpentStatus::Unspent,
             confirmed_in_block: (
                 confirmed_in.hash(),
                 confirmed_in.header().timestamp,
@@ -141,7 +164,7 @@ impl MonitoredUtxo {
             receiver_preimage,
             blockhash_to_membership_proof: VecDeque::default(),
             number_of_mps_per_utxo: max_number_of_mps_stored,
-            spent_in_block: None,
+            spent: MonitoredUtxoSpentStatus::Unspent,
             confirmed_in_block,
             abandoned_at: None,
         }
@@ -227,13 +250,21 @@ impl MonitoredUtxo {
             .map(|x| x.1.clone())
     }
 
-    pub(crate) fn mark_as_spent(
-        &mut self,
-        spending_block: Digest,
-        block_timestamp: Timestamp,
-        block_height: BlockHeight,
-    ) {
-        self.spent_in_block = Some((spending_block, block_timestamp, block_height));
+    /// Mark the monitored UTXO as spent, with the given block info, if
+    /// available. If the block info is not available, the UTXO is still marked
+    /// as spent, but without information about the block in which it was spent.
+    pub(crate) fn mark_as_spent(&mut self, block_info: Option<(Digest, Timestamp, BlockHeight)>) {
+        let spent = match block_info {
+            Some((block_hash, block_timestamp, block_height)) => {
+                MonitoredUtxoSpentStatus::SpentIn {
+                    block_hash,
+                    block_timestamp,
+                    block_height,
+                }
+            }
+            None => MonitoredUtxoSpentStatus::SpentInUnknownBlock,
+        };
+        self.spent = spent;
     }
 
     /// Get the most recent (block hash, membership proof) entry in the database,

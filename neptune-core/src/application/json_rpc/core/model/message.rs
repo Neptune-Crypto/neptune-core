@@ -371,10 +371,7 @@ pub struct RescanExpectedResponse {}
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
-pub struct RescanOutgoingRequest {
-    pub first: RpcBlockHeight,
-    pub last: RpcBlockHeight,
-}
+pub struct RescanOutgoingRequest {}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

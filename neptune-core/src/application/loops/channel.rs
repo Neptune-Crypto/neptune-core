@@ -129,10 +129,7 @@ pub(crate) enum RPCServerToMain {
         first: BlockHeight,
         last: BlockHeight,
     },
-    RescanOutgoing {
-        first: BlockHeight,
-        last: BlockHeight,
-    },
+    RescanOutgoing,
     RescanGuesserRewards {
         first: BlockHeight,
         last: BlockHeight,

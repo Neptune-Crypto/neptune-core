@@ -124,6 +124,7 @@ use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::address::SpendingKey;
 use crate::state::wallet::change_policy::ChangePolicy;
 use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::wallet_status::WalletStatus;
@@ -1722,17 +1723,14 @@ pub trait RPC {
         last: BlockHeight,
     ) -> RpcResult<()>;
 
-    /// Rescan the specified range of blocks for outgoing UTXOs, *i.e.*, UTXOs
-    /// spent by the node's wallet.
+    /// Rescan all monitored UTXOs for outgoing UTXOs, *i.e.*, UTXOs spent by
+    /// the node's wallet.
     ///
-    /// Can be used to recreate a transaction history. Requires a UTXO index.
+    /// Can be used to recreate a transaction history if a UTXO index is
+    /// maintained.
     ///
     /// Any found UTXOs are monitored going forward.
-    async fn rescan_outgoing(
-        token: auth::Token,
-        first: BlockHeight,
-        last: BlockHeight,
-    ) -> RpcResult<()>;
+    async fn rescan_outgoing(token: auth::Token) -> RpcResult<()>;
 
     /// Rescan the specified range for blocks that were successfully guessed by
     /// this node.
@@ -3437,27 +3435,13 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn rescan_outgoing(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        first: BlockHeight,
-        last: BlockHeight,
-    ) -> RpcResult<()> {
+    async fn rescan_outgoing(self, _: context::Context, token: auth::Token) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        if first > last {
-            return Err(RpcError::BlockRangeError);
-        }
-
-        if !self.state.cli().utxo_index {
-            return Err(RpcError::UtxoIndexNotPresent);
-        }
-
         let _ = self
             .rpc_server_to_main_tx
-            .send(RPCServerToMain::RescanOutgoing { first, last })
+            .send(RPCServerToMain::RescanOutgoing {})
             .await;
 
         Ok(())
@@ -4005,13 +3989,21 @@ impl RPC for NeptuneRPCServer {
                 block_height: monitored_utxo.confirmed_in_block.2,
                 timestamp: monitored_utxo.confirmed_in_block.1,
             };
-            let spent = if let Some((_, timestamp, block_height)) = monitored_utxo.spent_in_block {
-                UtxoStatusEvent::Confirmed {
-                    block_height,
-                    timestamp,
+
+            let spent = match monitored_utxo.spent {
+                MonitoredUtxoSpentStatus::Unspent => UtxoStatusEvent::None,
+                MonitoredUtxoSpentStatus::SpentInUnknownBlock => {
+                    // If spent at unknown block, assume spent when received.
+                    received
                 }
-            } else {
-                UtxoStatusEvent::None
+                MonitoredUtxoSpentStatus::SpentIn {
+                    block_height,
+                    block_timestamp,
+                    ..
+                } => UtxoStatusEvent::Confirmed {
+                    block_height,
+                    timestamp: block_timestamp,
+                },
             };
 
             if present_addition_records.insert(monitored_utxo.addition_record()) {
@@ -4996,10 +4988,7 @@ mod tests {
             .clone()
             .rescan_expected(ctx, token, 0u64.into(), 14u64.into())
             .await;
-        let _ = rpc_server
-            .clone()
-            .rescan_outgoing(ctx, token, 0u64.into(), 14u64.into())
-            .await;
+        let _ = rpc_server.clone().rescan_outgoing(ctx, token).await;
         let _ = rpc_server
             .clone()
             .rescan_guesser_rewards(ctx, token, 0u64.into(), 14u64.into())

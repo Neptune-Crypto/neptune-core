@@ -2,6 +2,7 @@ use super::v0_to_v1;
 use crate::application::database::storage::storage_schema::traits::StorageWriter;
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::state::wallet::migrate_db::v1_to_v2;
+use crate::state::wallet::migrate_db::v2_to_v3;
 
 // migrates a wallet db from a lower schema version to a higher version.
 //
@@ -71,6 +72,10 @@ pub(crate) async fn migrate_range(
             2 => {
                 log_apply_version(apply_version);
                 v1_to_v2::migrate(storage).await?
+            }
+            3 => {
+                log_apply_version(apply_version);
+                v2_to_v3::migrate(storage).await?;
             }
             _ => panic!("schema version {apply_version} is unknown"),
         }
