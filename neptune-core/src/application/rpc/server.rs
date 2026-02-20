@@ -2172,7 +2172,7 @@ pub trait RPC {
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
     /// # use tarpc::context;
-    /// # use twenty_first::tip5::digest::Digest;
+    /// # use tasm_lib::twenty_first::tip5::digest::Digest;
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<()>{
@@ -2196,7 +2196,7 @@ pub trait RPC {
     /// let utxo_ix = 0xAA;
     /// /* The digest of a block after spending (verifiers must check this block as canonical). For better privacy a recent block can be chosen, if the need is to show
     /// when it was already took place --- choose a block by its timestamp accordingly, up to the block which first confirmed the tx (including). */
-    /// let block: Digest = Digest::try_from_hex(0xAAAAAAAA)?;
+    /// let block: Digest = Digest::try_from_hex("AAAAAAAA")?;
     /// // get the claim and a proof
     /// let (claim, proof) = client.prove_transfer(context::current(), token, tx_ix, utxo_ix, block).await??;
     /// # Ok(())
@@ -4685,7 +4685,7 @@ impl RPC for NeptuneRPCServer {
             .aocl;
         let block_aocl_numleafs = block_aocl.num_leafs();
 
-        tracing::info!["Lock the global state for *reading.* Until the membership proof is computed for proving the transfer."];
+        tracing::trace!["Read-lock the global state. Until the membership proof is computed for proving the transfer."];
         let gs_lock = self.state.lock_guard().await;
         let aocl_archival = &gs_lock
             .chain
@@ -4707,7 +4707,7 @@ impl RPC for NeptuneRPCServer {
             .await;
 
         drop(gs_lock);
-        tracing::info!["Unlock the global state from *reading.* Computed the membership proof."];
+        tracing::trace!["Unlocked reading the global state. Computed the membership proof."];
 
         let sent = crate::application::util_proof::ProofOfTransfer::new(
             sent::claim_outputs(
