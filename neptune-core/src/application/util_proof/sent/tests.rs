@@ -33,8 +33,8 @@ pub async fn setup_funded_wallet_with_mined_tx(
     MmrMembershipProof,
     u64,
 ) {
-    assert!(spend_percent >= 0.0 && spend_percent <= 1.0);
-    assert!(fee_percent >= 0.0 && fee_percent <= 1.0);
+    assert!((0.0..=1.0).contains(&spend_percent));
+    assert!((0.0..=1.0).contains(&fee_percent));
 
     let (block_1, mut gs_lock, key) = bob_mines_one_block(Default::default()).await;
 
