@@ -25,6 +25,7 @@ use tokio::select;
 use tokio::signal;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio::time;
@@ -102,14 +103,21 @@ struct MainToMinerChannel(Option<mpsc::Sender<MainToMiner>>);
 
 impl MainToMinerChannel {
     /// Send a message to the miner task (if any).
+    ///
+    /// Do no use the `async` `send` function because it blocks until there
+    /// is spare capacity on the channel. Messages to the miner are not
+    /// critical so if there is no capacity left, just log an error
+    /// message.
     fn send(&self, message: MainToMiner) {
-        // Do no use the async `send` function because it blocks until there
-        // is spare capacity on the channel. Messages to the miner are not
-        // critical so if there is no capacity left, just log an error
-        // message.
         if let Some(channel) = &self.0 {
-            if let Err(e) = channel.try_send(message) {
-                error!("Failed to send pause message to miner thread:\n{e}");
+            match channel.try_send(message) {
+                Ok(()) => (),
+                Err(e @ TrySendError::Closed(_)) => {
+                    error!("Failed to send message to miner thread:\n{e}")
+                }
+                Err(TrySendError::Full(message)) => {
+                    tracing::warn!("no capacity to send to the miner: {message}")
+                }
             }
         }
     }
