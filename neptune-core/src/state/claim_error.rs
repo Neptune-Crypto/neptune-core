@@ -9,7 +9,7 @@ impl From<ClaimError> for RpcError {
     }
 }
 
-/// enumerates errors related to the claim (wallet registration) of UTXOs.
+/// Enumerates errors related to the claim (wallet registration) of UTXOs.
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ClaimError {

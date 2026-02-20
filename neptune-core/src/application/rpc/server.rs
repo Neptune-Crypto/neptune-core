@@ -121,8 +121,8 @@ use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::claim_error::ClaimError;
 use crate::protocol::proof_abstractions::SecretWitness;
+use crate::state::claim_error::ClaimError;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
@@ -4876,14 +4876,8 @@ pub mod error {
         }
     }
 
-    impl From<ClaimError> for RpcError {
-        fn from(err: ClaimError) -> Self {
-            RpcError::ClaimError(err.to_string())
-        }
-    }
-
-    // convert `anyhow::Error` to an `RpcError::Failed`.
-    // note that `anyhow` `Error` is not serializable.
+    // Convert `anyhow::Error` to an `RpcError::Failed`.
+    // Note that `anyhow` `Error` is not serializable.
     impl From<anyhow::Error> for RpcError {
         fn from(e: anyhow::Error) -> Self {
             Self::Failed(e.to_string())
