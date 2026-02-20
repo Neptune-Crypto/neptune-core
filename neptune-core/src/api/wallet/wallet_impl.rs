@@ -189,7 +189,6 @@ impl<'a> Wallet<'a> {
         &self,
         tx_ix: u64,
         utxo_ix: usize,
-        // block: Digest,
     ) -> Result<TxOutput, WalletError> {
         state_lock_call_async!(&self.state_lock, worker::txoutput_by_index, tx_ix, utxo_ix).await
     }
