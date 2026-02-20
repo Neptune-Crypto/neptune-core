@@ -1591,7 +1591,7 @@ impl WalletState {
                 );
 
                 self.wallet_db
-                    .mark_mutxo_as_spent(
+                    .mark_mutxo_as_spent_known_block(
                         *mutxo_list_index,
                         block.hash(),
                         block.header().timestamp,
@@ -1739,7 +1739,7 @@ impl WalletState {
     ) {
         for (_, mutxo_list_index) in spent_inputs.values() {
             self.wallet_db
-                .mark_mutxo_as_spent(
+                .mark_mutxo_as_spent_known_block(
                     *mutxo_list_index,
                     block.hash(),
                     block.header().timestamp,

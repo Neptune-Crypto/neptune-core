@@ -3,6 +3,7 @@ use tasm_lib::prelude::Tip5;
 
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
@@ -54,28 +55,33 @@ impl<'a> UtxoValidator<'a> {
                     return MonitoredUtxoState::Unsynced;
                 }
 
-                let Some((spending_hash, _, spending_height)) = monitored_utxo.spent_in_block
-                else {
+                if monitored_utxo.spent == MonitoredUtxoSpentStatus::Unspent {
                     return MonitoredUtxoState::SyncedAndUnspent;
-                };
+                }
 
-                // If MUTXO was ever observed as spent, we need to check
-                // the archival mutator set to see if the spend was
-                // reorganized away. If a spend was never observed, then
-                // it is assumed that the monitored UTXO was never
-                // spent.
-                let spend_is_canonical = archival_state
-                    .is_canonical_block(spending_hash, spending_height)
-                    .await;
+                let spend_is_canonical = match monitored_utxo.spent {
+                    MonitoredUtxoSpentStatus::SpentIn {
+                        block_hash,
+                        block_height,
+                        ..
+                    } => {
+                        archival_state
+                            .is_canonical_block(block_hash, block_height)
+                            .await
+                    }
+                    _ => false,
+                };
 
                 if spend_is_canonical {
                     MonitoredUtxoState::Spent
                 } else {
-                    // Corner case: Even *if* latest spend is not
-                    // canonical, this spending block could have been
-                    // reorganized away to a chain where the spend also
-                    // occurred. So we have to check the mutator set to
-                    // see if the UTXO was spent or not.
+                    // If we don't know when block was spent, the spending block
+                    // could have been reorganized away. And even if we know
+                    // that the block in which the UTXO was spent, this
+                    // this spending block could have been reorganized away to a
+                    // chain where the spend also occurred. So we have to check
+                    // the mutator set to see if the UTXO was actually spent or
+                    // not.
                     let absolute_index_set = monitored_utxo.absolute_indices();
                     let is_spent = archival_state
                         .archival_mutator_set

@@ -101,6 +101,7 @@ use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
@@ -842,19 +843,14 @@ impl GlobalState {
         height
     }
 
-    /// Rescan the specified (inclusive) range of blocks for spends of UTXOs.
-    /// Only works for nodes that maintain a UTXO index.
+    /// Reescan all monitored UTXOs for expenditures, whether or not each UTXO
+    /// monitored by the wallet was spent or not.
     ///
     /// Never loads the entire block from disk, so performance is good.
     ///
     /// # Panics
     /// - If start block height is greater than end block height
     pub async fn rescan_outgoing(&mut self, first: BlockHeight, last: BlockHeight) -> Result<()> {
-        ensure!(
-            self.chain.archival_state().utxo_index.is_some(),
-            "Cannot rescan for spent UTXOs when node does not maintain a UTXO index"
-        );
-
         let first: u64 = first.into();
         let last: u64 = last.into();
         assert!(
@@ -862,73 +858,96 @@ impl GlobalState {
             "Must call function with a non-empty range. Got range: {first}..={last}."
         );
 
-        for block_height in first..=last {
-            let Some(block_hash) = self
-                .chain
-                .archival_state()
-                .archival_block_mmr
-                .ammr()
-                .try_get_leaf(block_height)
-                .await
-            else {
-                warn!("Attempted to rescan block height {block_height} which is not known. Ending recan now.");
-                return Ok(());
-            };
+        let utxo_index = &self.chain.archival_state().utxo_index;
 
-            let Some(index_set_digests) = self
-                .chain
-                .archival_state()
-                .utxo_index
-                .as_ref()
-                .unwrap()
-                .index_set_digests(block_hash)
-                .await
-            else {
-                bail!("Block with hash {block_hash:x} not processed by the UTXO index.")
-            };
+        let monitored_utxos = self
+            .wallet_state
+            .wallet_db
+            .monitored_utxos()
+            .stream_values()
+            .await;
+        pin_mut!(monitored_utxos); // needed for iteration
 
-            let mut spent_mutxo_list_indices = vec![];
-            for index_set_digest in index_set_digests {
-                if let Some(mutxo_list_index) = self
-                    .wallet_state
-                    .wallet_db
-                    .index_set_to_mutxo()
-                    .get(&index_set_digest)
-                    .await
-                {
-                    spent_mutxo_list_indices.push(mutxo_list_index);
-                }
-            }
+        let mut spend_info = vec![];
+        let mut mutxo_list_index = -1i64;
+        for mutxo in monitored_utxos.next().await {
+            mutxo_list_index += 1;
 
-            // If no matches, do not load block. Continue to next block.
-            if spent_mutxo_list_indices.is_empty() {
+            // Was monitored UTXO already marked as spent?
+            if !matches!(mutxo.spent, MonitoredUtxoSpentStatus::Unspent) {
                 continue;
             }
 
-            debug!(
-                "Found {} spent UTXOs in block with height {block_height}",
-                spent_mutxo_list_indices.len()
-            );
-
-            // Only getting the header from the archival state and not the whole
-            // block is very fast.
-            let block_header = self
+            // Is UTXO spent?
+            let index_set = mutxo.absolute_indices();
+            let spent = self
                 .chain
                 .archival_state()
-                .get_block_header(block_hash)
-                .await
-                .expect("Must have block header for known block");
+                .archival_mutator_set
+                .ams()
+                .absolute_index_set_was_applied(index_set)
+                .await;
 
-            for mutxo_list_index in spent_mutxo_list_indices {
-                self.wallet_state
-                    .wallet_db
-                    .mark_mutxo_as_spent(
-                        mutxo_list_index,
-                        block_hash,
-                        block_header.timestamp,
-                        block_header.height,
-                    )
+            if !spent {
+                continue;
+            }
+
+            let spent_in_block = if let Some(utxo_index) = utxo_index {
+                // Only with the UTXO index can we efficiently determine the
+                // block in which the UTXO was spent.
+                let block_height = utxo_index.block_by_index_set(&index_set).await;
+
+                let Some(block_height) = block_height else {
+                    error!(
+                        "UTXO was spent according to archival mutator set, but no block could be
+                     found in the UTXO index. Try rescanning again later."
+                    );
+                    continue;
+                };
+                let block_hash = self
+                    .chain
+                    .archival_state()
+                    .archival_block_mmr
+                    .ammr()
+                    .try_get_leaf(block_height.value())
                     .await
+                    .expect("Known block height must have block hash");
+                let block_timestamp = self
+                    .chain
+                    .archival_state()
+                    .get_block_header(block_hash)
+                    .await
+                    .expect("Known block hash must have block header")
+                    .timestamp;
+
+                Some((block_hash, block_timestamp, block_height))
+            } else {
+                // One could still determine that the UTXO was spent by
+                // iterating through all blocks and checking their applied
+                // mutator sets, but this would be too slow, I think.
+                None
+            };
+
+            spend_info.push((mutxo_list_index as u64, spent_in_block));
+        }
+
+        for (mutxo_list_index, spent_in_block) in spend_info {
+            match spent_in_block {
+                Some((block_hash, block_timestamp, block_height)) => {
+                    self.wallet_state
+                        .wallet_db
+                        .mark_mutxo_as_spent_known_block(
+                            mutxo_list_index,
+                            (block_hash, block_timestamp, block_height),
+                        )
+                        .await
+                }
+                None => {
+                    self.wallet_state
+                        .wallet_db
+                        .mark_mutxo_as_spent_unknown_block(mutxo_list_index)
+                        .await
+                }
             }
         }
 
@@ -1918,13 +1937,17 @@ impl GlobalState {
                         warn!(
                             "Claimed UTXO was spent in block {block_hash:x}; which has height {block_height}",
                         );
-                        monitored_utxo.mark_as_spent(
+                        monitored_utxo.mark_as_spent(Some((
                             spending_block.hash(),
                             spending_block.header().timestamp,
                             spending_block.header().height,
-                        );
+                        )));
                     } else {
-                        error!("Claimed UTXO's mutator set membership proof was invalid but we could not find the block in which it was spent. This is most likely a bug in the software.");
+                        error!(
+                            "Claimed UTXO's mutator set membership proof was invalid but we could \
+                         not find the block in which it was spent. Was it spent a long time ago?"
+                        );
+                        monitored_utxo.mark_as_spent(None);
                     }
                 }
 

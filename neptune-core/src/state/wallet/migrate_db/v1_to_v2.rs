@@ -7,7 +7,8 @@ use tracing::trace;
 
 use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::application::database::storage::storage_vec::traits::*;
-use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::migrate_db::v2_to_v3::migration::schema_v2;
+use crate::state::wallet::migrate_db::v2_to_v3::migration::schema_v2::load_v2_schema_in_order;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::wallet_db_tables::WalletDbTables;
 
@@ -54,7 +55,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
     storage.reset_schema();
 
     // load v2 schema tables
-    let mut tables = WalletDbTables::load_schema_in_order(storage).await;
+    let mut tables = load_v2_schema_in_order(storage).await;
     let mutxos_v2 = &mut tables.monitored_utxos;
     let strong_key_to_mutxo = &mut tables.strong_key_to_mutxo;
     let index_set_to_mutxo = &mut tables.index_set_to_mutxo;
@@ -89,7 +90,7 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
 
         let aocl_leaf_index = msmp.aocl_leaf_index;
         let utxo = mutxo_v1.utxo;
-        let mutxo_v2 = MonitoredUtxo {
+        let mutxo_v2 = schema_v2::MonitoredUtxo {
             utxo: utxo.clone(),
             aocl_leaf_index,
             sender_randomness: msmp.sender_randomness,
