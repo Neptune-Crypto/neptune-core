@@ -132,8 +132,8 @@ use crate::VERSION;
 ///  1. Enables write serialization over all application state.
 ///     (blockchain, mempool, wallet, global flags)
 ///  2. Readers see a consistent view of data.
-///  3. makes it easy to reason about locking.
-///  4. simplifies the codebase.
+///  3. makes it easy to reason about locking
+///  4. simplifies the codebase
 ///
 /// The primary drawback is that long write operations can
 /// block readers.  As such, every effort should be made to keep
@@ -144,13 +144,11 @@ use crate::VERSION;
 /// Readers do not block eachother.  Only a writer blocks readers.
 /// See [`RwLock`](std::sync::RwLock) docs for details.
 ///
-/// ** unless some type uses interior mutability.  We have made
+/// ** Unless some type uses interior mutability.  We have made
 /// efforts to eradicate interior mutability in this crate.
 ///
-/// Usage conventions:
-///
+/// Usage conventions.
 /// ```text
-///
 /// // property naming:
 /// struct Foo {
 ///     global_state_lock: GlobalStateLock
@@ -368,10 +366,10 @@ impl GlobalStateLock {
         tx_artifacts: &TxCreationArtifacts,
     ) -> std::result::Result<(), RecordTransactionError> {
         //
-        // verifies that:
-        //  1. Self::network matches provided Network.
-        //  2. Transaction and TransactionDetails match.
-        //  3. Transaction proof is valid, and thus the Tx itself is valid.
+        // verifies 
+        //  1. `Self::network` matches provided `Network`.
+        //  2. Transaction and `TransactionDetails` match.
+        //  3. Transaction proof is valid, and thus the tx itself is valid.
 
         // acquire write-lock
         let mut gsm = self.lock_guard_mut().await;

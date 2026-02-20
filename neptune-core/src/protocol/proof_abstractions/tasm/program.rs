@@ -80,7 +80,7 @@ where
 /// Run the program and generate a proof for it, assuming the Triton VM run
 /// halts gracefully.
 ///
-/// Please do not call this directly.  Use TransactionProofBuilder instead
+/// Please do not call this directly.  Use `TransactionProofBuilder` instead
 /// which includes logic for building mock proofs if necessary.
 ///
 /// If we are in a test environment, try reading it from disk. If it is not
@@ -100,45 +100,45 @@ pub(crate) async fn prove_triton_program(
 ) -> Result<Proof, CreateProofError> {
     // regtest mode: just return a mock (empty) `Proof`
     if proof_job_options.job_settings.network.use_mock_proof() {
-        return Ok(Proof::valid_mock(claim));
-    }
+        Ok(Proof::valid_mock(claim))
+    } else {
+        // create a triton-vm-job-queue job for generating this proof
+        let job = ProverJob::new(
+            program,
+            claim,
+            nondeterminism,
+            proof_job_options.job_settings,
+        );
 
-    // create a triton-vm-job-queue job for generating this proof.
-    let job = ProverJob::new(
-        program,
-        claim,
-        nondeterminism,
-        proof_job_options.job_settings,
-    );
+        // Queue the job and obtain a job handle.
+        let job_handle = triton_vm_job_queue.add_job(job, proof_job_options.job_priority)?;
+        tokio::pin!(job_handle);
 
-    // queue the job and obtain a job handle.
-    let job_handle = triton_vm_job_queue.add_job(job, proof_job_options.job_priority)?;
-    tokio::pin!(job_handle);
+        let completion = match proof_job_options.cancel_job_rx {
+            /* Fix for issue #348.
+            if we have a cancellation channel from caller then we select on
+            both the channel and job.  If we get a cancel request from the
+            caller, or the channel closes, then we cancel the job
+            which removes it from the job-queue. */
+            Some(mut cancel_job_rx) => {
+                tokio::select! {
+                    // Case: job completion.
+                    completion = &mut job_handle => completion?,
 
-    let completion = match proof_job_options.cancel_job_rx {
-        // fix for issue #348.
-        // if we have a cancellation channel from caller then we select on
-        // both the channel and job.  If we get a cancel request from the
-        // caller, or the channel closes, then we cancel the job
-        // which removes it from the job-queue.
-        Some(mut cancel_job_rx) => {
-            tokio::select! {
-                // case: job completion.
-                completion = &mut job_handle => completion?,
-
-                // case: sender cancelled, or sender dropped.
-                _ = cancel_job_rx.changed() => {
-                    debug!("received cancellation request for job: {}.  cancelling.", job_handle.job_id());
-                    job_handle.cancel()?;
-                    job_handle.await?
+                    // Case: sender cancelled, or sender dropped.
+                    _ = cancel_job_rx.changed() => {
+                        debug!("received cancellation request for job: {}.  cancelling.", job_handle.job_id());
+                        job_handle.cancel()?;
+                        job_handle.await?
+                    }
                 }
             }
-        }
-        None => job_handle.await?,
-    };
+            None => job_handle.await?,
+        };
 
-    // obtain resulting proof.
-    Ok(ProverJobResult::try_from(completion)?.into_inner()?)
+        // Obtain resulting proof.
+        Ok(ProverJobResult::try_from(completion)?.into_inner()?)
+    }
 }
 
 /// options for executing the `triton-vm` proving job

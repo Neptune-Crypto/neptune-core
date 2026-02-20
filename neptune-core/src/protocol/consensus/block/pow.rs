@@ -798,7 +798,7 @@ pub(crate) mod tests {
             "After hardfork, buffer must only depend on previous block hash"
         );
 
-        // Verify that 1st block proposal can be solved
+        // verify that 1st block proposal can be solved
         let difficulty = Difficulty::from(2u32);
         let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty);
         assert!(correct_guess_1
@@ -821,7 +821,7 @@ pub(crate) mod tests {
                     prev_block_digest
                 )
                 .unwrap_err(),
-            "2nd set of auth paths must make 1st PoW solution invalid, as pow's\
+            "2nd set of auth paths must make 1st PoW solution invalid, as pow's \
             Merkle authentication path becomes invalid"
         );
 
