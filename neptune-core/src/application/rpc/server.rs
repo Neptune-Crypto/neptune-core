@@ -4877,14 +4877,8 @@ pub mod error {
         }
     }
 
-    impl From<ClaimError> for RpcError {
-        fn from(err: ClaimError) -> Self {
-            RpcError::ClaimError(err.to_string())
-        }
-    }
-
-    // convert `anyhow::Error` to an `RpcError::Failed`.
-    // note that `anyhow` `Error` is not serializable.
+    // Convert `anyhow::Error` to an `RpcError::Failed`.
+    // Note that `anyhow` `Error` is not serializable.
     impl From<anyhow::Error> for RpcError {
         fn from(e: anyhow::Error) -> Self {
             Self::Failed(e.to_string())
