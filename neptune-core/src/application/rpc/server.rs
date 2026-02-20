@@ -2146,13 +2146,22 @@ pub trait RPC {
     /// - the receiver's address,
     /// - hashed sender randomness to distinguish similar transfers,
     /// - the AOCL of the block used for the argument.
-    /// Other info is hidden in the proof, such as the exact UTXO that were spent and the exact block height at which the transfer was
-    /// confirmed. The native coin is indicated by `tx_ix` & `utxo_ix` inside it; `block` is any which contains the transfer (the verifier must have this block as canonical).
-    /// *Probably you will want to pass `block` along a successfull result so that a verifier won't need to search it by the AOCL digest from `Claim`.*
+    /// Other info is hidden in the proof, such as the exact UTXO that were spent and the exact
+    /// block height at which the transfer was
+    /// confirmed. The native coin is indicated by the indices (`tx_ix` & `utxo_ix`) of the sent txs
+    /// in the current wallet; `block` is any which contains the transfer (the verifier must have this block
+    /// as canonical). *Probably you will want to pass `block` along a successfull result so that a verifier
+    /// won't need to search it by the AOCL digest from `Claim`.*
+    ///
+    /// The relevant data is taken from this node DB.
+    /// During verification from the same block the same data will be pulled.
     ///
     /// For verification see `triton_verify` in this API.
     ///
-    /// Wraps [`Wallet::prove_transfer()`]. Returns `Auth` or `CreateProofError` variants of [`RpcError`] on a failure.
+    /// On a failure expect `Auth` or `CreateProofError` variants of [`RpcError`], or `Failed` with the details.
+    ///
+    /// # details
+    /// the addresses are disclosed as the components constraining the address
     ///
     /// # example
     /// ```no_run

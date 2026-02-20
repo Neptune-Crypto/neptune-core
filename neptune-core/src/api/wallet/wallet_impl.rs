@@ -175,18 +175,7 @@ impl<'a> Wallet<'a> {
         state_lock_call_async!(&self.state_lock, worker::spendable_inputs, timestamp).await
     }
 
-    /// A [`NeptuneProof`] for the tx UTXO (determined by the indices, see below) transferred
-    /// the `amount` (it discloses) of [`NativeCurrency`] to the address with the components it discloses
-    /// (`receiver_digest` & `lock_postimange`). The UTXO is binded by hashing `sender_randomness` which serves
-    /// for identification between the similar transfers.
-    ///
-    /// The data is taken from the wallet of this node. `tx_ix` & `utxo_ix` are indicies for getting the UTXO
-    /// you want to prove from the wallet.
-    ///
-    /// The `block` is needed to prove the UTXO was mined. It's determined by its [`Digest`], the relevant
-    /// data is taken from this node DB. During verification the same data will be pulled from the same block.
-    ///
-    /// A verifier can use [`tasm_lib::triton_vm::verify`] exposed on his API/RPC, or the [TUI](https://github.com/TritonVM/triton-tui).
+    /// Gets the output of a sent transaction by its indices in the wallet.
     ///
     /// # Panics.
     /// The implementation detail is when `tx_ix` is out of its bound it crashes the node until
@@ -195,7 +184,6 @@ impl<'a> Wallet<'a> {
         &self,
         tx_ix: u64,
         utxo_ix: usize,
-        // block: Digest,
     ) -> Result<TxOutput, WalletError> {
         state_lock_call_async!(
             &self.state_lock,
