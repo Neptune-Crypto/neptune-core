@@ -7,7 +7,7 @@ use tasm_lib::library::Library;
 use tasm_lib::triton_vm::prelude::*;
 
 use crate::protocol::consensus::block::BFieldCodec;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
@@ -35,7 +35,7 @@ pub struct CorrectMutatorSetUpdate {
     pub witness: CorrectMutatorSetUpdateWitness,
 }
 
-impl ConsensusProgram for CorrectMutatorSetUpdate {
+impl TritonProgram for CorrectMutatorSetUpdate {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
     }
@@ -51,9 +51,9 @@ impl ConsensusProgram for CorrectMutatorSetUpdate {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
 
-    impl ConsensusProgramSpecification for CorrectMutatorSetUpdate {
+    impl TritonProgramSpecification for CorrectMutatorSetUpdate {
         fn source(&self) {
             todo!()
         }

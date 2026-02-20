@@ -438,26 +438,25 @@ pub enum RecordTransactionError {
     InvalidTransaction(#[from] TxCreationArtifactsError),
 }
 
-/// abstracts over lock acquisition types for [GlobalStateLock]
+/// abstracts over lock acquisition types for [`GlobalStateLock`]
 ///
-/// this enables methods to be written that can accept whatever
+/// This enables methods to be written that can accept whatever
 /// the caller has.
 ///
-/// such generic methods can be called in series to share an already
+/// Such generic methods can be called in series to share an already
 /// acquired lock-guard, or to each acquire its own lock-guard
 /// in the case of `Lock` variant.
 ///
-/// Example usage:
-///
+/// Example usage.
 /// ```rust
 /// use neptune_cash::state::GlobalState;
 /// use neptune_cash::state::GlobalStateLock;
 /// use neptune_cash::api::export::StateLock;
 /// fn worker(gs: &GlobalState, truth: bool) {
-///    // do something with gs and truth.
+///    // Do something with `gs` and `truth`.
 /// }
 ///
-/// // a callee that accepts &StateLock
+/// // a callee that accepts `&StateLock`
 /// async fn callee(state_lock: &StateLock<'_>, truth: bool) {
 ///     match state_lock {
 ///        StateLock::Lock(gsl) => worker(&*gsl.lock_guard().await, truth),
@@ -489,14 +488,14 @@ pub enum RecordTransactionError {
 ///     callee(&sl, false).await;
 /// }
 ///
-/// // a caller that uses `ReadLock` variant and calls fn that accept `&GlobalState`
+/// // a caller that uses `ReadLock` variant and calls `fn` that accept `&GlobalState`
 /// async fn caller_4(gsl: GlobalStateLock) {
-///     // read-lock is acquired only once.
+///     // Read-lock is acquired only once.
 ///     let sl = StateLock::from(gsl.lock_guard().await);
 ///     callee(&sl, true).await;
 ///     callee(&sl, false).await;
 ///
-///     // we can pass &GlobalState directly.
+///     // We can pass `&GlobalState` directly.
 ///     worker(sl.gs(), true);
 ///
 ///     // convert back into a read-guard
@@ -510,7 +509,7 @@ pub enum RecordTransactionError {
 /// advanced usage as caller: see source of [TransactionSender::send()](crate::api::tx_initiation::send::TransactionSender::send())
 #[derive(Debug)]
 pub enum StateLock<'a> {
-    /// holds an instance GlobalStateLock. can be used to
+    /// Holds an instance `GlobalStateLock`. can be used to
     Lock(Box<GlobalStateLock>),
     ReadGuard(AtomicRwReadGuard<'a, GlobalState>),
     WriteGuard(AtomicRwWriteGuard<'a, GlobalState>),

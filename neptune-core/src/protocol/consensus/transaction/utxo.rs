@@ -21,7 +21,7 @@ use crate::protocol::consensus::type_scripts::known_type_scripts::is_known_type_
 use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::consensus::type_scripts::time_lock::TimeLock;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]

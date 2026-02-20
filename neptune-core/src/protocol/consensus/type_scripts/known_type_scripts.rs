@@ -10,7 +10,7 @@ use super::TypeScriptWitness;
 use crate::protocol::consensus::transaction::primitive_witness::SaltedUtxos;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::utxo::Coin;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 
 pub(crate) fn match_type_script_and_generate_witness(
     type_script_hash: Digest,

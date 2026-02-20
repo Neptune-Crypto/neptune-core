@@ -9,7 +9,7 @@ use tasm_lib::triton_vm::prelude::*;
 use crate::protocol::consensus::transaction::validity::collect_type_scripts::CollectTypeScripts;
 use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
 use crate::protocol::consensus::transaction::validity::tasm::claims::new_claim::NewClaim;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 
 pub(crate) struct GenerateCollectTypeScriptsClaim;
 

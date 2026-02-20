@@ -29,7 +29,7 @@ use crate::protocol::consensus::transaction::primitive_witness::SaltedUtxos;
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 
 /// Maximum number of inputs/outputs allowed. Number of UTXOs must be strictly
@@ -104,7 +104,7 @@ impl CollectTypeScripts {
     const TOO_MANY_COINS: i128 = 1_000_515;
 }
 
-impl ConsensusProgram for CollectTypeScripts {
+impl TritonProgram for CollectTypeScripts {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
         let field_with_size_salted_input_utxos =
@@ -442,10 +442,10 @@ mod tests {
     use crate::protocol::consensus::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
-    impl ConsensusProgramSpecification for CollectTypeScripts {
+    impl TritonProgramSpecification for CollectTypeScripts {
         fn source(&self) {
             let siu_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
             let sou_digest: Digest = tasm::tasmlib_io_read_stdin___digest();

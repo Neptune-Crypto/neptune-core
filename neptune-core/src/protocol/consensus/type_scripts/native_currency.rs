@@ -31,7 +31,7 @@ use crate::protocol::consensus::transaction::validity::tasm::coinbase_amount::Co
 use crate::protocol::consensus::type_scripts::BFieldCodec;
 use crate::protocol::consensus::type_scripts::TypeScriptAndWitness;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::proof_abstractions::SecretWitness;
 
@@ -70,7 +70,7 @@ impl NativeCurrency {
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct NativeCurrency;
 
-impl ConsensusProgram for NativeCurrency {
+impl TritonProgram for NativeCurrency {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
         let field_with_size_coinbase = field_with_size!(NativeCurrencyWitnessMemory::coinbase);
@@ -769,13 +769,13 @@ pub mod tests {
     use crate::protocol::consensus::type_scripts::time_lock::TimeLock;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::ConsensusError;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::protocol::proof_abstractions::verifier::verify;
     use crate::tests::shared_tokio_runtime;
 
-    impl ConsensusProgramSpecification for NativeCurrency {
+    impl TritonProgramSpecification for NativeCurrency {
         fn source(&self) {
             // get in the current program's hash digest
             let self_digest: Digest = tasm::own_program_digest();

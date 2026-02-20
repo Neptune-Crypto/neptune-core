@@ -9,7 +9,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 
     #[test]
     fn print_all_validity_program_names() {

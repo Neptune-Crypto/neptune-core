@@ -26,10 +26,10 @@ use crate::api::tx_initiation::error::CreateProofError;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
-pub(crate) trait TypeScript: ConsensusProgram {
+pub(crate) trait TypeScript: TritonProgram {
     type State: BFieldCodec;
 
     fn try_decode_state(

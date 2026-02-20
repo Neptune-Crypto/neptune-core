@@ -12,10 +12,10 @@ pub mod tasm;
 pub mod timestamp;
 pub mod verifier;
 
-/// A `SecretWitness` is data that makes a `ConsensusProgram` halt gracefully, but
+/// A `SecretWitness` is data that makes a `TritonProgram` halt gracefully, but
 /// that should be hidden behind a zero-knowledge proof.
 ///
-/// Phrased differently, after proving the matching `ConsensusProgram`, the
+/// Phrased differently, after proving the matching `TritonProgram`, the
 /// `SecretWitness` should be securely deleted.
 pub trait SecretWitness {
     /// The program's (public/standard) input

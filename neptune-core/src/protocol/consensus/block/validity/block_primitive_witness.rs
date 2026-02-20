@@ -24,9 +24,9 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 ///                                                             |
 ///                                                             |---> BlockBody ----}-.
 ///                                                             |                     |
-///        SingleProof : BlockConsensusProgram <-- conversion --+-> }                 |
-///         |        ? : BlockConsensusProgram <-- conversion --+-> } Appendix -----}-|
-///         | ...... ? : BlockConsensusProgram <-- conversion --'-> }                 |
+///        SingleProof : BlockTritonProgram <-- conversion --+-> }                 |
+///         |        ? : BlockTritonProgram <-- conversion --+-> } Appendix -----}-|
+///         | ...... ? : BlockTritonProgram <-- conversion --'-> }                 |
 ///        prove                                                                      |
 ///         | prove                                                                   |
 ///         |  | prove                                                                |

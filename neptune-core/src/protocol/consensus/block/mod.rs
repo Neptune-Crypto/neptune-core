@@ -71,7 +71,7 @@ use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::proof_abstractions::verifier::verify;
