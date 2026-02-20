@@ -328,8 +328,7 @@ async fn verify_that_all_requests_leave_server_running() -> Result<()> {
         .await;
     let _ = rpc_server.clone().mempool_tx_ids(ctx, token).await;
 
-    let my_output: OutputFormat =
-        (own_receiving_address, NativeCurrencyAmount::one_nau()).into();
+    let my_output: OutputFormat = (own_receiving_address, NativeCurrencyAmount::one_nau()).into();
     let _ = rpc_server
         .clone()
         .send(
@@ -1325,8 +1324,7 @@ async fn coinbase_distribution_happy_path() {
     let output1 = CoinbaseOutputReadable::new(300, address1.to_bech32m(network).unwrap(), true);
 
     let address2 = GenerationSpendingKey::derive_from_seed(rng.random()).to_address();
-    let output2 =
-        CoinbaseOutputReadable::new(495, address2.to_bech32m(network).unwrap(), false);
+    let output2 = CoinbaseOutputReadable::new(495, address2.to_bech32m(network).unwrap(), false);
 
     let cli = cli_args::Args {
         network,
@@ -1458,8 +1456,7 @@ mod pow_puzzle_tests {
         let guesser_address = GenerationReceivingAddress::derive_from_seed(rng.random());
         block1.set_header_guesser_address(guesser_address.into());
 
-        let guess_challenge =
-            ProofOfWorkPuzzle::new(block1.clone(), genesis.header().difficulty);
+        let guess_challenge = ProofOfWorkPuzzle::new(block1.clone(), genesis.header().difficulty);
         assert_eq!(guess_challenge.prev_block, genesis.hash());
 
         let pow: BlockPow = random();
@@ -1513,8 +1510,7 @@ mod pow_puzzle_tests {
         let block1 = fake_valid_deterministic_successor(&genesis, network).await;
         bob.state
             .lock_mut(|x| {
-                x.mining_state.block_proposal =
-                    BlockProposal::ForeignComposition(block1.clone())
+                x.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone())
             })
             .await;
         let guesser_address = bob
@@ -1592,8 +1588,7 @@ mod pow_puzzle_tests {
         let block1 = invalid_empty_block(&genesis, network);
         bob.state
             .lock_mut(|x| {
-                x.mining_state.block_proposal =
-                    BlockProposal::ForeignComposition(block1.clone())
+                x.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone())
             })
             .await;
         let bob_token = cookie_token(&bob).await;
@@ -1671,8 +1666,7 @@ mod pow_puzzle_tests {
         let mut block1 = invalid_empty_block(&genesis, network);
         bob.state
             .lock_mut(|x| {
-                x.mining_state.block_proposal =
-                    BlockProposal::ForeignComposition(block1.clone())
+                x.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone())
             })
             .await;
 
@@ -2008,10 +2002,7 @@ mod claim_utxo_tests {
             Ok(())
         }
 
-        pub(super) async fn claim_utxo_owned(
-            claim_after_mined: bool,
-            spent: bool,
-        ) -> Result<()> {
+        pub(super) async fn claim_utxo_owned(claim_after_mined: bool, spent: bool) -> Result<()> {
             assert!(
                 !spent || claim_after_mined,
                 "If UTXO is spent, it must also be mined"
@@ -2029,8 +2020,7 @@ mod claim_utxo_tests {
             let bob_key = bob_wallet.nth_generation_spending_key(0);
             let genesis_block = Block::genesis(network);
             let (block1, composer_expected_utxos) =
-                make_mock_block(&genesis_block, None, bob_key, Default::default(), network)
-                    .await;
+                make_mock_block(&genesis_block, None, bob_key, Default::default(), network).await;
 
             bob.state
                 .set_new_self_composed_tip(block1.clone(), composer_expected_utxos)
@@ -2079,10 +2069,8 @@ mod claim_utxo_tests {
                 .unwrap();
 
             // alice mines 2 more blocks.  block2 confirms the sent tx.
-            let block2 = invalid_block_with_transaction(
-                &block1,
-                tx_artifacts.transaction.clone().into(),
-            );
+            let block2 =
+                invalid_block_with_transaction(&block1, tx_artifacts.transaction.clone().into());
             let block3 = invalid_empty_block(&block2, network);
 
             if claim_after_mined {
@@ -2272,8 +2260,7 @@ mod send_tests {
         let timestamp = network.launch_date() + Timestamp::months(7);
 
         // obtain some funds, so we have two inputs available.
-        mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, Some(timestamp))
-            .await?;
+        mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, Some(timestamp)).await?;
 
         let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
             .to_address()
@@ -2338,8 +2325,7 @@ mod send_tests {
                 ..Default::default()
             };
             let mut rpc_server =
-                test_rpc_server(WalletEntropy::new_pseudorandom(rng.random()), 2, cli_args)
-                    .await;
+                test_rpc_server(WalletEntropy::new_pseudorandom(rng.random()), 2, cli_args).await;
             let token = cookie_token(&rpc_server).await;
 
             // --- Init.  get wallet spending key ---
@@ -2361,8 +2347,7 @@ mod send_tests {
             // wallet ---
             let timestamp = network.launch_date() + Timestamp::days(1);
             let (block_1, composer_utxos) =
-                make_mock_block(&genesis_block, Some(timestamp), key, rng.random(), network)
-                    .await;
+                make_mock_block(&genesis_block, Some(timestamp), key, rng.random(), network).await;
 
             {
                 let state_lock = rpc_server.state.lock_guard().await;
