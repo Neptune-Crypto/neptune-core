@@ -4060,10 +4060,8 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-            let block_1a = invalid_block_with_transaction(
-                &genesis,
-                spending_tx_1a.transaction().clone().into(),
-            );
+            let block_1a =
+                invalid_block_with_transaction(&genesis, spending_tx_1a.transaction().clone());
             let block_1b = invalid_empty_block(&genesis, network);
             let block_2b = invalid_empty_block(&block_1b, network);
             alice_global_lock
