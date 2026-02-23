@@ -62,7 +62,10 @@ impl Transport for HttpClient {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
     use std::net::SocketAddr;
+    use std::path::Path;
+    use std::path::PathBuf;
     use std::time::Duration;
 
     use neptune_cash::api::export::Args;
@@ -71,14 +74,28 @@ mod tests {
     use neptune_cash::application::json_rpc::core::model::json::JsonError;
     use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
     use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
+    use rand::distr::Alphanumeric;
+    use rand::distr::SampleString;
 
     use crate::http::HttpClient;
 
     #[tokio::test]
     async fn client_responds_in_real_world_scenario() {
-        let rpc_address = "127.0.0.1:9797";
+        let rpc_address = "127.0.0.1:56390";
 
         let mut cli_args = Args::default();
+
+        // allow run if instance is running, and don't overwrite
+        // existing data dir.
+        cli_args.peer_port = 56386;
+        cli_args.rpc_port = 56387;
+        cli_args.quic_port = 56388;
+        cli_args.tcp_port = 56389;
+        let tmp_root: PathBuf = env::temp_dir()
+            .join("neptune-unit-tests")
+            .join(Path::new(&Alphanumeric.sample_string(&mut rand::rng(), 16)));
+
+        cli_args.data_dir = Some(tmp_root);
         cli_args.listen_rpc = Some(rpc_address.parse::<SocketAddr>().unwrap());
         let _ = neptune_cash::initialize(cli_args).await.unwrap();
 

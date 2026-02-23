@@ -3462,6 +3462,7 @@ version = "0.6.1"
 dependencies = [
  "async-trait",
  "neptune-cash",
+ "rand 0.9.2",
  "reqwest",
  "serde_json",
  "tokio",
