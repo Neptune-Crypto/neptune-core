@@ -15,6 +15,7 @@ use crate::api::export::Announcement;
 use crate::api::export::GenerationSpendingKey;
 use crate::api::export::GlobalStateLock;
 use crate::api::export::Network;
+use crate::api::export::OutputFormat;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
@@ -52,6 +53,7 @@ use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::tests::shared::mock_tx::send_coins;
 use crate::tests::shared::Randomness;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -770,6 +772,19 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
         predecessor = blocks.last().unwrap();
     }
     blocks
+}
+
+/// Build a block with the specified outputs. Includes change outputs if
+/// balance exceeds output value. Notifies wallet of expected incoming
+/// UTXOs that can be claimed from the transaction.
+pub(crate) async fn block_with_outputs(
+    gsl: &mut GlobalStateLock,
+    outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+) -> Block {
+    let parent_block = gsl.lock_guard().await.chain.light_state().clone();
+    let timestamp = parent_block.header().timestamp + Timestamp::months(7);
+    let tx = send_coins(gsl, outputs, timestamp).await;
+    invalid_block_with_transaction(&parent_block, tx)
 }
 
 mod tests {

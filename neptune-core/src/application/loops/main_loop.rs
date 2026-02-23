@@ -2498,9 +2498,15 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::KeyType;
+    use crate::api::export::NativeCurrencyAmount;
+    use crate::api::export::ReceivingAddress;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
     use crate::protocol::peer::peer_info::pseudorandom_peer_id;
+    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::tests::shared::blocks::block_with_outputs;
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
@@ -2590,6 +2596,144 @@ mod tests {
             main_loop_handler,
             main_to_peer_rx,
             main_to_miner_rx,
+        }
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn rescan_incoming_finds_expenditures() {
+        // Ensure that rescans for incoming UTXO also checks newly registered
+        // UTXOs for spent status. Otherwise wallet balances will be wrong.
+        let utxo_index_options = [false, true];
+        let notification_mediums = [
+            UtxoNotificationMedium::OffChain,
+            UtxoNotificationMedium::OnChain,
+        ];
+
+        for (notification_medium, with_utxo_index) in notification_mediums
+            .into_iter()
+            .cartesian_product(utxo_index_options.into_iter())
+        {
+            prop(with_utxo_index, notification_medium).await;
+        }
+
+        async fn prop(utxo_index: bool, notification_medium: UtxoNotificationMedium) {
+            let network = Network::Main;
+            let cli_args = cli_args::Args {
+                network,
+                utxo_index,
+                ..Default::default()
+            };
+            let TestSetup {
+                main_loop_handler: mut alice_main_loop,
+                ..
+            } = setup(1, 0, cli_args).await;
+            let mut alice = alice_main_loop.global_state_lock.clone();
+
+            let own_key = alice
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .nth_spending_key(KeyType::Generation, 1);
+            let third_party_address: ReceivingAddress =
+                GenerationReceivingAddress::derive_from_seed(Digest::default()).into();
+            let outputs = vec![
+                (
+                    third_party_address,
+                    NativeCurrencyAmount::coins(7),
+                    UtxoNotificationMedium::OffChain,
+                ),
+                (
+                    own_key.to_address(),
+                    NativeCurrencyAmount::coins(2),
+                    notification_medium,
+                ),
+            ];
+
+            alice
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .bump_derivation_index(KeyType::Generation, 10)
+                .await;
+
+            let block = block_with_outputs(&mut alice, outputs).await;
+            alice.set_new_tip(block).await.unwrap();
+
+            let balance_timestamp = alice
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .header()
+                .timestamp;
+            let expected_balance = NativeCurrencyAmount::coins(13);
+            let balance = alice
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .available_confirmed(balance_timestamp);
+            assert_eq!(
+                expected_balance, balance,
+                "Balance must be 13 after getting 20 and sending 7.\nExpected: {expected_balance}.\n Got: {balance}."
+            );
+
+            alice
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .wallet_db
+                .clear_mutxos()
+                .await;
+
+            let mut mutable_main_loop_state = alice_main_loop.mutable();
+            let all_keys = alice
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_all_known_spending_keys()
+                .collect_vec();
+
+            // Do *not* hold any lock on Alice's global state here, as the
+            // calls obviously require a write-lock on the state.
+            alice_main_loop
+                .handle_rpc_server_message(
+                    RPCServerToMain::RescanAnnounced {
+                        first: 0.into(),
+                        last: 10.into(),
+                        keys: all_keys,
+                    },
+                    &mut mutable_main_loop_state,
+                )
+                .await
+                .unwrap();
+            alice_main_loop
+                .handle_rpc_server_message(
+                    RPCServerToMain::RescanExpected {
+                        first: 0.into(),
+                        last: 10.into(),
+                    },
+                    &mut mutable_main_loop_state,
+                )
+                .await
+                .unwrap();
+
+            // Sleep to allow calls to complete, as they happen in spawned
+            // tasks.
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
+            let balance_again = alice
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .available_confirmed(balance_timestamp);
+            assert_eq!(
+                expected_balance, balance_again,
+                "Balance after rescan must agree with original balance, \
+                     since rescan must also account for expenditures."
+            );
         }
     }
 

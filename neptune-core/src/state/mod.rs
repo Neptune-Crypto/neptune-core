@@ -1101,6 +1101,8 @@ impl GlobalState {
 
         let num_mps_per_utxo = self.cli.number_of_mps_per_utxo;
 
+        debug!("Rescanning range {first}..={last} for expected incoming.",);
+
         let mut recovery_list = vec![];
         for block_height in first..=last {
             let Some((addition_records, block_hash)) = self
@@ -1311,6 +1313,10 @@ impl GlobalState {
             .into_iter()
             .map(|key| ((&key.to_address()).into(), key))
             .collect();
+        debug!(
+            "Rescanning {} keys in range {first}..={last} for announced incoming.",
+            keys.len()
+        );
 
         // Notice that we *do not* use the announcement flag to block height
         // lookup here in case the node maintains a UTXO index but instead loop
@@ -3241,9 +3247,6 @@ mod tests {
     use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
-    use crate::api::export::ChangePolicy;
-    use crate::api::export::InputSelectionPolicy;
-    use crate::api::export::OutputFormat;
     use crate::api::export::ReceivingAddress;
     use crate::api::export::TxOutputList;
     use crate::application::config::network::Network;
@@ -3268,6 +3271,7 @@ mod tests {
     use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
+    use crate::tests::shared::mock_tx::send_coins;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -3404,8 +3408,6 @@ mod tests {
         use futures::future;
 
         use super::*;
-        use crate::api::export::TransactionProof;
-        use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
         use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
 
         /// Create 3 branches and return them in an array.
@@ -3619,71 +3621,6 @@ mod tests {
 
             let all_branches = all_branches.lock().await.clone();
             all_branches.map(std::option::Option::unwrap)
-        }
-
-        /// Send coins to somewhere.
-        ///
-        /// Make the transaction. Update state accordingly. Return the
-        /// transaction. Fee in returned transaction is set to zero.
-        pub(crate) async fn send_coins(
-            sender: &mut GlobalStateLock,
-            outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
-            timestamp: Timestamp,
-        ) -> Transaction {
-            let outputs = sender
-                .api()
-                .tx_initiator()
-                .generate_tx_outputs(outputs)
-                .await;
-            let utxos_sent_to_self = sender
-                .lock_guard()
-                .await
-                .wallet_state
-                .extract_expected_utxos(outputs.iter(), UtxoNotifier::Myself);
-
-            sender
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .add_expected_utxos(utxos_sent_to_self)
-                .await;
-
-            let amount = outputs.total_native_coins();
-            let inputs = sender
-                .api()
-                .tx_initiator()
-                .select_spendable_inputs(InputSelectionPolicy::ByProvidedOrder, amount, timestamp)
-                .await
-                .into_iter()
-                .collect_vec();
-            let transaction_details = TransactionDetailsBuilder::default()
-                .inputs(inputs.into())
-                .outputs(outputs)
-                .change_policy(ChangePolicy::RecoverToNextUnusedKey {
-                    key_type: KeyType::Symmetric,
-                    medium: UtxoNotificationMedium::OnChain,
-                })
-                .timestamp(timestamp)
-                .build(&mut StateLock::Lock(Box::new(sender.clone())))
-                .await
-                .unwrap();
-
-            let primitive_witness_proof = sender
-                .api()
-                .tx_initiator()
-                .generate_witness_proof(transaction_details.into());
-            let primitive_witness = primitive_witness_proof.into_primitive_witness();
-
-            println!(
-                "primitive witness has public announcements? (global state) {}",
-                !primitive_witness.kernel.announcements.is_empty()
-            );
-            let kernel = primitive_witness.kernel;
-
-            Transaction {
-                kernel,
-                proof: TransactionProof::invalid(),
-            }
         }
     }
 
@@ -3925,7 +3862,7 @@ mod tests {
         // initiate transaction to rando
         let rando = GenerationReceivingAddress::derive_from_seed(rng.random());
         drop(alice_gsl); // drop lock to free up api
-        let tx_a = helper::send_coins(
+        let tx_a = send_coins(
             &mut alice,
             vec![(rando.into(), NativeCurrencyAmount::coins(10))],
             timestamp_2,
@@ -3993,7 +3930,7 @@ mod tests {
 
         // make transaction
         drop(alice_gsl); // drop lock to free up api
-        let tx_b = helper::send_coins(
+        let tx_b = send_coins(
             &mut alice,
             vec![(rando.into(), NativeCurrencyAmount::coins(5))],
             timestamp_5,
@@ -4230,19 +4167,8 @@ mod tests {
     mod rescan_wallet {
         use super::*;
         use crate::api::export::TxInputList;
+        use crate::tests::shared::blocks::block_with_outputs;
         use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
-
-        /// Build a block with the specified outputs. Includes change outputs if
-        /// balance exceeds output value.
-        async fn block_with_outputs(
-            gsl: &mut GlobalStateLock,
-            outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
-        ) -> Block {
-            let parent_block = gsl.lock_guard().await.chain.light_state().clone();
-            let timestamp = parent_block.header().timestamp + Timestamp::months(7);
-            let tx = helper::send_coins(gsl, outputs, timestamp).await;
-            invalid_block_with_transaction(&parent_block, tx)
-        }
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

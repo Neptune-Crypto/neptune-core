@@ -1,14 +1,20 @@
 use bytesize::ByteSize;
+use itertools::Itertools;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::bfe;
 
 use crate::api::export::BlockHeight;
+use crate::api::export::ChangePolicy;
+use crate::api::export::InputSelectionPolicy;
+use crate::api::export::KeyType;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
+use crate::api::export::OutputFormat;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TxProvingCapability;
+use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::application::config::cli_args;
 use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
@@ -22,8 +28,12 @@ use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
+use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::wallet::wallet_entropy::WalletEntropy;
+use crate::state::GlobalStateLock;
+use crate::state::StateLock;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -215,4 +225,71 @@ pub(crate) async fn genesis_tx_with_proof_type(
         .transaction;
 
     transaction
+}
+
+/// Send coins to somewhere.
+///
+/// Make the transaction. Update state accordingly. Return the
+/// transaction. Fee in returned transaction is set to zero.
+///
+/// Notifies wallet of expected incoming UTXOs.
+pub(crate) async fn send_coins(
+    sender: &mut GlobalStateLock,
+    outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+    timestamp: Timestamp,
+) -> Transaction {
+    let outputs = sender
+        .api()
+        .tx_initiator()
+        .generate_tx_outputs(outputs)
+        .await;
+    let utxos_sent_to_self = sender
+        .lock_guard()
+        .await
+        .wallet_state
+        .extract_expected_utxos(outputs.iter(), UtxoNotifier::Myself);
+
+    sender
+        .lock_guard_mut()
+        .await
+        .wallet_state
+        .add_expected_utxos(utxos_sent_to_self)
+        .await;
+
+    let amount = outputs.total_native_coins();
+    let inputs = sender
+        .api()
+        .tx_initiator()
+        .select_spendable_inputs(InputSelectionPolicy::ByProvidedOrder, amount, timestamp)
+        .await
+        .into_iter()
+        .collect_vec();
+    let transaction_details = TransactionDetailsBuilder::default()
+        .inputs(inputs.into())
+        .outputs(outputs)
+        .change_policy(ChangePolicy::RecoverToNextUnusedKey {
+            key_type: KeyType::Symmetric,
+            medium: UtxoNotificationMedium::OnChain,
+        })
+        .timestamp(timestamp)
+        .build(&mut StateLock::Lock(Box::new(sender.clone())))
+        .await
+        .unwrap();
+
+    let primitive_witness_proof = sender
+        .api()
+        .tx_initiator()
+        .generate_witness_proof(transaction_details.into());
+    let primitive_witness = primitive_witness_proof.into_primitive_witness();
+
+    println!(
+        "primitive witness has public announcements? (global state) {}",
+        !primitive_witness.kernel.announcements.is_empty()
+    );
+    let kernel = primitive_witness.kernel;
+
+    Transaction {
+        kernel,
+        proof: TransactionProof::invalid(),
+    }
 }
