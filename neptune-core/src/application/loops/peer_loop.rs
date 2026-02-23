@@ -874,14 +874,9 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
 
-                // If we are already syncing, then this message does not matter.
-                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-                if global_state_mut.net.sync_anchor.is_some() {
-                    info!("Already entered into sync mode; ignoring sync challenge response.");
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
                 // Decrement the display counter.
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                let sync_anchor = global_state_mut.net.sync_anchor.clone();
                 if let SyncStatus::Challenges(number) = global_state_mut.net.sync_status {
                     global_state_mut.net.sync_status =
                         SyncStatus::Challenges(number.saturating_sub(1));
@@ -917,6 +912,21 @@ impl PeerLoopHandler {
                 {
                     self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
                         .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // If we are already syncing, then most likely another peer
+                // activated the sync loop. That's great, now we can sync from
+                // multiple peers simultaneously! At this point we know that we
+                // are not at risk of being tricked into entering sync mode
+                // maliciously. So we can proceed to inform the sync loop of the
+                // extra available peer. (Otherwise we need to do more
+                // scrutiny.)
+                if sync_anchor.is_some() {
+                    self.to_main_tx
+                        .send(PeerTaskToMain::NewPeer(self.peer_id))
+                        .await?;
+                    info!("Informing sync loop of new available peer.");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
