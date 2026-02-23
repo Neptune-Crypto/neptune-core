@@ -595,6 +595,8 @@ pub(crate) mod tests {
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use rand::rng;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
     use strum::IntoEnumIterator;
     use tasm_lib::twenty_first::bfe;
     use test_strategy::proptest;
@@ -848,7 +850,9 @@ pub(crate) mod tests {
         );
 
         let target = difficulty.target();
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(
+            buffer.prev_block_digest.values()[0].value() ^ auth_paths.commit().values()[0].value(),
+        );
         let index_picker_preimage = buffer.index_picker_preimage(auth_paths);
         loop {
             let nonce = rng.random();
