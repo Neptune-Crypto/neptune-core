@@ -55,45 +55,48 @@ impl<'a> UtxoValidator<'a> {
                     return MonitoredUtxoState::Unsynced;
                 }
 
-                if monitored_utxo.spent == MonitoredUtxoSpentStatus::Unspent {
-                    return MonitoredUtxoState::SyncedAndUnspent;
-                }
-
-                let spend_is_canonical = match monitored_utxo.spent {
+                match monitored_utxo.spent {
+                    MonitoredUtxoSpentStatus::Unspent => {
+                        return MonitoredUtxoState::SyncedAndUnspent;
+                    }
                     MonitoredUtxoSpentStatus::SpentIn {
                         block_hash,
                         block_height,
                         ..
                     } => {
-                        archival_state
+                        if archival_state
                             .is_canonical_block(block_hash, block_height)
                             .await
+                        {
+                            return MonitoredUtxoState::Spent;
+                        }
                     }
-                    _ => false,
+                    MonitoredUtxoSpentStatus::SpentInUnknownBlock => (),
                 };
 
-                if spend_is_canonical {
+                // UTXO is marked as spent but we don't know in which block it
+                // was spent *or* the block in which an expenditure was seen
+                // is not canonical.
+                // If we don't know when the UTXO was spent, the spending block
+                // could have been reorganized away. And even if we know
+                // that the block in which the UTXO was spent was reorganized
+                // away, it could could have been reorganized away to a chain
+                // where the spend also occurred. So we have to check the
+                // mutator set to see if the UTXO was actually spent or not.
+                // The reason we don't do this for all UTXOs, is that it's too
+                // slow compared to inspecting the fields on the monitored UTXO
+                // directly.
+                let absolute_index_set = monitored_utxo.absolute_indices();
+                let is_spent = archival_state
+                    .archival_mutator_set
+                    .ams()
+                    .absolute_index_set_was_applied(absolute_index_set)
+                    .await;
+
+                if is_spent {
                     MonitoredUtxoState::Spent
                 } else {
-                    // If we don't know when block was spent, the spending block
-                    // could have been reorganized away. And even if we know
-                    // that the block in which the UTXO was spent, this
-                    // this spending block could have been reorganized away to a
-                    // chain where the spend also occurred. So we have to check
-                    // the mutator set to see if the UTXO was actually spent or
-                    // not.
-                    let absolute_index_set = monitored_utxo.absolute_indices();
-                    let is_spent = archival_state
-                        .archival_mutator_set
-                        .ams()
-                        .absolute_index_set_was_applied(absolute_index_set)
-                        .await;
-
-                    if is_spent {
-                        MonitoredUtxoState::Spent
-                    } else {
-                        MonitoredUtxoState::SyncedAndUnspent
-                    }
+                    MonitoredUtxoState::SyncedAndUnspent
                 }
             }
         }
