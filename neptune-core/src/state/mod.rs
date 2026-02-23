@@ -843,7 +843,7 @@ impl GlobalState {
         height
     }
 
-    /// Reescan all monitored UTXOs for expenditures to set the "spent" status,
+    /// Rescan all monitored UTXOs for expenditures to set the "spent" status,
     /// indicating if the UTXO was spent or not.
     ///
     /// Never loads the entire block from disk, so performance is good.
@@ -967,6 +967,10 @@ impl GlobalState {
     /// Rescan the specified (inclusive) range of blocks for guesser rewards to
     /// this node's wallet.
     ///
+    /// Must be followed up by a call to [`Self::rescan_outgoing`] to ensure
+    /// wallet integrity. Otherwise a wrong balance might be reported by the
+    /// wallet.
+    ///
     /// # Panics
     /// - If start block height is greater than end block height
     pub(crate) async fn rescan_guesser_rewards(&mut self, first: BlockHeight, last: BlockHeight) {
@@ -1086,6 +1090,10 @@ impl GlobalState {
 
     /// Rescan the specified (inclusive) range of blocks for incoming UTXOs that
     /// were added as expected UTXOs to the wallet database.
+    ///
+    /// Must be followed up by a call to [`Self::rescan_outgoing`] to ensure
+    /// wallet integrity. Otherwise a wrong balance might be reported by the
+    /// wallet.
     ///
     /// Never loads the entire block from disk, so performance is good.
     ///
@@ -1291,6 +1299,10 @@ impl GlobalState {
     /// Rescan the specified (inclusive) range of canonical blocks for incoming
     /// UTXOs that were announced on-chain, for the specified list of spending
     /// keys.
+    ///
+    /// Must be followed up by a call to [`Self::rescan_outgoing`] to ensure
+    /// wallet integrity. Otherwise a wrong balance might be reported by the
+    /// wallet.
     ///
     /// Fast if node maintains a UTXO index, otherwise potentially slow.
     ///
