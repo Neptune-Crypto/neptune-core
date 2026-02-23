@@ -2044,6 +2044,8 @@ impl MainLoopHandler {
 
                     if let Err(err) = res_outgoing {
                         error!("{err}");
+                    } else {
+                        info!("Completed rescan successfully");
                     }
                 });
 
@@ -2067,6 +2069,8 @@ impl MainLoopHandler {
 
                     if let Err(err) = res_outgoing {
                         error!("{err}");
+                    } else {
+                        info!("Completed rescan successfully");
                     }
                 });
 
@@ -2086,6 +2090,8 @@ impl MainLoopHandler {
 
                     if let Err(err) = res {
                         error!("{err}");
+                    } else {
+                        info!("Completed rescan successfully");
                     }
                 });
 
@@ -2109,6 +2115,8 @@ impl MainLoopHandler {
 
                     if let Err(err) = res_outgoing {
                         error!("{err}");
+                    } else {
+                        info!("Completed rescan successfully");
                     }
                 });
 
