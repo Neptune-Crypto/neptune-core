@@ -332,7 +332,7 @@ pub trait RpcApi: Sync + Send {
         _request: BurnedSupplyRequest,
     ) -> RpcResult<BurnedSupplyResponse>;
 
-    /* Wallet */
+    /* WalletServer */
 
     async fn get_blocks(
         &self,
@@ -386,6 +386,8 @@ pub trait RpcApi: Sync + Send {
         })
         .await
     }
+
+    /* OwnWallet */
 
     async fn rescan_announced_call(
         &self,

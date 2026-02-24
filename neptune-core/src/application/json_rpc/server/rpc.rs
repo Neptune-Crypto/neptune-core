@@ -11,6 +11,10 @@ use crate::state::GlobalStateLock;
 pub struct RpcServer {
     pub(crate) state: GlobalStateLock,
     pub(crate) to_main_tx: mpsc::Sender<RPCServerToMain>,
+
+    /// Prevents users from doing harm.
+    /// DOS protection: If set to true, the client may make requests that
+    /// require a lot of work or a long time to answer.
     pub(crate) unrestricted: bool,
 }
 
@@ -99,6 +103,40 @@ mod tests {
         assert!(server_unrestricted.unrestricted);
     }
 
+    async fn call_paramless(router: Arc<RpcRouter>, method: &str) -> JsonResponse {
+        let empty_params = json!([]);
+        let response = router.dispatch(method, empty_params).await;
+
+        match response {
+            Ok(result) => JsonResponse::success(None, result),
+            Err(error) => JsonResponse::error(None, error),
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn cannot_call_own_wallet_endpoint_if_not_activated() {
+        let router_with_ownwallet = Arc::new(RpcMethods::new_router(
+            Arc::new(test_rpc_server().await),
+            HashSet::from([Namespace::Ownwallet, Namespace::Chain]),
+        ));
+        let router_no_ownwallet = Arc::new(RpcMethods::new_router(
+            Arc::new(test_rpc_server().await),
+            HashSet::from([Namespace::Chain]),
+        ));
+
+        assert!(matches!(
+            call_paramless(router_no_ownwallet, "ownwallet_rescanOutgoing").await,
+            JsonResponse::Error {
+                error: JsonError::MethodNotFound,
+                ..
+            }
+        ));
+        assert!(matches!(
+            call_paramless(router_with_ownwallet, "ownwallet_rescanOutgoing").await,
+            JsonResponse::Success { .. }
+        ));
+    }
+
     #[apply(shared_tokio_runtime)]
     async fn router_macro_isolates_namespaces() {
         const CHAIN_TEST_METHOD: &str = "chain_height";
@@ -112,16 +150,6 @@ mod tests {
             Arc::new(test_rpc_server().await),
             HashSet::from([Namespace::Node, Namespace::Chain]),
         ));
-
-        async fn call_paramless(router: Arc<RpcRouter>, method: &str) -> JsonResponse {
-            let empty_params = json!([]);
-            let response = router.dispatch(method, empty_params).await;
-
-            match response {
-                Ok(result) => JsonResponse::success(None, result),
-                Err(error) => JsonResponse::error(None, error),
-            }
-        }
 
         let no_chain_response = call_paramless(router_no_chain.clone(), CHAIN_TEST_METHOD).await;
         assert!(matches!(
