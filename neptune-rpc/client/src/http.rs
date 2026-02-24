@@ -62,6 +62,7 @@ impl Transport for HttpClient {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::env;
     use std::net::SocketAddr;
     use std::path::Path;
@@ -69,6 +70,8 @@ mod tests {
     use std::time::Duration;
 
     use neptune_cash::api::export::Args;
+    use neptune_cash::api::export::KeyType;
+    use neptune_cash::application::json_rpc::core::api::ops::Namespace;
     use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
     use neptune_cash::application::json_rpc::core::api::rpc::RpcError;
     use neptune_cash::application::json_rpc::core::model::json::JsonError;
@@ -79,32 +82,54 @@ mod tests {
 
     use crate::http::HttpClient;
 
-    #[tokio::test]
-    async fn client_responds_in_real_world_scenario() {
-        let rpc_address = "127.0.0.1:56390";
+    /// Start a real neptune-core node with a specified port offset to allow
+    /// tests to run in parallel.
+    ///
+    /// Don't use this real server to test all cornercases of inner workings of
+    /// neptune-core. Think of this server as integration testing.
+    async fn start_pseudo_real_server(
+        activated_namespaces: HashSet<Namespace>,
+        unsafe_rpc: bool,
+        port_offset: u16,
+    ) -> HttpClient {
+        let rpc_address = format!("127.0.0.1:{port_offset}");
 
         let mut cli_args = Args::default();
 
         // allow run if instance is running, and don't overwrite
         // existing data dir.
-        cli_args.peer_port = 56386;
-        cli_args.rpc_port = 56387;
-        cli_args.quic_port = 56388;
-        cli_args.tcp_port = 56389;
+        cli_args.peer_port = port_offset + 1;
+        cli_args.rpc_port = port_offset + 2;
+        cli_args.quic_port = port_offset + 3;
+        cli_args.tcp_port = port_offset + 4;
+        cli_args.rpc_modules = activated_namespaces.into_iter().collect();
+        cli_args.unsafe_rpc = unsafe_rpc;
         let tmp_root: PathBuf = env::temp_dir()
             .join("neptune-unit-tests")
             .join(Path::new(&Alphanumeric.sample_string(&mut rand::rng(), 16)));
 
         cli_args.data_dir = Some(tmp_root);
         cli_args.listen_rpc = Some(rpc_address.parse::<SocketAddr>().unwrap());
-        let _ = neptune_cash::initialize(cli_args).await.unwrap();
+        let mut main_loop = neptune_cash::initialize(cli_args).await.unwrap();
 
-        // Wait a few seconds so node will fully initialize.
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::spawn(async move {
+            main_loop.run().await.unwrap();
+        });
 
-        let client = HttpClient::new(format!("http://{}", rpc_address));
+        // Wait a few seconds so node will fully initialize. Initializing
+        // neptune-core spawns multiple loops. They might need a bit time to
+        // be ready for responses.
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
-        // Chain namespace is available by default.
+        HttpClient::new(format!("http://{}", rpc_address))
+    }
+
+    #[tokio::test]
+    async fn client_responds_in_real_world_scenario() {
+        let unsafe_rpc = false;
+        let client =
+            start_pseudo_real_server(HashSet::from([Namespace::Chain]), unsafe_rpc, 40500).await;
+
         let tip_response = client.tip().await;
         assert!(tip_response.is_ok());
 
@@ -117,5 +142,23 @@ mod tests {
             block_response.unwrap_err(),
             RpcError::Server(JsonError::MethodNotFound)
         );
+    }
+
+    #[tokio::test]
+    async fn get_new_address_bumps_derivation_index() {
+        let unsafe_rpc = false;
+        let client = start_pseudo_real_server(
+            HashSet::from([Namespace::Chain, Namespace::Ownwallet]),
+            unsafe_rpc,
+            40510,
+        )
+        .await;
+
+        for key_type in [KeyType::Generation, KeyType::Symmetric] {
+            let old_index = client.derivation_index(key_type).await.unwrap();
+            let _ = client.generate_address(key_type).await.unwrap();
+            let new_index = client.derivation_index(key_type).await.unwrap();
+            assert_eq!(new_index.derivation_index, old_index.derivation_index + 1);
+        }
     }
 }

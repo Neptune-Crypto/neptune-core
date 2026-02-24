@@ -3607,6 +3607,8 @@ pub(crate) mod tests {
     }
 
     mod key_derivation {
+        use strum::IntoEnumIterator;
+
         use super::*;
 
         /// tests that all known keys are unique, for all key types.
@@ -3733,6 +3735,18 @@ pub(crate) mod tests {
                 assert!(persisted_known_keys.iter().all_unique());
 
                 Ok(())
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn next_receiving_address_bumps_counter_by_one() {
+            let mut wallet_state =
+                mock_genesis_wallet_state(WalletEntropy::new_random(), &Args::default()).await;
+
+            for key_type in KeyType::iter() {
+                let counter = wallet_state.key_counter(key_type);
+                wallet_state.next_unused_spending_key(key_type).await;
+                assert_eq!(counter + 1, wallet_state.key_counter(key_type));
             }
         }
     }

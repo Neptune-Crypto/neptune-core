@@ -2298,6 +2298,28 @@ impl MainLoopHandler {
                     .await;
                 Ok(false)
             }
+            RPCServerToMain::GenerateNewAddress {
+                key_type,
+                return_channel,
+            } => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::GenerateNewAddress");
+
+                let spending_key = self
+                    .global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .next_unused_spending_key(key_type)
+                    .await;
+                let address = spending_key.to_address();
+
+                match return_channel.send(address) {
+                    Ok(_) => debug!("Generated new {key_type} address."),
+                    Err(_) => error!("Cannot send new address back to caller."),
+                };
+
+                Ok(false)
+            }
         }
     }
 

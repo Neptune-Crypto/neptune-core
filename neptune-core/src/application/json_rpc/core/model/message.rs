@@ -411,6 +411,18 @@ pub struct SetDerivationIndexRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SetDerivationIndexResponse {}
 
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateAddressRequest {
+    pub key_type: KeyType,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateAddressResponse {
+    pub address: String,
+}
+
 /* Mining */
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]

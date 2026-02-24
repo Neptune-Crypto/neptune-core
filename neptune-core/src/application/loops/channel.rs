@@ -7,6 +7,7 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 
 use crate::api::export::KeyType;
+use crate::api::export::ReceivingAddress;
 use crate::api::export::SpendingKey;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::network::overview::NetworkOverview;
@@ -142,6 +143,10 @@ pub(crate) enum RPCServerToMain {
     ResetRelayReservations,
     GetNetworkOverview(tokio::sync::oneshot::Sender<NetworkOverview>),
     BumpKeyDerivationIndex(KeyType, u64),
+    GenerateNewAddress {
+        key_type: KeyType,
+        return_channel: tokio::sync::oneshot::Sender<ReceivingAddress>,
+    },
 }
 
 pub trait Cancelable: Send + Sync {

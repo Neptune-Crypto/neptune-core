@@ -458,6 +458,16 @@ pub trait RpcApi: Sync + Send {
         request: SetDerivationIndexRequest,
     ) -> RpcResult<SetDerivationIndexResponse>;
 
+    async fn generate_address(&self, key_type: KeyType) -> RpcResult<GenerateAddressResponse> {
+        self.generate_address_call(GenerateAddressRequest { key_type })
+            .await
+    }
+
+    async fn generate_address_call(
+        &self,
+        request: GenerateAddressRequest,
+    ) -> RpcResult<GenerateAddressResponse>;
+
     /* Mining */
 
     async fn get_block_template(
@@ -604,6 +614,7 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: BestTransactionForNextBlockRequest,
     ) -> RpcResult<BestTransactionForNextBlockResponse>;
+
     /* Networking */
 
     async fn ban_call(&self, request: BanRequest) -> RpcResult<BanResponse>;

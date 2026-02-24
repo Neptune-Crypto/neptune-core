@@ -15,8 +15,9 @@ neptune-cash = { version = "0.6.1", path = "../../neptune-core" }
 async-trait = "0.1.83"
 
 [dev-dependencies]
-tokio = { version = "1.41", features = ["full", "tracing"] }
+itertools = "0.14"
 rand = "0.9"
+tokio = { version = "1.41", features = ["full", "tracing"] }
 
 [lints]
 workspace = true

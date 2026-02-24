@@ -683,6 +683,28 @@ impl RpcApi for RpcServer {
         Ok(SetDerivationIndexResponse {})
     }
 
+    async fn generate_address_call(
+        &self,
+        request: GenerateAddressRequest,
+    ) -> RpcResult<GenerateAddressResponse> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .to_main_tx
+            .send(RPCServerToMain::GenerateNewAddress {
+                key_type: request.key_type,
+                return_channel: tx,
+            })
+            .await;
+
+        let network = self.state.cli().network;
+        let address = rx
+            .await
+            .expect("Main loop shouldn't crash")
+            .to_bech32m(network)
+            .expect("Must be able to encode address from own wallet as bech32");
+        Ok(GenerateAddressResponse { address })
+    }
+
     async fn get_block_template_call(
         &self,
         request: GetBlockTemplateRequest,
