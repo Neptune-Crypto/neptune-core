@@ -231,6 +231,10 @@ mod tests {
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
 
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "Test disabled on Windows due to LevelDB cross-platform issues"
+    )]
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn migrate_real_v2_db_to_current_version() -> anyhow::Result<()> {
