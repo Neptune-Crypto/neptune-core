@@ -78,6 +78,9 @@ pub enum RpcError {
     #[error("Endpoint requires UTXO index which is not present")]
     UtxoIndexNotPresent,
 
+    #[error("Filtering conditions may not be empty")]
+    EmptyFilteringConditions,
+
     // Common case errors
     #[error("Invalid address provided in arguments")]
     InvalidAddress,
@@ -539,6 +542,30 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: BlockHeightsByAbsoluteIndexSetsRequest,
     ) -> RpcResult<BlockHeightsByAbsoluteIndexSetsResponse>;
+
+    /// Return the block heights for blocks matching *all* elements in the
+    /// specified input/output lists, for blocks belonging to the canonical
+    /// chain. Will not return block heights were e.g. only one of the outputs
+    /// was included if more than one output is included in the outputs list.
+    ///
+    /// Can return multiple blocks in the case where blocks are selected only
+    /// based on addition records and multiple blocks contain the same addition
+    /// records.
+    ///
+    /// Returns an error if no filtering conditions are set.
+    async fn was_mined(
+        &self,
+        inputs: Vec<RpcAbsoluteIndexSet>,
+        outputs: Vec<RpcAdditionRecord>,
+    ) -> RpcResult<WasMinedResponse> {
+        self.was_mined_call(WasMinedRequest {
+            absolute_index_sets: inputs,
+            addition_records: outputs,
+        })
+        .await
+    }
+
+    async fn was_mined_call(&self, request: WasMinedRequest) -> RpcResult<WasMinedResponse>;
 
     /* Mempool */
 

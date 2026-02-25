@@ -70,11 +70,16 @@ mod tests {
     use std::time::Duration;
 
     use neptune_cash::api::export::Args;
+    use neptune_cash::api::export::BlockHeight;
+    use neptune_cash::api::export::Digest;
     use neptune_cash::api::export::KeyType;
+    use neptune_cash::api::export::Network;
     use neptune_cash::application::json_rpc::core::api::ops::Namespace;
     use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
     use neptune_cash::application::json_rpc::core::api::rpc::RpcError;
+    use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
     use neptune_cash::application::json_rpc::core::model::json::JsonError;
+    use neptune_cash::protocol::consensus::block::Block;
     use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
     use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
     use rand::distr::Alphanumeric;
@@ -95,6 +100,7 @@ mod tests {
         let rpc_address = format!("127.0.0.1:{port_offset}");
 
         let mut cli_args = Args::default();
+        cli_args.utxo_index = true;
 
         // allow run if instance is running, and don't overwrite
         // existing data dir.
@@ -160,5 +166,40 @@ mod tests {
             let new_index = client.derivation_index(key_type).await.unwrap();
             assert_eq!(new_index.derivation_index, old_index.derivation_index + 1);
         }
+    }
+
+    #[tokio::test]
+    async fn was_mined_on_genesis() {
+        let unsafe_rpc = false;
+        let client =
+            start_pseudo_real_server(HashSet::from([Namespace::Utxoindex]), unsafe_rpc, 40520)
+                .await;
+
+        let a_genesis_output = Block::genesis(Network::Main)
+            .body()
+            .transaction_kernel
+            .outputs[0];
+        assert_eq!(
+            vec![BlockHeight::genesis()],
+            client
+                .was_mined(vec![], vec![a_genesis_output.into()])
+                .await
+                .unwrap()
+                .block_heights
+        );
+
+        let unknown_output = RpcAdditionRecord(Digest::default());
+        assert!(
+            client
+                .was_mined(vec![], vec![unknown_output])
+                .await
+                .unwrap()
+                .block_heights
+                .is_empty()
+        );
+        assert_eq!(
+            RpcError::EmptyFilteringConditions,
+            client.was_mined(vec![], vec![]).await.unwrap_err()
+        );
     }
 }

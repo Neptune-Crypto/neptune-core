@@ -768,6 +768,8 @@ impl RpcApi for RpcServer {
         Ok(SubmitBlockResponse { success })
     }
 
+    /* Utxoindex */
+
     async fn block_heights_by_flags_call(
         &self,
         request: BlockHeightsByFlagsRequest,
@@ -842,6 +844,37 @@ impl RpcApi for RpcServer {
 
         Ok(block_heights)
     }
+
+    async fn was_mined_call(&self, request: WasMinedRequest) -> RpcResult<WasMinedResponse> {
+        if request.addition_records.is_empty() && request.absolute_index_sets.is_empty() {
+            return Err(RpcError::EmptyFilteringConditions);
+        }
+
+        let addition_records = request
+            .addition_records
+            .into_iter()
+            .map(|x| x.into())
+            .collect();
+        let absolute_index_sets = request.absolute_index_sets.into_iter().collect();
+
+        let blocks = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .canonical_block_heights_with_puts(absolute_index_sets, addition_records)
+            .await
+            .expect("UTXO index namespace is only active if UTXO index is maintained");
+
+        let res = WasMinedResponse {
+            block_heights: blocks.into_iter().collect(),
+        };
+
+        Ok(res)
+    }
+
+    /* Mempool */
 
     async fn transactions_call(&self, _: TransactionsRequest) -> RpcResult<TransactionsResponse> {
         let transactions = self

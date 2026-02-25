@@ -486,6 +486,19 @@ pub struct BlockHeightsByAbsoluteIndexSetsResponse {
     pub block_heights: Vec<RpcBlockHeight>,
 }
 
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct WasMinedRequest {
+    pub absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+    pub addition_records: Vec<RpcAdditionRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WasMinedResponse {
+    pub block_heights: Vec<RpcBlockHeight>,
+}
+
 /* Mempool */
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]

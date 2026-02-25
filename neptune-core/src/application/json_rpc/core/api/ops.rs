@@ -166,6 +166,9 @@ pub enum RpcMethods {
     #[namespace(Namespace::Utxoindex)]
     BlockHeightsByAbsoluteIndexSets,
 
+    #[namespace(Namespace::Utxoindex)]
+    WasMined,
+
     #[namespace(Namespace::Mempool)]
     Transactions,
 
