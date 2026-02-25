@@ -332,7 +332,7 @@ pub trait RpcApi: Sync + Send {
         _request: BurnedSupplyRequest,
     ) -> RpcResult<BurnedSupplyResponse>;
 
-    /* WalletServer */
+    /* Walletserver */
 
     async fn get_blocks(
         &self,
@@ -387,7 +387,7 @@ pub trait RpcApi: Sync + Send {
         .await
     }
 
-    /* OwnWallet */
+    /* Ownwallet */
 
     async fn rescan_announced_call(
         &self,
@@ -495,7 +495,7 @@ pub trait RpcApi: Sync + Send {
         request: SubmitBlockRequest,
     ) -> RpcResult<SubmitBlockResponse>;
 
-    /* Utxo Index */
+    /* Utxoindex */
 
     async fn block_heights_by_flags(
         &self,

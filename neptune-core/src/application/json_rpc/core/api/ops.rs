@@ -26,7 +26,7 @@ pub enum Namespace {
     Mempool,
     Walletserver,
     Ownwallet,
-    UtxoIndex,
+    Utxoindex,
 }
 
 #[derive(Router, Routes, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -151,19 +151,19 @@ pub enum RpcMethods {
 
     /// Return block heights for blocks containing announcements with specified
     /// announcement flags. May return results from orphaned blocks.
-    #[namespace(Namespace::UtxoIndex)]
+    #[namespace(Namespace::Utxoindex)]
     BlockHeightsByFlags,
 
     /// Return block heights for blocks containing specified addition records.
     /// Returned block heights are guaranteed to reference blocks belonging to
     /// the canonical chain.
-    #[namespace(Namespace::UtxoIndex)]
+    #[namespace(Namespace::Utxoindex)]
     BlockHeightsByAdditionRecords,
 
     /// Return block heights for blocks containing specified absolute index
     /// sets. Returned block heights are guaranteed to reference blocks
     /// belonging to the canonical chain.
-    #[namespace(Namespace::UtxoIndex)]
+    #[namespace(Namespace::Utxoindex)]
     BlockHeightsByAbsoluteIndexSets,
 
     #[namespace(Namespace::Mempool)]
