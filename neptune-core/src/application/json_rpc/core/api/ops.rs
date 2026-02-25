@@ -143,6 +143,9 @@ pub enum RpcMethods {
     #[namespace(Namespace::Ownwallet)]
     GenerateAddress,
 
+    #[namespace(Namespace::Ownwallet)]
+    GetBalance,
+
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
 

@@ -4,16 +4,18 @@
 //! Going forward test authors are encouraged to use the public APIs instead.
 
 use crate::api::export::ChangePolicy;
+use crate::api::export::InputCandidate;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Timestamp;
 use crate::api::export::TxCreationArtifacts;
 use crate::api::export::TxOutputList;
+use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
+use crate::api::tx_initiation::builder::input_selector::InputSelectionPriority;
+use crate::api::tx_initiation::builder::input_selector::InputSelector;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
-use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
-use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::state::StateLock;
@@ -36,7 +38,7 @@ impl TransactionInitiatorInternal {
     /// new tests should use TransactionSender::send() or
     /// `TransactionInitiator or a builder.
     ///
-    /// it is now just a wrapper around TxInputListBuilder,
+    /// it is now just a wrapper around [`InputSelector`],
     /// TransactionDetailsBuilder, TransactionProofBuilder and
     /// TransactionBuilder
     pub(crate) async fn create_transaction(
@@ -58,23 +60,29 @@ impl TransactionInitiatorInternal {
         };
 
         // select inputs
-        let tx_inputs = TxInputListBuilder::new()
-            .spendable_inputs(
-                state_lock
-                    .gs()
-                    .wallet_spendable_inputs(timestamp)
-                    .await
-                    .into_iter()
-                    .collect(),
-            )
-            .policy(InputSelectionPolicy::ByProvidedOrder)
+        let wallet_status = state_lock.gs().get_wallet_status_for_tip().await;
+        let current_height = state_lock.gs().chain.light_state().header().height;
+        let spendable_inputs = wallet_status.spendable_inputs(timestamp);
+        let input_candidates = spendable_inputs
+            .into_iter()
+            .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
+            .collect();
+
+        let selected_inputs = InputSelector::new()
+            .input_candidates(input_candidates)
+            .policy(InputSelectionPolicy::from(
+                InputSelectionPriority::ByProvidedOrder,
+            ))
             .spend_amount(tx_outputs.total_native_coins() + fee)
             .build();
+
+        // Unlock selected inputs.
+        let unlocked_inputs = state_lock.gs().unlock_inputs(selected_inputs).await;
 
         // generate tx details
         let tx_details = TransactionDetailsBuilder::new()
             .timestamp(timestamp)
-            .inputs(tx_inputs.into_iter().into())
+            .inputs(unlocked_inputs)
             .outputs(tx_outputs)
             .fee(fee)
             .change_policy(tx_creation_config.change_policy())

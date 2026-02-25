@@ -141,7 +141,6 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use futures::channel::oneshot;
-    use itertools::Itertools;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -149,7 +148,8 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::api::export::GlobalStateLock;
-    use crate::api::export::InputSelectionPolicy;
+    use crate::api::export::InputCandidate;
+    use crate::api::export::InputSelectionPriority;
     use crate::api::export::KeyType;
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::OutputFormat;
@@ -159,12 +159,13 @@ pub(crate) mod tests {
     use crate::api::export::TransactionProofType;
     use crate::api::export::TxCreationArtifacts;
     use crate::api::export::TxProvingCapability;
+    use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
+    use crate::api::tx_initiation::builder::input_selector::InputSelector;
+    use crate::api::tx_initiation::builder::input_selector::SortOrder;
     use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
     use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
     use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
-    use crate::api::tx_initiation::builder::tx_input_list_builder::SortOrder;
-    use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
     use crate::application::config::cli_args;
     use crate::application::loops::channel::NewBlockFound;
     use crate::application::loops::mine_loop::compose_block_helper;
@@ -208,23 +209,31 @@ pub(crate) mod tests {
         drop(initiator);
 
         let fee = NativeCurrencyAmount::from_nau(14);
-        let tx_inputs = TxInputListBuilder::new()
-            .spendable_inputs(
-                state
-                    .lock_guard()
-                    .await
-                    .wallet_spendable_inputs(timestamp)
-                    .await
-                    .into_iter()
-                    .collect(),
-            )
-            .policy(InputSelectionPolicy::ByUtxoSize(SortOrder::Ascending))
-            .spend_amount(tx_outputs.total_native_coins() + fee)
-            .build();
-        let tx_inputs = tx_inputs.into_iter().collect_vec();
+
+        let unlocked_inputs = {
+            let state_lock = state.lock_guard().await;
+            let validator = state_lock.utxo_validator();
+            let wallet_status = state_lock.wallet_state.get_wallet_status(&validator).await;
+            let spendable_inputs = wallet_status.spendable_inputs(timestamp);
+            let current_height = state_lock.chain.light_state().header().height;
+            let input_candidates = spendable_inputs
+                .into_iter()
+                .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
+                .collect();
+
+            let policy = InputSelectionPolicy::default()
+                .prioritize(InputSelectionPriority::ByUtxoSize(SortOrder::Ascending));
+            let selected_inputs = InputSelector::new()
+                .input_candidates(input_candidates)
+                .policy(policy)
+                .spend_amount(tx_outputs.total_native_coins() + fee)
+                .build();
+
+            state_lock.unlock_inputs(selected_inputs).await
+        };
 
         let tx_details = TransactionDetailsBuilder::new()
-            .inputs(tx_inputs.into_iter().into())
+            .inputs(unlocked_inputs)
             .outputs(tx_outputs)
             .fee(fee)
             .timestamp(timestamp)
@@ -372,9 +381,14 @@ pub(crate) mod tests {
                 .is_positive(),
             "Bob must have money"
         );
+        let bob_spendable_inputs = bob
+            .lock_guard()
+            .await
+            .wallet_spendable_inputs_at_time(now)
+            .await;
         assert_eq!(
             blocks_to_mine,
-            bob.api().wallet().spendable_inputs(now).await.len(),
+            bob_spendable_inputs.len(),
             "Bob must have {blocks_to_mine} spendable inputs after mining {blocks_to_mine} blocks"
         );
 

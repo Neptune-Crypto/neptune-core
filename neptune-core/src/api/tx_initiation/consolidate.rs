@@ -1,15 +1,19 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
 use num_traits::CheckedSub;
 use tracing::debug;
 use tracing::error;
 
 use crate::api::export::ChangePolicy;
+use crate::api::export::InputSelectionPriority;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
-use crate::api::export::TxInputList;
 use crate::api::export::TxProvingCapability;
+use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
+use crate::api::tx_initiation::builder::input_selector::InputSelector;
+use crate::api::tx_initiation::builder::input_selector::SortOrder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::api::tx_initiation::error::CreateTxError;
 use crate::api::tx_initiation::error::SendError;
@@ -34,21 +38,36 @@ impl TransactionInitiator {
         let num_inputs = num_inputs.unwrap_or(CONSOLIDATION_INPUT_COUNT);
 
         debug!("consolidate: Attempting to consolidate {num_inputs} UTXOs in wallet");
-        let spendable_inputs = self.spendable_inputs(timestamp).await;
-        if spendable_inputs.len() < num_inputs {
+        let input_candidates = self.input_candidates(timestamp).await;
+        if input_candidates.len() < num_inputs {
             debug!("Nothing to consolidate as wallet has less than {num_inputs} spendable inputs.");
             return Err(ConsolidationError::NotEnoughUtxos {
                 requested: num_inputs,
-                present: spendable_inputs.len(),
+                present: input_candidates.len(),
             });
         }
 
-        let (inputs, _) = spendable_inputs.split_at(num_inputs);
-        let inputs: TxInputList = inputs.to_vec().into();
+        let policy =
+            InputSelectionPolicy::from(InputSelectionPriority::ByAge(SortOrder::Descending))
+                .require_confirmations(10);
+        let selected_inputs = InputSelector::default()
+            .input_candidates(input_candidates)
+            .policy(policy)
+            .take(num_inputs)
+            .into_iter()
+            .collect_vec();
+
+        let unlocked_inputs = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .unlock_inputs(selected_inputs)
+            .await;
+
         debug!(
             "Selected {} inputs for consolidation, in total amount {}.",
-            inputs.len(),
-            inputs.total_native_coins()
+            unlocked_inputs.len(),
+            unlocked_inputs.total_native_coins()
         );
 
         let receiving_address = match consolidation_address {
@@ -69,7 +88,7 @@ impl TransactionInitiator {
             TxProvingCapability::SingleProof => CONSOLIDATION_FEE_SP,
         };
 
-        let unlocked_amount = inputs.total_native_coins();
+        let unlocked_amount = unlocked_inputs.total_native_coins();
         let Some(output_amount) = unlocked_amount.checked_sub(&fee) else {
             return Err(ConsolidationError::Dust {
                 amount: unlocked_amount,
@@ -84,7 +103,7 @@ impl TransactionInitiator {
             .await;
 
         let tx_details = self
-            .generate_tx_details(inputs, outputs, ChangePolicy::ExactChange, fee)
+            .generate_tx_details(unlocked_inputs, outputs, ChangePolicy::ExactChange, fee)
             .await?;
 
         let pw = self.generate_witness_proof(Arc::new(tx_details.clone()));

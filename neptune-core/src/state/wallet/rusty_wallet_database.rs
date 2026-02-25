@@ -153,6 +153,16 @@ impl RustyWalletDatabase {
         self.tables.monitored_utxos.get(index).await
     }
 
+    /// Return the UTXO of a monitored UTXO by strong [`StrongUtxoKey`].
+    pub(crate) async fn monitored_utxo_by_strong_key(
+        &self,
+        strong_utxo_key: &StrongUtxoKey,
+    ) -> Option<MonitoredUtxo> {
+        let list_index = self.tables.strong_key_to_mutxo.get(strong_utxo_key).await?;
+
+        Some(self.tables.monitored_utxos.get(list_index).await)
+    }
+
     /// Return the UTXO of a monitored UTXO and the monitored UTXOs list index
     /// matching the specified absolute index set, if any.
     ///
@@ -166,18 +176,16 @@ impl RustyWalletDatabase {
         index_set: &AbsoluteIndexSet,
     ) -> Option<(MonitoredUtxo, Index)> {
         let index_set_digest = Tip5::hash(index_set);
-        let list_index: Option<Index> = self.tables.index_set_to_mutxo.get(&index_set_digest).await;
+        let list_index = self
+            .tables
+            .index_set_to_mutxo
+            .get(&index_set_digest)
+            .await?;
 
-        match list_index {
-            Some(list_index) => {
-                let mutxo = (
-                    self.tables.monitored_utxos.get(list_index).await,
-                    list_index,
-                );
-                Some(mutxo)
-            }
-            None => None,
-        }
+        Some((
+            self.tables.monitored_utxos.get(list_index).await,
+            list_index,
+        ))
     }
 
     /// Mark a monitored UTXO as abandoned

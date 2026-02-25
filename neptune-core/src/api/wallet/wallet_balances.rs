@@ -51,14 +51,13 @@ impl std::fmt::Display for WalletBalances {
 impl WalletBalances {
     pub(super) async fn from_global_state(gs: &GlobalState, timestamp: Timestamp) -> Self {
         let wallet_status = gs.get_wallet_status_for_tip().await;
-        let wallet_state = &gs.wallet_state;
+        let tip_height = gs.chain.light_state().header().height;
 
         Self {
-            confirmed_available: wallet_status.available_confirmed(timestamp),
-            confirmed_total: wallet_status.total_confirmed(),
-            unconfirmed_available: wallet_state
-                .unconfirmed_available_balance(&wallet_status, timestamp),
-            unconfirmed_total: wallet_state.unconfirmed_total_balance(&wallet_status),
+            confirmed_available: wallet_status.confirmed_available_balance(tip_height, timestamp),
+            confirmed_total: wallet_status.confirmed_total_balance(tip_height),
+            unconfirmed_available: wallet_status.unconfirmed_available_balance(timestamp),
+            unconfirmed_total: wallet_status.unconfirmed_total_balance(),
         }
     }
 }

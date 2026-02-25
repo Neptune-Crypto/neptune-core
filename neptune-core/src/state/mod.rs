@@ -55,6 +55,7 @@ use wallet::wallet_status::WalletStatus;
 use crate::api;
 use crate::api::export::NeptuneProof;
 use crate::api::export::SpendingKey;
+use crate::api::export::TxInputs;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
@@ -100,12 +101,12 @@ use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
+use crate::state::wallet::input_candidate::InputCandidate;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
-use crate::state::wallet::transaction_input::TxInput;
 use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
@@ -806,7 +807,7 @@ impl GlobalState {
 
     /// Return the logic used to check the wallet's UTXOs for spend status and
     /// more.
-    fn utxo_validator(&'_ self) -> UtxoValidator<'_> {
+    pub(crate) fn utxo_validator(&'_ self) -> UtxoValidator<'_> {
         if self.is_true_archival() {
             UtxoValidator::Archival(self.chain.archival_state())
         } else {
@@ -1667,7 +1668,7 @@ impl GlobalState {
             );
             history.push(received);
 
-            if matches!(state, MonitoredUtxoState::Spent) {
+            if matches!(state, MonitoredUtxoState::Spent(_)) {
                 let spend = match monitored_utxo.spent {
                     MonitoredUtxoSpentStatus::SpentIn {
                         block_hash,
@@ -1694,23 +1695,19 @@ impl GlobalState {
         history
     }
 
-    /// Returns all spendable inputs.
+    /// Takes a list of [`InputCandidate`]s and adds unlocking information, such as
+    ///  - lock script and witnesses;
+    ///  - type script(s) and witnesses;
+    ///  - mutator set membership proof.
     ///
-    /// wallet_status must be current as of present tip.
-    ///
-    ///   excludes utxos:
-    ///     + that are timelocked in the future
-    ///     + that are unspendable (no spending key)
-    ///     + that are already spent by transactions in the mempool
-    pub(crate) async fn spendable_inputs(
-        &self,
-        wallet_status: WalletStatus,
-        timestamp: Timestamp,
-    ) -> impl IntoIterator<Item = TxInput> + use<'_> {
+    /// All inputs must be guaranteed to be spendable (and the unlocking
+    /// information must be guaranteed to exist). Otherwise this function will
+    /// crash.
+    pub(crate) async fn unlock_inputs(&self, inputs: Vec<InputCandidate>) -> TxInputs {
         // Build a hashset of all tx inputs presently in the mempool.
         let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
             .wallet_state
-            .mempool_spent_utxos
+            .mempool_outgoing_utxos
             .iter()
             .flat_map(|(_txkid, tx_inputs)| tx_inputs.keys())
             .copied()
@@ -1722,83 +1719,121 @@ impl GlobalState {
             .map(|x| (x.lock_script_hash(), x))
             .collect();
 
-        // filter spendable inputs.
-        let mut unlocked_utxos = vec![];
-        for wse in wallet_status.synced_unspent {
-            // filter out UTXOs that are still timelocked.
-            if !wse.utxo.can_spend_at(timestamp) {
-                continue;
+        // Double-check spendability of inputs.
+        let now = Timestamp::now();
+        for synced_utxo in &inputs {
+            // Double-check time-lock.
+            #[allow(clippy::manual_assert)]
+            if !synced_utxo.utxo.can_spend_at(now) {
+                // In a test environment, we might play around with the
+                // timestamp without affect unlockability. So don't crash if
+                // test.
+                #[cfg(test)]
+                error!("Input UTXO must be spendable now.");
+
+                // Do crash if production.
+                #[cfg(not(test))]
+                panic!("Input UTXO must be spendable now.");
             }
 
-            // filter out inputs that are already spent by txs in mempool.
-            let item = Tip5::hash(&wse.utxo);
+            // Double-check for expenditures by txs in mempool.
+            let item = Tip5::hash(&synced_utxo.utxo);
             let absolute_index_set = AbsoluteIndexSet::compute(
                 item,
-                wse.sender_randomness,
-                wse.receiver_preimage,
-                wse.aocl_leaf_index,
+                synced_utxo.sender_randomness,
+                synced_utxo.receiver_preimage,
+                synced_utxo.aocl_leaf_index,
             );
-            if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
-                continue;
-            }
+            assert!(
+                !index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set),
+                "Input UTXO may not be spent by a mempool transaction."
+            );
 
-            // filter out inputs that we can't spend
-            let Some(spending_key) =
-                lock_script_hash_to_spending_key.get(&wse.utxo.lock_script_hash())
+            // Double-check for missing spending keys.
+            let Some(_spending_key) =
+                lock_script_hash_to_spending_key.get(&synced_utxo.utxo.lock_script_hash())
             else {
-                warn!("spending key not found for utxo: {:?}", wse.utxo);
-                continue;
+                panic!("Cannot find spending key for UTXO: {:?}", synced_utxo.utxo);
             };
+        }
 
-            // Get the membership proof from archival state, if not already set
-            // through the input. It's much faster to get the membership
-            // proofs from archival state rather than maintaining them in the
-            // wallet.
-            let membership_proof = match wse.ms_membership_proof {
-                Some(msmp) => msmp,
-                None => self
-                    .chain
+        // Adjoin unlocking information.
+        let mut unlocked_utxos = vec![];
+        let has_ams = self.is_true_archival();
+        for synced_utxo in inputs {
+            // Get mutator set membership proof ...
+            let membership_proof = if has_ams {
+                // ... from archival mutator set.
+                let item = Tip5::hash(&synced_utxo.utxo);
+                self.chain
                     .archival_state()
                     .archival_mutator_set
                     .ams()
                     .restore_membership_proof(
                         item,
-                        wse.sender_randomness,
-                        wse.receiver_preimage,
-                        wse.aocl_leaf_index,
+                        synced_utxo.sender_randomness,
+                        synced_utxo.receiver_preimage,
+                        synced_utxo.aocl_leaf_index,
                     )
                     .await
-                    .expect("Spendable monitored UTXOs must have valid membership proofs"),
+                    .expect("Spendable monitored UTXOs must have valid membership proofs")
+            } else {
+                // ... from wallet database.
+                let tip_digest = self.chain.light_state().hash();
+                let strong_key = synced_utxo.strong_utxo_key();
+                let mutxo = self
+                    .wallet_state
+                    .wallet_db
+                    .monitored_utxo_by_strong_key(&strong_key)
+                    .await
+                    .expect("Wallet status better reflect elements in the wallet database");
+                mutxo.get_membership_proof_for_block(tip_digest).expect(
+                    "If light node reports UTXO as synced, it better know the membership proof",
+                )
             };
+
+            let spending_key = lock_script_hash_to_spending_key
+                .get(&synced_utxo.utxo.lock_script_hash())
+                .expect("Already double-checked for existence of spending key.");
 
             // Create the transaction input object
             let unlocked_utxo = UnlockedUtxo::unlock(
-                wse.utxo.clone(),
+                synced_utxo.utxo.clone(),
                 spending_key.lock_script_and_witness(),
                 membership_proof,
-            )
-            .into();
+            );
             unlocked_utxos.push(unlocked_utxo);
         }
 
-        unlocked_utxos
+        unlocked_utxos.into()
     }
 
-    /// retrieves all spendable inputs in the wallet as of the present tip.
+    /// Produce a list of *all* [`UnlockedUtxo`]s spendable at the given time.
     ///
-    /// excludes utxos:
-    ///   + that are timelocked in the future
-    ///   + that are unspendable (no spending key)
-    ///   + that are already spent in the mempool
+    /// This is a convenience function applying common-case sane default
+    /// strategies. While it is concretely inefficient, for small casual users
+    /// that inefficiency is barely noticeable. In particular, this function
+    /// does not apply a UTXO selection policy. For more fine-grained control
+    /// and performance, go via the transaction creation API -- more
+    /// specifically, the
+    /// [`InputSelector`](crate::api::tx_initiation::builder::input_selector::InputSelector)
+    /// .
     ///
-    /// note: ordering of the returned `TxInput` is insertion order into the
-    /// wallet.
-    pub async fn wallet_spendable_inputs(
-        &self,
-        timestamp: Timestamp,
-    ) -> impl IntoIterator<Item = TxInput> + use<'_> {
+    /// See also `Self::wallet_spendable_inputs` which is hidden behind the test
+    /// flag.
+    ///
+    // Marked public for benchmarking; not part of the public API.
+    #[doc(hidden)]
+    pub async fn wallet_spendable_inputs_at_time(&self, timestamp: Timestamp) -> TxInputs {
+        let tip_height = self.chain.light_state().header().height;
         let wallet_status = self.get_wallet_status_for_tip().await;
-        self.spendable_inputs(wallet_status, timestamp).await
+        let inputs = wallet_status.spendable_inputs(timestamp);
+        // omit policy
+        let selected_inputs = inputs
+            .into_iter()
+            .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, tip_height))
+            .collect_vec();
+        self.unlock_inputs(selected_inputs).await
     }
 
     pub(crate) fn get_own_handshakedata(&self) -> HandshakeData {
@@ -3413,6 +3448,21 @@ mod tests {
 
             Ok(())
         }
+
+        /// Produce a list of *all* [`UnlockedUtxo`]s spendable now.
+        ///
+        /// This is a convenience function applying common-case sane default
+        /// strategies. While it is concretely inefficient, for small casual users
+        /// that inefficiency is barely noticeable. In particular, this function
+        /// does not apply a UTXO selection policy. For more fine-grained control
+        /// and performance, go via the transaction creation API -- more
+        /// specifically, the
+        /// [`InputSelector`](crate::api::tx_initiation::builder::input_selector::InputSelector)
+        /// .
+        pub(crate) async fn wallet_spendable_inputs(&self) -> TxInputs {
+            let now = Timestamp::now();
+            self.wallet_spendable_inputs_at_time(now).await
+        }
     }
 
     mod helper {
@@ -3843,7 +3893,7 @@ mod tests {
         let wallet_status_1 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_1 = current_block.header().timestamp;
         assert_eq!(
-            wallet_status_1.available_confirmed(timestamp_1),
+            wallet_status_1.confirmed_available_balance(current_block.header().height, timestamp_1),
             LIQUID_BLOCK_SUBSIDY.scalar_mul(3)
         );
 
@@ -3864,7 +3914,8 @@ mod tests {
         current_block = a_blocks.last().unwrap().clone();
         let wallet_status_2 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_2 = current_block.header().timestamp;
-        let alice_balance_2 = wallet_status_2.available_confirmed(timestamp_2);
+        let alice_balance_2 =
+            wallet_status_2.confirmed_available_balance(current_block.header().height, timestamp_2);
         let expected_balance_2 = LIQUID_BLOCK_SUBSIDY.scalar_mul(3);
         assert_eq!(
             expected_balance_2, alice_balance_2,
@@ -3888,7 +3939,8 @@ mod tests {
 
         let wallet_status_3 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_3 = current_block.header().timestamp;
-        let wallet_balance_3 = wallet_status_3.available_confirmed(timestamp_3);
+        let wallet_balance_3 =
+            wallet_status_3.confirmed_available_balance(current_block.header().height, timestamp_3);
         let expected_branch_a_liquid_balance = (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
             .checked_sub(&NativeCurrencyAmount::coins(10))
             .unwrap();
@@ -3916,7 +3968,7 @@ mod tests {
         let timestamp_4 = current_block.header().timestamp;
         assert_eq!(
             expected_branch_a_liquid_balance,
-            wallet_status_4.available_confirmed(timestamp_4)
+            wallet_status_4.confirmed_available_balance(current_block.header().height, timestamp_4)
         );
 
         // resolve fork: apply all of branch b
@@ -3933,7 +3985,8 @@ mod tests {
             WalletStatusExportFormat::Table.export(&wallet_status_5)
         );
         let timestamp_5 = current_block.header().timestamp;
-        let wallet_balance_5 = wallet_status_5.available_confirmed(timestamp_5);
+        let wallet_balance_5 =
+            wallet_status_5.confirmed_available_balance(current_block.header().height, timestamp_5);
         assert_eq!(
             wallet_balance_5,
             LIQUID_BLOCK_SUBSIDY.scalar_mul(3),
@@ -3957,7 +4010,7 @@ mod tests {
         let wallet_status_6 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_6 = current_block.header().timestamp;
         assert_eq!(
-            wallet_status_6.available_confirmed(timestamp_6),
+            wallet_status_6.confirmed_available_balance(current_block.header().height, timestamp_6),
             (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
                 .checked_sub(&NativeCurrencyAmount::coins(5))
                 .unwrap()
@@ -3990,7 +4043,8 @@ mod tests {
         );
         let timestamp_7 = current_block.header().timestamp;
         println!("timestamp_7: {}", timestamp_7.standard_format());
-        let wallet_balance_7 = wallet_status_7.available_confirmed(timestamp_7);
+        let wallet_balance_7 =
+            wallet_status_7.confirmed_available_balance(target_block.header().height, timestamp_7);
         assert_eq!(
             expected_branch_a_liquid_balance, wallet_balance_7,
             "wallet balance: {wallet_balance_7}.\nExpected: {expected_branch_a_liquid_balance}"
@@ -4004,8 +4058,13 @@ mod tests {
             .unwrap();
         let wallet_status_8 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_8 = genesis.header().timestamp;
-        assert!(wallet_status_8.available_confirmed(timestamp_8).is_zero(),);
-        assert_eq!(premine_amount, wallet_status_8.total_confirmed());
+        assert!(wallet_status_8
+            .confirmed_available_balance(genesis.header().height, timestamp_8)
+            .is_zero(),);
+        assert_eq!(
+            premine_amount,
+            wallet_status_8.confirmed_total_balance(genesis.header().height)
+        );
         assert_eq!(alice_gsl.chain.light_state().hash(), genesis.hash());
 
         // State updates work when tip is genesis
@@ -4023,7 +4082,7 @@ mod tests {
         let timestamp_9 = current_block.header().timestamp;
         assert_eq!(
             expected_branch_a_liquid_balance,
-            wallet_status_9.available_confirmed(timestamp_9)
+            wallet_status_9.confirmed_available_balance(target_block.header().height, timestamp_9)
         );
 
         let expected_branch_a_total_balance = (LIQUID_BLOCK_SUBSIDY.scalar_mul(6))
@@ -4032,7 +4091,7 @@ mod tests {
             + premine_amount;
         assert_eq!(
             expected_branch_a_total_balance,
-            wallet_status_9.total_confirmed()
+            wallet_status_9.confirmed_total_balance(target_block.header().height)
         );
 
         // Set tip to genesis again, then to target some place on the a-chain.
@@ -4049,11 +4108,12 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 expected_branch_a_total_balance,
-                wallet_status_9.total_confirmed()
+                wallet_status_9.confirmed_total_balance(target_block.header().height)
             );
             assert_eq!(
                 expected_branch_a_liquid_balance,
-                wallet_status_9.available_confirmed(timestamp_9)
+                wallet_status_9
+                    .confirmed_available_balance(target_block.header().height, timestamp_9)
             );
         }
     }
@@ -4178,7 +4238,6 @@ mod tests {
 
     mod rescan_wallet {
         use super::*;
-        use crate::api::export::TxInputList;
         use crate::tests::shared::blocks::block_with_outputs;
         use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
 
@@ -4338,7 +4397,7 @@ mod tests {
                 invalid_empty_block1_with_guesser_fraction(network, guesser_fraction).await;
             block1.set_header_guesser_address(alice_guesser_key.to_address());
 
-            alice.set_new_tip(block1).await.unwrap();
+            alice.set_new_tip(block1.clone()).await.unwrap();
 
             let balance_timestamp = alice.chain.light_state().header().timestamp;
             let expected_balance = NativeCurrencyAmount::coins(64);
@@ -4348,7 +4407,7 @@ mod tests {
                 alice
                     .get_wallet_status_for_tip()
                     .await
-                    .available_confirmed(balance_timestamp),
+                    .confirmed_available_balance(block1.header().height, balance_timestamp),
                 "Must have liquide balance of 64 after successful guess"
             );
 
@@ -4359,7 +4418,7 @@ mod tests {
                 alice
                     .get_wallet_status_for_tip()
                     .await
-                    .available_confirmed(balance_timestamp),
+                    .confirmed_available_balance(block1.header().height, balance_timestamp),
                 "Must have zero balance after clearing monitored UTXOs"
             );
             alice
@@ -4373,7 +4432,7 @@ mod tests {
                 alice
                     .get_wallet_status_for_tip()
                     .await
-                    .available_confirmed(balance_timestamp),
+                    .confirmed_available_balance(block1.header().height, balance_timestamp),
                 "Must have liquid balance of 64 after rescan of guesser rewards"
             );
         }
@@ -4488,12 +4547,13 @@ mod tests {
 
                 let mut alice = alice.lock_guard_mut().await;
 
+                let block_height_a = alice.chain.light_state().header().height;
                 let balance_timestamp = alice.chain.light_state().header().timestamp;
                 let expected_balance = NativeCurrencyAmount::coins(5);
                 let balance = alice
                     .get_wallet_status_for_tip()
                     .await
-                    .available_confirmed(balance_timestamp);
+                    .confirmed_available_balance(block_height_a, balance_timestamp);
                 assert_eq!(
                     expected_balance, balance,
                     "Balance must be 5 after getting 20 and sending 15"
@@ -4505,10 +4565,7 @@ mod tests {
                     "History list must not be empty after balance changes"
                 );
 
-                let spendable_utxos: TxInputList = alice
-                    .wallet_spendable_inputs(balance_timestamp)
-                    .await
-                    .into();
+                let spendable_utxos = alice.wallet_spendable_inputs().await;
 
                 // Clear tables and rescan, and verify restored history.
                 alice.wallet_state.wallet_db.clear_mutxos().await;
@@ -4541,7 +4598,7 @@ mod tests {
                     let balance_again = alice
                         .get_wallet_status_for_tip()
                         .await
-                        .available_confirmed(balance_timestamp);
+                        .confirmed_available_balance(block_height_a, balance_timestamp);
                     assert_eq!(
                         expected_balance, balance_again,
                         "Balance must be 5 after wallet rescan"
@@ -4567,10 +4624,9 @@ mod tests {
                         );
                     }
 
-                    let spendable_utxos_again: TxInputList = alice
-                        .wallet_spendable_inputs(balance_timestamp)
-                        .await
-                        .into();
+                    let spendable_utxos_again = alice
+                        .wallet_spendable_inputs_at_time(balance_timestamp)
+                        .await;
                     assert_eq!(
                         spendable_utxos.total_native_coins(),
                         spendable_utxos_again.total_native_coins()
@@ -4844,7 +4900,10 @@ mod tests {
                 assert!(!alice
                     .get_wallet_status_for_tip()
                     .await
-                    .available_confirmed(launch + seven_months)
+                    .confirmed_available_balance(
+                        genesis_block.header().height,
+                        launch + seven_months
+                    )
                     .is_zero());
                 assert!(!alice.get_balance_history().await.is_empty());
 
@@ -4942,7 +5001,11 @@ mod tests {
                 // block 1a.
                 assert_eq!(
                     3,
-                    alice.get_wallet_status_for_tip().await.synced_unspent.len()
+                    alice
+                        .get_wallet_status_for_tip()
+                        .await
+                        .synced_unspent(None)
+                        .count()
                 );
                 assert_eq!(3, alice.get_balance_history().await.len());
 
@@ -4973,8 +5036,11 @@ mod tests {
 
                 // Verify that two MUTXOs are unsynced, and that 1 (from genesis) is synced
                 let alice_wallet_status_after_reorg = alice.get_wallet_status_for_tip().await;
-                assert_eq!(1, alice_wallet_status_after_reorg.synced_unspent.len());
-                assert_eq!(2, alice_wallet_status_after_reorg.unsynced.len());
+                assert_eq!(
+                    1,
+                    alice_wallet_status_after_reorg.synced_unspent(None).count()
+                );
+                assert_eq!(2, alice_wallet_status_after_reorg.num_unsynced());
 
                 // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
                 // genesis block is not.
@@ -5036,7 +5102,11 @@ mod tests {
                     // Verify that composer UTXOs were recorded
                     assert_eq!(
                         3,
-                        alice.get_wallet_status_for_tip().await.synced_unspent.len()
+                        alice
+                            .get_wallet_status_for_tip()
+                            .await
+                            .synced_unspent(None)
+                            .count()
                     );
                 }
 
@@ -5085,7 +5155,7 @@ mod tests {
                 // Verify that all both MUTXOs have synced MPs
                 let wallet_status_on_a_fork = alice.get_wallet_status_for_tip().await;
 
-                assert_eq!(3, wallet_status_on_a_fork.synced_unspent.len());
+                assert_eq!(3, wallet_status_on_a_fork.synced_unspent(None).count());
 
                 // Fork away from the "a" chain to the "b" chain, with block 1 as LUCA
                 let fork_b_block = b_blocks.last().unwrap().to_owned();
@@ -5099,12 +5169,12 @@ mod tests {
                 assert_eq!(
                     0,
                     alice_wallet_status_on_b_fork_before_resync
-                        .synced_unspent
-                        .len()
+                        .synced_unspent(None)
+                        .count()
                 );
                 assert_eq!(
                     3,
-                    alice_wallet_status_on_b_fork_before_resync.unsynced.len()
+                    alice_wallet_status_on_b_fork_before_resync.num_unsynced()
                 );
 
                 // Run the resync and verify that MPs are synced
@@ -5123,12 +5193,14 @@ mod tests {
                 let wallet_status_on_b_fork_after_resync = alice.get_wallet_status_for_tip().await;
                 assert_eq!(
                     3,
-                    wallet_status_on_b_fork_after_resync.synced_unspent.len(),
+                    wallet_status_on_b_fork_after_resync
+                        .synced_unspent(None)
+                        .count(),
                     "Expected 3 synced UTXOs, restore_method: {restore_method:?}"
                 );
                 assert_eq!(
                     0,
-                    wallet_status_on_b_fork_after_resync.unsynced.len(),
+                    wallet_status_on_b_fork_after_resync.num_unsynced(),
                     "Expected 0 unsynced UTXOs, restore_method: {restore_method:?}"
                 );
 
@@ -5145,12 +5217,12 @@ mod tests {
                 assert_eq!(
                     0,
                     alice_wallet_status_on_c_fork_before_resync
-                        .synced_unspent
-                        .len()
+                        .synced_unspent(None)
+                        .count()
                 );
                 assert_eq!(
                     3,
-                    alice_wallet_status_on_c_fork_before_resync.unsynced.len()
+                    alice_wallet_status_on_c_fork_before_resync.num_unsynced()
                 );
 
                 // Run the resync and verify that UTXO from genesis is synced, but that
@@ -5168,8 +5240,8 @@ mod tests {
                 };
 
                 let alice_ws_c_after_resync = alice.get_wallet_status_for_tip().await;
-                assert_eq!(1, alice_ws_c_after_resync.synced_unspent.len());
-                assert_eq!(2, alice_ws_c_after_resync.unsynced.len());
+                assert_eq!(1, alice_ws_c_after_resync.synced_unspent(None).count());
+                assert_eq!(2, alice_ws_c_after_resync.num_unsynced());
 
                 // Also check that UTXO from 1a is considered abandoned
                 let alice_mutxos = alice.wallet_state.wallet_db.monitored_utxos();
@@ -5434,7 +5506,7 @@ mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(in_seven_months)
+                .confirmed_available_balance(block_1.header().height, in_seven_months)
         );
         assert_eq!(
             NativeCurrencyAmount::coins(7),
@@ -5442,7 +5514,7 @@ mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(in_seven_months)
+                .confirmed_available_balance(block_1.header().height, in_seven_months)
         );
         // TODO: No idea why this isn't working. It's off by 1 NAU?
         // {
@@ -6467,8 +6539,16 @@ mod tests {
             assert_eq!(*tip, new_state.chain.archival_state().get_tip().await);
             assert_eq!(*tip, old_state.chain.archival_state().get_tip().await);
             assert_eq!(
-                old_state.get_wallet_status_for_tip().await.synced_unspent,
-                new_state.get_wallet_status_for_tip().await.synced_unspent,
+                old_state
+                    .get_wallet_status_for_tip()
+                    .await
+                    .synced_unspent(None)
+                    .collect_vec(),
+                new_state
+                    .get_wallet_status_for_tip()
+                    .await
+                    .synced_unspent(None)
+                    .collect_vec(),
                 "Restored wallet state must agree with original state"
             );
         }
@@ -6630,7 +6710,10 @@ mod tests {
                     .await
                     .get_wallet_status_for_tip()
                     .await
-                    .available_confirmed(seven_months_post_launch);
+                    .confirmed_available_balance(
+                        genesis_block.header().height,
+                        seven_months_post_launch,
+                    );
                 assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
 
                 // create change key for alice. change_key_type is a test param.
@@ -6754,7 +6837,10 @@ mod tests {
                         .await
                         .get_wallet_status_for_tip()
                         .await
-                        .available_confirmed(seven_months_post_launch)
+                        .confirmed_available_balance(
+                            block_1.header().height,
+                            seven_months_post_launch
+                        )
                 );
 
                 block_1
@@ -6773,7 +6859,10 @@ mod tests {
                     bob_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .available_confirmed(seven_months_post_launch)
+                        .confirmed_available_balance(
+                            block_1.header().height,
+                            seven_months_post_launch
+                        )
                 );
             }
 
@@ -6806,16 +6895,17 @@ mod tests {
                     .await;
 
                 // check alice's initial balance after genesis.
+                let tip_height = alice_state_mut.chain.light_state().header().height;
                 let alice_initial_balance = alice_state_mut
                     .get_wallet_status_for_tip()
                     .await
-                    .available_confirmed(seven_months_post_launch);
+                    .confirmed_available_balance(tip_height, seven_months_post_launch);
 
                 // lucky alice's wallet begins with 20 balance from premine.
                 assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
 
                 // now alice must replay old blocks.  (there's only one so far)
-                alice_state_mut.set_new_tip(block_1).await.unwrap();
+                alice_state_mut.set_new_tip(block_1.clone()).await.unwrap();
 
                 // Now alice should have a balance of 9.
                 // 20 from premine - 11
@@ -6840,7 +6930,10 @@ mod tests {
                     alice_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .available_confirmed(seven_months_post_launch)
+                        .confirmed_available_balance(
+                            block_1.header().height,
+                            seven_months_post_launch
+                        )
                 );
             }
         }

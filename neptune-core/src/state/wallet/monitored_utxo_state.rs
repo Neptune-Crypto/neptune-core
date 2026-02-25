@@ -1,5 +1,7 @@
+use crate::api::export::BlockHeight;
+
 pub(crate) enum MonitoredUtxoState {
     SyncedAndUnspent,
-    Spent,
+    Spent(Option<BlockHeight>),
     Unsynced,
 }

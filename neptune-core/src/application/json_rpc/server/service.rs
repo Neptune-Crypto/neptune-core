@@ -14,6 +14,7 @@ use crate::api::export::TransactionProof;
 use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::header::TransactionKernelWithPriority;
 use crate::application::json_rpc::core::model::block::RpcBlock;
+use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplateMetadata;
@@ -705,6 +706,53 @@ impl RpcApi for RpcServer {
         Ok(GenerateAddressResponse { address })
     }
 
+    async fn get_balance_call(&self, request: GetBalanceRequest) -> RpcResult<GetBalanceResponse> {
+        let number_of_confirmations = request.number_of_confirmations;
+        if number_of_confirmations == 0 {
+            return Err(RpcError::BadConfirmationCount);
+        }
+
+        let block_height = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header()
+            .height;
+        let threshold_block_height = block_height
+            .next()
+            .value()
+            .checked_sub(u64::from(number_of_confirmations))
+            .ok_or(RpcError::BadConfirmationCount)?
+            .into();
+
+        let now = Timestamp::now();
+        let wallet_status = self
+            .state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await;
+
+        let response = GetBalanceResponse {
+            confirmed_available: RpcNativeCurrencyAmount::from(
+                wallet_status.confirmed_available_balance(threshold_block_height, now),
+            ),
+            confirmed_total: RpcNativeCurrencyAmount::from(
+                wallet_status.confirmed_total_balance(threshold_block_height),
+            ),
+            unconfirmed_available: RpcNativeCurrencyAmount::from(
+                wallet_status.unconfirmed_available_balance(now),
+            ),
+            unconfirmed_total: RpcNativeCurrencyAmount::from(
+                wallet_status.unconfirmed_total_balance(),
+            ),
+        };
+
+        Ok(response)
+    }
+
     async fn get_block_template_call(
         &self,
         request: GetBlockTemplateRequest,
@@ -1116,7 +1164,7 @@ pub mod tests {
     use crate::state::mining::block_proposal::BlockProposal;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::state::wallet::wallet_status::WalletStatusElement;
+    use crate::state::wallet::wallet_status::SyncedUtxo;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
@@ -1450,13 +1498,13 @@ pub mod tests {
             .get_wallet_status_for_tip()
             .await;
 
-        let WalletStatusElement {
+        let SyncedUtxo {
             aocl_leaf_index,
             utxo,
             sender_randomness,
             receiver_preimage,
             ..
-        } = &wallet_status.synced_unspent[0];
+        } = &wallet_status.synced_unspent(None).next().unwrap();
         let item = Tip5::hash(utxo);
 
         let absolute_index_set = AbsoluteIndexSet::compute(

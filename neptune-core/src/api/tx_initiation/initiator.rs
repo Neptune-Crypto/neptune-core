@@ -15,13 +15,13 @@ use std::sync::Arc;
 
 use super::error;
 use crate::api::export::Timestamp;
+use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
+use crate::api::tx_initiation::builder::input_selector::InputSelector;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
-use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
-use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::application::triton_vm_job_queue::vm_job_queue;
@@ -35,9 +35,9 @@ use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
 use crate::state::wallet::change_policy::ChangePolicy;
-use crate::state::wallet::transaction_input::TxInput;
-use crate::state::wallet::transaction_input::TxInputList;
+use crate::state::wallet::input_candidate::InputCandidate;
 use crate::state::wallet::transaction_output::TxOutputList;
+use crate::state::wallet::unlocked_utxo::TxInputs;
 use crate::GlobalStateLock;
 
 /// provides an API for building and sending neptune transactions.
@@ -53,33 +53,34 @@ impl From<GlobalStateLock> for TransactionInitiator {
 }
 
 impl TransactionInitiator {
-    /// returns all spendable inputs in the wallet.
-    ///
-    /// the order of inputs is undefined.
-    pub async fn spendable_inputs(&self, timestamp: Timestamp) -> TxInputList {
-        // sadly we have to collect here because we can't hold ref after lock guard is dropped.
-        self.global_state_lock
-            .lock_guard()
-            .await
-            .wallet_spendable_inputs(timestamp)
-            .await
+    /// Return all spendable inputs in the wallet.
+    pub async fn input_candidates(&self, timestamp: Timestamp) -> Vec<InputCandidate> {
+        let state = self.global_state_lock.lock_guard().await;
+        let current_height = state.chain.light_state().header().height;
+        let validator = state.utxo_validator();
+        let wallet_status = state.wallet_state.get_wallet_status(&validator).await;
+        let spendable_inputs = wallet_status.spendable_inputs(timestamp);
+        spendable_inputs
             .into_iter()
-            .into()
+            .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
+            .collect()
     }
 
-    /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
+    /// Get enough inputs to cover spend_amount.
+    ///
+    /// Enfoce selection policy.
     ///
     /// see [InputSelectionPolicy] for a description of available policies.
     ///
-    /// see [TxInputListBuilder] for details.
-    pub async fn select_spendable_inputs(
+    /// see [InputSelector] for details.
+    pub async fn select_inputs(
         &self,
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
         timestamp: Timestamp,
-    ) -> impl IntoIterator<Item = TxInput> {
-        TxInputListBuilder::new()
-            .spendable_inputs(self.spendable_inputs(timestamp).await.into())
+    ) -> Vec<InputCandidate> {
+        InputSelector::new()
+            .input_candidates(self.input_candidates(timestamp).await)
             .policy(policy)
             .spend_amount(spend_amount)
             .build()
@@ -108,7 +109,7 @@ impl TransactionInitiator {
     /// see [TransactionDetailsBuilder] for details.
     pub async fn generate_tx_details(
         &mut self,
-        inputs: TxInputList,
+        inputs: TxInputs,
         outputs: TxOutputList,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
@@ -292,17 +293,24 @@ impl TransactionInitiator {
 
         // select inputs
         let spend_amount = tx_outputs.total_native_coins() + fee;
-        let policy = InputSelectionPolicy::Random;
-        let tx_inputs = self
-            .select_spendable_inputs(policy, spend_amount, timestamp)
+        let policy = InputSelectionPolicy::default();
+        let selected_inputs = self
+            .select_inputs(policy, spend_amount, timestamp)
             .await
             .into_iter()
             .collect::<Vec<_>>();
 
+        let unlocked_inputs = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .unlock_inputs(selected_inputs)
+            .await;
+
         // generate tx details (may add change output)
         let tx_details = TransactionDetailsBuilder::new()
             .timestamp(timestamp)
-            .inputs(tx_inputs.into())
+            .inputs(unlocked_inputs)
             .outputs(tx_outputs)
             .fee(fee)
             .change_policy(change_policy)

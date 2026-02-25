@@ -26,7 +26,7 @@ use tokio::time::sleep;
 use tracing::*;
 
 use crate::api::export::ReceivingAddress;
-use crate::api::export::TxInputList;
+use crate::api::export::TxInputs;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
@@ -435,7 +435,7 @@ pub(crate) fn prepare_coinbase_transaction_stateless(
     );
 
     let transaction_details = TransactionDetails::new_with_coinbase(
-        TxInputList::empty(),
+        TxInputs::empty(),
         composer_outputs.clone(),
         coinbase_amount,
         guesser_fee,
@@ -1351,7 +1351,7 @@ pub(crate) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(now)
+                .confirmed_available_balance(genesis_block.header().height, now)
                 .is_zero(),
             "Assumed to be premine-recipient"
         );

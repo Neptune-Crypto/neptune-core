@@ -20,7 +20,8 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 ///    (There is one exception to this rule: for guesser fee UTXOs, the unlock
 ///    key coincides with the receiver preimage.)
 ///
-/// See [UtxoNotificationPayload], [ExpectedUtxo]
+/// See [UtxoNotificationPayload], [ExpectedUtxo],
+/// [IncomingUtxoRecoveryData](super::wallet_state::IncomingUtxoRecoveryData).
 #[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub(crate) struct IncomingUtxo {

@@ -1,7 +1,11 @@
+use std::ops::Deref;
+use std::ops::DerefMut;
+
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
 
+use crate::api::export::NativeCurrencyAmount;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::tasm_lib::prelude::Digest;
@@ -56,5 +60,102 @@ impl UnlockedUtxo {
             self.membership_proof.sender_randomness,
             self.membership_proof.receiver_preimage.hash(),
         )
+    }
+}
+
+impl Deref for UnlockedUtxo {
+    type Target = Utxo;
+
+    fn deref(&self) -> &Self::Target {
+        &self.utxo
+    }
+}
+
+/// Represents a list of [`UnlockedUtxo`] decorated with convenience functions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TxInputs(Vec<UnlockedUtxo>);
+
+impl Deref for TxInputs {
+    type Target = Vec<UnlockedUtxo>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for TxInputs {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<UnlockedUtxo> for TxInputs {
+    fn from(t: UnlockedUtxo) -> Self {
+        Self(vec![t])
+    }
+}
+
+impl<I: Into<UnlockedUtxo>, T: IntoIterator<Item = I>> From<T> for TxInputs {
+    fn from(v: T) -> Self {
+        Self(v.into_iter().map(|i| i.into()).collect())
+    }
+}
+
+impl From<TxInputs> for Vec<UnlockedUtxo> {
+    fn from(list: TxInputs) -> Self {
+        list.0
+    }
+}
+
+impl From<&TxInputs> for Vec<MsMembershipProof> {
+    fn from(list: &TxInputs) -> Self {
+        list.ms_membership_proofs_iter().into_iter().collect()
+    }
+}
+
+impl TxInputs {
+    pub fn empty() -> Self {
+        Self(vec![])
+    }
+
+    /// retrieves native currency sum(inputs)
+    pub fn total_native_coins(&self) -> NativeCurrencyAmount {
+        self.0
+            .iter()
+            .map(|u| u.utxo.get_native_currency_amount())
+            .sum()
+    }
+
+    /// provides an iterator over input Utxo
+    pub fn utxos_iter(&self) -> impl IntoIterator<Item = Utxo> + '_ {
+        self.0.iter().map(|u| &u.utxo).cloned()
+    }
+
+    /// retrieves all Utxo
+    pub fn utxos(&self) -> Vec<Utxo> {
+        self.utxos_iter().into_iter().collect()
+    }
+
+    /// provides iterator over removal records
+    pub fn removal_records_iter<'a>(
+        &'a self,
+        msa: &'a MutatorSetAccumulator,
+    ) -> impl IntoIterator<Item = RemovalRecord> + 'a {
+        self.0.iter().map(|u| u.removal_record(msa))
+    }
+
+    /// retrieves removal records
+    pub fn removal_records<'a>(&'a self, msa: &'a MutatorSetAccumulator) -> Vec<RemovalRecord> {
+        self.removal_records_iter(msa).into_iter().collect()
+    }
+
+    /// provides mutator-set membership proof iterator
+    pub fn ms_membership_proofs_iter(&self) -> impl IntoIterator<Item = MsMembershipProof> + '_ {
+        self.0.iter().map(|u| u.mutator_set_mp()).cloned()
+    }
+
+    /// retrieves mutator-set membership proofs
+    pub fn ms_membership_proofs(&self) -> Vec<MsMembershipProof> {
+        self.ms_membership_proofs_iter().into_iter().collect()
     }
 }

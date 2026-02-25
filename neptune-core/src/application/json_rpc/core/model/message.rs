@@ -423,6 +423,21 @@ pub struct GenerateAddressResponse {
     pub address: String,
 }
 
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBalanceRequest {
+    pub number_of_confirmations: u32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBalanceResponse {
+    pub confirmed_available: RpcNativeCurrencyAmount,
+    pub confirmed_total: RpcNativeCurrencyAmount,
+    pub unconfirmed_available: RpcNativeCurrencyAmount,
+    pub unconfirmed_total: RpcNativeCurrencyAmount,
+}
+
 /* Mining */
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]

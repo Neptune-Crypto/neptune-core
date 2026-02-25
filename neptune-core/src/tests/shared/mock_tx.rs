@@ -1,12 +1,11 @@
 use bytesize::ByteSize;
-use itertools::Itertools;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::bfe;
 
 use crate::api::export::BlockHeight;
 use crate::api::export::ChangePolicy;
-use crate::api::export::InputSelectionPolicy;
+use crate::api::export::InputSelectionPriority;
 use crate::api::export::KeyType;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
@@ -15,6 +14,7 @@ use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TxProvingCapability;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
+use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::application::config::cli_args;
 use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
@@ -257,15 +257,22 @@ pub(crate) async fn send_coins(
         .await;
 
     let amount = outputs.total_native_coins();
-    let inputs = sender
+    let selected_inputs = sender
         .api()
         .tx_initiator()
-        .select_spendable_inputs(InputSelectionPolicy::ByProvidedOrder, amount, timestamp)
+        .select_inputs(
+            InputSelectionPolicy::from(InputSelectionPriority::ByProvidedOrder),
+            amount,
+            timestamp,
+        )
+        .await;
+    let unlocked_inputs = sender
+        .lock_guard()
         .await
-        .into_iter()
-        .collect_vec();
+        .unlock_inputs(selected_inputs)
+        .await;
     let transaction_details = TransactionDetailsBuilder::default()
-        .inputs(inputs.into())
+        .inputs(unlocked_inputs)
         .outputs(outputs)
         .change_policy(ChangePolicy::RecoverToNextUnusedKey {
             key_type: KeyType::Symmetric,

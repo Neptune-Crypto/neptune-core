@@ -5,8 +5,8 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
-use crate::api::export::TxInput;
 use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -19,11 +19,14 @@ use crate::util_types::mutator_set::removal_record::absolute_index_set::Absolute
 /// in particular lays bare the amounts if native currency coins are involved.
 ///
 /// See also:
-///  - `UnlockedUtxo` -- also contains lock script and witness and mutator set
-///    membership proof;
-///  - [`TxInput`] -- newtype wrapper around `UnlockedUtxo`;
+///  - [`InputCandidate`](crate::state::wallet::input_candidate::InputCandidate)
+///    -- representation of spendable UTXOs used for applying
+///    input selection policy;
 ///  - `ExpectedUtxo` -- contains data for receiving and monitoring received
 ///    UTXOs;
+///  - `UnlockedUtxo` -- also contains lock script and witness and mutator set
+///    membership proof;
+///  - `SyncedUtxo` --
 ///  - `IncomingUtxo` -- contains extra data and does not store the AOCL leaf
 ///    index;
 ///  - [`UtxoTriple`](crate::protocol::consensus::transaction::utxo_triple::UtxoTriple)
@@ -39,8 +42,8 @@ pub struct TransparentInput {
     pub receiver_preimage: Digest,
 }
 
-impl From<TxInput> for TransparentInput {
-    fn from(tx_input: TxInput) -> Self {
+impl From<UnlockedUtxo> for TransparentInput {
+    fn from(tx_input: UnlockedUtxo) -> Self {
         TransparentInput {
             utxo: tx_input.utxo.clone(),
             aocl_leaf_index: tx_input.mutator_set_mp().aocl_leaf_index,

@@ -26,6 +26,15 @@ pub(crate) enum UtxoValidator<'a> {
 impl<'a> UtxoValidator<'a> {
     #[inline]
     pub(crate) async fn mutxo_state(&self, monitored_utxo: &MonitoredUtxo) -> MonitoredUtxoState {
+        // These spend heights are not considered cryptographically important.
+        // Saying "I don't know" is okay as it only affects views of spending
+        // history -- not spendable UTXOs. If this information is known, it is
+        // correct.
+        let spent_height = match monitored_utxo.spent {
+            MonitoredUtxoSpentStatus::Unspent => None,
+            MonitoredUtxoSpentStatus::SpentInUnknownBlock => None,
+            MonitoredUtxoSpentStatus::SpentIn { block_height, .. } => Some(block_height),
+        };
         match self {
             UtxoValidator::Light {
                 tip: tip_digest,
@@ -35,7 +44,7 @@ impl<'a> UtxoValidator<'a> {
                     let spent =
                         !mutator_set_accumulator.verify(Tip5::hash(&monitored_utxo.utxo), &mp);
                     if spent {
-                        MonitoredUtxoState::Spent
+                        MonitoredUtxoState::Spent(spent_height)
                     } else {
                         MonitoredUtxoState::SyncedAndUnspent
                     }
@@ -68,15 +77,15 @@ impl<'a> UtxoValidator<'a> {
                             .is_canonical_block(block_hash, block_height)
                             .await
                         {
-                            return MonitoredUtxoState::Spent;
+                            return MonitoredUtxoState::Spent(spent_height);
                         }
                     }
                     MonitoredUtxoSpentStatus::SpentInUnknownBlock => (),
                 };
 
                 // UTXO is marked as spent but we don't know in which block it
-                // was spent *or* the block in which an expenditure was seen
-                // is not canonical.
+                // was spent *or* we registered a block in which it was spent
+                // but this block is not canonical.
                 // If we don't know when the UTXO was spent, the spending block
                 // could have been reorganized away. And even if we know
                 // that the block in which the UTXO was spent was reorganized
@@ -94,7 +103,7 @@ impl<'a> UtxoValidator<'a> {
                     .await;
 
                 if is_spent {
-                    MonitoredUtxoState::Spent
+                    MonitoredUtxoState::Spent(spent_height)
                 } else {
                     MonitoredUtxoState::SyncedAndUnspent
                 }

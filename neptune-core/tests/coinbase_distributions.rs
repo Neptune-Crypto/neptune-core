@@ -67,14 +67,22 @@ pub async fn custom_coinbase_distribution_separate() {
         .await
         .get_wallet_status_for_tip()
         .await;
+    let block_height = alice
+        .gsl
+        .lock_guard()
+        .await
+        .chain
+        .light_state()
+        .header()
+        .height;
     assert_eq!(
         NativeCurrencyAmount::coins(128),
-        wallet_status.total_confirmed(),
+        wallet_status.confirmed_total_balance(block_height),
         "Must have expected block reward"
     );
     assert_eq!(
         NativeCurrencyAmount::coins(32),
-        wallet_status.available_confirmed(Timestamp::now()),
+        wallet_status.confirmed_available_balance(block_height, Timestamp::now()),
         "Must have 1/4 of block reward liquid"
     );
 }

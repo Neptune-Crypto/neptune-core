@@ -20,7 +20,7 @@
 //! # use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-//! # use neptune_cash::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::input_selector::InputSelector;
 //! # use neptune_cash::api::export::TransactionProofType;
 //! # use neptune_cash::api::export::ReceivingAddress;
 //! # use neptune_cash::api::export::NativeCurrencyAmount;
@@ -50,7 +50,7 @@
 //!        .await;
 //!
 //!    // select inputs
-//!    let tx_inputs = TxInputListBuilder::new()
+//!    let tx_inputs = InputSelector::new()
 //!        .spendable_inputs(
 //!            state_lock
 //!                .gs()
@@ -143,11 +143,11 @@
 //! # Ok(proof)
 //! # }
 //! ```
+pub mod input_selector;
 pub mod proof_builder;
 pub mod transaction_builder;
 pub mod transaction_details_builder;
 pub mod transaction_proof_builder;
 pub mod triton_vm_proof_job_options_builder;
 pub mod tx_artifacts_builder;
-pub mod tx_input_list_builder;
 pub mod tx_output_list_builder;
