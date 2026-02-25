@@ -253,7 +253,7 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::TxInputList;
+    use crate::api::export::TxInputs;
     use crate::api::export::TxOutputList;
     use crate::api::tx_initiation::error::CreateProofError;
     use crate::application::config::network::Network;
@@ -438,7 +438,7 @@ pub(crate) mod tests {
         let now = network.launch_date() + Timestamp::hours(12);
         let cheated_fee = NativeCurrencyAmount::coins(100);
         let fee_tx = TransactionDetails::new_without_coinbase(
-            TxInputList::default(),
+            TxInputs::default(),
             TxOutputList::default(),
             cheated_fee,
             now,

@@ -27,10 +27,10 @@ use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::SpendingKey;
 use crate::state::wallet::change_policy::ChangePolicy;
-use crate::state::wallet::transaction_input::TxInput;
-use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::transaction_output::TxOutputList;
+use crate::state::wallet::unlocked_utxo::TxInputs;
+use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::GlobalState;
 use crate::state::StateLock;
@@ -41,7 +41,7 @@ use crate::WalletState;
 // note: all fields intentionally private
 #[derive(Debug, Default)]
 pub struct TransactionDetailsBuilder {
-    tx_inputs: TxInputList,
+    tx_inputs: TxInputs,
     tx_outputs: TxOutputList,
     custom_announcements: Vec<Announcement>,
     fee: NativeCurrencyAmount,
@@ -64,13 +64,13 @@ impl TransactionDetailsBuilder {
     }
 
     /// adds an input.
-    pub fn input(mut self, tx_input: TxInput) -> Self {
-        self.tx_inputs.push(tx_input);
+    pub fn input(mut self, unlocked_utxo: UnlockedUtxo) -> Self {
+        self.tx_inputs.push(unlocked_utxo);
         self
     }
 
-    /// adds a list of inputs.  See [TxInputListBuilder](super::tx_input_list_builder::TxInputListBuilder)
-    pub fn inputs(mut self, mut tx_input_list: TxInputList) -> Self {
+    /// Add inputs.
+    pub fn inputs(mut self, mut tx_input_list: TxInputs) -> Self {
         self.tx_inputs.append(&mut tx_input_list);
         self
     }

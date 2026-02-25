@@ -3074,6 +3074,7 @@ pub(super) mod tests {
         }
 
         // Check balances
+        let block_height = block_1.header().height;
         assert_eq!(
             NativeCurrencyAmount::coins(10),
             alice
@@ -3081,7 +3082,7 @@ pub(super) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(in_seven_months)
+                .confirmed_available_balance(block_height, in_seven_months)
         );
         assert_eq!(
             NativeCurrencyAmount::coins(5),
@@ -3089,7 +3090,7 @@ pub(super) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(in_seven_months)
+                .confirmed_available_balance(block_height, in_seven_months)
         );
 
         let block_subsidy = Block::block_subsidy(block_1.header().height);
@@ -3106,7 +3107,7 @@ pub(super) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(in_seven_months)
+                .confirmed_available_balance(block_1.header().height, in_seven_months)
         );
 
         let after_cb_timelock_expiration = block_1.header().timestamp + Timestamp::months(37);
@@ -3117,7 +3118,7 @@ pub(super) mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(after_cb_timelock_expiration)
+                .confirmed_available_balance(block_1.header().height, after_cb_timelock_expiration)
         );
 
         println!("Transactions were received in good order.");
@@ -3304,14 +3305,14 @@ pub(super) mod tests {
             .await
             .get_wallet_status_for_tip()
             .await
-            .available_confirmed(in_seven_months)
+            .confirmed_available_balance(block_2.header().height, in_seven_months)
             .is_zero());
         assert!(bob
             .lock_guard()
             .await
             .get_wallet_status_for_tip()
             .await
-            .available_confirmed(in_seven_months)
+            .confirmed_available_balance(block_2.header().height, in_seven_months)
             .is_zero());
 
         // Verify that all ingoing UTXOs are recorded in wallet of receiver of genesis UTXO

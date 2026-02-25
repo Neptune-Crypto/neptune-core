@@ -101,6 +101,9 @@ pub enum RpcError {
 
     #[error("Wallet key counter is zero.")]
     WalletKeyCounterIsZero,
+
+    #[error("Number of confirmations is wrong.")]
+    BadConfirmationCount,
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -507,6 +510,15 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: OutgoingHistoryRequest,
     ) -> RpcResult<OutgoingHistoryResponse>;
+
+    async fn get_balance(&self, number_of_confirmations: u32) -> RpcResult<GetBalanceResponse> {
+        self.get_balance_call(GetBalanceRequest {
+            number_of_confirmations,
+        })
+        .await
+    }
+
+    async fn get_balance_call(&self, request: GetBalanceRequest) -> RpcResult<GetBalanceResponse>;
 
     /* Mining */
 
