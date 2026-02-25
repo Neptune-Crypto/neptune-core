@@ -1128,6 +1128,72 @@ impl ArchivalState {
         Ok(ret)
     }
 
+    /// Return the block heights for blocks matching *all* elements in the
+    /// specified input/output lists, for blocks belonging to the canonical
+    /// chain. Will not return block heights were e.g. only one of the outputs
+    /// was included if more than one output is included in the outputs list.
+    ///
+    /// Can return multiple blocks in the case where blocks are selected only
+    /// based on addition records and multiple blocks contain the same addition
+    /// records.
+    ///
+    /// Only works if a UTXO index is maintained, otherwise an error is
+    /// returned.
+    ///
+    /// # Panics
+    /// - If no filtering is applied, i.e. if both input and output lists are
+    ///   empty.
+    pub(crate) async fn canonical_block_heights_with_puts(
+        &self,
+        absolute_index_sets: HashSet<AbsoluteIndexSet>,
+        addition_records: HashSet<AdditionRecord>,
+    ) -> Result<HashSet<BlockHeight>> {
+        ensure!(
+            self.utxo_index.is_some(),
+            "Only works a UTXO index is maintained."
+        );
+
+        assert!(
+            !addition_records.is_empty() || !absolute_index_sets.is_empty(),
+            "No filtering was applied"
+        );
+
+        let mut block_matches: Option<HashSet<BlockHeight>> = None;
+        for index_set in absolute_index_sets {
+            let block_heights = self
+                .absolute_index_sets_to_block_heights(HashSet::from([index_set]))
+                .await
+                .expect("Utxo index namespace can only be active when UTXO index is present");
+
+            match block_matches {
+                Some(bmatches) => {
+                    block_matches = Some(bmatches.intersection(&block_heights).copied().collect());
+                }
+                None => {
+                    block_matches = Some(block_heights);
+                }
+            }
+        }
+
+        for addition_record in addition_records {
+            let block_heights = self
+                .addition_records_to_block_height(HashSet::from([addition_record]))
+                .await
+                .expect("Utxo index namespace can only be active when UTXO index is present");
+
+            match block_matches {
+                Some(bmatches) => {
+                    block_matches = Some(bmatches.intersection(&block_heights).copied().collect());
+                }
+                None => {
+                    block_matches = Some(block_heights);
+                }
+            }
+        }
+
+        Ok(block_matches.expect("At least one filtering criteria was set"))
+    }
+
     /// Return latest block from database, or genesis block if no other block
     /// is known.
     pub async fn get_tip(&self) -> Block {
@@ -5071,6 +5137,8 @@ pub(super) mod tests {
     /// Test of functions that require both UTXO index and other parts of the
     /// archival state
     mod utxo_index {
+        use tasm_lib::twenty_first::bfe;
+
         use super::*;
         use crate::tests::shared::blocks::block_with_num_puts;
         use crate::tests::shared::blocks::invalid_empty_block;
@@ -5098,19 +5166,31 @@ pub(super) mod tests {
                 block_with_puts(network, &genesis, vec![canonical_output], vec![]).await;
             archive.set_new_tip(&block1_canonical).await.unwrap();
 
-            let abandoned_output = [abandoned_output].into_iter().collect();
+            let abandoned_output = HashSet::from([abandoned_output]);
             assert!(archive
-                .addition_records_to_block_height(abandoned_output)
+                .addition_records_to_block_height(abandoned_output.clone())
+                .await
+                .unwrap()
+                .is_empty());
+            assert!(archive
+                .canonical_block_heights_with_puts(HashSet::new(), abandoned_output)
                 .await
                 .unwrap()
                 .is_empty());
 
-            let canonical_output = [canonical_output].into_iter().collect();
-            let block_height_1: HashSet<_> = [BlockHeight::from(1u64)].into_iter().collect();
+            let canonical_output = HashSet::from([canonical_output]);
+            let block_height_1 = HashSet::from([BlockHeight::from(1u64)]);
             assert_eq!(
                 block_height_1,
                 archive
-                    .addition_records_to_block_height(canonical_output)
+                    .addition_records_to_block_height(canonical_output.clone())
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(
+                block_height_1,
+                archive
+                    .canonical_block_heights_with_puts(HashSet::new(), canonical_output)
                     .await
                     .unwrap()
             );
@@ -5141,12 +5221,18 @@ pub(super) mod tests {
                 .iter()
                 .map(|x| x.absolute_indices)
             {
-                let abs_index_set = [abs_index_set].into_iter().collect();
-                let res = archive
-                    .absolute_index_sets_to_block_heights(abs_index_set)
+                let abs_index_set = HashSet::from([abs_index_set]);
+                assert!(archive
+                    .absolute_index_sets_to_block_heights(abs_index_set.clone())
                     .await
-                    .unwrap();
-                assert!(res.is_empty());
+                    .unwrap()
+                    .is_empty());
+
+                assert!(archive
+                    .canonical_block_heights_with_puts(abs_index_set, HashSet::new())
+                    .await
+                    .unwrap()
+                    .is_empty());
             }
 
             // Verify that all inputs from canonical block 1 are matched.
@@ -5157,14 +5243,22 @@ pub(super) mod tests {
                 .iter()
                 .map(|x| x.absolute_indices)
             {
-                let abs_index_set = [abs_index_set].into_iter().collect();
+                let abs_index_set = HashSet::from([abs_index_set]);
                 let res = archive
-                    .absolute_index_sets_to_block_heights(abs_index_set)
+                    .absolute_index_sets_to_block_heights(abs_index_set.clone())
                     .await
                     .unwrap();
                 let expected: HashSet<BlockHeight> =
                     [BlockHeight::from(1u64)].into_iter().collect();
                 assert_eq!(expected, res);
+
+                assert_eq!(
+                    expected,
+                    archive
+                        .canonical_block_heights_with_puts(abs_index_set, HashSet::new())
+                        .await
+                        .unwrap()
+                );
             }
         }
 
@@ -5215,14 +5309,114 @@ pub(super) mod tests {
             .into_iter()
             .collect();
 
-            let repeated_output = [repeated_output].into_iter().collect();
+            let repeated_output = HashSet::from([repeated_output]);
             assert_eq!(
                 expected,
                 archive
-                    .addition_records_to_block_height(repeated_output)
+                    .addition_records_to_block_height(repeated_output.clone())
                     .await
                     .unwrap()
             );
+            assert_eq!(
+                expected,
+                archive
+                    .canonical_block_heights_with_puts(HashSet::new(), repeated_output)
+                    .await
+                    .unwrap()
+            )
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn canonical_block_heights_with_puts_simple() {
+            async fn assert_in_block1(
+                archive: &ArchivalState,
+                inputs: Vec<AbsoluteIndexSet>,
+                outputs: Vec<AdditionRecord>,
+            ) {
+                assert_eq!(
+                    HashSet::from([BlockHeight::new(bfe!(1))]),
+                    archive
+                        .canonical_block_heights_with_puts(
+                            inputs.into_iter().collect(),
+                            outputs.into_iter().collect()
+                        )
+                        .await
+                        .unwrap()
+                );
+            }
+
+            async fn assert_not_mined(
+                archive: &ArchivalState,
+                inputs: Vec<AbsoluteIndexSet>,
+                outputs: Vec<AdditionRecord>,
+            ) {
+                assert!(archive
+                    .canonical_block_heights_with_puts(
+                        inputs.into_iter().collect(),
+                        outputs.into_iter().collect(),
+                    )
+                    .await
+                    .unwrap()
+                    .is_empty())
+            }
+
+            let network = Network::Main;
+            let cli = Args {
+                utxo_index: true,
+                network,
+                ..Default::default()
+            };
+
+            let genesis = Block::genesis(network);
+            let mut archive = make_test_archival_state(&cli).await;
+            let block1 = block_with_num_puts(network, &genesis, 4, 4).await;
+            archive.set_new_tip(&block1).await.unwrap();
+
+            let outputs = block1.all_addition_records().unwrap();
+            let inputs = block1.all_absolute_index_sets();
+
+            assert_in_block1(&archive, vec![], vec![outputs[0]]).await;
+            assert_in_block1(&archive, vec![], vec![outputs[1]]).await;
+            assert_in_block1(&archive, vec![], vec![outputs[0], outputs[1]]).await;
+            assert_in_block1(&archive, vec![inputs[0]], vec![]).await;
+            assert_in_block1(&archive, vec![inputs[0], inputs[1]], vec![]).await;
+            assert_in_block1(&archive, vec![inputs[0]], vec![outputs[0]]).await;
+            assert_in_block1(&archive, vec![inputs[0], inputs[2]], vec![outputs[0]]).await;
+            assert_in_block1(
+                &archive,
+                vec![inputs[0], inputs[2]],
+                vec![outputs[0], outputs[3]],
+            )
+            .await;
+            assert_in_block1(
+                &archive,
+                vec![inputs[2], inputs[0], inputs[3]],
+                vec![outputs[3], outputs[1], outputs[2]],
+            )
+            .await;
+            assert_in_block1(
+                &archive,
+                inputs.clone(),
+                vec![outputs[3], outputs[1], outputs[2]],
+            )
+            .await;
+            assert_in_block1(&archive, inputs.clone(), vec![]).await;
+            assert_in_block1(&archive, vec![], outputs.clone()).await;
+            assert_in_block1(&archive, inputs.clone(), outputs.clone()).await;
+
+            let unknown_output = AdditionRecord::new(Digest::default());
+            assert_not_mined(&archive, vec![], vec![unknown_output]).await;
+            assert_not_mined(&archive, vec![], vec![unknown_output, outputs[0]]).await;
+            assert_not_mined(&archive, vec![], vec![outputs[0], unknown_output]).await;
+            assert_not_mined(&archive, inputs.clone(), vec![outputs[0], unknown_output]).await;
+            assert_not_mined(&archive, inputs.clone(), vec![unknown_output]).await;
+
+            let unknown_input = AbsoluteIndexSet::empty_dummy();
+            assert_not_mined(&archive, vec![unknown_input], vec![]).await;
+            assert_not_mined(&archive, vec![unknown_input], vec![unknown_output]).await;
+            assert_not_mined(&archive, vec![unknown_input], outputs.clone()).await;
+            assert_not_mined(&archive, vec![unknown_input, inputs[0]], vec![]).await;
+            assert_not_mined(&archive, vec![inputs[0], unknown_input], vec![]).await;
         }
 
         #[apply(shared_tokio_runtime)]
@@ -5244,9 +5438,14 @@ pub(super) mod tests {
                 .is_err());
 
             let dummy_tx_output = AdditionRecord::new(Digest::default());
-            let dummy_tx_output = [dummy_tx_output].into_iter().collect();
+            let dummy_tx_output = HashSet::from([dummy_tx_output]);
             assert!(archive
-                .addition_records_to_block_height(dummy_tx_output)
+                .addition_records_to_block_height(dummy_tx_output.clone())
+                .await
+                .is_err());
+
+            assert!(archive
+                .canonical_block_heights_with_puts(HashSet::new(), dummy_tx_output)
                 .await
                 .is_err());
         }
