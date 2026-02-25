@@ -67,6 +67,7 @@ use serde::Serialize;
 use systemstat::Platform;
 use systemstat::System;
 use tarpc::context;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -79,7 +80,7 @@ use crate::api;
 use crate::api::export::AnnouncementFlag;
 use crate::api::export::ConsolidationError;
 use crate::api::tx_initiation;
-use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::application::config::network::Network;
 use crate::application::database::storage::storage_vec::traits::StorageVecBase;
@@ -125,14 +126,15 @@ use crate::state::wallet::address::SpendingKey;
 use crate::state::wallet::change_policy::ChangePolicy;
 use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
-use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutputList;
+use crate::state::wallet::unlocked_utxo::TxInputs;
 use crate::state::wallet::wallet_status::WalletStatus;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ResponseMsMembershipProofPrivacyPreserving;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::DataDirectory;
 
@@ -1418,7 +1420,7 @@ pub trait RPC {
     /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::spendable_inputs()]
-    async fn spendable_inputs(token: auth::Token) -> RpcResult<TxInputList>;
+    async fn spendable_inputs(token: auth::Token) -> RpcResult<TxInputs>;
 
     /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
     ///
@@ -1437,7 +1439,7 @@ pub trait RPC {
         token: auth::Token,
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
-    ) -> RpcResult<TxInputList>;
+    ) -> RpcResult<TxInputs>;
 
     /// generate tx outputs from list of OutputFormat.
     ///
@@ -1459,7 +1461,7 @@ pub trait RPC {
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_details()]
     async fn generate_tx_details(
         token: auth::Token,
-        tx_inputs: TxInputList,
+        tx_inputs: TxInputs,
         tx_outputs: TxOutputList,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
@@ -2806,8 +2808,10 @@ impl RPC for NeptuneRPCServer {
 
         let gs = self.state.lock_guard().await;
         let wallet_status = gs.get_wallet_status_for_tip().await;
+        let block_height = gs.chain.light_state().header().height;
 
-        let confirmed_available = wallet_status.available_confirmed(Timestamp::now());
+        let confirmed_available =
+            wallet_status.confirmed_available_balance(block_height, Timestamp::now());
 
         // test inequality
         Ok(amount <= confirmed_available)
@@ -2824,8 +2828,10 @@ impl RPC for NeptuneRPCServer {
 
         let gs = self.state.lock_guard().await;
         let wallet_status = gs.get_wallet_status_for_tip().await;
+        let block_height = gs.chain.light_state().header().height;
 
-        let confirmed_available = wallet_status.available_confirmed(Timestamp::now());
+        let confirmed_available =
+            wallet_status.confirmed_available_balance(block_height, Timestamp::now());
 
         Ok(confirmed_available)
     }
@@ -2842,9 +2848,7 @@ impl RPC for NeptuneRPCServer {
         let gs = self.state.lock_guard().await;
         let wallet_status = gs.get_wallet_status_for_tip().await;
 
-        Ok(gs
-            .wallet_state
-            .unconfirmed_available_balance(&wallet_status, Timestamp::now()))
+        Ok(wallet_status.unconfirmed_available_balance(Timestamp::now()))
     }
 
     // documented in trait. do not add doc-comment.
@@ -3133,24 +3137,24 @@ impl RPC for NeptuneRPCServer {
             log_slow_scope!(fn_name!() + "::get_wallet_status_for_tip()");
             state.get_wallet_status_for_tip().await
         };
-        let wallet_state = &state.wallet_state;
 
+        let block_height = state.chain.light_state().header().height;
         let confirmed_available_balance = {
             log_slow_scope!(fn_name!() + "::confirmed_available_balance()");
-            wallet_status.available_confirmed(now)
+            wallet_status.confirmed_available_balance(block_height, now)
         };
         let confirmed_total_balance = {
             log_slow_scope!(fn_name!() + "::confirmed_total_balance()");
-            wallet_status.total_confirmed()
+            wallet_status.confirmed_total_balance(block_height)
         };
 
         let unconfirmed_available_balance = {
             log_slow_scope!(fn_name!() + "::unconfirmed_available_balance()");
-            wallet_state.unconfirmed_available_balance(&wallet_status, now)
+            wallet_status.unconfirmed_available_balance(now)
         };
         let unconfirmed_total_balance = {
             log_slow_scope!(fn_name!() + "::unconfirmed_total_balance()");
-            wallet_state.unconfirmed_total_balance(&wallet_status)
+            wallet_status.unconfirmed_total_balance()
         };
 
         Ok(OverviewData {
@@ -4018,7 +4022,11 @@ impl RPC for NeptuneRPCServer {
         }
 
         // get unconfirmed incoming UTXOs
-        for (incoming_utxo, addition_record) in state.wallet_state.mempool_unspent_utxos_iter() {
+        for (incoming_utxo, sender_randomness, receiver_preimage) in
+            state.wallet_state.mempool_incoming_utxos_iter()
+        {
+            let item = Tip5::hash(incoming_utxo);
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             if present_addition_records.insert(addition_record) {
                 ui_utxos.push(UiUtxo {
                     received: UtxoStatusEvent::Pending,
@@ -4045,7 +4053,7 @@ impl RPC for NeptuneRPCServer {
 
         // mark "spent" label on unconfirmed outgoing UTXOs as "pending"
         let mut markable_indices = HashSet::new();
-        for (_outgoing_utxo, aocl_leaf_index) in state.wallet_state.mempool_spent_utxos_iter() {
+        for (_outgoing_utxo, aocl_leaf_index) in state.wallet_state.mempool_outgoing_utxos_iter() {
             markable_indices.insert(aocl_leaf_index);
         }
         for ui_utxo in &mut ui_utxos {
@@ -4162,16 +4170,28 @@ impl RPC for NeptuneRPCServer {
         self,
         _: context::Context,
         token: auth::Token,
-    ) -> RpcResult<TxInputList> {
+    ) -> RpcResult<TxInputs> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self
+        let input_candidates = self
             .state
             .api()
             .tx_initiator()
-            .spendable_inputs(Timestamp::now())
-            .await)
+            .input_candidates(Timestamp::now())
+            .await;
+
+        // Select all.
+        let selected_inputs = input_candidates.into_iter().collect_vec();
+
+        let unlocked_utxos = self
+            .state
+            .lock_guard()
+            .await
+            .unlock_inputs(selected_inputs)
+            .await;
+
+        Ok(unlocked_utxos)
     }
 
     // documented in trait. do not add doc-comment.
@@ -4181,17 +4201,25 @@ impl RPC for NeptuneRPCServer {
         token: auth::Token,
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
-    ) -> RpcResult<TxInputList> {
+    ) -> RpcResult<TxInputs> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self
+        let selected_inputs = self
             .state
             .api()
             .tx_initiator()
-            .select_spendable_inputs(policy, spend_amount, Timestamp::now())
+            .select_inputs(policy, spend_amount, Timestamp::now())
+            .await;
+
+        let unlocked_inputs = self
+            .state
+            .lock_guard()
             .await
-            .into())
+            .unlock_inputs(selected_inputs)
+            .await;
+
+        Ok(unlocked_inputs)
     }
 
     // documented in trait. do not add doc-comment.
@@ -4217,7 +4245,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _: context::Context,
         token: auth::Token,
-        tx_inputs: TxInputList,
+        tx_inputs: TxInputs,
         tx_outputs: TxOutputList,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
@@ -4907,7 +4935,7 @@ mod tests {
             .select_spendable_inputs(
                 ctx,
                 token,
-                InputSelectionPolicy::Random,
+                InputSelectionPolicy::default(),
                 NativeCurrencyAmount::coins(5),
             )
             .await;
@@ -4921,7 +4949,7 @@ mod tests {
             .generate_tx_details(
                 ctx,
                 token,
-                TxInputList::default(),
+                TxInputs::default(),
                 TxOutputList::default(),
                 ChangePolicy::default(),
                 NativeCurrencyAmount::zero(),
@@ -5143,7 +5171,7 @@ mod tests {
             .select_spendable_inputs(
                 ctx,
                 token,
-                InputSelectionPolicy::Random,
+                InputSelectionPolicy::default(),
                 NativeCurrencyAmount::coins(19),
             )
             .await
@@ -6062,9 +6090,9 @@ mod tests {
             .state
             .lock_guard()
             .await
-            .wallet_spendable_inputs(Timestamp::now())
+            .wallet_spendable_inputs()
             .await
-            .into_iter()
+            .iter()
             .collect_vec()[0]
             .clone();
         let msmp = utxo.mutator_set_mp().clone();
@@ -7047,8 +7075,10 @@ mod tests {
 
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
+                    let block_height = state_lock.chain.light_state().header().height;
                     let wallet_status = state_lock.get_wallet_status_for_tip().await;
-                    let original_balance = wallet_status.available_confirmed(timestamp);
+                    let original_balance =
+                        wallet_status.confirmed_available_balance(block_height, timestamp);
                     assert!(original_balance.is_zero(), "Original balance assumed zero");
                 };
 
@@ -7061,7 +7091,9 @@ mod tests {
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
                     let wallet_status = state_lock.get_wallet_status_for_tip().await;
-                    let new_balance = wallet_status.available_confirmed(timestamp);
+                    let block_height = state_lock.chain.light_state().header().height;
+                    let new_balance =
+                        wallet_status.confirmed_available_balance(block_height, timestamp);
                     let mut expected_balance = Block::block_subsidy(block_1.header().height);
                     expected_balance.div_two();
                     assert_eq!(

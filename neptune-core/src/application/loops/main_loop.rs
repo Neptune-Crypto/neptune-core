@@ -2688,7 +2688,7 @@ mod tests {
                 .await;
 
             let block = block_with_outputs(&mut alice, outputs).await;
-            alice.set_new_tip(block).await.unwrap();
+            alice.set_new_tip(block.clone()).await.unwrap();
 
             let balance_timestamp = alice
                 .lock_guard()
@@ -2703,7 +2703,7 @@ mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(balance_timestamp);
+                .confirmed_available_balance(block.header().height, balance_timestamp);
             assert_eq!(
                 expected_balance, balance,
                 "Balance must be 13 after getting 20 and sending 7.\nExpected: {expected_balance}.\n Got: {balance}."
@@ -2758,7 +2758,7 @@ mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(balance_timestamp);
+                .confirmed_available_balance(block.header().height, balance_timestamp);
             assert_eq!(
                 expected_balance, balance_again,
                 "Balance after rescan must agree with original balance, \

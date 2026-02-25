@@ -151,6 +151,9 @@ pub enum RpcMethods {
     #[namespace(Namespace::Personal)]
     OutgoingHistory,
 
+    #[namespace(Namespace::Personal)]
+    GetBalance,
+
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
 

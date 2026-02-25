@@ -6,6 +6,7 @@ use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::tx_initiation::consolidate::CONSOLIDATION_FEE_SP;
+use neptune_cash::api::tx_initiation::consolidate::NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION;
 use num_traits::ops::checked::CheckedSub;
 use num_traits::Zero;
 use tracing_test::traced_test;
@@ -17,8 +18,8 @@ use tracing_test::traced_test;
 ///  1. Alice and Bob run 2-node regtest network, from genesis.
 ///  2. Alice and both each have no funds initially.
 ///  3. Bob generates a receiving address and provides to Alice (out of band).
-///  4. Alice mines 3 blocks to her own wallet.
-///  5. Alice consolidates her 3 liquid to Bob's address
+///  4. Alice mines a ton of blocks to her own wallet.
+///  5. Alice consolidates 3 of her liquid to Bob's address
 ///  6. Bob verifies the unconfirmed balance matches consolidation amount.
 ///
 #[tokio::test(flavor = "multi_thread")]
@@ -50,16 +51,17 @@ pub async fn consolidation_basic() {
         .await
         .unwrap();
 
-    // alice mines 3 blocks to her wallet
+    // alice mines a ton of blocks to her wallet
+    let num_blocks_mined = 3 + NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION as u32;
     alice
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_blocks_to_wallet(3, false)
+        .mine_blocks_to_wallet(num_blocks_mined, false)
         .await
         .unwrap();
 
-    tracing::info!("alice mined 3 blocks!");
+    tracing::info!("alice mined a ton of blocks!");
 
     // wait 5 seconds to allow block to propagate to bob's node.
     // otherwise bob's node might receive the Tx before accepting the latest block
@@ -85,10 +87,10 @@ pub async fn consolidation_basic() {
             .light_state()
             .header()
             .height,
-        3u64.into()
+        u64::from(num_blocks_mined).into()
     );
 
-    // Alice consolidates
+    // Alice consolidates 3 of her UTXOs
     let num_consolidations = alice
         .gsl
         .api_mut()
@@ -140,6 +142,7 @@ pub async fn consolidation_basic() {
 
     // bob checks balances are correct.
     let bob_balances = bob.gsl.api().wallet().balances(Timestamp::now()).await;
+
     // compare strings to correct for rounding errors
     assert_eq!(
         bob_balances.unconfirmed_available.to_string(),
@@ -184,7 +187,9 @@ pub async fn consolidation_basic() {
         alice_balances_after_confirmed.unconfirmed_available
     );
 
-    bob.wait_until_block_height(4, timeout_secs).await.unwrap();
+    bob.wait_until_block_height(u64::from(num_blocks_mined + 1), timeout_secs)
+        .await
+        .unwrap();
 
     // bob checks payment is reflected in his confirmed wallet balance
     let bob_balances = bob.gsl.api().wallet().balances(Timestamp::now()).await;
