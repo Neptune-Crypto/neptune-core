@@ -114,25 +114,25 @@ mod tests {
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn cannot_call_own_wallet_endpoint_if_not_activated() {
-        let router_with_ownwallet = Arc::new(RpcMethods::new_router(
+    async fn cannot_call_personal_endpoint_if_not_activated() {
+        let router_with_personal = Arc::new(RpcMethods::new_router(
             Arc::new(test_rpc_server().await),
-            HashSet::from([Namespace::Ownwallet, Namespace::Chain]),
+            HashSet::from([Namespace::Personal, Namespace::Chain]),
         ));
-        let router_no_ownwallet = Arc::new(RpcMethods::new_router(
+        let router_no_personal = Arc::new(RpcMethods::new_router(
             Arc::new(test_rpc_server().await),
             HashSet::from([Namespace::Chain]),
         ));
 
         assert!(matches!(
-            call_paramless(router_no_ownwallet, "ownwallet_rescanOutgoing").await,
+            call_paramless(router_no_personal, "personal_rescanOutgoing").await,
             JsonResponse::Error {
                 error: JsonError::MethodNotFound,
                 ..
             }
         ));
         assert!(matches!(
-            call_paramless(router_with_ownwallet, "ownwallet_rescanOutgoing").await,
+            call_paramless(router_with_personal, "personal_rescanOutgoing").await,
             JsonResponse::Success { .. }
         ));
     }

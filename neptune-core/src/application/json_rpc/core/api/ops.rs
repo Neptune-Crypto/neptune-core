@@ -23,9 +23,17 @@ pub enum Namespace {
     Chain,
     Mining,
     Archival,
+
+    /// Endpoints for inspecting the mempool status
     Mempool,
-    Walletserver,
-    Ownwallet,
+
+    /// Endpoints for serving external wallets
+    Wallet,
+
+    /// Endpoints for managing personal wallet
+    Personal,
+
+    /// Endpoints relating to and requiring a UTXO index
     Utxoindex,
 }
 
@@ -113,34 +121,34 @@ pub enum RpcMethods {
     #[namespace(Namespace::Archival)]
     BurnedSupply,
 
-    #[namespace(Namespace::Walletserver)]
+    #[namespace(Namespace::Wallet)]
     GetBlocks,
 
-    #[namespace(Namespace::Walletserver)]
+    #[namespace(Namespace::Wallet)]
     RestoreMembershipProof,
 
-    #[namespace(Namespace::Walletserver)]
+    #[namespace(Namespace::Wallet)]
     SubmitTransaction,
 
-    #[namespace(Namespace::Ownwallet)]
+    #[namespace(Namespace::Personal)]
     RescanAnnounced,
 
-    #[namespace(Namespace::Ownwallet)]
+    #[namespace(Namespace::Personal)]
     RescanExpected,
 
-    #[namespace(Namespace::Ownwallet)]
+    #[namespace(Namespace::Personal)]
     RescanOutgoing,
 
-    #[namespace(Namespace::Ownwallet)]
+    #[namespace(Namespace::Personal)]
     RescanGuesserRewards,
 
-    #[namespace(Namespace::Ownwallet)]
+    #[namespace(Namespace::Personal)]
     DerivationIndex,
 
-    #[namespace(Namespace::Ownwallet)]
+    #[namespace(Namespace::Personal)]
     SetDerivationIndex,
 
-    #[namespace(Namespace::Ownwallet)]
+    #[namespace(Namespace::Personal)]
     GenerateAddress,
 
     #[namespace(Namespace::Mining)]

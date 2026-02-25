@@ -154,7 +154,7 @@ mod tests {
     async fn get_new_address_bumps_derivation_index() {
         let unsafe_rpc = false;
         let client = start_pseudo_real_server(
-            HashSet::from([Namespace::Chain, Namespace::Ownwallet]),
+            HashSet::from([Namespace::Chain, Namespace::Personal]),
             unsafe_rpc,
             40510,
         )
