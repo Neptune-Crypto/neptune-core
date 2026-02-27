@@ -351,12 +351,19 @@ impl TxOutput {
         self.utxo.clone()
     }
 
+    #[inline(always)]
     pub(crate) fn sender_randomness(&self) -> Digest {
         self.sender_randomness
     }
 
+    #[inline(always)]
     pub(crate) fn receiver_digest(&self) -> Digest {
         self.receiver_digest
+    }
+
+    #[inline(always)]
+    pub(crate) fn notification_method(&self) -> &UtxoNotificationMethod {
+        &self.notification_method
     }
 
     /// Retrieve on-chain UTXO notification announcement, if any.

@@ -153,6 +153,16 @@ impl RustyWalletDatabase {
         self.tables.monitored_utxos.get(index).await
     }
 
+    /// Return the UTXO of a monitored UTXO by strong [`StrongUtxoKey`].
+    pub(crate) async fn monitored_utxo_by_strong_key(
+        &self,
+        strong_utxo_key: &StrongUtxoKey,
+    ) -> Option<MonitoredUtxo> {
+        let list_index = self.tables.strong_key_to_mutxo.get(strong_utxo_key).await?;
+
+        Some(self.tables.monitored_utxos.get(list_index).await)
+    }
+
     /// Return the UTXO of a monitored UTXO and the monitored UTXOs list index
     /// matching the specified absolute index set, if any.
     ///

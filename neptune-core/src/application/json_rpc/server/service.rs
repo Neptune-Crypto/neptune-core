@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use itertools::Itertools;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -11,6 +12,7 @@ use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
+use crate::application::database::storage::storage_vec::traits::StorageVecStream;
 use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::header::TransactionKernelWithPriority;
 use crate::application::json_rpc::core::model::block::RpcBlock;
@@ -18,11 +20,18 @@ use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplateMetadata;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
+use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
+use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionInput;
+use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionOutput;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
+use crate::state::wallet::sent_transaction::SentTransaction;
+use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
+use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
@@ -705,6 +714,137 @@ impl RpcApi for RpcServer {
         Ok(GenerateAddressResponse { address })
     }
 
+    async fn outgoing_history_call(
+        &self,
+        request: OutgoingHistoryRequest,
+    ) -> RpcResult<OutgoingHistoryResponse> {
+        let state = self.state.lock_guard().await;
+
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+        let matches_filter = |tx: &SentTransaction| {
+            request
+                .sender_randomness
+                .is_none_or(|q| tx.tx_outputs.iter().any(|o| o.sender_randomness() == q))
+                && request
+                    .receiver_digest
+                    .is_none_or(|q| tx.tx_outputs.iter().any(|o| o.receiver_digest() == q))
+                && request.output_lock_script_hash.is_none_or(|q| {
+                    tx.tx_outputs
+                        .iter()
+                        .any(|o| o.utxo().lock_script_hash() == q)
+                })
+                && request.output.is_none_or(|q| {
+                    tx.tx_outputs
+                        .iter()
+                        .any(|o| o.addition_record() == q.into())
+                })
+                && request.timestamp.is_none_or(|q| tx.timestamp == q)
+        };
+
+        let utxo_notification_medium = |tx: &TxOutput| match tx.notification_method() {
+            UtxoNotificationMethod::None => "none",
+            UtxoNotificationMethod::OffChain(_) => "off-chain",
+            UtxoNotificationMethod::OnChain(_) => "on-chain",
+        };
+
+        let network = self.state.cli().network;
+        let extract_recipient_address = |tx: &TxOutput| match tx.notification_method() {
+            UtxoNotificationMethod::OnChain(receiving_address) => Some(
+                receiving_address
+                    .to_bech32m(network)
+                    .expect("Address stored in DB must be bech32 representable"),
+            ),
+            UtxoNotificationMethod::OffChain(receiving_address) => Some(
+                receiving_address
+                    .to_bech32m(network)
+                    .expect("Address stored in DB must be bech32 representable"),
+            ),
+            UtxoNotificationMethod::None => None,
+        };
+
+        let limit = request.max_num_elements.unwrap_or(100).min(1000) as usize;
+        let page = request.page.unwrap_or(0);
+        let offset = (page * limit as u64) as usize;
+
+        let wallet_db = &state.wallet_state.wallet_db;
+        let sent_txs = wallet_db.sent_transactions();
+        let sent_txs = sent_txs.stream_values().await;
+        futures::pin_mut!(sent_txs);
+
+        let mut matching_sent = Vec::new();
+        let mut i = 0;
+        while let Some(tx) = sent_txs.next().await {
+            if !matches_filter(&tx) {
+                continue;
+            }
+
+            i += 1;
+
+            if i <= offset {
+                continue;
+            }
+
+            if i > offset + limit {
+                break;
+            }
+
+            let outputs: Vec<InitiatedTransactionOutput> = tx
+                .tx_outputs
+                .iter()
+                .map(|o| InitiatedTransactionOutput {
+                    utxo: o.utxo().into(),
+                    sender_randomness: o.sender_randomness(),
+                    receiver_digest: o.receiver_digest(),
+                    notification_medium: utxo_notification_medium(o).to_owned(),
+                    is_change: o.is_change(),
+                    owned: o.is_owned(),
+                    to_address: extract_recipient_address(o),
+                })
+                .collect();
+
+            let inputs: Vec<InitiatedTransactionInput> = futures::future::join_all(
+                tx.tx_inputs.iter().map(|(input_aocl_index, utxo)| async {
+                    // Attempt to calculate absolute index set from wallet
+                    // database and from archival state.
+                    let absolute_index_set = {
+                        let addition_record = aocl
+                            .try_get_leaf(*input_aocl_index)
+                            .await
+                            .map(AdditionRecord::new);
+                        let strong_key =
+                            addition_record.map(|x| StrongUtxoKey::new(x, *input_aocl_index));
+                        let input_mutxo = match strong_key {
+                            None => None,
+                            Some(strong_key) => {
+                                wallet_db.monitored_utxo_by_strong_key(&strong_key).await
+                            }
+                        };
+                        input_mutxo.map(|mutxo| mutxo.absolute_indices())
+                    };
+
+                    InitiatedTransactionInput {
+                        utxo: utxo.to_owned().into(),
+                        aocl_leaf_index: *input_aocl_index,
+                        absolute_index_set,
+                    }
+                }),
+            )
+            .await;
+
+            matching_sent.push(InitiatedTransaction {
+                inputs,
+                outputs,
+                fee: tx.fee.into(),
+                timestamp: tx.timestamp,
+                tip_when_sent: tx.tip_when_sent,
+            });
+        }
+
+        let resp = OutgoingHistoryResponse { matching_sent };
+
+        Ok(resp)
+    }
+
     async fn get_block_template_call(
         &self,
         request: GetBlockTemplateRequest,
@@ -1130,7 +1270,9 @@ pub mod tests {
     use crate::api::export::OutputFormat;
     use crate::api::export::Timestamp;
     use crate::api::export::TxProvingCapability;
+    use crate::api::export::Utxo;
     use crate::application::config::cli_args;
+    use crate::application::json_rpc::core::api::ops::Namespace;
     use crate::application::json_rpc::core::api::rpc::RpcApi;
     use crate::application::json_rpc::core::api::rpc::RpcError;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
@@ -1161,11 +1303,17 @@ pub mod tests {
     use crate::BFieldElement;
     use crate::Block;
 
-    async fn test_rpc_server_with_cli_args(cli: cli_args::Args) -> RpcServer {
-        let global_state_lock =
-            mock_genesis_global_state(2, WalletEntropy::new_random(), cli).await;
+    async fn test_rpc_server_with_cli_args_and_wallet(
+        cli: cli_args::Args,
+        wallet: WalletEntropy,
+    ) -> RpcServer {
+        let global_state_lock = mock_genesis_global_state(2, wallet, cli).await;
 
         RpcServer::new(global_state_lock, None)
+    }
+
+    async fn test_rpc_server_with_cli_args(cli: cli_args::Args) -> RpcServer {
+        test_rpc_server_with_cli_args_and_wallet(cli, WalletEntropy::new_random()).await
     }
 
     pub async fn test_rpc_server() -> RpcServer {
@@ -1806,5 +1954,171 @@ pub mod tests {
             rpc_server.reset_relay_reservations().await.unwrap_err()
         );
         assert_eq!(err, rpc_server.get_network_overview().await.unwrap_err());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn outgoing_history_is_consistent() {
+        let network = Network::Main;
+        let cli_args = cli_args::Args {
+            network,
+            rpc_modules: vec![Namespace::Personal],
+            ..Default::default()
+        };
+        let mut rpc_server =
+            test_rpc_server_with_cli_args_and_wallet(cli_args, WalletEntropy::devnet_wallet())
+                .await;
+
+        let to_address = rpc_server
+            .state
+            .api()
+            .wallet()
+            .next_receiving_address(KeyType::Generation)
+            .await
+            .unwrap();
+        let send_amount = NativeCurrencyAmount::from_nau(1);
+        let tx_fee = NativeCurrencyAmount::from_nau(1);
+
+        // Create a lot of transactions in as many blocks.
+        let num_transactions = 20;
+        let mut previous_block = Block::genesis(network);
+        for _ in 1..=num_transactions {
+            let devnet_artifacts = rpc_server
+                .state
+                .api_mut()
+                .tx_sender_mut()
+                .send(
+                    vec![OutputFormat::AddressAndAmount(
+                        to_address.clone(),
+                        send_amount,
+                    )],
+                    Default::default(),
+                    tx_fee,
+                    previous_block.header().timestamp + Timestamp::months(7),
+                )
+                .await
+                .unwrap();
+            let block = invalid_block_with_transaction(
+                &previous_block,
+                devnet_artifacts.transaction().clone(),
+            );
+            rpc_server.state.set_new_tip(block.clone()).await.unwrap();
+
+            previous_block = block;
+        }
+
+        // Verify that transaction filtering works.
+        let receiver_digest_with_matches = to_address.privacy_digest();
+        let many_matches = rpc_server
+            .outgoing_history(
+                None,
+                Some(receiver_digest_with_matches),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap()
+            .matching_sent;
+        assert_eq!(num_transactions, many_matches.len());
+
+        let capped_matches_page0 = rpc_server
+            .outgoing_history(
+                None,
+                Some(receiver_digest_with_matches),
+                None,
+                None,
+                None,
+                Some(7),
+                Some(0),
+            )
+            .await
+            .unwrap()
+            .matching_sent;
+        assert_eq!(7, capped_matches_page0.len());
+
+        let capped_matches_page1 = rpc_server
+            .outgoing_history(
+                None,
+                Some(receiver_digest_with_matches),
+                None,
+                None,
+                None,
+                Some(7),
+                Some(1),
+            )
+            .await
+            .unwrap()
+            .matching_sent;
+        assert_eq!(7, capped_matches_page1.len());
+        assert_ne!(capped_matches_page0, capped_matches_page1);
+
+        let capped_matches_page2 = rpc_server
+            .outgoing_history(
+                None,
+                Some(receiver_digest_with_matches),
+                None,
+                None,
+                None,
+                Some(7),
+                Some(2),
+            )
+            .await
+            .unwrap()
+            .matching_sent;
+        assert_eq!(
+            6,
+            capped_matches_page2.len(),
+            "Page 2 must not be capped in length by request"
+        );
+
+        let state = rpc_server.state.lock_guard().await;
+        let ams = state.chain.archival_state().archival_mutator_set.ams();
+        let to_address = to_address.to_bech32m(network).unwrap();
+        for sent_tx in capped_matches_page0
+            .into_iter()
+            .chain(capped_matches_page1)
+            .chain(capped_matches_page2)
+        {
+            for input in &sent_tx.inputs {
+                assert!(
+                    ams.absolute_index_set_was_applied(input.absolute_index_set.unwrap())
+                        .await
+                );
+                assert!(input.aocl_leaf_index < 1000);
+            }
+
+            for output in &sent_tx.outputs {
+                assert!(output.owned);
+                let utxo: Utxo = output.utxo.clone().into();
+                assert!(!utxo.is_timelocked());
+
+                if !output.is_change {
+                    assert_eq!(receiver_digest_with_matches, output.receiver_digest);
+                    assert_eq!(to_address, output.to_address.to_owned().unwrap());
+                    assert_eq!(send_amount, utxo.get_native_currency_amount());
+                }
+            }
+        }
+
+        let receiver_digest_no_matches = Digest::default();
+        assert!(
+            rpc_server
+                .outgoing_history(
+                    None,
+                    Some(receiver_digest_no_matches),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap()
+                .matching_sent
+                .is_empty(),
+            "Must return empty list when receiver digest has no matches"
+        )
     }
 }

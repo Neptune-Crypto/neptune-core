@@ -202,4 +202,20 @@ mod tests {
             client.was_mined(vec![], vec![]).await.unwrap_err()
         );
     }
+
+    #[tokio::test]
+    async fn outgoing_history_empty_wallet_db() {
+        let unsafe_rpc = false;
+        let client =
+            start_pseudo_real_server(HashSet::from([Namespace::Personal]), unsafe_rpc, 40530).await;
+
+        assert!(
+            client
+                .outgoing_history(None, None, None, None, None, None, None)
+                .await
+                .unwrap()
+                .matching_sent
+                .is_empty()
+        );
+    }
 }

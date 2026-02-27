@@ -7,6 +7,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::api::export::KeyType;
+use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::body::*;
 use crate::application::json_rpc::core::model::block::header::*;
 use crate::application::json_rpc::core::model::block::transaction_kernel::*;
@@ -15,6 +16,7 @@ use crate::application::json_rpc::core::model::common::*;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
 use crate::application::json_rpc::core::model::wallet::block::*;
 use crate::application::json_rpc::core::model::wallet::mutator_set::*;
+use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
 use crate::application::json_rpc::core::model::wallet::RpcAnnouncementFlag;
@@ -346,6 +348,8 @@ pub struct SubmitTransactionResponse {
     pub success: bool,
 }
 
+/* Personal */
+
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct RescanAnnouncedRequest {
@@ -447,6 +451,28 @@ pub struct SubmitBlockRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SubmitBlockResponse {
     pub success: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct OutgoingHistoryRequest {
+    pub sender_randomness: Option<Digest>,
+    pub receiver_digest: Option<Digest>,
+    pub output_lock_script_hash: Option<Digest>,
+    pub output: Option<RpcAdditionRecord>,
+    pub timestamp: Option<Timestamp>,
+
+    /// Upper limit on the number of returned elements
+    pub max_num_elements: Option<u64>,
+
+    /// 0-indexed page.
+    pub page: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutgoingHistoryResponse {
+    pub matching_sent: Vec<InitiatedTransaction>,
 }
 
 /* Utxo Index */

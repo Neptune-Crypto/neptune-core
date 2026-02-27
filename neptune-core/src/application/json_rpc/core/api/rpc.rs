@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use crate::api::export::AnnouncementFlag;
 use crate::api::export::KeyType;
+use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
@@ -470,6 +471,39 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: GenerateAddressRequest,
     ) -> RpcResult<GenerateAddressResponse>;
+
+    /// Return all outgoing transactions intiated by this node's wallet matching
+    /// the specified filters.
+    ///
+    /// Returns all outgoing transactions if no filter is specified. Allows for
+    /// pagination.
+    #[expect(clippy::too_many_arguments)]
+    async fn outgoing_history(
+        &self,
+        sender_randomness: Option<Digest>,
+        receiver_digest: Option<Digest>,
+        output_lock_script_hash: Option<Digest>,
+        output: Option<RpcAdditionRecord>,
+        timestamp: Option<Timestamp>,
+        max_num_elements: Option<u64>,
+        page: Option<u64>,
+    ) -> RpcResult<OutgoingHistoryResponse> {
+        self.outgoing_history_call(OutgoingHistoryRequest {
+            sender_randomness,
+            receiver_digest,
+            output_lock_script_hash,
+            output,
+            timestamp,
+            max_num_elements,
+            page,
+        })
+        .await
+    }
+
+    async fn outgoing_history_call(
+        &self,
+        request: OutgoingHistoryRequest,
+    ) -> RpcResult<OutgoingHistoryResponse>;
 
     /* Mining */
 
