@@ -106,9 +106,6 @@ pub enum RpcMethods {
     #[namespace(Namespace::Archival)]
     FindUtxoOrigin,
 
-    /// Check if indices in an absolute index set are set. Can be used to check
-    /// if a UTXO is spent without having to know the mutator set membership
-    /// proof.
     #[namespace(Namespace::Archival)]
     AreBloomIndicesSet,
 
@@ -160,20 +157,12 @@ pub enum RpcMethods {
     #[namespace(Namespace::Mining)]
     SubmitBlock,
 
-    /// Return block heights for blocks containing announcements with specified
-    /// announcement flags. May return results from orphaned blocks.
     #[namespace(Namespace::Utxoindex)]
     BlockHeightsByFlags,
 
-    /// Return block heights for blocks containing specified addition records.
-    /// Returned block heights are guaranteed to reference blocks belonging to
-    /// the canonical chain.
     #[namespace(Namespace::Utxoindex)]
     BlockHeightsByAdditionRecords,
 
-    /// Return block heights for blocks containing specified absolute index
-    /// sets. Returned block heights are guaranteed to reference blocks
-    /// belonging to the canonical chain.
     #[namespace(Namespace::Utxoindex)]
     BlockHeightsByAbsoluteIndexSets,
 
@@ -195,8 +184,6 @@ pub enum RpcMethods {
     #[namespace(Namespace::Mempool)]
     GetTransactionsByAbsoluteIndexSets,
 
-    /// Return transaction most likely to be mined in next block, based on fee
-    /// density, sync status, and proof quality.
     #[namespace(Namespace::Mempool)]
     BestTransactionForNextBlock,
 

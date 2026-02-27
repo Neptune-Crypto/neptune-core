@@ -300,6 +300,9 @@ pub trait RpcApi: Sync + Send {
         request: FindUtxoOriginRequest,
     ) -> RpcResult<FindUtxoOriginResponse>;
 
+    /// Check if indices in an absolute index set are set in the node's archival
+    /// mutator set. Can be used to check  if a UTXO is spent without having to
+    /// know the mutator set membership proof.
     async fn are_bloom_indices_set(
         &self,
         absolute_index_set: RpcAbsoluteIndexSet,
@@ -534,6 +537,8 @@ pub trait RpcApi: Sync + Send {
 
     /* Utxoindex */
 
+    /// Return block heights for blocks containing announcements with specified
+    /// announcement flags. May return results from orphaned blocks.
     async fn block_heights_by_flags(
         &self,
         announcement_flags: Vec<AnnouncementFlag>,
@@ -547,6 +552,9 @@ pub trait RpcApi: Sync + Send {
         request: BlockHeightsByFlagsRequest,
     ) -> RpcResult<BlockHeightsByFlagsResponse>;
 
+    /// Return block heights for blocks containing specified addition records.
+    /// Returned block heights are guaranteed to reference blocks belonging to
+    /// the canonical chain.
     async fn block_heights_by_addition_records(
         &self,
         addition_records: Vec<RpcAdditionRecord>,
@@ -572,6 +580,9 @@ pub trait RpcApi: Sync + Send {
         .await
     }
 
+    /// Return block heights for blocks containing specified absolute index
+    /// sets. Returned block heights are guaranteed to reference blocks
+    /// belonging to the canonical chain.
     async fn block_heights_by_absolute_index_sets_call(
         &self,
         request: BlockHeightsByAbsoluteIndexSetsRequest,
@@ -665,6 +676,8 @@ pub trait RpcApi: Sync + Send {
         request: GetTransactionsByAbsoluteIndexSetsRequest,
     ) -> RpcResult<GetTransactionsByAbsoluteIndexSetsResponse>;
 
+    /// Return transaction most likely to be mined in next block, based on fee
+    /// density, sync status, and proof quality.
     async fn best_transaction_for_next_block(
         &self,
     ) -> RpcResult<BestTransactionForNextBlockResponse> {
