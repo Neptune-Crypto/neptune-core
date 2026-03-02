@@ -108,6 +108,8 @@ use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
+use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
+use crate::state::wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -2066,26 +2068,35 @@ impl GlobalState {
         let incoming_utxo_count = incoming_utxos.len();
         info!("Checking {} incoming UTXOs", incoming_utxo_count);
 
+        let known_keys: HashSet<_> = self
+            .wallet_state
+            .get_all_known_spending_keys()
+            .map(|x| x.lock_script_hash())
+            .collect();
+
         let is_true_archival = self.is_true_archival();
         let mut recovery_data_for_missing_mutxos = vec![];
         {
             // Two UTXOs are considered the same iff their AOCL index and
             // their addition record agree. Otherwise, they are different.
-            let mutxos: HashMap<(u64, AdditionRecord), MonitoredUtxo> = self
+            let mutxos: HashMap<StrongUtxoKey, MonitoredUtxo> = self
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
                 .stream_values()
                 .await
-                .map(|x| ((x.aocl_leaf_index, x.addition_record()), x))
+                .map(|x| {
+                    (
+                        StrongUtxoKey::new(x.addition_record(), x.aocl_leaf_index),
+                        x,
+                    )
+                })
                 .collect()
                 .await;
             let mut seen_recovery_entries = HashSet::<Digest>::default();
 
             for incoming_utxo in incoming_utxos {
                 let new_value = seen_recovery_entries.insert(Tip5::hash(&incoming_utxo));
-
-                // Ensure duplicated entries are filtered out.
                 if !new_value {
                     warn!(
                         "Recovery data contains duplicated entries. Entry with AOCL index {} \
@@ -2095,16 +2106,27 @@ impl GlobalState {
                     continue;
                 }
 
-                let wallet_mutxo =
-                    mutxos.get(&(incoming_utxo.aocl_index, incoming_utxo.addition_record()));
-                let needs_recovery = match wallet_mutxo {
+                let has_key = known_keys.contains(&incoming_utxo.utxo.lock_script_hash());
+                if !has_key {
+                    error!(
+                        "Your {WALLET_INCOMING_SECRETS_FILE_NAME} contains UTXOs for which your\
+                     wallet does not have a spending key. Are you using a seed incompatible with\
+                     this file, or do you need to bump your wallet's derivation index?"
+                    );
+                    continue;
+                }
+
+                let strong_key =
+                    StrongUtxoKey::new(incoming_utxo.addition_record(), incoming_utxo.aocl_index);
+                let wallet_mutxo = mutxos.get(&strong_key);
+                let should_be_recovered = match wallet_mutxo {
                     Some(mutxo) => {
                         !is_true_archival && mutxo.get_latest_membership_proof_entry().is_some()
                     }
                     None => true,
                 };
 
-                if needs_recovery {
+                if should_be_recovered {
                     recovery_data_for_missing_mutxos.push(incoming_utxo);
                 }
             }
@@ -3878,6 +3900,7 @@ mod tests {
             alice_gsl.set_new_tip(block.clone()).await.unwrap();
             current_block = block;
         }
+
         const LIQUID_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(64);
         let wallet_status_1 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_1 = current_block.header().timestamp;
