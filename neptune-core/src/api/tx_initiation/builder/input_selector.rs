@@ -1,9 +1,6 @@
 //! provides a builder and related types for selecting which inputs to use in a
 //! transaction in order to cover the target spend amount.
 //!
-//! all spendable inputs may be obtained via
-//! [TransactionInitiator::spendable_inputs()](super::super::initiator::TransactionInitiator::spendable_inputs()).
-//!
 //! The `InputSelectionPolicy` enum provides a set of policies for selecting
 //! inputs.
 //!
