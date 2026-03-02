@@ -953,6 +953,166 @@ mod tests {
         );
     }
 
+    mod wallet_balance {
+        use std::collections::HashMap;
+
+        use super::*;
+        use crate::state::mempool::upgrade_priority::UpgradePriority;
+        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn wallet_status_with_mempool_tx() {
+            let network = Network::Main;
+            let cli_args = cli_args::Args {
+                network,
+                ..Default::default()
+            };
+
+            let bob = WalletEntropy::devnet_wallet();
+            let mut bob = mock_genesis_global_state(2, bob, cli_args.clone()).await;
+            let current_block = Block::genesis(network);
+
+            let distant_timestamp = current_block.header().timestamp + Timestamp::years(100);
+            let no_mempool_tx = bob.lock_guard().await.get_wallet_status_for_tip().await;
+            assert_eq!(
+                no_mempool_tx
+                    .confirmed_available_balance(current_block.header().height, distant_timestamp),
+                no_mempool_tx.unconfirmed_available_balance(distant_timestamp)
+            );
+            assert_eq!(
+                no_mempool_tx
+                    .confirmed_available_balance(current_block.header().height, distant_timestamp),
+                NativeCurrencyAmount::coins(20)
+            );
+
+            let tx = tx_with_expenditure(bob.clone(), NativeCurrencyAmount::coins(16)).await;
+            bob.global_state_lock
+                .lock_guard_mut()
+                .await
+                .mempool_insert(tx, UpgradePriority::Critical)
+                .await;
+            let with_mempool_tx = bob.lock_guard().await.get_wallet_status_for_tip().await;
+            assert_eq!(
+                with_mempool_tx.unconfirmed_available_balance(distant_timestamp),
+                NativeCurrencyAmount::coins(4)
+            );
+            assert_eq!(
+                with_mempool_tx
+                    .confirmed_available_balance(current_block.header().height, distant_timestamp),
+                NativeCurrencyAmount::coins(20)
+            );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn balances_with_n_confirmations_is_balance_n_blocks_back() {
+            // Bob is premine recipient. Makes expenditures over 7 blocks.
+            // This test verifies that the balance at tip after each block
+            // matches the balance with N confirmations when the tip is a block
+            // of height 7.
+            let network = Network::Main;
+            let cli_args = cli_args::Args {
+                network,
+                ..Default::default()
+            };
+            let mut balances_at_tip: HashMap<BlockHeight, NativeCurrencyAmount> = HashMap::new();
+            let bob = WalletEntropy::devnet_wallet();
+            let mut bob = mock_genesis_global_state(2, bob, cli_args.clone()).await;
+
+            let mut current_block = Block::genesis(network);
+            let distant_timestamp = current_block.header().timestamp + Timestamp::years(100);
+            let tip_balance = async |gsl: GlobalStateLock| {
+                let gs = gsl.global_state_lock.lock_guard().await;
+                let tip = gs.chain.light_state();
+                gs.get_wallet_status_for_tip()
+                    .await
+                    .confirmed_available_balance(tip.header().height, distant_timestamp)
+            };
+
+            for i in 1u32..=7 {
+                balances_at_tip.insert(
+                    current_block.header().height,
+                    tip_balance(bob.clone()).await,
+                );
+
+                let expenditure = NativeCurrencyAmount::coins(i.div_ceil(2));
+                let next_block = next_block_with_expenditure(bob.clone(), expenditure).await;
+                bob.set_new_tip(next_block.clone()).await.unwrap();
+                current_block = next_block;
+            }
+
+            balances_at_tip.insert(
+                current_block.header().height,
+                tip_balance(bob.clone()).await,
+            );
+
+            for i in 1..=8 {
+                let threshold = current_block.header().height.checked_sub(i - 1).unwrap();
+                let balance_with_confirmations = bob
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .get_wallet_status_for_tip()
+                    .await
+                    .confirmed_available_balance(threshold, distant_timestamp);
+                println!("balance_with_confirmations: {balance_with_confirmations}");
+
+                assert_eq!(balances_at_tip[&threshold], balance_with_confirmations);
+            }
+        }
+
+        /// Return a block with a transaction with an expenditure from the
+        /// provided global state.
+        async fn next_block_with_expenditure(
+            gsl: GlobalStateLock,
+            amount: NativeCurrencyAmount,
+        ) -> Block {
+            let tip = gsl.lock_guard().await.chain.light_state().clone();
+            let tx = tx_with_expenditure(gsl, amount).await;
+            invalid_block_with_transaction(&tip, tx)
+        }
+
+        /// Return a btransaction with an expenditure from the provided global
+        /// state.
+        async fn tx_with_expenditure(
+            gsl: GlobalStateLock,
+            amount: NativeCurrencyAmount,
+        ) -> Transaction {
+            let third_party = GenerationReceivingAddress::derive_from_seed(Digest::default());
+            let sender_randomness = Digest::default();
+
+            let receiver_data = TxOutput::offchain_native_currency(
+                amount,
+                sender_randomness,
+                third_party.into(),
+                false,
+            );
+            let receiver_data: TxOutputList = vec![receiver_data].into();
+            let config = TxCreationConfig::default()
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let mut tx_initiator_internal = gsl.api().tx_initiator_internal();
+            let network = gsl.cli().network;
+            let tip = gsl.lock_guard().await.chain.light_state().clone();
+            let in_seven_months = tip.header().timestamp + Timestamp::months(7);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, tip.header().height);
+            let fee = NativeCurrencyAmount::zero();
+            let tx = tx_initiator_internal
+                .create_transaction(
+                    receiver_data.clone(),
+                    fee,
+                    in_seven_months,
+                    config,
+                    consensus_rule_set,
+                )
+                .await
+                .unwrap()
+                .transaction;
+
+            tx.into()
+        }
+    }
+
     mod generation_key_derivation {
         use itertools::Itertools;
 
