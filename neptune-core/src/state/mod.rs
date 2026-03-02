@@ -112,7 +112,6 @@ use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -3481,6 +3480,7 @@ mod tests {
         use futures::future;
 
         use super::*;
+        use crate::api::export::AdditionRecord;
         use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
 
         /// Create 3 branches and return them in an array.

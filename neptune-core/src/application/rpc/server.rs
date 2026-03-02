@@ -1418,8 +1418,6 @@ pub trait RPC {
     ) -> RpcResult<Option<(Block, ProofOfWorkPuzzle)>>;
 
     /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::spendable_inputs()]
     async fn spendable_inputs(token: auth::Token) -> RpcResult<TxInputs>;
 
     /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
@@ -1433,8 +1431,6 @@ pub trait RPC {
     /// }
     ///
     /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::select_spendable_inputs()]
     async fn select_spendable_inputs(
         token: auth::Token,
         policy: InputSelectionPolicy,

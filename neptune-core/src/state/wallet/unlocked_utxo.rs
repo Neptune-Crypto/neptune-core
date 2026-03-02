@@ -71,7 +71,7 @@ impl Deref for UnlockedUtxo {
     }
 }
 
-/// Represents a list of [`UnlockedUtxo`] decorated with convenience functions.
+/// Represents a list of `UnlockedUtxo` decorated with convenience functions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TxInputs(Vec<UnlockedUtxo>);
 
