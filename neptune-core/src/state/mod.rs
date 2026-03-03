@@ -1845,6 +1845,7 @@ impl GlobalState {
     /// Return all coins owned by the wallet. Only returns synced and unspent
     /// UTXOs.
     pub async fn coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {
+        let tip_height = self.chain.light_state().header().height;
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
         let mut own_coins = vec![];
 
@@ -1858,10 +1859,17 @@ impl GlobalState {
                 continue;
             };
 
+            let num_confirmations = tip_height
+                .checked_sub(mutxo.confirmed_in_block.2.value())
+                .map(|x| x.value() + 1);
+
             own_coins.push(CoinWithPossibleTimeLock {
                 amount: mutxo.utxo.get_native_currency_amount(),
                 confirmed: mutxo.confirmed_in_block.1,
                 release_date: mutxo.utxo.release_date(),
+                aocl_leaf_index: mutxo.aocl_leaf_index,
+                lock_script_hash: mutxo.utxo.lock_script_hash(),
+                num_confirmations,
             });
         }
         own_coins

@@ -262,4 +262,13 @@ mod tests {
         assert!(bad_resp.receiver_identifier.is_none());
         assert!(bad_resp.announcement_flags.is_none());
     }
+
+    #[tokio::test]
+    async fn unspent_utxos_call() {
+        let unsafe_rpc = false;
+        let client =
+            start_pseudo_real_server(HashSet::from([Namespace::Personal]), unsafe_rpc, 40560).await;
+        let unspent_utxos = client.unspent_utxos().await.unwrap().utxos;
+        assert!(unspent_utxos.is_empty());
+    }
 }

@@ -28,6 +28,7 @@ use crate::application::json_rpc::core::model::wallet::personal_history::Initiat
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionInput;
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionOutput;
 use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
+use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
@@ -1045,6 +1046,23 @@ impl RpcApi for RpcServer {
         let resp = OutgoingHistoryResponse { matching_sent };
 
         Ok(resp)
+    }
+
+    async fn unspent_utxos_call(
+        &self,
+        _request: UnspentUtxosRequest,
+    ) -> RpcResult<UnspentUtxosResponse> {
+        let utxos: Vec<RpcCoinWithPossibleTimeLock> = self
+            .state
+            .lock_guard()
+            .await
+            .coins_with_possible_timelocks()
+            .await
+            .into_iter()
+            .map(|x| x.into())
+            .collect();
+
+        Ok(UnspentUtxosResponse { utxos })
     }
 
     async fn get_balance_call(&self, request: GetBalanceRequest) -> RpcResult<GetBalanceResponse> {
@@ -2327,6 +2345,21 @@ pub mod tests {
             .unwrap()
             .amount
             .is_none());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn unspent_utxos_call_premine_recipient() {
+        let network = Network::Main;
+        let cli = cli_args::Args::default_with_network(network);
+        let rpc_server =
+            test_rpc_server_with_cli_args_and_wallet(cli, WalletEntropy::devnet_wallet()).await;
+        let unspent_utxos = rpc_server.unspent_utxos().await.unwrap().utxos;
+        assert_eq!(1, unspent_utxos.len());
+        assert_eq!(1, unspent_utxos[0].num_confirmations.unwrap());
+        assert_eq!(
+            NativeCurrencyAmount::coins(20),
+            unspent_utxos[0].amount.into()
+        );
     }
 
     mod history {

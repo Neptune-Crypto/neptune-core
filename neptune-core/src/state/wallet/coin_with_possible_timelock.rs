@@ -4,6 +4,7 @@ use itertools::Itertools;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
@@ -21,6 +22,13 @@ pub struct CoinWithPossibleTimeLock {
 
     /// The earliest time at which the UTXO can be spent.
     pub release_date: Option<Timestamp>,
+
+    pub aocl_leaf_index: u64,
+    pub lock_script_hash: Digest,
+
+    /// Number of confirmations. Can be unkonwn since reorganizations can make
+    /// this value unattainable.
+    pub num_confirmations: Option<u64>,
 }
 
 impl Display for CoinWithPossibleTimeLock {
@@ -118,6 +126,7 @@ mod tests {
     use arbitrary::Unstructured;
     use rand::Rng;
     use rand::RngCore;
+    use tasm_lib::prelude::Digest;
 
     use super::CoinWithPossibleTimeLock;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -144,6 +153,9 @@ mod tests {
                     None
                 },
                 confirmed: rng.random::<Timestamp>(),
+                aocl_leaf_index: rng.random::<u64>(),
+                lock_script_hash: rng.random::<Digest>(),
+                num_confirmations: Some(rng.random::<u64>()),
             };
             coins.push(coin);
         }

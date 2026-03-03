@@ -18,6 +18,7 @@ use crate::application::json_rpc::core::model::wallet::block::*;
 use crate::application::json_rpc::core::model::wallet::mutator_set::*;
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
 use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
+use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
 use crate::application::json_rpc::core::model::wallet::RpcAnnouncementFlag;
@@ -464,6 +465,16 @@ pub struct GenerateAddressRequest {
 #[serde(rename_all = "camelCase")]
 pub struct GenerateAddressResponse {
     pub address: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct UnspentUtxosRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnspentUtxosResponse {
+    pub utxos: Vec<RpcCoinWithPossibleTimeLock>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]

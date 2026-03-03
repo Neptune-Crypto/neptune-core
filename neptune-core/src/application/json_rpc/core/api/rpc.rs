@@ -600,6 +600,15 @@ pub trait RpcApi: Sync + Send {
         request: OutgoingHistoryRequest,
     ) -> RpcResult<OutgoingHistoryResponse>;
 
+    async fn unspent_utxos(&self) -> RpcResult<UnspentUtxosResponse> {
+        self.unspent_utxos_call(UnspentUtxosRequest {}).await
+    }
+
+    async fn unspent_utxos_call(
+        &self,
+        request: UnspentUtxosRequest,
+    ) -> RpcResult<UnspentUtxosResponse>;
+
     async fn get_balance(&self, number_of_confirmations: u32) -> RpcResult<GetBalanceResponse> {
         self.get_balance_call(GetBalanceRequest {
             number_of_confirmations,

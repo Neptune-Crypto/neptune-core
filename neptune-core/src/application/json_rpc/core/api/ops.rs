@@ -164,6 +164,9 @@ pub enum RpcMethods {
     OutgoingHistory,
 
     #[namespace(Namespace::Personal)]
+    UnspentUtxos,
+
+    #[namespace(Namespace::Personal)]
     GetBalance,
 
     #[namespace(Namespace::Personal)]
