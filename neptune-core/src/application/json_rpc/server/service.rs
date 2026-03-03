@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
 use itertools::Itertools;
+use tasm_lib::prelude::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
 
@@ -25,11 +27,13 @@ use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembers
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionInput;
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionOutput;
+use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
+use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
@@ -787,6 +791,129 @@ impl RpcApi for RpcServer {
             .to_bech32m(network)
             .expect("Must be able to encode address from own wallet as bech32");
         Ok(GenerateAddressResponse { address })
+    }
+
+    async fn incoming_history_call(
+        &self,
+        request: IncomingHistoryRequest,
+    ) -> RpcResult<IncomingHistoryResponse> {
+        let state = self.state.lock_guard().await;
+        let network = state.cli().network;
+
+        let mutxos = state.wallet_state.wallet_db.monitored_utxos();
+        let mutxos = mutxos.stream_values().await;
+        futures::pin_mut!(mutxos);
+
+        let archive = state.chain.archival_state();
+
+        let matches_filter = async |mutxo: &MonitoredUtxo| {
+            let confirmed_block_hash = mutxo.confirmed_in_block.0;
+            let confirmed_height = mutxo.confirmed_in_block.2;
+            let is_canonical = archive
+                .is_canonical_block(confirmed_block_hash, confirmed_height)
+                .await;
+            let matches_filter = request
+                .aocl_leaf_index
+                .is_none_or(|q| mutxo.aocl_leaf_index == q)
+                && request
+                    .output
+                    .is_none_or(|q| mutxo.addition_record() == q.into())
+                && request
+                    .receiver_preimage
+                    .is_none_or(|q| mutxo.receiver_preimage == q)
+                && request
+                    .receiver_digest
+                    .is_none_or(|q| mutxo.receiver_preimage.hash() == q)
+                && request
+                    .lock_script_hash
+                    .is_none_or(|q| mutxo.utxo.lock_script_hash() == q)
+                && request
+                    .sender_randomness
+                    .is_none_or(|q| mutxo.sender_randomness == q)
+                && request
+                    .confirmed_height
+                    .is_none_or(|q| confirmed_height == q)
+                && request
+                    .confirmed_block_hash
+                    .is_none_or(|q| confirmed_block_hash == q)
+                && (request.include_orphaned || is_canonical);
+
+            (matches_filter, is_canonical)
+        };
+
+        let limit = request.max_num_elements.unwrap_or(100).min(1000) as usize;
+        let page = request.page.unwrap_or(0);
+        let offset = (page * limit as u64) as usize;
+        let mut matching_incoming = Vec::new();
+        let mut i = 0;
+
+        let lock_script_hash_to_address: HashMap<Digest, ReceivingAddress> = state
+            .wallet_state
+            .get_all_known_addressable_spending_keys()
+            .map(|x| (x.lock_script_hash(), x.to_address()))
+            .collect();
+        while let Some(mutxo) = mutxos.next().await {
+            let (matches_filter, is_canonical) = matches_filter(&mutxo).await;
+            if !matches_filter {
+                continue;
+            }
+
+            i += 1;
+
+            if i <= offset {
+                continue;
+            }
+
+            if i > offset + limit {
+                break;
+            }
+
+            let confirmation_block = mutxo.confirmed_in_block.0;
+
+            let mutxo_addition_record = mutxo.addition_record();
+            let block_outputs = archive
+                .get_addition_record_indices_for_block(confirmation_block)
+                .await;
+
+            // Find the index into the block's list of outputs where the output
+            // was inserted. Can be done *without* loading the block from disk.
+            let output_index_in_block = block_outputs.and_then(|x| {
+                let min_leaf_index = x.values().map(|x| x.unwrap_or_default());
+                let min_leaf_index = min_leaf_index
+                    .into_iter()
+                    .min()
+                    .expect("Block must have at least one output");
+                x.get(&mutxo_addition_record)
+                    .expect("Block must contain UTXO registered by wallet.")
+                    .map(|x| x - min_leaf_index)
+            });
+            let output_index_in_block = output_index_in_block
+                .map(|x| u32::try_from(x).expect("Can't have billions of outputs in a block"));
+
+            let lock_script_hash = mutxo.utxo.lock_script_hash();
+            let receiving_address = lock_script_hash_to_address
+                .get(&lock_script_hash)
+                .map(|address| address.to_bech32m(network).unwrap());
+            let incoming_utxo = ReceivedTransactionOutput {
+                aocl_leaf_index: mutxo.aocl_leaf_index,
+                addition_record: mutxo_addition_record.into(),
+                utxo: mutxo.utxo.into(),
+                receiver_preimage: mutxo.receiver_preimage,
+                sender_randomness: mutxo.sender_randomness,
+                confirmed_timestamp: mutxo.confirmed_in_block.1,
+                confirmed_block: confirmation_block,
+                confirmed_height: mutxo.confirmed_in_block.2,
+                receiving_address,
+                canonical: is_canonical,
+                output_index: output_index_in_block,
+            };
+
+            matching_incoming.push(incoming_utxo);
+        }
+
+        Ok(IncomingHistoryResponse {
+            outputs: matching_incoming,
+        })
     }
 
     async fn outgoing_history_call(
@@ -2104,172 +2231,6 @@ pub mod tests {
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn outgoing_history_is_consistent() {
-        let network = Network::Main;
-        let cli_args = cli_args::Args {
-            network,
-            rpc_modules: vec![Namespace::Personal],
-            ..Default::default()
-        };
-        let mut rpc_server =
-            test_rpc_server_with_cli_args_and_wallet(cli_args, WalletEntropy::devnet_wallet())
-                .await;
-
-        let to_address = rpc_server
-            .state
-            .api()
-            .wallet()
-            .next_receiving_address(KeyType::Generation)
-            .await
-            .unwrap();
-        let send_amount = NativeCurrencyAmount::from_nau(1);
-        let tx_fee = NativeCurrencyAmount::from_nau(1);
-
-        // Create a lot of transactions in as many blocks.
-        let num_transactions = 20;
-        let mut previous_block = Block::genesis(network);
-        for _ in 1..=num_transactions {
-            let devnet_artifacts = rpc_server
-                .state
-                .api_mut()
-                .tx_sender_mut()
-                .send(
-                    vec![OutputFormat::AddressAndAmount(
-                        to_address.clone(),
-                        send_amount,
-                    )],
-                    Default::default(),
-                    tx_fee,
-                    previous_block.header().timestamp + Timestamp::months(7),
-                )
-                .await
-                .unwrap();
-            let block = invalid_block_with_transaction(
-                &previous_block,
-                devnet_artifacts.transaction().clone(),
-            );
-            rpc_server.state.set_new_tip(block.clone()).await.unwrap();
-
-            previous_block = block;
-        }
-
-        // Verify that transaction filtering works.
-        let receiver_digest_with_matches = to_address.privacy_digest();
-        let many_matches = rpc_server
-            .outgoing_history(
-                None,
-                Some(receiver_digest_with_matches),
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .await
-            .unwrap()
-            .matching_sent;
-        assert_eq!(num_transactions, many_matches.len());
-
-        let capped_matches_page0 = rpc_server
-            .outgoing_history(
-                None,
-                Some(receiver_digest_with_matches),
-                None,
-                None,
-                None,
-                Some(7),
-                Some(0),
-            )
-            .await
-            .unwrap()
-            .matching_sent;
-        assert_eq!(7, capped_matches_page0.len());
-
-        let capped_matches_page1 = rpc_server
-            .outgoing_history(
-                None,
-                Some(receiver_digest_with_matches),
-                None,
-                None,
-                None,
-                Some(7),
-                Some(1),
-            )
-            .await
-            .unwrap()
-            .matching_sent;
-        assert_eq!(7, capped_matches_page1.len());
-        assert_ne!(capped_matches_page0, capped_matches_page1);
-
-        let capped_matches_page2 = rpc_server
-            .outgoing_history(
-                None,
-                Some(receiver_digest_with_matches),
-                None,
-                None,
-                None,
-                Some(7),
-                Some(2),
-            )
-            .await
-            .unwrap()
-            .matching_sent;
-        assert_eq!(
-            6,
-            capped_matches_page2.len(),
-            "Page 2 must not be capped in length by request"
-        );
-
-        let state = rpc_server.state.lock_guard().await;
-        let ams = state.chain.archival_state().archival_mutator_set.ams();
-        let to_address = to_address.to_bech32m(network).unwrap();
-        for sent_tx in capped_matches_page0
-            .into_iter()
-            .chain(capped_matches_page1)
-            .chain(capped_matches_page2)
-        {
-            for input in &sent_tx.inputs {
-                assert!(
-                    ams.absolute_index_set_was_applied(input.absolute_index_set.unwrap())
-                        .await
-                );
-                assert!(input.aocl_leaf_index < 1000);
-            }
-
-            for output in &sent_tx.outputs {
-                assert!(output.owned);
-                let utxo: Utxo = output.utxo.clone().into();
-                assert!(!utxo.is_timelocked());
-
-                if !output.is_change {
-                    assert_eq!(receiver_digest_with_matches, output.receiver_digest);
-                    assert_eq!(to_address, output.to_address.to_owned().unwrap());
-                    assert_eq!(send_amount, utxo.get_native_currency_amount());
-                }
-            }
-        }
-
-        let receiver_digest_no_matches = Digest::default();
-        assert!(
-            rpc_server
-                .outgoing_history(
-                    None,
-                    Some(receiver_digest_no_matches),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-                .await
-                .unwrap()
-                .matching_sent
-                .is_empty(),
-            "Must return empty list when receiver digest has no matches"
-        )
-    }
-
-    #[apply(shared_tokio_runtime)]
     async fn validate_coin_amount() {
         let rpc_server = test_rpc_server().await;
 
@@ -2366,5 +2327,367 @@ pub mod tests {
             .unwrap()
             .amount
             .is_none());
+    }
+
+    mod history {
+        use super::*;
+        use crate::api::export::ReceivingAddress;
+        use crate::application::database::storage::storage_vec::traits::StorageVecBase;
+
+        #[apply(shared_tokio_runtime)]
+        async fn incoming_history_no_filter() {
+            let network = Network::Main;
+            let num_transactions = 25;
+            let amt_per_tx = NativeCurrencyAmount::from_nau(17);
+            let fee_per_tx = NativeCurrencyAmount::from_nau(2);
+            let (rpc_server, _) =
+                state_with_transaction_history(network, num_transactions, amt_per_tx, fee_per_tx)
+                    .await;
+
+            let num_mutxos = rpc_server
+                .state
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .len()
+                .await;
+
+            let all_incoming = rpc_server
+                .incoming_history(
+                    false, None, None, None, None, None, None, None, None, None, None,
+                )
+                .await
+                .unwrap()
+                .outputs;
+
+            assert_eq!(num_mutxos, all_incoming.len() as u64);
+
+            for incoming in all_incoming {
+                assert!(incoming.canonical);
+
+                // Verify that index into block outputs is correct.
+                let receiving_block = rpc_server
+                    .state
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .get_block(incoming.confirmed_block)
+                    .await
+                    .unwrap()
+                    .unwrap();
+
+                assert_eq!(
+                    receiving_block.all_addition_records().unwrap()
+                        [incoming.output_index.unwrap() as usize],
+                    incoming.addition_record.into()
+                );
+
+                assert!(rpc_server
+                    .state
+                    .lock_guard()
+                    .await
+                    .wallet_state
+                    .can_unlock(&incoming.utxo.into()));
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn incoming_history_filter_lock_script_hash() {
+            let network = Network::Main;
+            let num_transactions = 19;
+            let amt_per_tx = NativeCurrencyAmount::from_nau(18);
+            let fee_per_tx = NativeCurrencyAmount::from_nau(23);
+            let (rpc_server, receiver) =
+                state_with_transaction_history(network, num_transactions, amt_per_tx, fee_per_tx)
+                    .await;
+
+            let lock_script_hash = receiver.lock_script_hash();
+            let incoming_to_address = rpc_server
+                .incoming_history(
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(lock_script_hash),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap()
+                .outputs;
+
+            for (i, incoming) in incoming_to_address.into_iter().enumerate() {
+                assert!(incoming.canonical);
+
+                let expected_block_height: BlockHeight = ((i + 1) as u64).into();
+                assert_eq!(expected_block_height, incoming.confirmed_height);
+
+                // Verify that index into block outputs is correct.
+                let receiving_block = rpc_server
+                    .state
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .get_block(incoming.confirmed_block)
+                    .await
+                    .unwrap()
+                    .unwrap();
+
+                assert_eq!(
+                    receiving_block.all_addition_records().unwrap()
+                        [incoming.output_index.unwrap() as usize],
+                    incoming.addition_record.into()
+                );
+
+                let utxo: Utxo = incoming.utxo.into();
+                assert!(rpc_server
+                    .state
+                    .lock_guard()
+                    .await
+                    .wallet_state
+                    .can_unlock(&utxo));
+
+                assert_eq!(
+                    receiver.to_bech32m(network).unwrap(),
+                    incoming.receiving_address.unwrap()
+                );
+                assert_eq!(receiver.privacy_digest(), incoming.receiver_preimage.hash());
+                assert_eq!(amt_per_tx, utxo.get_native_currency_amount());
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn incoming_history_pagination() {
+            let network = Network::Main;
+
+            // total num monitored UTXOS: {num_transactions} * 2 + 1 = 17
+            let num_transactions = 8;
+            let amt_per_tx = NativeCurrencyAmount::from_nau(17);
+            let fee_per_tx = NativeCurrencyAmount::from_nau(2);
+            let (rpc_server, _) =
+                state_with_transaction_history(network, num_transactions, amt_per_tx, fee_per_tx)
+                    .await;
+
+            let page = async |page| {
+                rpc_server
+                    .incoming_history(
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some(8),
+                        Some(page),
+                    )
+                    .await
+                    .unwrap()
+                    .outputs
+            };
+
+            let page0 = page(0).await;
+            let page1 = page(1).await;
+            let page2 = page(2).await;
+
+            assert_eq!(8, page0.len());
+            assert_eq!(8, page1.len());
+            assert_eq!(1, page2.len());
+
+            assert_ne!(page0, page1);
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn outgoing_history_is_consistent() {
+            // Verify that transaction filtering works.
+
+            let network = Network::Main;
+            let num_transactions = 20;
+            let amt_per_tx = NativeCurrencyAmount::one_nau();
+            let fee_per_tx = NativeCurrencyAmount::one_nau();
+            let (rpc_server, to_address) =
+                state_with_transaction_history(network, num_transactions, amt_per_tx, fee_per_tx)
+                    .await;
+            let receiver_digest_with_matches = to_address.privacy_digest();
+            let many_matches = rpc_server
+                .outgoing_history(
+                    None,
+                    Some(receiver_digest_with_matches),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap()
+                .matching_sent;
+            assert_eq!(num_transactions, many_matches.len());
+
+            let capped_matches_page0 = rpc_server
+                .outgoing_history(
+                    None,
+                    Some(receiver_digest_with_matches),
+                    None,
+                    None,
+                    None,
+                    Some(7),
+                    Some(0),
+                )
+                .await
+                .unwrap()
+                .matching_sent;
+            assert_eq!(7, capped_matches_page0.len());
+
+            let capped_matches_page1 = rpc_server
+                .outgoing_history(
+                    None,
+                    Some(receiver_digest_with_matches),
+                    None,
+                    None,
+                    None,
+                    Some(7),
+                    Some(1),
+                )
+                .await
+                .unwrap()
+                .matching_sent;
+            assert_eq!(7, capped_matches_page1.len());
+            assert_ne!(capped_matches_page0, capped_matches_page1);
+
+            let capped_matches_page2 = rpc_server
+                .outgoing_history(
+                    None,
+                    Some(receiver_digest_with_matches),
+                    None,
+                    None,
+                    None,
+                    Some(7),
+                    Some(2),
+                )
+                .await
+                .unwrap()
+                .matching_sent;
+            assert_eq!(
+                6,
+                capped_matches_page2.len(),
+                "Page 2 must not be capped in length by request"
+            );
+
+            let state = rpc_server.state.lock_guard().await;
+            let ams = state.chain.archival_state().archival_mutator_set.ams();
+            let to_address = to_address.to_bech32m(network).unwrap();
+            for sent_tx in capped_matches_page0
+                .into_iter()
+                .chain(capped_matches_page1)
+                .chain(capped_matches_page2)
+            {
+                for input in &sent_tx.inputs {
+                    assert!(
+                        ams.absolute_index_set_was_applied(input.absolute_index_set.unwrap())
+                            .await
+                    );
+                    assert!(input.aocl_leaf_index < 1000);
+                }
+
+                for output in &sent_tx.outputs {
+                    assert!(output.owned);
+                    let utxo: Utxo = output.utxo.clone().into();
+                    assert!(!utxo.is_timelocked());
+
+                    if !output.is_change {
+                        assert_eq!(receiver_digest_with_matches, output.receiver_digest);
+                        assert_eq!(to_address, output.to_address.to_owned().unwrap());
+                        assert_eq!(amt_per_tx, utxo.get_native_currency_amount());
+                    }
+                }
+
+                assert_eq!(fee_per_tx, sent_tx.fee.0);
+            }
+
+            let receiver_digest_no_matches = Digest::default();
+            assert!(
+                rpc_server
+                    .outgoing_history(
+                        None,
+                        Some(receiver_digest_no_matches),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                    .unwrap()
+                    .matching_sent
+                    .is_empty(),
+                "Must return empty list when receiver digest has no matches"
+            )
+        }
+
+        /// Return an RPC server with state with wallet history. Also returns
+        /// the address receiving all non-change transactions.
+        async fn state_with_transaction_history(
+            network: Network,
+            num_blocks: usize,
+            send_amount: NativeCurrencyAmount,
+            fee_per_tx: NativeCurrencyAmount,
+        ) -> (RpcServer, ReceivingAddress) {
+            let cli_args = cli_args::Args {
+                network,
+                rpc_modules: vec![Namespace::Personal],
+                ..Default::default()
+            };
+            let mut rpc_server =
+                test_rpc_server_with_cli_args_and_wallet(cli_args, WalletEntropy::devnet_wallet())
+                    .await;
+
+            let to_address = rpc_server
+                .state
+                .api()
+                .wallet()
+                .next_receiving_address(KeyType::Generation)
+                .await
+                .unwrap();
+
+            // Create a lot of transactions in as many blocks.
+            let mut previous_block = Block::genesis(network);
+            for _ in 1..=num_blocks {
+                let devnet_artifacts = rpc_server
+                    .state
+                    .api_mut()
+                    .tx_sender_mut()
+                    .send(
+                        vec![OutputFormat::AddressAndAmount(
+                            to_address.clone(),
+                            send_amount,
+                        )],
+                        Default::default(),
+                        fee_per_tx,
+                        previous_block.header().timestamp + Timestamp::months(7),
+                    )
+                    .await
+                    .unwrap();
+                let block = invalid_block_with_transaction(
+                    &previous_block,
+                    devnet_artifacts.transaction().clone(),
+                );
+                rpc_server.state.set_new_tip(block.clone()).await.unwrap();
+
+                previous_block = block;
+            }
+
+            (rpc_server, to_address)
+        }
     }
 }

@@ -526,6 +526,47 @@ pub trait RpcApi: Sync + Send {
         request: GenerateAddressRequest,
     ) -> RpcResult<GenerateAddressResponse>;
 
+    /// Return all incoming UTXOs tracked by this node's wallet matching the
+    /// specified filters.
+    ///
+    /// Returns all incoming UTXOs if no filter is specified. Allows for
+    /// pagination.
+    #[expect(clippy::too_many_arguments)]
+    async fn incoming_history(
+        &self,
+        include_orphaned: bool,
+        aocl_leaf_index: Option<u64>,
+        output: Option<RpcAdditionRecord>,
+        receiver_preimage: Option<Digest>,
+        receiver_digest: Option<Digest>,
+        lock_script_hash: Option<Digest>,
+        sender_randomness: Option<Digest>,
+        confirmed_height: Option<RpcBlockHeight>,
+        confirmed_block_hash: Option<Digest>,
+        max_num_elements: Option<u64>,
+        page: Option<u64>,
+    ) -> RpcResult<IncomingHistoryResponse> {
+        self.incoming_history_call(IncomingHistoryRequest {
+            aocl_leaf_index,
+            output,
+            receiver_preimage,
+            receiver_digest,
+            lock_script_hash,
+            sender_randomness,
+            confirmed_height,
+            confirmed_block_hash,
+            include_orphaned,
+            max_num_elements,
+            page,
+        })
+        .await
+    }
+
+    async fn incoming_history_call(
+        &self,
+        request: IncomingHistoryRequest,
+    ) -> RpcResult<IncomingHistoryResponse>;
+
     /// Return all outgoing transactions intiated by this node's wallet matching
     /// the specified filters.
     ///

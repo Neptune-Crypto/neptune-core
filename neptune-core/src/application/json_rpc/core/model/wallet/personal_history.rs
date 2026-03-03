@@ -3,9 +3,32 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::Timestamp;
+use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
+use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcUtxo;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct ReceivedTransactionOutput {
+    pub aocl_leaf_index: u64,
+    pub addition_record: RpcAdditionRecord,
+    pub utxo: RpcUtxo,
+    pub receiver_preimage: Digest,
+    pub sender_randomness: Digest,
+    pub confirmed_timestamp: Timestamp,
+    pub confirmed_block: Digest,
+    pub confirmed_height: RpcBlockHeight,
+    pub receiving_address: Option<String>,
+    pub canonical: bool,
+
+    /// If transaction was mined in a canonical block, this value shows the
+    /// position of the output in the mined block. Always set to `None` if the
+    /// block is not canonical.
+    pub output_index: Option<u32>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

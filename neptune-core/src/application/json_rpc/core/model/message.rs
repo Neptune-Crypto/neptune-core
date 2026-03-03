@@ -17,6 +17,7 @@ use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplat
 use crate::application::json_rpc::core::model::wallet::block::*;
 use crate::application::json_rpc::core::model::wallet::mutator_set::*;
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
+use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
 use crate::application::json_rpc::core::model::wallet::RpcAnnouncementFlag;
@@ -516,6 +517,32 @@ pub struct SubmitBlockRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SubmitBlockResponse {
     pub success: bool,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingHistoryRequest {
+    pub aocl_leaf_index: Option<u64>,
+    pub output: Option<RpcAdditionRecord>,
+    pub receiver_preimage: Option<Digest>,
+    pub receiver_digest: Option<Digest>,
+    pub lock_script_hash: Option<Digest>,
+    pub sender_randomness: Option<Digest>,
+    pub confirmed_height: Option<RpcBlockHeight>,
+    pub confirmed_block_hash: Option<Digest>,
+    pub include_orphaned: bool,
+
+    /// Upper limit on the number of returned elements
+    pub max_num_elements: Option<u64>,
+
+    /// 0-indexed page.
+    pub page: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingHistoryResponse {
+    pub outputs: Vec<ReceivedTransactionOutput>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]

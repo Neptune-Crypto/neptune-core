@@ -158,6 +158,9 @@ pub enum RpcMethods {
     GenerateAddress,
 
     #[namespace(Namespace::Personal)]
+    IncomingHistory,
+
+    #[namespace(Namespace::Personal)]
     OutgoingHistory,
 
     #[namespace(Namespace::Personal)]
