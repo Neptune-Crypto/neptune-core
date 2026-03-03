@@ -591,15 +591,13 @@ impl WalletState {
             .await;
     }
 
-    /// returns a count of transactions this wallet sent at given block.
+    /// returns a count of transactions this wallet intiated at given block.
     ///
     /// note that the block specifies the current tip at the moment the
-    /// transactions were sent -- NOT when they were confirmed.
+    /// transactions were intiated -- NOT when they were confirmed.
     ///
     /// This fn is provided to facilitate send-rate limiting.
     /// ie to limit how many payments the wallet can send per block.
-    ///
-    /// once send-rate limiting is disabled, this fn can probably be removed.
     pub(crate) async fn count_sent_transactions_at_block(&self, block: Digest) -> usize {
         let list = self.wallet_db.sent_transactions();
         let len = list.len().await;
@@ -615,7 +613,6 @@ impl WalletState {
         // to eachother, which should normally be true.
         // that assumption allows us to break early rather than checking the
         // entire list.
-
         while let Some(stx) = stream.next().await {
             if stx.tip_when_sent == block {
                 count += 1;

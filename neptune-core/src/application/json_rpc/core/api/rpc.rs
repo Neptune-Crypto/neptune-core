@@ -520,6 +520,22 @@ pub trait RpcApi: Sync + Send {
 
     async fn get_balance_call(&self, request: GetBalanceRequest) -> RpcResult<GetBalanceResponse>;
 
+    /// Return the number of transactions initiated while this block was tip.
+    ///
+    /// Does not check if the transactions have been mined, only initiated.
+    async fn count_sent_transactions_at_block(
+        &self,
+        selector: RpcBlockSelector,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse> {
+        self.count_sent_transactions_at_block_call(CountSentTransactionsAtBlockRequest { selector })
+            .await
+    }
+
+    async fn count_sent_transactions_at_block_call(
+        &self,
+        request: CountSentTransactionsAtBlockRequest,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse>;
+
     /* Mining */
 
     async fn get_block_template(

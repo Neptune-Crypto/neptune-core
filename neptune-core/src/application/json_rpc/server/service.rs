@@ -893,6 +893,31 @@ impl RpcApi for RpcServer {
         Ok(response)
     }
 
+    async fn count_sent_transactions_at_block_call(
+        &self,
+        request: CountSentTransactionsAtBlockRequest,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse> {
+        let state = self.state.lock_guard().await;
+
+        let Some(digest) = request.selector.as_digest(&state).await else {
+            return Ok(CountSentTransactionsAtBlockResponse { count: 0 });
+        };
+
+        let count = state
+            .wallet_state
+            .count_sent_transactions_at_block(digest)
+            .await;
+
+        let response = CountSentTransactionsAtBlockResponse {
+            count: count
+                .try_into()
+                .expect("Cannot have initiated more than u32::MAX transactions"),
+        };
+
+        Ok(response)
+    }
+
+    /* Mining */
     async fn get_block_template_call(
         &self,
         request: GetBlockTemplateRequest,

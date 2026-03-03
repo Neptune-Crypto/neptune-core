@@ -218,4 +218,22 @@ mod tests {
                 .is_empty()
         );
     }
+
+    #[tokio::test]
+    async fn count_sent_txs_empty_wallet_db() {
+        let unsafe_rpc = false;
+        let client =
+            start_pseudo_real_server(HashSet::from([Namespace::Personal]), unsafe_rpc, 40540).await;
+
+        assert_eq!(
+            0,
+            client
+                .count_sent_transactions_at_block(BlockSelector::Special(
+                    BlockSelectorLiteral::Genesis
+                ))
+                .await
+                .unwrap()
+                .count
+        );
+    }
 }

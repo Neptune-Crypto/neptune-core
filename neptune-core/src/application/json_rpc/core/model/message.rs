@@ -349,7 +349,6 @@ pub struct SubmitTransactionResponse {
 }
 
 /* Personal */
-
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct RescanAnnouncedRequest {
@@ -440,6 +439,18 @@ pub struct GetBalanceResponse {
     pub confirmed_total: RpcNativeCurrencyAmount,
     pub unconfirmed_available: RpcNativeCurrencyAmount,
     pub unconfirmed_total: RpcNativeCurrencyAmount,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct CountSentTransactionsAtBlockRequest {
+    pub selector: RpcBlockSelector,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CountSentTransactionsAtBlockResponse {
+    pub count: u32,
 }
 
 /* Mining */

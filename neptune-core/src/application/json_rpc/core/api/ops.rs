@@ -154,6 +154,9 @@ pub enum RpcMethods {
     #[namespace(Namespace::Personal)]
     GetBalance,
 
+    #[namespace(Namespace::Personal)]
+    CountSentTransactionsAtBlock,
+
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
 
