@@ -119,6 +119,9 @@ pub enum RpcMethods {
     BurnedSupply,
 
     #[namespace(Namespace::Wallet)]
+    ValidateAddress,
+
+    #[namespace(Namespace::Wallet)]
     GetBlocks,
 
     #[namespace(Namespace::Wallet)]

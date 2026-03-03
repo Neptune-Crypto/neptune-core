@@ -8,6 +8,7 @@ use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::api::export::AdditionRecord;
+use crate::api::export::AnnouncementFlag;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
@@ -429,6 +430,37 @@ impl RpcApi for RpcServer {
                 .burned_supply()
                 .await
                 .into(),
+        })
+    }
+
+    /* wallet */
+    async fn validate_address_call(
+        &self,
+        request: ValidateAddressRequest,
+    ) -> RpcResult<ValidateAddressResponse> {
+        use crate::state::wallet::address::ReceivingAddress;
+
+        let network = self.state.cli().network;
+        let Some(addr) = ReceivingAddress::from_bech32m(&request.address_string, network).ok()
+        else {
+            return Ok(ValidateAddressResponse {
+                address_type: None,
+                receiver_identifier: None,
+                announcement_flags: None,
+            });
+        };
+
+        let address_type = Some(match &addr {
+            ReceivingAddress::Generation(_) => "generation".to_string(),
+            ReceivingAddress::Symmetric(_) => "symmetric".to_string(),
+        });
+        let receiver_identifier = Some(addr.receiver_identifier().value());
+        let announcement_flags: Option<AnnouncementFlag> = Some((&addr).into());
+
+        Ok(ValidateAddressResponse {
+            address_type,
+            receiver_identifier,
+            announcement_flags,
         })
     }
 

@@ -344,6 +344,18 @@ pub trait RpcApi: Sync + Send {
 
     /* Wallet */
 
+    /// Check if a string is a valid Neptune address. Returns metadata about
+    /// the address if the address is valid.
+    async fn validate_address(&self, address_string: String) -> RpcResult<ValidateAddressResponse> {
+        self.validate_address_call(ValidateAddressRequest { address_string })
+            .await
+    }
+
+    async fn validate_address_call(
+        &self,
+        request: ValidateAddressRequest,
+    ) -> RpcResult<ValidateAddressResponse>;
+
     async fn get_blocks(
         &self,
         from_height: RpcBlockHeight,

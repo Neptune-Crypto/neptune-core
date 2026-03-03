@@ -311,6 +311,21 @@ pub struct BurnedSupplyResponse {
     pub amount: RpcNativeCurrencyAmount,
 }
 
+/* wallet */
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateAddressRequest {
+    pub address_string: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateAddressResponse {
+    pub address_type: Option<String>,
+    pub receiver_identifier: Option<u64>,
+    pub announcement_flags: Option<RpcAnnouncementFlag>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct GetBlocksRequest {
