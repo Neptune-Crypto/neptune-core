@@ -470,7 +470,7 @@ impl RpcApi for RpcServer {
     ) -> RpcResult<ValidateCoinsAmountResponse> {
         use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-        let Some(amount) = NativeCurrencyAmount::coins_from_str(&request.amount_string).ok() else {
+        let Ok(amount) = NativeCurrencyAmount::coins_from_str(&request.amount_string) else {
             return Ok(ValidateCoinsAmountResponse { amount: None });
         };
 
@@ -480,6 +480,29 @@ impl RpcApi for RpcServer {
 
         Ok(ValidateCoinsAmountResponse {
             amount: Some(amount.into()),
+        })
+    }
+
+    async fn validate_nau_amount_call(
+        &self,
+        request: ValidateNauAmountRequest,
+    ) -> RpcResult<ValidateNauAmountResponse> {
+        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+        let Ok(num_naus) = request.nau_string.parse::<i128>() else {
+            return Ok(ValidateNauAmountResponse { amount: None });
+        };
+
+        if num_naus.is_negative() {
+            return Ok(ValidateNauAmountResponse { amount: None });
+        }
+
+        if num_naus > NativeCurrencyAmount::MAX_NAU {
+            return Ok(ValidateNauAmountResponse { amount: None });
+        }
+
+        Ok(ValidateNauAmountResponse {
+            amount: Some(NativeCurrencyAmount::from_nau(num_naus).into()),
         })
     }
 
@@ -2274,6 +2297,71 @@ pub mod tests {
         let not_an_amount = "béarnaise";
         assert!(rpc_server
             .validate_coins_amount(not_an_amount.to_string())
+            .await
+            .unwrap()
+            .amount
+            .is_none());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn validate_nau_amount() {
+        let rpc_server = test_rpc_server().await;
+
+        let good_amt = 823457;
+        let good_decoded = NativeCurrencyAmount::from_nau(good_amt);
+        assert_eq!(
+            good_decoded,
+            rpc_server
+                .validate_nau_amount(good_amt.to_string())
+                .await
+                .unwrap()
+                .amount
+                .unwrap()
+                .into()
+        );
+
+        // Verify "0" is valid amount
+        assert!(rpc_server
+            .validate_nau_amount("0".to_string())
+            .await
+            .unwrap()
+            .amount
+            .unwrap()
+            .0
+            .is_zero());
+
+        let max = NativeCurrencyAmount::MAX_NAU;
+        let max_decoded = NativeCurrencyAmount::from_nau(max);
+        assert_eq!(
+            max_decoded,
+            rpc_server
+                .validate_nau_amount(max.to_string())
+                .await
+                .unwrap()
+                .amount
+                .unwrap()
+                .0
+        );
+
+        let negative_amt = -1;
+        assert!(rpc_server
+            .validate_nau_amount(negative_amt.to_string())
+            .await
+            .unwrap()
+            .amount
+            .is_none());
+
+        let not_an_amount = "béarnaise";
+        assert!(rpc_server
+            .validate_nau_amount(not_an_amount.to_string())
+            .await
+            .unwrap()
+            .amount
+            .is_none());
+
+        let too_big = NativeCurrencyAmount::MAX_NAU + 1;
+        assert!(rpc_server
+            .validate_nau_amount(too_big.to_string())
             .await
             .unwrap()
             .amount

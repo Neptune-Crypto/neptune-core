@@ -373,6 +373,25 @@ pub trait RpcApi: Sync + Send {
         request: ValidateCoinsAmountRequest,
     ) -> RpcResult<ValidateCoinsAmountResponse>;
 
+    /// Check if a string represents a valid, non-negative amount of NPT,
+    /// atomical units, AKA NAU. This is equivalent to checking if the string
+    /// represents a valid, non-negative i128 not exceeding the maximum allowed
+    /// coins amount of 42.000.000.
+    ///
+    /// If the amount is valid, returns the amount.
+    async fn validate_nau_amount(
+        &self,
+        nau_string: String,
+    ) -> RpcResult<ValidateNauAmountResponse> {
+        self.validate_nau_amount_call(ValidateNauAmountRequest { nau_string })
+            .await
+    }
+
+    async fn validate_nau_amount_call(
+        &self,
+        request: ValidateNauAmountRequest,
+    ) -> RpcResult<ValidateNauAmountResponse>;
+
     async fn get_blocks(
         &self,
         from_height: RpcBlockHeight,

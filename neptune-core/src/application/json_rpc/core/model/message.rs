@@ -338,6 +338,18 @@ pub struct ValidateCoinsAmountResponse {
     pub amount: Option<RpcNativeCurrencyAmount>,
 }
 
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateNauAmountRequest {
+    pub nau_string: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateNauAmountResponse {
+    pub amount: Option<RpcNativeCurrencyAmount>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct GetBlocksRequest {
