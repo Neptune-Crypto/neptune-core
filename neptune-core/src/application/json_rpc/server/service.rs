@@ -464,6 +464,25 @@ impl RpcApi for RpcServer {
         })
     }
 
+    async fn validate_coins_amount_call(
+        &self,
+        request: ValidateCoinsAmountRequest,
+    ) -> RpcResult<ValidateCoinsAmountResponse> {
+        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+        let Some(amount) = NativeCurrencyAmount::coins_from_str(&request.amount_string).ok() else {
+            return Ok(ValidateCoinsAmountResponse { amount: None });
+        };
+
+        if amount.is_negative() {
+            return Ok(ValidateCoinsAmountResponse { amount: None });
+        }
+
+        Ok(ValidateCoinsAmountResponse {
+            amount: Some(amount.into()),
+        })
+    }
+
     async fn get_blocks_call(&self, request: GetBlocksRequest) -> RpcResult<GetBlocksResponse> {
         // Reverse get_blocks is not supported yet.
         // Might be reconsidered after "succinctness" as it might give it a purpose.
@@ -2225,5 +2244,39 @@ pub mod tests {
                 .is_empty(),
             "Must return empty list when receiver digest has no matches"
         )
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn validate_coin_amount() {
+        let rpc_server = test_rpc_server().await;
+
+        let good_string = "823457.983247";
+        let good_decoded = NativeCurrencyAmount::coins_from_str(good_string).unwrap();
+        assert_eq!(
+            good_decoded,
+            rpc_server
+                .validate_coins_amount(good_string.to_string())
+                .await
+                .unwrap()
+                .amount
+                .unwrap()
+                .into()
+        );
+
+        let negative_amt = "-1";
+        assert!(rpc_server
+            .validate_coins_amount(negative_amt.to_string())
+            .await
+            .unwrap()
+            .amount
+            .is_none());
+
+        let not_an_amount = "béarnaise";
+        assert!(rpc_server
+            .validate_coins_amount(not_an_amount.to_string())
+            .await
+            .unwrap()
+            .amount
+            .is_none());
     }
 }

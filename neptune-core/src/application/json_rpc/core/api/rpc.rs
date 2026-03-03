@@ -356,6 +356,23 @@ pub trait RpcApi: Sync + Send {
         request: ValidateAddressRequest,
     ) -> RpcResult<ValidateAddressResponse>;
 
+    /// Check if a string represents a valid, non-negative amount of NPT,
+    /// Neptune coins.
+    ///
+    /// If the amount is valid, returns the amount.
+    async fn validate_coins_amount(
+        &self,
+        amount_string: String,
+    ) -> RpcResult<ValidateCoinsAmountResponse> {
+        self.validate_coins_amount_call(ValidateCoinsAmountRequest { amount_string })
+            .await
+    }
+
+    async fn validate_coins_amount_call(
+        &self,
+        request: ValidateCoinsAmountRequest,
+    ) -> RpcResult<ValidateCoinsAmountResponse>;
+
     async fn get_blocks(
         &self,
         from_height: RpcBlockHeight,

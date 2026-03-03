@@ -122,6 +122,9 @@ pub enum RpcMethods {
     ValidateAddress,
 
     #[namespace(Namespace::Wallet)]
+    ValidateCoinsAmount,
+
+    #[namespace(Namespace::Wallet)]
     GetBlocks,
 
     #[namespace(Namespace::Wallet)]
