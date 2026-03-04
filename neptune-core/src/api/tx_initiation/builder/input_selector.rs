@@ -9,6 +9,10 @@
 //! pass `InputSelectionPolicy::ByProvidedOrder` to the builder.
 //!
 //! see [builder](super) for examples of using the builders together.
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::str::FromStr;
+
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
@@ -17,6 +21,7 @@ use rand::RngCore;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::api::tx_initiation::error;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::input_candidate::InputCandidate;
 
@@ -27,6 +32,16 @@ pub enum SortOrder {
     Ascending,
     /// descending order
     Descending,
+}
+
+impl Display for SortOrder {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            SortOrder::Ascending => "asc",
+            SortOrder::Descending => "desc",
+        };
+        write!(f, "{s}")
+    }
 }
 
 // ##multicoin## :
@@ -56,12 +71,71 @@ pub enum InputSelectionPriority {
     ByAge(SortOrder),
 }
 
+impl Display for InputSelectionPriority {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputSelectionPriority::Random => {
+                write!(f, "random")
+            }
+            InputSelectionPriority::ByProvidedOrder => {
+                write!(f, "provided-order")
+            }
+            InputSelectionPriority::ByNativeCoinAmount(order) => {
+                write!(f, "native-amount:{order}")
+            }
+            InputSelectionPriority::ByUtxoSize(order) => {
+                write!(f, "utxo-size:{order}")
+            }
+            InputSelectionPriority::ByAge(order) => {
+                write!(f, "age:{order}")
+            }
+        }
+    }
+}
+
+impl FromStr for InputSelectionPriority {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "random" => return Ok(InputSelectionPriority::Random),
+            "provided-order" => return Ok(InputSelectionPriority::ByProvidedOrder),
+            _ => {}
+        }
+
+        // Variants with sort order use `prefix:asc|desc`
+        let (prefix, order_str) = s
+            .split_once(':')
+            .ok_or_else(|| format!("Invalid InputSelectionPriority: '{s}'"))?;
+
+        let sort_order = match order_str {
+            "asc" => SortOrder::Ascending,
+            "desc" => SortOrder::Descending,
+            _ => {
+                return Err(format!(
+                    "Invalid sort order '{order_str}' in InputSelectionPriority"
+                ))
+            }
+        };
+
+        match prefix {
+            "native-amount" => Ok(InputSelectionPriority::ByNativeCoinAmount(sort_order)),
+            "utxo-size" => Ok(InputSelectionPriority::ByUtxoSize(sort_order)),
+            "age" => Ok(InputSelectionPriority::ByAge(sort_order)),
+            _ => Err(format!("Invalid InputSelectionPriority: '{s}'")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct InputSelectionPolicy {
     priority: InputSelectionPriority,
 
     /// Ignore inputs with fewer confirmations than this.
     required_number_of_confirmations: usize,
+
+    /// If set, number of selected inputs will exceed this number.
+    max_num_inputs: Option<usize>,
 }
 
 impl From<InputSelectionPriority> for InputSelectionPolicy {
@@ -69,6 +143,7 @@ impl From<InputSelectionPriority> for InputSelectionPolicy {
         Self {
             priority,
             required_number_of_confirmations: 1,
+            max_num_inputs: None,
         }
     }
 }
@@ -81,6 +156,11 @@ impl InputSelectionPolicy {
 
     pub fn require_confirmations(mut self, required_number_of_confirmations: usize) -> Self {
         self.required_number_of_confirmations = required_number_of_confirmations;
+        self
+    }
+
+    pub fn cap_num_inputs(mut self, max_num_inputs: usize) -> Self {
+        self.max_num_inputs = Some(max_num_inputs);
         self
     }
 }
@@ -241,24 +321,31 @@ impl InputSelector {
 
     /// Build the list of transaction inputs, taking inputs filtered for policy-
     /// compliance and sorted by priority until we have enough native currency.
-    pub fn build(self) -> Vec<InputCandidate> {
+    pub fn build(self) -> Result<Vec<InputCandidate>, error::CreateTxError> {
         // scan sequence until we have enough
-        let zero: NativeCurrencyAmount = NativeCurrencyAmount::zero();
         let spend_amount = self.spend_amount;
 
         let iter = self.input_candidates_inputs.iter();
         let iter = self.filter_by_confirmation_count(iter);
         let iter = self.prioritize(iter);
-        iter.into_iter()
-            .scan((zero, spend_amount), |(current_amount, target), input| {
-                if *current_amount < *target {
-                    *current_amount += input.utxo.get_native_currency_amount();
-                    Some(input.clone())
-                } else {
-                    None
-                }
-            })
-            .collect_vec()
+
+        let mut selected_inputs = vec![];
+        let mut current_amount = NativeCurrencyAmount::zero();
+        let max_num_inputs = self.policy.max_num_inputs.unwrap_or(usize::MAX);
+        for input in iter {
+            if current_amount < spend_amount && max_num_inputs > selected_inputs.len() {
+                current_amount += input.utxo.get_native_currency_amount();
+                selected_inputs.push(input.clone());
+            } else if max_num_inputs <= selected_inputs.len() {
+                // The input priority is incompatible with the maximum number
+                // of inputs allowed by the policy.
+                return Err(error::CreateTxError::TooManyInputs);
+            } else {
+                break;
+            }
+        }
+
+        Ok(selected_inputs)
     }
 }
 

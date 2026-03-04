@@ -19,6 +19,7 @@ use crate::application::json_rpc::core::model::wallet::mutator_set::*;
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
 use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
 use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
+use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNotificationData;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
 use crate::application::json_rpc::core::model::wallet::RpcAnnouncementFlag;
@@ -502,6 +503,36 @@ pub struct CountSentTransactionsAtBlockRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CountSentTransactionsAtBlockResponse {
     pub count: u32,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct SendRequest {
+    pub amount: RpcNativeCurrencyAmount,
+    pub fee: RpcNativeCurrencyAmount,
+    pub to_address: String,
+    pub min_input_confirmations: Option<usize>,
+    pub max_num_inputs: Option<usize>,
+    pub notify_self: Option<String>,
+    pub notify_other: Option<String>,
+    pub utxo_priority: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SendResponse {
+    /// The absolute indices of the wallet's inputs used in the transactions.
+    pub inputs: Vec<RpcAbsoluteIndexSet>,
+
+    /// The addition records of the transaction outputs.
+    pub outputs: Vec<RpcAdditionRecord>,
+
+    /// Offchain notifications that must be communicated to the recipient to
+    /// allow them to claim the transaction outputs created in this transaction.
+    /// This list will be empty if on-chain notifications are selected.
+    ///
+    /// Does not include notifications pertaning to UTXOs that the transaction
+    /// initiator node can unlock.
+    pub unowned_offchain_notifications: Vec<RpcPrivateNotificationData>,
 }
 
 /* Mining */

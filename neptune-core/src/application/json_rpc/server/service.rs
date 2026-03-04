@@ -1,3 +1,4 @@
+use std::cmp::min;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
@@ -11,15 +12,22 @@ use tracing::debug;
 
 use crate::api::export::AdditionRecord;
 use crate::api::export::AnnouncementFlag;
+use crate::api::export::ChangePolicy;
+use crate::api::export::InputSelectionPriority;
+use crate::api::export::KeyType;
+use crate::api::export::NativeCurrencyAmount;
+use crate::api::export::OutputFormat;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
+use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::application::database::storage::storage_vec::traits::StorageVecStream;
 use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::header::TransactionKernelWithPriority;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
+use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplateMetadata;
@@ -29,6 +37,7 @@ use crate::application::json_rpc::core::model::wallet::personal_history::Initiat
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionOutput;
 use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
 use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
+use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNotificationData;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
@@ -37,7 +46,7 @@ use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
+use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -636,7 +645,9 @@ impl RpcApi for RpcServer {
 
         let response = self
             .to_main_tx
-            .send(RPCServerToMain::SubmitTx(Box::new(transaction)))
+            .send(RPCServerToMain::BroadcastThirdPartyTx(Box::new(
+                transaction,
+            )))
             .await;
 
         Ok(SubmitTransactionResponse {
@@ -944,25 +955,12 @@ impl RpcApi for RpcServer {
                 && request.timestamp.is_none_or(|q| tx.timestamp == q)
         };
 
-        let utxo_notification_medium = |tx: &TxOutput| match tx.notification_method() {
-            UtxoNotificationMethod::None => "none",
-            UtxoNotificationMethod::OffChain(_) => "off-chain",
-            UtxoNotificationMethod::OnChain(_) => "on-chain",
-        };
-
         let network = self.state.cli().network;
-        let extract_recipient_address = |tx: &TxOutput| match tx.notification_method() {
-            UtxoNotificationMethod::OnChain(receiving_address) => Some(
-                receiving_address
-                    .to_bech32m(network)
-                    .expect("Address stored in DB must be bech32 representable"),
-            ),
-            UtxoNotificationMethod::OffChain(receiving_address) => Some(
-                receiving_address
-                    .to_bech32m(network)
-                    .expect("Address stored in DB must be bech32 representable"),
-            ),
-            UtxoNotificationMethod::None => None,
+        let extract_recipient_address = |tx: &TxOutput| {
+            tx.notification_method().receiving_address().map(|addr| {
+                addr.to_bech32m(network)
+                    .expect("Address stored in DB must be bech32 representable")
+            })
         };
 
         let limit = request.max_num_elements.unwrap_or(100).min(1000) as usize;
@@ -998,7 +996,7 @@ impl RpcApi for RpcServer {
                     utxo: o.utxo().into(),
                     sender_randomness: o.sender_randomness(),
                     receiver_digest: o.receiver_digest(),
-                    notification_medium: utxo_notification_medium(o).to_owned(),
+                    notification_medium: o.notification_method().to_string(),
                     is_change: o.is_change(),
                     owned: o.is_owned(),
                     to_address: extract_recipient_address(o),
@@ -1134,6 +1132,176 @@ impl RpcApi for RpcServer {
         };
 
         Ok(response)
+    }
+
+    async fn send_call(&self, request: SendRequest) -> RpcResult<SendResponse> {
+        let network = self.state.cli().network;
+        let Ok(to_address) = ReceivingAddress::from_bech32m(&request.to_address, network) else {
+            return Err(RpcError::Server(JsonError::Custom {
+                code: -32602,
+                message: "Invalid address format".to_string(),
+                data: None,
+            }));
+        };
+
+        let notify_self = match request.notify_self {
+            Some(notify) => {
+                let Ok(notify) = notify.parse::<UtxoNotificationMedium>() else {
+                    return Err(RpcError::Server(JsonError::Custom {
+                        code: -32602,
+                        message: "Invalid notify_self value".to_string(),
+                        data: None,
+                    }));
+                };
+                notify
+            }
+            None => UtxoNotificationMedium::default(),
+        };
+
+        let notify_other = match request.notify_other {
+            Some(notify) => {
+                let Ok(notify) = notify.parse::<UtxoNotificationMedium>() else {
+                    return Err(RpcError::Server(JsonError::Custom {
+                        code: -32602,
+                        message: "Invalid notify_other value".to_string(),
+                        data: None,
+                    }));
+                };
+                notify
+            }
+            None => UtxoNotificationMedium::default(),
+        };
+
+        let input_selection_priority = match request.utxo_priority {
+            None => InputSelectionPriority::default(),
+            Some(priority) => match priority.parse::<InputSelectionPriority>() {
+                Ok(priority) => priority,
+                Err(err) => {
+                    return Err(RpcError::Server(JsonError::Custom {
+                        code: -32602,
+                        message: err,
+                        data: None,
+                    }));
+                }
+            },
+        };
+
+        let number_of_confirmations = request.min_input_confirmations.unwrap_or(1);
+        if number_of_confirmations == 0 {
+            return Err(RpcError::BadConfirmationCount);
+        }
+
+        let mut input_selection_policy = InputSelectionPolicy::default()
+            .prioritize(input_selection_priority)
+            .require_confirmations(number_of_confirmations);
+        if let Some(max_num_inputs) = request.max_num_inputs {
+            input_selection_policy = input_selection_policy.cap_num_inputs(max_num_inputs);
+        }
+
+        let tip_height = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header()
+            .height;
+        let threshold_block_height = tip_height
+            .next()
+            .value()
+            .checked_sub(number_of_confirmations.try_into().unwrap())
+            .ok_or(RpcError::BadConfirmationCount)?
+            .into();
+
+        let wallet_status = self
+            .state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await;
+
+        let now = Timestamp::now();
+        let confirmed_available =
+            wallet_status.confirmed_available_balance(threshold_block_height, now);
+        let unconfirmed_available = wallet_status.unconfirmed_available_balance(now);
+        let lower_of_the_two = min(confirmed_available, unconfirmed_available);
+
+        let amount: NativeCurrencyAmount = request.amount.into();
+        let fee: NativeCurrencyAmount = request.fee.into();
+
+        let total_expenditure = amount + fee;
+        if lower_of_the_two < total_expenditure {
+            return Err(RpcError::InsufficientFunds {
+                have: lower_of_the_two.into(),
+                need: total_expenditure.into(),
+            });
+        }
+
+        let outputs: Vec<OutputFormat> = vec![OutputFormat::AddressAndAmountAndMedium(
+            to_address,
+            amount,
+            notify_other,
+        )];
+
+        // Notice that this change policy actually mutates the wallet state when
+        // the transaction is initiated, as it bumps the derived index counter
+        // in the wallet state by one.
+        let change_policy =
+            ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, notify_self);
+        let transparent = false;
+        let tx_creation_artifacts = self
+            .state
+            .api()
+            .tx_initiator()
+            .construct_transaction_inner(
+                outputs,
+                change_policy,
+                fee,
+                now,
+                transparent,
+                input_selection_policy,
+            )
+            .await;
+        let tx_creation_artifacts = match tx_creation_artifacts {
+            Ok(tx_creation_artifacts) => tx_creation_artifacts,
+            Err(err) => return Err(RpcError::SendError(format!("{err}"))),
+        };
+
+        // Notice that transaction has *not* yet been inserted into the mempool.
+        // So that must happen in the main loop.
+        let tx_inputs = tx_creation_artifacts
+            .transaction()
+            .kernel
+            .inputs
+            .iter()
+            .map(|x| x.absolute_indices)
+            .collect();
+        let tx_outputs = tx_creation_artifacts
+            .transaction()
+            .kernel
+            .outputs
+            .iter()
+            .copied()
+            .map(|x| x.into())
+            .collect();
+        let unowned_offchain_notifications = transaction.unowned_offchain_notifications();
+        self.to_main_tx
+            .send(RPCServerToMain::RecordAndBroadcastOwnTx(
+                tx_creation_artifacts,
+            ))
+            .await
+            .expect("Main loop must still be running");
+
+        let resp = SendResponse {
+            inputs: tx_inputs,
+            outputs: tx_outputs,
+            unowned_offchain_notifications: unowned_offchain_notifications
+                .into_iter()
+                .map(|x| RpcPrivateNotificationData::from_private_notification_data(x, network))
+                .collect(),
+        };
+
+        Ok(resp)
     }
 
     /* Mining */
@@ -2360,6 +2528,60 @@ pub mod tests {
             NativeCurrencyAmount::coins(20),
             unspent_utxos[0].amount.into()
         );
+    }
+
+    mod send {
+        use tracing_test::traced_test;
+
+        use super::*;
+        use crate::api::export::UtxoTriple;
+        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn send_from_premine_receiver() {
+            let network = Network::Main;
+            let cli = cli_args::Args {
+                network,
+                rpc_modules: vec![Namespace::Personal, Namespace::Mempool],
+                ..Default::default()
+            };
+            let wallet_entropy = WalletEntropy::devnet_wallet();
+            let rpc_server =
+                test_rpc_server_with_cli_args_and_wallet(cli, wallet_entropy.clone()).await;
+            let send_amt = NativeCurrencyAmount::coins(2);
+            let fee = NativeCurrencyAmount::coins(2);
+            let recipient = GenerationReceivingAddress::derive_from_seed(Digest::default());
+
+            let resp = rpc_server
+                .send(
+                    send_amt.into(),
+                    fee.into(),
+                    recipient.to_bech32m(network).unwrap(),
+                    None,
+                    None,
+                    Some("on-chain".to_string()),
+                    Some("on-chain".to_string()),
+                    None,
+                )
+                .await
+                .unwrap();
+
+            let receiver_digest = recipient.receiver_postimage();
+            let expected_sender_randomness =
+                wallet_entropy.generate_sender_randomness(BlockHeight::genesis(), receiver_digest);
+
+            // One of the outputs must match the initiated transaction.
+            let triple = UtxoTriple {
+                utxo: Utxo::new_native_currency(recipient.lock_script().hash(), send_amt),
+                sender_randomness: expected_sender_randomness,
+                receiver_digest,
+            };
+            assert!(resp.outputs.contains(&triple.addition_record().into()));
+
+            // Do not check if tx is in mempool since no main loop / real node
+            // is running in this test.
+        }
     }
 
     mod history {

@@ -18,6 +18,7 @@ use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdd
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernelId;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
+use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
@@ -104,6 +105,15 @@ pub enum RpcError {
 
     #[error("Number of confirmations is wrong.")]
     BadConfirmationCount,
+
+    #[error("Insufficient funds. Have: {}, need: {}.", have.0, need.0)]
+    InsufficientFunds {
+        have: RpcNativeCurrencyAmount,
+        need: RpcNativeCurrencyAmount,
+    },
+
+    #[error("Failed to create transaction. Error: {0}")]
+    SendError(String),
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -633,6 +643,33 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: CountSentTransactionsAtBlockRequest,
     ) -> RpcResult<CountSentTransactionsAtBlockResponse>;
+
+    #[expect(clippy::too_many_arguments)]
+    async fn send(
+        &self,
+        amount: RpcNativeCurrencyAmount,
+        fee: RpcNativeCurrencyAmount,
+        to_address: String,
+        min_input_confirmations: Option<usize>,
+        max_num_inputs: Option<usize>,
+        notify_self: Option<String>,
+        notify_other: Option<String>,
+        utxo_priority: Option<String>,
+    ) -> RpcResult<SendResponse> {
+        self.send_call(SendRequest {
+            amount,
+            fee,
+            to_address,
+            min_input_confirmations,
+            max_num_inputs,
+            notify_self,
+            notify_other,
+            utxo_priority,
+        })
+        .await
+    }
+
+    async fn send_call(&self, request: SendRequest) -> RpcResult<SendResponse>;
 
     /* Mining */
 

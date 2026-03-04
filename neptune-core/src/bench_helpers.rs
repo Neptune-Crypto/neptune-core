@@ -58,11 +58,10 @@ pub fn benchmark_data_directory(network: Network) -> Result<DataDirectory> {
 pub async fn devops_global_state_genesis(cli_args: cli_args::Args) -> GlobalStateLock {
     let data_directory = benchmark_data_directory(cli_args.network).unwrap();
     let genesis = Block::genesis(cli_args.network);
-    let wallet_state = devops_wallet_state_genesis(cli_args.network).await;
-    let gs =
-        GlobalState::try_new_with_wallet_state(data_directory, genesis, cli_args, wallet_state)
-            .await
-            .unwrap();
+    let premine_receiver = WalletEntropy::devnet_wallet();
+    let gs = GlobalState::try_new(data_directory, genesis, cli_args, Some(premine_receiver))
+        .await
+        .unwrap();
     let (rpc_server_to_main_tx, _rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     GlobalStateLock::from_global_state(gs, rpc_server_to_main_tx)

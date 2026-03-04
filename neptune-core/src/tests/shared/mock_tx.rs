@@ -265,7 +265,8 @@ pub(crate) async fn send_coins(
             amount,
             timestamp,
         )
-        .await;
+        .await
+        .unwrap();
     let unlocked_inputs = sender
         .lock_guard()
         .await

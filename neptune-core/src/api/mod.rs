@@ -28,7 +28,7 @@
 //!     let args = Args::default();
 //!
 //!     // initialize
-//!     let mut main_loop_handler = neptune_cash::initialize(args).await?;
+//!     let mut main_loop_handler = neptune_cash::initialize(args, None).await?;
 //!     let gsl = main_loop_handler.global_state_lock();
 //!
 //!     // spawn tokio task to start the node running

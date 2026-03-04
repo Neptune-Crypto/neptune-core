@@ -74,7 +74,7 @@ impl TransactionInitiatorInternal {
                 InputSelectionPriority::ByProvidedOrder,
             ))
             .spend_amount(tx_outputs.total_native_coins() + fee)
-            .build();
+            .build()?;
 
         // Unlock selected inputs.
         let unlocked_inputs = state_lock.gs().unlock_inputs(selected_inputs).await;

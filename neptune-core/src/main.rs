@@ -42,7 +42,7 @@ pub fn main() -> Result<()> {
             set_up_logger();
         }
 
-        let mut main_loop_handler = neptune_cash::initialize(args).await?;
+        let mut main_loop_handler = neptune_cash::initialize(args, None).await?;
         main_loop_handler.run().await
     });
 

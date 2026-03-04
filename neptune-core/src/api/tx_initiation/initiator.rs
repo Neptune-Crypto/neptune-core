@@ -13,6 +13,8 @@
 
 use std::sync::Arc;
 
+use tracing::trace;
+
 use super::error;
 use crate::api::export::Timestamp;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
@@ -78,7 +80,7 @@ impl TransactionInitiator {
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
         timestamp: Timestamp,
-    ) -> Vec<InputCandidate> {
+    ) -> Result<Vec<InputCandidate>, error::CreateTxError> {
         InputSelector::new()
             .input_candidates(self.input_candidates(timestamp).await)
             .policy(policy)
@@ -278,27 +280,54 @@ impl TransactionInitiator {
         timestamp: Timestamp,
         transparent: bool,
     ) -> Result<TxCreationArtifacts, error::SendError> {
+        tracing::info!("send: recording tx");
+
+        let policy = InputSelectionPolicy::default();
+        let tx_creation_artifacts = self
+            .construct_transaction_inner(
+                outputs,
+                change_policy,
+                fee,
+                timestamp,
+                transparent,
+                policy,
+            )
+            .await?;
+
+        self.record_and_broadcast_transaction(&tx_creation_artifacts)
+            .await?;
+
+        tracing::info!("send: all done!");
+
+        Ok(tx_creation_artifacts)
+    }
+
+    /// Build a transaction without broadcasting it or inserting it into the
+    /// mempool.
+    pub(crate) async fn construct_transaction_inner(
+        &self,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+        transparent: bool,
+        input_selection_policy: InputSelectionPolicy,
+    ) -> Result<TxCreationArtifacts, error::SendError> {
         self.private().check_proceed_with_send(fee).await?;
 
         tracing::debug!("tx send initiated.");
-
-        // The target proof-type is set to the lowest possible value here,
-        // since we don't want the client (CLI or dashboard) to hang while
-        // producing proofs. Instead, we let (a task started by) main loop
-        // handle the proving.
-        let target_proof_type = TransactionProofType::PrimitiveWitness;
 
         // generate outputs
         let tx_outputs = self.generate_tx_outputs(outputs).await;
 
         // select inputs
         let spend_amount = tx_outputs.total_native_coins() + fee;
-        let policy = InputSelectionPolicy::default();
+        trace!("spend_amount: {spend_amount}");
+
         let selected_inputs = self
-            .select_inputs(policy, spend_amount, timestamp)
-            .await
-            .into_iter()
-            .collect::<Vec<_>>();
+            .select_inputs(input_selection_policy, spend_amount, timestamp)
+            .await?;
+        trace!("selected {} inputs for transaction.", selected_inputs.len());
 
         let unlocked_inputs = self
             .global_state_lock
@@ -329,9 +358,13 @@ impl TransactionInitiator {
         let cli_args = self.global_state_lock.cli();
         let network = cli_args.network;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
-        // drop(state_lock); // release lock asap.
 
-        tracing::info!("send: proving tx:\n{}", tx_details);
+        // The target proof-type is set to the lowest possible value here,
+        // since we don't want the client (CLI or dashboard) to hang while
+        // producing proofs. Instead, we let (a task started by) main loop
+        // handle the proving.
+        let target_proof_type = TransactionProofType::PrimitiveWitness;
+        tracing::info!("send: creating primitive witness for:\n{}", tx_details);
 
         // use cli options for building proof, but override proof-type
         let options = TritonVmProofJobOptionsBuilder::new()
@@ -348,8 +381,6 @@ impl TransactionInitiator {
             .build()
             .await?;
 
-        tracing::info!("send: assembling tx");
-
         // create transaction
         let transaction = self.assemble_transaction(&tx_details, proof)?;
 
@@ -358,13 +389,6 @@ impl TransactionInitiator {
             .transaction_details(tx_details)
             .transaction(transaction)
             .build()?;
-
-        tracing::info!("send: recording tx");
-
-        self.record_and_broadcast_transaction(&tx_creation_artifacts)
-            .await?;
-
-        tracing::info!("send: all done!");
 
         Ok(tx_creation_artifacts)
     }

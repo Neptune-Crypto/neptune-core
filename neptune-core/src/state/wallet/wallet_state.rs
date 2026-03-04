@@ -2078,10 +2078,10 @@ pub(crate) mod tests {
             data_dir: &DataDirectory,
             wallet_entropy: WalletEntropy,
             cli_args: &Args,
+            genesis: &Block,
         ) -> Self {
             let configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
-            let genesis_block = Block::genesis(configuration.network());
-            Self::try_new(configuration, wallet_entropy, &genesis_block)
+            Self::try_new(configuration, wallet_entropy, genesis)
                 .await
                 .unwrap()
         }
@@ -3700,6 +3700,7 @@ pub(crate) mod tests {
                 let network = Network::RegTest;
                 let wallet_secret = WalletEntropy::new_random();
                 let data_dir = unit_test_data_directory(network)?;
+                let genesis = Block::genesis(network);
 
                 // 1. create new wallet and generate 20 keys
                 // 2. record wallet counter and known-keys
@@ -3711,6 +3712,7 @@ pub(crate) mod tests {
                         &data_dir,
                         wallet_secret.clone(),
                         &cli_args,
+                        &genesis,
                     )
                     .await;
 
@@ -3729,8 +3731,13 @@ pub(crate) mod tests {
                 };
 
                 // 5. instantiate 2nd wallet instance with same data_dir and secret as the first
-                let wallet =
-                    WalletState::new_from_wallet_entropy(&data_dir, wallet_secret, &cli_args).await;
+                let wallet = WalletState::new_from_wallet_entropy(
+                    &data_dir,
+                    wallet_secret,
+                    &cli_args,
+                    &genesis,
+                )
+                .await;
 
                 let persisted_counter = wallet.key_counter(key_type);
                 let persisted_known_keys = wallet
@@ -3979,12 +3986,14 @@ pub(crate) mod tests {
                 let wallet_secret = WalletEntropy::new_random();
                 let data_dir = unit_test_data_directory(network).unwrap();
                 let cli_args = cli_args::Args::default();
+                let genesis = Block::genesis(network);
 
                 // create initial wallet in a new directory
                 let mut wallet = WalletState::new_from_wallet_entropy(
                     &data_dir,
                     wallet_secret.clone(),
                     &cli_args,
+                    &genesis,
                 )
                 .await;
 
@@ -4017,8 +4026,13 @@ pub(crate) mod tests {
                 drop(wallet);
 
                 // re-create wallet state from same seed and same directory
-                let restored_wallet =
-                    WalletState::new_from_wallet_entropy(&data_dir, wallet_secret, &cli_args).await;
+                let restored_wallet = WalletState::new_from_wallet_entropy(
+                    &data_dir,
+                    wallet_secret,
+                    &cli_args,
+                    &genesis,
+                )
+                .await;
 
                 // if wallet state was persisted to DB then we should have
                 // 1 (restored) ExpectedUtxo, else 0.
@@ -4355,6 +4369,7 @@ pub(crate) mod tests {
                     &data_dir,
                     alice_secret.clone(),
                     &cli_args,
+                    &genesis_block,
                 )
                 .await;
 
@@ -4409,11 +4424,13 @@ pub(crate) mod tests {
             let network = Network::Main;
             let mut rng = StdRng::from_rng(&mut rng());
             let wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
+            let genesis = Block::genesis(network);
             let data_dir = unit_test_data_directory(network).unwrap();
             let wallet_state = WalletState::new_from_wallet_entropy(
                 &data_dir,
                 wallet_secret,
                 &cli_args::Args::default(),
+                &genesis,
             )
             .await;
 
@@ -4490,11 +4507,13 @@ pub(crate) mod tests {
             >,
         ) {
             let network = Network::Main;
+            let genesis = Block::genesis(network);
             let data_dir = unit_test_data_directory(network).unwrap();
             let wallet_state = WalletState::new_from_wallet_entropy(
                 &data_dir,
                 wallet_secret.clone(),
                 &cli_args::Args::default(),
+                &genesis,
             )
             .await;
             println!("(ignore all log messages above 😆)");

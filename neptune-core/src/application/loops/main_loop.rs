@@ -1811,6 +1811,40 @@ impl MainLoopHandler {
         Ok(exit_code)
     }
 
+    /// Broadcast own transaction. Perform an upgrade of the proof if the
+    /// transaction cannot immediately be shared.
+    fn broadcast_own_transaction(&mut self, transaction: &Transaction) {
+        // Is this a transaction we can share with peers? If so, share
+        // it immediately.
+        if let Ok(notification) = transaction.try_into() {
+            let pmsg = MainToPeerTask::TransactionNotification(notification);
+            self.main_to_peer_broadcast(pmsg);
+        } else {
+            // Otherwise, upgrade its proof quality.
+            let primitive_witness = transaction.proof.clone().into_primitive_witness();
+
+            let vm_job_queue = vm_job_queue();
+
+            let proving_capability = self.global_state_lock.cli().proving_capability();
+            let network = self.global_state_lock.cli().network;
+            let upgrade_job =
+                UpgradeJob::from_primitive_witness(network, proving_capability, primitive_witness);
+
+            // handle_upgrade() broadcasts to peers on success.
+            let global_state_lock_clone = self.global_state_lock.clone();
+            let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
+            let _proof_upgrader_task = tokio::task::spawn(async move {
+                upgrade_job
+                    .handle_upgrade(
+                        vm_job_queue.clone(),
+                        global_state_lock_clone,
+                        main_to_peer_broadcast_tx_clone,
+                    )
+                    .await
+            });
+        }
+    }
+
     /// Handle messages from the RPC server. Returns `true` iff the client should shut down
     /// after handling this message.
     async fn handle_rpc_server_message(
@@ -1819,7 +1853,7 @@ impl MainLoopHandler {
         main_loop_state: &mut MutableMainLoopState,
     ) -> Result<bool> {
         match msg {
-            RPCServerToMain::BroadcastTx(transaction) => {
+            RPCServerToMain::BroadcastOwnTx(transaction) => {
                 debug!(
                             "`main` received following transaction from RPC Server. {} inputs, {} outputs. Synced to mutator set hash: {}",
                             transaction.kernel.inputs.len(),
@@ -1827,51 +1861,20 @@ impl MainLoopHandler {
                             transaction.kernel.mutator_set_hash
                         );
 
-                // note: this Tx must already have been added to the mempool by
-                // sender.  This occurs in GlobalStateLock::record_transaction().
+                self.broadcast_own_transaction(transaction.as_ref());
 
-                // Is this a transaction we can share with peers? If so, share
-                // it immediately.
-                if let Ok(notification) = transaction.as_ref().try_into() {
-                    let pmsg = MainToPeerTask::TransactionNotification(notification);
-                    self.main_to_peer_broadcast(pmsg);
-                } else {
-                    // Otherwise, upgrade its proof quality, and share it by
-                    // spinning up the proof upgrader.
-                    let primitive_witness = transaction.proof.clone().into_primitive_witness();
+                Ok(false)
+            }
+            RPCServerToMain::RecordAndBroadcastOwnTx(tx) => {
+                debug!("main loop receiver self-initiated primitive witness.");
 
-                    let vm_job_queue = vm_job_queue();
+                self.global_state_lock()
+                    .record_own_transaction(&tx)
+                    .await
+                    .expect("Transaction must be accepted as valid");
 
-                    let proving_capability = self.global_state_lock.cli().proving_capability();
-                    let network = self.global_state_lock.cli().network;
-                    let upgrade_job = UpgradeJob::from_primitive_witness(
-                        network,
-                        proving_capability,
-                        primitive_witness,
-                    );
+                self.broadcast_own_transaction(&tx.transaction);
 
-                    // note: handle_upgrade() hands off proving to the
-                    //       triton-vm job queue and waits for job completion.
-                    // note: handle_upgrade() broadcasts to peers on success.
-
-                    let global_state_lock_clone = self.global_state_lock.clone();
-                    let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
-                    let _proof_upgrader_task = tokio::task::spawn(async move {
-                        upgrade_job
-                            .handle_upgrade(
-                                vm_job_queue.clone(),
-                                global_state_lock_clone,
-                                main_to_peer_broadcast_tx_clone,
-                            )
-                            .await
-                    });
-
-                    // main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
-                    // If transaction could not be shared immediately because
-                    // it contains secret data, upgrade its proof-type.
-                }
-
-                // do not shut down
                 Ok(false)
             }
             RPCServerToMain::PerformTxProofUpgrade(upgrade_job) => {
@@ -1998,9 +2001,7 @@ impl MainLoopHandler {
                 // shut down
                 Ok(true)
             }
-            RPCServerToMain::SubmitTx(transaction) => {
-                // Technically RPC is not supposed/capable to handle ProofWitness but just in case
-                // Until a decision is made. (As this might get used by api too.)
+            RPCServerToMain::BroadcastThirdPartyTx(transaction) => {
                 let notification: Option<TransactionNotification> =
                     transaction.as_ref().try_into().ok();
 
@@ -2012,9 +2013,7 @@ impl MainLoopHandler {
                         .await;
                 }
 
-                // If transaction can be sent thru P2P, submit instantly.
-                // This might be mempools responsibility but for now...
-                // We know upgraded transactions gets announced but not sure about new entries, might get moved into mempool too.
+                // If transaction can be shared, do so.
                 if let Some(notification) = notification {
                     let pmsg = MainToPeerTask::TransactionNotification(notification);
                     self.main_to_peer_broadcast(pmsg);

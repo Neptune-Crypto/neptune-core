@@ -27,7 +27,7 @@ impl TransactionInitiatorPrivate {
         let response = self
             .global_state_lock
             .rpc_server_to_main_tx()
-            .send(RPCServerToMain::BroadcastTx(transaction))
+            .send(RPCServerToMain::BroadcastOwnTx(transaction))
             .await;
 
         if let Err(e) = response {

@@ -4206,7 +4206,7 @@ impl RPC for NeptuneRPCServer {
             .api()
             .tx_initiator()
             .select_inputs(policy, spend_amount, Timestamp::now())
-            .await;
+            .await?;
 
         let unlocked_inputs = self
             .state

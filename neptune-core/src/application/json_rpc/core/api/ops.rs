@@ -172,6 +172,9 @@ pub enum RpcMethods {
     #[namespace(Namespace::Personal)]
     CountSentTransactionsAtBlock,
 
+    #[namespace(Namespace::Personal)]
+    Send,
+
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
 

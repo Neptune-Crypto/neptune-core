@@ -109,6 +109,7 @@ use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
+use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
@@ -699,16 +700,30 @@ impl Drop for GlobalState {
 }
 
 impl GlobalState {
+    /// Create a new global state object, with an optional overwritten wallet
+    /// seed.
+    ///
+    /// # Panics
+    ///
+    /// - If injected wallet seed would override an existing seed file.
     pub async fn try_new(
         data_directory: DataDirectory,
         genesis: Block,
         cli: cli_args::Args,
+        injected_wallet_seed: Option<WalletEntropy>,
     ) -> Result<Self> {
         // Get wallet object, create various wallet secret files
         let wallet_dir = data_directory.wallet_directory_path();
         DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
-        let wallet_file_context =
-            WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?;
+
+        let wallet_file_context = if let Some(override_seed) = injected_wallet_seed {
+            WalletFileContext::new_with_injected_entropy(
+                &data_directory.wallet_directory_path(),
+                override_seed,
+            )?
+        } else {
+            WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?
+        };
         debug!("Now getting wallet state. This may take a while if the database needs pruning.");
         let wallet_state =
             WalletState::try_new_from_context(&data_directory, wallet_file_context, &cli, &genesis)
@@ -719,10 +734,7 @@ impl GlobalState {
     }
 
     /// Initialize a global state with a supplied wallet state.
-    ///
-    /// This function is required for benchmarks, but is not part of the public API.
-    #[doc(hidden)]
-    pub async fn try_new_with_wallet_state(
+    async fn try_new_with_wallet_state(
         data_directory: DataDirectory,
         genesis: Block,
         cli: cli_args::Args,

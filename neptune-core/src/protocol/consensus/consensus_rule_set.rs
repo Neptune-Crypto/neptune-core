@@ -227,7 +227,8 @@ pub(crate) mod tests {
                 .input_candidates(input_candidates)
                 .policy(policy)
                 .spend_amount(tx_outputs.total_native_coins() + fee)
-                .build();
+                .build()
+                .unwrap();
 
             state_lock.unlock_inputs(selected_inputs).await
         };
