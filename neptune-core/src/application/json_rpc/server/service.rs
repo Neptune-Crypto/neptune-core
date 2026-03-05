@@ -1,4 +1,3 @@
-use std::cmp::min;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -1198,35 +1197,7 @@ impl RpcApi for RpcServer {
             input_selection_policy = input_selection_policy.cap_num_inputs(max_num_inputs);
         }
 
-        let now = Timestamp::now();
-        let balance_lower_bound = {
-            // avoid holding lock when transaction is created below.
-            let read_lock = self.state.lock_guard().await;
-            let tip_height = read_lock.chain.light_state().header().height;
-            let threshold_block_height = tip_height
-                .next()
-                .value()
-                .checked_sub(number_of_confirmations.try_into().unwrap())
-                .ok_or(RpcError::BadConfirmationCount)?
-                .into();
-            let wallet_status = read_lock.get_wallet_status_for_tip().await;
-            let confirmed_available =
-                wallet_status.confirmed_available_balance(threshold_block_height, now);
-            let unconfirmed_available = wallet_status.unconfirmed_available_balance(now);
-
-            min(confirmed_available, unconfirmed_available)
-        };
-
         let amount: NativeCurrencyAmount = request.amount.into();
-        let fee: NativeCurrencyAmount = request.fee.into();
-        let total_expenditure = amount + fee;
-        if balance_lower_bound < total_expenditure {
-            return Err(RpcError::InsufficientFunds {
-                have: balance_lower_bound.into(),
-                need: total_expenditure.into(),
-            });
-        }
-
         let outputs: Vec<OutputFormat> = vec![OutputFormat::AddressAndAmountAndMedium(
             to_address,
             amount,
@@ -1246,7 +1217,9 @@ impl RpcApi for RpcServer {
             key: Arc::new(change_key),
             medium: notify_self,
         };
+        let fee: NativeCurrencyAmount = request.fee.into();
         let transparent = false;
+        let now = Timestamp::now();
         let tx_creation_artifacts = self
             .state
             .api()

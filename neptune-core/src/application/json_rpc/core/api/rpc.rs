@@ -106,12 +106,6 @@ pub enum RpcError {
     #[error("Number of confirmations is wrong.")]
     BadConfirmationCount,
 
-    #[error("Insufficient funds. Have: {}, need: {}.", have.0, need.0)]
-    InsufficientFunds {
-        have: RpcNativeCurrencyAmount,
-        need: RpcNativeCurrencyAmount,
-    },
-
     #[error("Failed to create transaction. Error: {0}")]
     SendError(String),
 }
