@@ -1,6 +1,7 @@
 use std::cmp::min;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -14,7 +15,6 @@ use crate::api::export::AdditionRecord;
 use crate::api::export::AnnouncementFlag;
 use crate::api::export::ChangePolicy;
 use crate::api::export::InputSelectionPriority;
-use crate::api::export::KeyType;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::OutputFormat;
 use crate::api::export::ReceivingAddress;
@@ -1198,41 +1198,31 @@ impl RpcApi for RpcServer {
             input_selection_policy = input_selection_policy.cap_num_inputs(max_num_inputs);
         }
 
-        let tip_height = self
-            .state
-            .lock_guard()
-            .await
-            .chain
-            .light_state()
-            .header()
-            .height;
-        let threshold_block_height = tip_height
-            .next()
-            .value()
-            .checked_sub(number_of_confirmations.try_into().unwrap())
-            .ok_or(RpcError::BadConfirmationCount)?
-            .into();
-
-        let wallet_status = self
-            .state
-            .lock_guard()
-            .await
-            .get_wallet_status_for_tip()
-            .await;
-
         let now = Timestamp::now();
-        let confirmed_available =
-            wallet_status.confirmed_available_balance(threshold_block_height, now);
-        let unconfirmed_available = wallet_status.unconfirmed_available_balance(now);
-        let lower_of_the_two = min(confirmed_available, unconfirmed_available);
+        let balance_lower_bound = {
+            // avoid holding lock when transaction is created below.
+            let read_lock = self.state.lock_guard().await;
+            let tip_height = read_lock.chain.light_state().header().height;
+            let threshold_block_height = tip_height
+                .next()
+                .value()
+                .checked_sub(number_of_confirmations.try_into().unwrap())
+                .ok_or(RpcError::BadConfirmationCount)?
+                .into();
+            let wallet_status = read_lock.get_wallet_status_for_tip().await;
+            let confirmed_available =
+                wallet_status.confirmed_available_balance(threshold_block_height, now);
+            let unconfirmed_available = wallet_status.unconfirmed_available_balance(now);
+
+            min(confirmed_available, unconfirmed_available)
+        };
 
         let amount: NativeCurrencyAmount = request.amount.into();
         let fee: NativeCurrencyAmount = request.fee.into();
-
         let total_expenditure = amount + fee;
-        if lower_of_the_two < total_expenditure {
+        if balance_lower_bound < total_expenditure {
             return Err(RpcError::InsufficientFunds {
-                have: lower_of_the_two.into(),
+                have: balance_lower_bound.into(),
                 need: total_expenditure.into(),
             });
         }
@@ -1243,11 +1233,19 @@ impl RpcApi for RpcServer {
             notify_other,
         )];
 
-        // Notice that this change policy actually mutates the wallet state when
-        // the transaction is initiated, as it bumps the derived index counter
-        // in the wallet state by one.
-        let change_policy =
-            ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, notify_self);
+        // Main loop *must* bump derivation counter for change to be registered
+        // by wallet. Shouldn't be done here since the RPC server may not change
+        // state.
+        let change_key = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .future_change_key();
+        let change_policy = ChangePolicy::RecoverToProvidedKey {
+            key: Arc::new(change_key),
+            medium: notify_self,
+        };
         let transparent = false;
         let tx_creation_artifacts = self
             .state
@@ -1262,21 +1260,21 @@ impl RpcApi for RpcServer {
                 input_selection_policy,
             )
             .await;
-        let tx_creation_artifacts = match tx_creation_artifacts {
+        let transaction = match tx_creation_artifacts {
             Ok(tx_creation_artifacts) => tx_creation_artifacts,
             Err(err) => return Err(RpcError::SendError(format!("{err}"))),
         };
 
         // Notice that transaction has *not* yet been inserted into the mempool.
         // So that must happen in the main loop.
-        let tx_inputs = tx_creation_artifacts
+        let tx_inputs = transaction
             .transaction()
             .kernel
             .inputs
             .iter()
             .map(|x| x.absolute_indices)
             .collect();
-        let tx_outputs = tx_creation_artifacts
+        let tx_outputs = transaction
             .transaction()
             .kernel
             .outputs
@@ -1286,9 +1284,10 @@ impl RpcApi for RpcServer {
             .collect();
         let unowned_offchain_notifications = transaction.unowned_offchain_notifications();
         self.to_main_tx
-            .send(RPCServerToMain::RecordAndBroadcastOwnTx(
-                tx_creation_artifacts,
-            ))
+            .send(RPCServerToMain::RecordAndBroadcastOwnTx {
+                transaction,
+                increment_change_key_counter: true,
+            })
             .await
             .expect("Main loop must still be running");
 

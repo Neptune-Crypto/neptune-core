@@ -74,6 +74,8 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
+const CHANGE_KEY_TYPE: KeyType = KeyType::Symmetric;
+
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
     pub wallet_entropy: WalletEntropy,
@@ -1102,6 +1104,18 @@ impl WalletState {
                 .nth_symmetric_key(derivation_index)
                 .into(),
         }
+    }
+
+    /// Return the next next immediate spending key for change ouputs.
+    pub(crate) fn future_change_key(&self) -> SpendingKey {
+        self.nth_spending_key(CHANGE_KEY_TYPE, self.key_counter(CHANGE_KEY_TYPE))
+    }
+
+    /// Increment the key counter for the keys used for change, without
+    /// returning the key. This adds the key to this wallet's list of monitored
+    /// keys/addresses.
+    pub(crate) async fn increment_change_key_counter(&mut self) {
+        self.next_unused_spending_key(CHANGE_KEY_TYPE).await;
     }
 
     /// Get the next unused generation spending key.

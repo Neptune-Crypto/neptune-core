@@ -1865,15 +1865,28 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
-            RPCServerToMain::RecordAndBroadcastOwnTx(tx) => {
+            RPCServerToMain::RecordAndBroadcastOwnTx {
+                transaction,
+                increment_change_key_counter,
+            } => {
                 debug!("main loop receiver self-initiated primitive witness.");
 
+                if increment_change_key_counter {
+                    let _next_key = self
+                        .global_state_lock()
+                        .lock_guard_mut()
+                        .await
+                        .wallet_state
+                        .increment_change_key_counter()
+                        .await;
+                }
+
                 self.global_state_lock()
-                    .record_own_transaction(&tx)
+                    .record_own_transaction(&transaction)
                     .await
                     .expect("Transaction must be accepted as valid");
 
-                self.broadcast_own_transaction(&tx.transaction);
+                self.broadcast_own_transaction(&transaction.transaction);
 
                 Ok(false)
             }

@@ -153,7 +153,10 @@ pub(crate) enum RPCServerToMain {
 
     /// Record self-initialized transaction. Then broadcast and upgrade if
     /// necessary.
-    RecordAndBroadcastOwnTx(TxCreationArtifacts),
+    RecordAndBroadcastOwnTx {
+        transaction: TxCreationArtifacts,
+        increment_change_key_counter: bool,
+    },
 }
 
 pub trait Cancelable: Send + Sync {

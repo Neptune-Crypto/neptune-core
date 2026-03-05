@@ -324,6 +324,11 @@ mod tests {
             .to_bech32m(network)
             .unwrap();
 
+        let key_counter_prior = client
+            .derivation_index(KeyType::Symmetric)
+            .await
+            .unwrap()
+            .derivation_index;
         let resp = client
             .send(
                 send_amt,
@@ -361,6 +366,16 @@ mod tests {
                 .unwrap()
                 .transactions
                 .len()
+        );
+
+        assert_eq!(
+            key_counter_prior + 1,
+            client
+                .derivation_index(KeyType::Symmetric)
+                .await
+                .unwrap()
+                .derivation_index,
+            "Derivation key counter must be bumped after successful 'send'"
         );
     }
 }
