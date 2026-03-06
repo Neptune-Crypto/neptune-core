@@ -1220,11 +1220,14 @@ impl RpcApi for RpcServer {
         let fee: NativeCurrencyAmount = request.fee.into();
         let transparent = false;
         let now = Timestamp::now();
+
+        // Do *not* hold any lock here as tx initiator grabs its own locks.
+        // Holding locks here can lead to deadlocks.
         let tx_creation_artifacts = self
             .state
             .api()
             .tx_initiator()
-            .construct_transaction_inner(
+            .construct_transaction_immutable_state(
                 outputs,
                 change_policy,
                 fee,

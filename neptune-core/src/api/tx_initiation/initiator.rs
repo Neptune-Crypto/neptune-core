@@ -40,6 +40,7 @@ use crate::state::wallet::change_policy::ChangePolicy;
 use crate::state::wallet::input_candidate::InputCandidate;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::unlocked_utxo::TxInputs;
+use crate::state::StateLock;
 use crate::GlobalStateLock;
 
 /// provides an API for building and sending neptune transactions.
@@ -266,12 +267,6 @@ impl TransactionInitiator {
     }
 
     /// Build a transaction and broadcast it.
-    ///
-    // Locking: this function uses an incrementally lower-level interface, which
-    // takes locks where-ever needed and releases them as soon as possible
-    // afterwards. As a result, no single lock is held over the bulk of the
-    // function's duration, potentially leading to funky race conditions if
-    // multiple invocations are made in parallel.
     async fn send_inner(
         &mut self,
         outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
@@ -284,7 +279,7 @@ impl TransactionInitiator {
 
         let policy = InputSelectionPolicy::default();
         let tx_creation_artifacts = self
-            .construct_transaction_inner(
+            .construct_transaction_mutable_state(
                 outputs,
                 change_policy,
                 fee,
@@ -302,10 +297,19 @@ impl TransactionInitiator {
         Ok(tx_creation_artifacts)
     }
 
-    /// Build a transaction without broadcasting it or inserting it into the
-    /// mempool.
-    pub(crate) async fn construct_transaction_inner(
-        &self,
+    /// Private, inner function for building a transaction. Should not be
+    /// exposed since it relies on very domain-specific knowledge about locks
+    /// and the mutation of global state, and since it may panic if used
+    /// incorrectly.
+    ///
+    /// This function *must* hold the same lock in order to avoid race
+    /// conditions during the construction of a transaction.
+    ///
+    /// # Panics
+    /// - If a lock type imcompatible with the selected [`ChangePolicy`] is
+    ///   used.
+    async fn construct_transaction_inner<'a>(
+        mut state_lock: StateLock<'a>,
         outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
@@ -313,30 +317,42 @@ impl TransactionInitiator {
         transparent: bool,
         input_selection_policy: InputSelectionPolicy,
     ) -> Result<TxCreationArtifacts, error::SendError> {
-        self.private().check_proceed_with_send(fee).await?;
-
-        tracing::debug!("tx send initiated.");
-
-        // generate outputs
-        let tx_outputs = self.generate_tx_outputs(outputs).await;
+        assert!(
+            !change_policy.requires_state_mutation()
+            || !matches!(state_lock, StateLock::ReadGuard(_)),
+            "If change policy requires state mutation, then a read lock does not work for this function.");
+        let tx_outputs = TxOutputListBuilder::new()
+            .outputs(outputs)
+            .build(&state_lock)
+            .await;
 
         // select inputs
         let spend_amount = tx_outputs.total_native_coins() + fee;
         trace!("spend_amount: {spend_amount}");
 
-        let selected_inputs = self
-            .select_inputs(input_selection_policy, spend_amount, timestamp)
-            .await?;
+        let current_height = state_lock.gs().chain.light_state().header().height;
+        let validator = state_lock.gs().utxo_validator();
+        let wallet_status = state_lock
+            .gs()
+            .wallet_state
+            .get_wallet_status(&validator)
+            .await;
+        let spendable_inputs = wallet_status.spendable_inputs(timestamp);
+        let input_candidates = spendable_inputs
+            .into_iter()
+            .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
+            .collect();
+        let selected_inputs = InputSelector::new()
+            .input_candidates(input_candidates)
+            .policy(input_selection_policy)
+            .spend_amount(spend_amount)
+            .build()?;
         trace!("selected {} inputs for transaction.", selected_inputs.len());
 
-        let unlocked_inputs = self
-            .global_state_lock
-            .lock_guard()
-            .await
-            .unlock_inputs(selected_inputs)
-            .await;
+        let unlocked_inputs = state_lock.gs().unlock_inputs(selected_inputs).await;
 
-        // generate tx details (may add change output)
+        // generate tx details (may add change output). Mutates wallet state
+        // depending on the chosen change policy.
         let tx_details = TransactionDetailsBuilder::new()
             .timestamp(timestamp)
             .inputs(unlocked_inputs)
@@ -344,19 +360,16 @@ impl TransactionInitiator {
             .fee(fee)
             .change_policy(change_policy)
             .transparent(transparent)
-            .build(&mut self.global_state_lock.clone().into())
+            .build(&mut state_lock)
             .await?;
 
-        let block_height = self
-            .global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .light_state()
-            .header()
-            .height;
-        let cli_args = self.global_state_lock.cli();
-        let network = cli_args.network;
+        let block_height = state_lock.gs().chain.light_state().header().height;
+        let network = state_lock.cli().network;
+        let proof_job_options = state_lock.cli().as_proof_job_options();
+
+        // Release lock ASAP
+        drop(state_lock);
+
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
 
         // The target proof-type is set to the lowest possible value here,
@@ -368,7 +381,7 @@ impl TransactionInitiator {
 
         // use cli options for building proof, but override proof-type
         let options = TritonVmProofJobOptionsBuilder::new()
-            .template(&cli_args.as_proof_job_options())
+            .template(&proof_job_options)
             .proof_type(target_proof_type)
             .build();
 
@@ -382,7 +395,10 @@ impl TransactionInitiator {
             .await?;
 
         // create transaction
-        let transaction = self.assemble_transaction(&tx_details, proof)?;
+        let transaction = TransactionBuilder::new()
+            .transaction_details(&tx_details)
+            .transaction_proof(proof)
+            .build()?;
 
         // assemble transaction artifacts
         let tx_creation_artifacts = TxCreationArtifactsBuilder::new()
@@ -391,6 +407,83 @@ impl TransactionInitiator {
             .build()?;
 
         Ok(tx_creation_artifacts)
+    }
+
+    /// Build a transaction without broadcasting it or inserting it into the
+    /// mempool.
+    ///
+    /// This function does not mutate the global state, so it only needs a read
+    /// lock. This function should *only* be used if you know that the
+    /// transaction initialization is guaranteed to not mutate the global state.
+    ///
+    /// # Panics
+    /// - If the selected [`ChangePolicy`] requires mutation of the global
+    ///   state.
+    pub(crate) async fn construct_transaction_immutable_state(
+        &self,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+        transparent: bool,
+        input_selection_policy: InputSelectionPolicy,
+    ) -> Result<TxCreationArtifacts, error::SendError> {
+        self.private().check_proceed_with_send(fee).await?;
+
+        tracing::debug!("tx send initiated.");
+
+        // Hold read lock across entire transaction construction to avoid race
+        // conditions from e.g. a new block being set as tip.
+        // generate outputs
+        let read_lock = self.global_state_lock.lock_guard().await;
+        let read_lock = StateLock::ReadGuard(read_lock);
+
+        Self::construct_transaction_inner(
+            read_lock,
+            outputs,
+            change_policy,
+            fee,
+            timestamp,
+            transparent,
+            input_selection_policy,
+        )
+        .await
+    }
+
+    /// Build a transaction without broadcasting it or inserting it into the
+    /// mempool.
+    ///
+    /// This function grabs a write lock on the global state and may thus mutate
+    /// the global state.
+    pub(crate) async fn construct_transaction_mutable_state(
+        &mut self,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+        transparent: bool,
+        input_selection_policy: InputSelectionPolicy,
+    ) -> Result<TxCreationArtifacts, error::SendError> {
+        self.private().check_proceed_with_send(fee).await?;
+
+        tracing::debug!("tx send initiated.");
+
+        // Hold read lock across entire transaction construction to avoid race
+        // conditions from e.g. a new block being set as tip.
+        // generate outputs
+        let write_lock = self.global_state_lock.lock_guard_mut().await;
+        let write_lock = StateLock::WriteGuard(write_lock);
+
+        Self::construct_transaction_inner(
+            write_lock,
+            outputs,
+            change_policy,
+            fee,
+            timestamp,
+            transparent,
+            input_selection_policy,
+        )
+        .await
     }
 
     fn private(&self) -> super::private::TransactionInitiatorPrivate {
