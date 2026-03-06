@@ -648,6 +648,10 @@ pub struct Args {
     /// RPC modules to enable.
     /// Specifies which sets of RPC methods are exposed (e.g., node or chain).
     /// By default, both "node" and "chain" modules are enabled.
+    ///
+    /// WARNING: Activating some of these endpoints may expose wallet secrets
+    /// through the JSON/HTTP RPC. Make sure you don't activate the wrong ones
+    /// on an unsecured network.
     #[clap(
         long,
         value_parser = clap::value_parser!(Namespace),

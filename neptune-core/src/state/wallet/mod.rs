@@ -3,6 +3,7 @@ pub mod change_policy;
 pub mod coin_with_possible_timelock;
 pub(crate) mod expected_utxo;
 pub(crate) mod incoming_utxo;
+pub mod input_candidate;
 pub(crate) mod migrate_db;
 pub(crate) mod monitored_utxo;
 pub(crate) mod monitored_utxo_state;
@@ -10,7 +11,6 @@ pub(crate) mod rusty_wallet_database;
 pub(crate) mod scan_mode_configuration;
 pub mod secret_key_material;
 pub mod sent_transaction;
-pub mod transaction_input;
 pub mod transaction_output;
 pub(crate) mod unlocked_utxo;
 pub mod utxo_notification;
@@ -334,10 +334,8 @@ mod tests {
             alice_
                 .lock_guard()
                 .await
-                .wallet_spendable_inputs(now)
+                .wallet_spendable_inputs_at_time(now)
                 .await
-                .into_iter()
-                .collect_vec()
         };
         let num_spendable_utxos =
             |alice_: GlobalStateLock| async move { spendable_utxos(alice_).await.len() };
@@ -413,7 +411,7 @@ mod tests {
             .await
             .get_wallet_status_for_tip()
             .await
-            .available_confirmed(in_seven_months);
+            .confirmed_available_balance(BlockHeight::genesis(), in_seven_months);
         assert!(
             !bobs_original_balance.is_zero(),
             "Premine must have non-zero synced balance"
@@ -489,7 +487,7 @@ mod tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .available_confirmed(in_seven_months),
+                .confirmed_available_balance(block_1.header().height, in_seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
@@ -600,15 +598,15 @@ mod tests {
         let alice_wallet_status = alice.get_wallet_status_for_tip().await;
         assert_eq!(
             expected_num_expected_mutxos_alice,
-            alice_wallet_status.synced_unspent.len(),
+            alice_wallet_status.synced_unspent(None).count(),
             "Wallet must have {expected_num_expected_mutxos_alice} synced, unspent UTXOs",
         );
         assert!(
-            alice_wallet_status.spent.is_empty(),
+            alice_wallet_status.synced_spent(None).count() == 0,
             "Wallet must have 0 synced, spent UTXOs"
         );
         assert!(
-            alice_wallet_status.unsynced.is_empty(),
+            alice_wallet_status.num_unsynced() == 0,
             "Wallet must have 0 unsynced UTXOs"
         );
 
@@ -625,11 +623,7 @@ mod tests {
             .set_new_tip(block_2_b.clone())
             .await
             .unwrap();
-        let alice_utxos_at_2b = alice
-            .wallet_spendable_inputs(block_2_b.header().timestamp)
-            .await
-            .into_iter()
-            .collect_vec();
+        let alice_utxos_at_2b = alice.wallet_spendable_inputs().await;
         assert_eq!(
             2,
             alice_utxos_at_2b.len(),
@@ -637,7 +631,7 @@ mod tests {
         );
 
         // Verify that all monitored UTXOs have accessible membership proofs.
-        for utxo in &alice_utxos_at_2b {
+        for utxo in alice_utxos_at_2b.iter() {
             let item = Tip5::hash(&utxo.utxo);
             assert!(
                 block_2_b
@@ -656,13 +650,10 @@ mod tests {
             .set_new_tip(first_block_after_spree.clone())
             .await
             .unwrap();
-        let alice_utxos_after_continued_spree: Vec<_> = alice
-            .wallet_spendable_inputs(
-                first_block_after_spree.header().timestamp + Timestamp::years(4),
-            )
-            .await
-            .into_iter()
-            .collect_vec();
+        let four_years_later = first_block_after_spree.header().timestamp + Timestamp::years(4);
+        let alice_utxos_after_continued_spree = alice
+            .wallet_spendable_inputs_at_time(four_years_later)
+            .await;
         assert_eq!(
             expected_num_expected_mutxos_alice,
             alice_utxos_after_continued_spree.len(),
@@ -670,7 +661,7 @@ mod tests {
         );
 
         // Verify that all input UTXOs have valid membership proofs
-        for utxo in &alice_utxos_after_continued_spree {
+        for utxo in alice_utxos_after_continued_spree.iter() {
             let item = Tip5::hash(&utxo.utxo);
             assert!(
                 first_block_after_spree
@@ -769,11 +760,9 @@ mod tests {
             .await;
         alice.set_new_tip(block_3_b.clone()).await.unwrap();
 
-        let alice_utxos_3b: Vec<_> = alice
-            .wallet_spendable_inputs(block_3_b.header().timestamp + Timestamp::years(4))
-            .await
-            .into_iter()
-            .collect_vec();
+        let alice_utxos_3b = alice
+            .wallet_spendable_inputs_at_time(block_3_b.header().timestamp + Timestamp::years(4))
+            .await;
         assert_eq!(
             5,
             alice_utxos_3b.len(),
@@ -781,7 +770,7 @@ mod tests {
         );
 
         // Verify that all unspent monitored UTXOs have valid membership proofs
-        for utxo in alice_utxos_3b {
+        for utxo in alice_utxos_3b.iter() {
             let item = Tip5::hash(&utxo.utxo);
             assert!(
                 block_3_b
@@ -806,19 +795,17 @@ mod tests {
             .await
             .unwrap();
 
-        let alice_utxos_after_second_block_after_spree: Vec<_> = alice
-            .wallet_spendable_inputs(
-                second_block_after_spree.header().timestamp + Timestamp::years(4),
-            )
-            .await
-            .into_iter()
-            .collect_vec();
+        let also_four_years_later =
+            second_block_after_spree.header().timestamp + Timestamp::years(4);
+        let alice_utxos_after_second_block_after_spree = alice
+            .wallet_spendable_inputs_at_time(also_four_years_later)
+            .await;
         assert_eq!(
             expected_num_expected_mutxos_alice,
             alice_utxos_after_second_block_after_spree.len(),
             "List of monitored UTXOs must be as expected after returning to our fork"
         );
-        for utxo in &alice_utxos_after_second_block_after_spree {
+        for utxo in alice_utxos_after_second_block_after_spree.iter() {
             let item = Tip5::hash(&utxo.utxo);
             assert!(
                 second_block_after_spree
@@ -966,6 +953,166 @@ mod tests {
         );
     }
 
+    mod wallet_balance {
+        use std::collections::HashMap;
+
+        use super::*;
+        use crate::state::mempool::upgrade_priority::UpgradePriority;
+        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn wallet_status_with_mempool_tx() {
+            let network = Network::Main;
+            let cli_args = cli_args::Args {
+                network,
+                ..Default::default()
+            };
+
+            let bob = WalletEntropy::devnet_wallet();
+            let mut bob = mock_genesis_global_state(2, bob, cli_args.clone()).await;
+            let current_block = Block::genesis(network);
+
+            let distant_timestamp = current_block.header().timestamp + Timestamp::years(100);
+            let no_mempool_tx = bob.lock_guard().await.get_wallet_status_for_tip().await;
+            assert_eq!(
+                no_mempool_tx
+                    .confirmed_available_balance(current_block.header().height, distant_timestamp),
+                no_mempool_tx.unconfirmed_available_balance(distant_timestamp)
+            );
+            assert_eq!(
+                no_mempool_tx
+                    .confirmed_available_balance(current_block.header().height, distant_timestamp),
+                NativeCurrencyAmount::coins(20)
+            );
+
+            let tx = tx_with_expenditure(bob.clone(), NativeCurrencyAmount::coins(16)).await;
+            bob.global_state_lock
+                .lock_guard_mut()
+                .await
+                .mempool_insert(tx, UpgradePriority::Critical)
+                .await;
+            let with_mempool_tx = bob.lock_guard().await.get_wallet_status_for_tip().await;
+            assert_eq!(
+                with_mempool_tx.unconfirmed_available_balance(distant_timestamp),
+                NativeCurrencyAmount::coins(4)
+            );
+            assert_eq!(
+                with_mempool_tx
+                    .confirmed_available_balance(current_block.header().height, distant_timestamp),
+                NativeCurrencyAmount::coins(20)
+            );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn balances_with_n_confirmations_is_balance_n_blocks_back() {
+            // Bob is premine recipient. Makes expenditures over 7 blocks.
+            // This test verifies that the balance at tip after each block
+            // matches the balance with N confirmations when the tip is a block
+            // of height 7.
+            let network = Network::Main;
+            let cli_args = cli_args::Args {
+                network,
+                ..Default::default()
+            };
+            let mut balances_at_tip: HashMap<BlockHeight, NativeCurrencyAmount> = HashMap::new();
+            let bob = WalletEntropy::devnet_wallet();
+            let mut bob = mock_genesis_global_state(2, bob, cli_args.clone()).await;
+
+            let mut current_block = Block::genesis(network);
+            let distant_timestamp = current_block.header().timestamp + Timestamp::years(100);
+            let tip_balance = async |gsl: GlobalStateLock| {
+                let gs = gsl.global_state_lock.lock_guard().await;
+                let tip = gs.chain.light_state();
+                gs.get_wallet_status_for_tip()
+                    .await
+                    .confirmed_available_balance(tip.header().height, distant_timestamp)
+            };
+
+            for i in 1u32..=7 {
+                balances_at_tip.insert(
+                    current_block.header().height,
+                    tip_balance(bob.clone()).await,
+                );
+
+                let expenditure = NativeCurrencyAmount::coins(i.div_ceil(2));
+                let next_block = next_block_with_expenditure(bob.clone(), expenditure).await;
+                bob.set_new_tip(next_block.clone()).await.unwrap();
+                current_block = next_block;
+            }
+
+            balances_at_tip.insert(
+                current_block.header().height,
+                tip_balance(bob.clone()).await,
+            );
+
+            for i in 1..=8 {
+                let threshold = current_block.header().height.checked_sub(i - 1).unwrap();
+                let balance_with_confirmations = bob
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .get_wallet_status_for_tip()
+                    .await
+                    .confirmed_available_balance(threshold, distant_timestamp);
+                println!("balance_with_confirmations: {balance_with_confirmations}");
+
+                assert_eq!(balances_at_tip[&threshold], balance_with_confirmations);
+            }
+        }
+
+        /// Return a block with a transaction with an expenditure from the
+        /// provided global state.
+        async fn next_block_with_expenditure(
+            gsl: GlobalStateLock,
+            amount: NativeCurrencyAmount,
+        ) -> Block {
+            let tip = gsl.lock_guard().await.chain.light_state().clone();
+            let tx = tx_with_expenditure(gsl, amount).await;
+            invalid_block_with_transaction(&tip, tx)
+        }
+
+        /// Return a btransaction with an expenditure from the provided global
+        /// state.
+        async fn tx_with_expenditure(
+            gsl: GlobalStateLock,
+            amount: NativeCurrencyAmount,
+        ) -> Transaction {
+            let third_party = GenerationReceivingAddress::derive_from_seed(Digest::default());
+            let sender_randomness = Digest::default();
+
+            let receiver_data = TxOutput::offchain_native_currency(
+                amount,
+                sender_randomness,
+                third_party.into(),
+                false,
+            );
+            let receiver_data: TxOutputList = vec![receiver_data].into();
+            let config = TxCreationConfig::default()
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let mut tx_initiator_internal = gsl.api().tx_initiator_internal();
+            let network = gsl.cli().network;
+            let tip = gsl.lock_guard().await.chain.light_state().clone();
+            let in_seven_months = tip.header().timestamp + Timestamp::months(7);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, tip.header().height);
+            let fee = NativeCurrencyAmount::zero();
+            let tx = tx_initiator_internal
+                .create_transaction(
+                    receiver_data.clone(),
+                    fee,
+                    in_seven_months,
+                    config,
+                    consensus_rule_set,
+                )
+                .await
+                .unwrap()
+                .transaction;
+
+            tx.into()
+        }
+    }
+
     mod generation_key_derivation {
         use itertools::Itertools;
 
@@ -1103,7 +1250,10 @@ mod tests {
 
                 assert_eq!(
                     NativeCurrencyAmount::coins(1),
-                    wallet_status.available_confirmed(seven_months_after_launch)
+                    wallet_status.confirmed_available_balance(
+                        genesis_block.header().height,
+                        seven_months_after_launch
+                    )
                 );
             }
         }

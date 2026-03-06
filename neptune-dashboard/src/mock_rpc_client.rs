@@ -203,6 +203,7 @@ impl MockRpcClient {
         let receiving_address = match address_type {
             KeyType::Generation => state.generation_address.clone(),
             KeyType::Symmetric => state.symmetric_address.clone(),
+            _ => todo!(),
         };
         Ok(Ok(receiving_address))
     }
@@ -227,6 +228,7 @@ impl MockRpcClient {
                 );
                 state.symmetric_address.clone()
             }
+            _ => todo!(),
         };
         Ok(Ok(receiving_address))
     }

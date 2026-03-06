@@ -81,8 +81,10 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
     // Verify that wallet state was handled correctly, that balance is still
     // premine reward, since the devnet reward was not spent during first
     // blocks.
+    let block_height = state.chain.light_state().header().height;
     let wallet_status = state.get_wallet_status_for_tip().await;
-    let balance = wallet_status.available_confirmed(network.launch_date() + Timestamp::months(7));
+    let balance = wallet_status
+        .confirmed_available_balance(block_height, network.launch_date() + Timestamp::months(7));
     assert_eq!(
         NativeCurrencyAmount::coins(20),
         balance,

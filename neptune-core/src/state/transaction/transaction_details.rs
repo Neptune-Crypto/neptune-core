@@ -18,8 +18,8 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutputList;
+use crate::state::wallet::unlocked_utxo::TxInputs;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// contains the unblinded data that a
@@ -43,7 +43,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 /// security: This type contains secrets (keys) and should never be shared.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionDetails {
-    pub tx_inputs: TxInputList,
+    pub tx_inputs: TxInputs,
     pub tx_outputs: TxOutputList,
 
     /// announcements *excluding* encrypted UTXO notifications.
@@ -85,7 +85,7 @@ impl Display for TransactionDetails {
                 .unwrap_or("-".to_string()),
             self.tx_inputs
                 .iter()
-                .map(|o| o.native_currency_amount())
+                .map(|o| o.get_native_currency_amount())
                 .join(", "),
             self.tx_outputs
                 .iter()
@@ -175,7 +175,7 @@ impl TransactionDetails {
         };
 
         TransactionDetails::new_without_coinbase(
-            TxInputList::empty(),
+            TxInputs::empty(),
             gobbling_utxos,
             -gobbled_fee,
             now,
@@ -193,7 +193,7 @@ impl TransactionDetails {
     ///
     /// See also: [Self::new_without_coinbase].
     pub(crate) fn new_with_coinbase(
-        tx_inputs: impl Into<TxInputList>,
+        tx_inputs: impl Into<TxInputs>,
         tx_outputs: impl Into<TxOutputList>,
         coinbase: NativeCurrencyAmount,
         fee: NativeCurrencyAmount,
@@ -221,7 +221,7 @@ impl TransactionDetails {
     ///
     /// See also: [Self::new_with_coinbase].
     pub(crate) fn new_without_coinbase(
-        tx_inputs: impl Into<TxInputList>,
+        tx_inputs: impl Into<TxInputs>,
         tx_outputs: impl Into<TxOutputList>,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
@@ -243,7 +243,7 @@ impl TransactionDetails {
     ///
     /// This fn does not perform any validation.  use validate() instead.
     pub(crate) fn new(
-        tx_inputs: impl Into<TxInputList>,
+        tx_inputs: impl Into<TxInputs>,
         tx_outputs: impl Into<TxOutputList>,
         fee: NativeCurrencyAmount,
         coinbase: Option<NativeCurrencyAmount>,

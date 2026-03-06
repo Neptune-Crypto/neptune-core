@@ -70,6 +70,7 @@ impl TasmObject for NativeCurrencyAmount {
 }
 
 impl NativeCurrencyAmount {
+    /// Maximum number of nau that is still a valid amount.
     pub(crate) const MAX_NAU: i128 = 42_000_000 * Self::conversion_factor();
 
     /// The maximum amount that is still valid.

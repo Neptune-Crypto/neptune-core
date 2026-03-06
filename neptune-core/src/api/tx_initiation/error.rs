@@ -45,6 +45,13 @@ pub enum CreateTxError {
 
     #[error("tip does not have mutator-set-after")]
     NoMutatorSetAccumulatorAfter,
+
+    #[error(
+        "The input selection policy cannot be satisfied due to a limit \
+     in the number of allowed input. Either increase the number of inputs \
+      allowed for this transaction, or choose another input priority."
+    )]
+    TooManyInputs,
 }
 
 #[derive(Debug, Clone, thiserror::Error, strum::Display)]

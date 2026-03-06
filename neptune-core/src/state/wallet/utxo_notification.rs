@@ -1,3 +1,6 @@
+use std::fmt::Display;
+use std::str::FromStr;
+
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -17,6 +20,29 @@ pub enum UtxoNotificationMedium {
     OffChain,
 }
 
+impl Display for UtxoNotificationMedium {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let string = match self {
+            UtxoNotificationMedium::OnChain => "on-chain",
+            UtxoNotificationMedium::OffChain => "off-chain",
+        };
+
+        write!(f, "{string}")
+    }
+}
+
+impl FromStr for UtxoNotificationMedium {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "on-chain" => Ok(UtxoNotificationMedium::OnChain),
+            "off-chain" => Ok(UtxoNotificationMedium::OffChain),
+            other => Err(format!("Invalid UtxoNotificationMedium: '{other}'")),
+        }
+    }
+}
+
 /// enumerates how utxos and spending information is communicated, including how
 /// to encrypt this information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -32,11 +58,31 @@ pub(crate) enum UtxoNotificationMethod {
     None,
 }
 
+impl Display for UtxoNotificationMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let string = match self {
+            UtxoNotificationMethod::OnChain(_) => "on-chain",
+            UtxoNotificationMethod::OffChain(_) => "off-chain",
+            UtxoNotificationMethod::None => "none",
+        };
+
+        write!(f, "{string}")
+    }
+}
+
 impl UtxoNotificationMethod {
     pub(crate) fn new(medium: UtxoNotificationMedium, address: ReceivingAddress) -> Self {
         match medium {
             UtxoNotificationMedium::OnChain => Self::OnChain(address),
             UtxoNotificationMedium::OffChain => Self::OffChain(address),
+        }
+    }
+
+    pub(crate) fn receiving_address(&self) -> Option<&ReceivingAddress> {
+        match self {
+            UtxoNotificationMethod::OnChain(receiving_address) => Some(receiving_address),
+            UtxoNotificationMethod::OffChain(receiving_address) => Some(receiving_address),
+            UtxoNotificationMethod::None => None,
         }
     }
 }

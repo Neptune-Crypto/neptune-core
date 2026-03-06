@@ -180,7 +180,8 @@ pub(crate) async fn mock_genesis_wallet_state(
     cli_args: &crate::application::config::cli_args::Args,
 ) -> WalletState {
     let data_dir = unit_test_data_directory(cli_args.network).unwrap();
-    WalletState::new_from_wallet_entropy(&data_dir, wallet_entropy, cli_args).await
+    let genesis = Block::genesis(cli_args.network);
+    WalletState::new_from_wallet_entropy(&data_dir, wallet_entropy, cli_args, &genesis).await
 }
 
 /// Create a block-transaction with a bogus proof but such that `verify` passes.
