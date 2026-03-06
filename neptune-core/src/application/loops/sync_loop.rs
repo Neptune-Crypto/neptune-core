@@ -32,7 +32,7 @@ pub(crate) mod rapid_block_download;
 pub mod sync_progress;
 pub(crate) mod synchronization_bit_mask;
 
-pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 10;
+pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 100;
 
 /// After this long without a response from a given peer, that peer will be sent
 /// another block request.
