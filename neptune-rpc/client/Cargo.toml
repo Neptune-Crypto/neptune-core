@@ -18,6 +18,7 @@ async-trait = "0.1.83"
 itertools = "0.14"
 rand = "0.9"
 tokio = { version = "1.41", features = ["full", "tracing"] }
+num-traits = "0.2"
 
 [lints]
 workspace = true

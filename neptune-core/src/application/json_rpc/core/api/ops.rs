@@ -175,6 +175,9 @@ pub enum RpcMethods {
     #[namespace(Namespace::Personal)]
     Send,
 
+    #[namespace(Namespace::Personal)]
+    ClaimUtxo,
+
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
 

@@ -1887,15 +1887,21 @@ impl GlobalState {
         own_coins
     }
 
-    /// Register a UTXO to the wallet. The UTXO is expected to not be associated
-    /// with an on-chain announcement, as this method requires an encrypted UTXO
-    /// notification.
+    /// Check if a UTXO can be registered to the wallet. The UTXO is expected to
+    /// not be associated with an on-chain announcement, as this method requires
+    /// an encrypted UTXO notification, which will usually be received
+    /// off-chain.
     ///
     /// `max_search_depth` denotes how many blocks back from tip we attempt
     /// to find the transaction in a block. `None` means unlimited.
     ///
     /// `encrypted_utxo_notification` is expected to hold encrypted data about
     /// a future or past UTXO, which can be claimed by this client.
+    ///
+    /// # Returns
+    /// - Ok(None) if this UTXO is already registered by the wallet.
+    /// - Ok(Some(claim)) if this UTXO is new to the wallet.
+    /// - Err if this UTXO cannot be claimed by this wallet.
     pub(crate) async fn claim_utxo(
         &self,
         encrypted_utxo_notification: String,

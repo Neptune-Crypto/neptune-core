@@ -2034,6 +2034,21 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
+            RPCServerToMain::ClaimUtxo(claim_data) => {
+                info!("Registering UTXO claim data");
+
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::ClaimUtxo");
+
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .claim_utxo(*claim_data)
+                    .await
+                    .expect("Wallet must be able to process UTXO claim data");
+
+                Ok(false)
+            }
             RPCServerToMain::RescanAnnounced { first, last, keys } => {
                 info!("Rescanning block range {first}..={last} for announced UTXOs");
 

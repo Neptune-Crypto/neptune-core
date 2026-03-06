@@ -1243,21 +1243,10 @@ impl RpcApi for RpcServer {
 
         // Notice that transaction has *not* yet been inserted into the mempool.
         // So that must happen in the main loop.
-        let tx_inputs = transaction
-            .transaction()
-            .kernel
-            .inputs
-            .iter()
-            .map(|x| x.absolute_indices)
-            .collect();
-        let tx_outputs = transaction
-            .transaction()
-            .kernel
-            .outputs
-            .iter()
-            .copied()
-            .map(|x| x.into())
-            .collect();
+        let kernel = &transaction.transaction().kernel;
+        let tx_inputs = kernel.inputs.iter().map(|x| x.absolute_indices).collect();
+        let tx_outputs = kernel.outputs.iter().copied().map(|x| x.into()).collect();
+        let transaction_kernel_id = kernel.txid();
         let unowned_offchain_notifications = transaction.unowned_offchain_notifications();
         self.to_main_tx
             .send(RPCServerToMain::RecordAndBroadcastOwnTx {
@@ -1268,6 +1257,7 @@ impl RpcApi for RpcServer {
             .expect("Main loop must still be running");
 
         let resp = SendResponse {
+            transaction_kernel_id,
             inputs: tx_inputs,
             outputs: tx_outputs,
             unowned_offchain_notifications: unowned_offchain_notifications
@@ -1277,6 +1267,32 @@ impl RpcApi for RpcServer {
         };
 
         Ok(resp)
+    }
+
+    async fn claim_utxo_call(&self, request: ClaimUtxoRequest) -> RpcResult<ClaimUtxoResponse> {
+        let claim_utxo_data = match self
+            .state
+            .lock_guard()
+            .await
+            .claim_utxo(request.ciphertext, request.max_search_depth)
+            .await
+        {
+            Ok(Some(claim)) => claim,
+            Ok(None) => return Ok(ClaimUtxoResponse { new: false }),
+            Err(err) => return Err(RpcError::CannotClaimUtxo(err.to_string())),
+        };
+
+        if claim_utxo_data.has_expected_utxo {
+            // UTXO was already registered as an expected UTXO by the wallet.
+            return Ok(ClaimUtxoResponse { new: false });
+        }
+
+        self.to_main_tx
+            .send(RPCServerToMain::ClaimUtxo(Box::new(claim_utxo_data)))
+            .await
+            .expect("Main loop must still be running");
+
+        Ok(ClaimUtxoResponse { new: true })
     }
 
     /* Mining */

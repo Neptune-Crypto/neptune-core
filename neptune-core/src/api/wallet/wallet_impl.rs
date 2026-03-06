@@ -161,13 +161,18 @@ impl<'a> Wallet<'a> {
     pub async fn balances(&self, timestamp: Timestamp) -> WalletBalances {
         state_lock_call_async!(&self.state_lock, worker::balances, timestamp).await
     }
+
+    /// Returns the number of expected UTXOs in the wallet database.
+    pub async fn num_expected_utxos(&self) -> u64 {
+        state_lock_call_async!(&self.state_lock, worker::num_expected_utxos, ()).await
+    }
 }
 
 mod worker {
 
     use super::*;
 
-    pub async fn next_unused_spending_key(
+    pub(super) async fn next_unused_spending_key(
         gsm: &mut GlobalState,
         key_type: KeyType,
     ) -> Result<SpendingKey, WalletError> {
@@ -179,7 +184,11 @@ mod worker {
         Ok(address)
     }
 
-    pub async fn balances(gs: &GlobalState, timestamp: Timestamp) -> WalletBalances {
+    pub(super) async fn balances(gs: &GlobalState, timestamp: Timestamp) -> WalletBalances {
         WalletBalances::from_global_state(gs, timestamp).await
+    }
+
+    pub(super) async fn num_expected_utxos(gs: &GlobalState, _: ()) -> u64 {
+        gs.wallet_state.num_expected_utxos().await
     }
 }

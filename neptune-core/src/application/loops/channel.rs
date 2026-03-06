@@ -124,6 +124,10 @@ pub(crate) enum RPCServerToMain {
 
     // Used by JSON-RPC
     BroadcastThirdPartyTx(Box<Transaction>),
+
+    /// Request that the wallet registers a UTXO claim.
+    ClaimUtxo(Box<ClaimUtxoData>),
+
     RescanAnnounced {
         first: BlockHeight,
         last: BlockHeight,

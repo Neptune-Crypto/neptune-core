@@ -520,6 +520,10 @@ pub struct SendRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SendResponse {
+    /// An identifier for the transaction that stays valid as long as the
+    /// transaction is not merged with other transactions, or mined.
+    pub transaction_kernel_id: RpcTransactionKernelId,
+
     /// The absolute indices of the wallet's inputs used in the transactions.
     pub inputs: Vec<RpcAbsoluteIndexSet>,
 
@@ -533,6 +537,22 @@ pub struct SendResponse {
     /// Does not include notifications pertaning to UTXOs that the transaction
     /// initiator node can unlock.
     pub unowned_offchain_notifications: Vec<RpcPrivateNotificationData>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimUtxoRequest {
+    pub ciphertext: String,
+
+    /// Indicates how many blocks to look back in case the UTXO was already
+    /// mined.
+    pub max_search_depth: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimUtxoResponse {
+    pub new: bool,
 }
 
 /* Mining */

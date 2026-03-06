@@ -108,6 +108,9 @@ pub enum RpcError {
 
     #[error("Failed to create transaction. Error: {0}")]
     SendError(String),
+
+    #[error("The UTXO that you try to claim cannot be registered by the wallet. Error: {0}")]
+    CannotClaimUtxo(String),
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -664,6 +667,22 @@ pub trait RpcApi: Sync + Send {
     }
 
     async fn send_call(&self, request: SendRequest) -> RpcResult<SendResponse>;
+
+    /// Claim a UTXO which does not have an onchain announcement but whose
+    /// receiver data is shared through an offchain ciphertext.
+    async fn claim_utxo(
+        &self,
+        ciphertext: String,
+        max_search_depth: Option<u64>,
+    ) -> RpcResult<ClaimUtxoResponse> {
+        self.claim_utxo_call(ClaimUtxoRequest {
+            ciphertext,
+            max_search_depth,
+        })
+        .await
+    }
+
+    async fn claim_utxo_call(&self, request: ClaimUtxoRequest) -> RpcResult<ClaimUtxoResponse>;
 
     /* Mining */
 

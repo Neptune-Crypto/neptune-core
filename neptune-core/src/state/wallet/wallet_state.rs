@@ -1176,6 +1176,11 @@ impl WalletState {
             .map(|i| (i, self.wallet_entropy.nth_symmetric_key(i)))
     }
 
+    /// Claim a UTXO by adding it as either an [`ExpectedUtxo`], a
+    /// [`MonitoredUtxo`], or both.
+    ///
+    /// Will never create duplicated entries in the wallet, so this function is
+    /// guaranteed to never register the same UTXO twice.
     pub(crate) async fn claim_utxo(&mut self, utxo_claim_data: ClaimUtxoData) -> Result<()> {
         // add expected_utxo to wallet if not existing.
         //
@@ -1923,22 +1928,22 @@ impl WalletState {
         Ok(())
     }
 
-    /// writes prepared utxo claim data to disk
-    /// writes prepared utxo claim data to disk and to the database.
+    /// Writes prepared utxo claim data to disk and to the database.
     ///
     /// Inform wallet of a Utxo *after* parent transaction is mined.
     ///
-    /// no validation. assumes input data is valid/correct.
+    /// No validation. Assumes input data is valid/correct. But never stores
+    /// the same UTXO twice, in either database or on disk.
     pub(crate) async fn register_incoming_utxo(
         &mut self,
         monitored_utxo: MonitoredUtxo,
     ) -> Result<()> {
-        // write to disk.
         let recovery_data: IncomingUtxoRecoveryData = (&monitored_utxo).into();
-        self.store_utxo_ms_recovery_data(recovery_data).await?;
-
-        // add monitored_utxo
-        self.wallet_db.insert_mutxo(monitored_utxo).await;
+        let insertion_result = self.wallet_db.insert_mutxo(monitored_utxo.clone()).await;
+        if let MonitoredUtxoInsertResult::New(_) = insertion_result {
+            // write to recovery data to disk, if new.
+            self.store_utxo_ms_recovery_data(recovery_data).await?;
+        }
 
         Ok(())
     }
