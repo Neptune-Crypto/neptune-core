@@ -1763,7 +1763,7 @@ pub mod tests {
         RpcServer::new(global_state_lock, None)
     }
 
-    async fn test_rpc_server_with_cli_args(cli: cli_args::Args) -> RpcServer {
+    pub(crate) async fn test_rpc_server_with_cli_args(cli: cli_args::Args) -> RpcServer {
         test_rpc_server_with_cli_args_and_wallet(cli, WalletEntropy::new_random()).await
     }
 
@@ -2535,6 +2535,7 @@ pub mod tests {
             let cli = cli_args::Args {
                 network,
                 rpc_modules: vec![Namespace::Personal, Namespace::Mempool],
+                unsafe_rpc: true,
                 ..Default::default()
             };
             let wallet_entropy = WalletEntropy::devnet_wallet();
@@ -2892,6 +2893,7 @@ pub mod tests {
             let cli_args = cli_args::Args {
                 network,
                 rpc_modules: vec![Namespace::Personal],
+                unsafe_rpc: true,
                 ..Default::default()
             };
             let mut rpc_server =

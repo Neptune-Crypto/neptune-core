@@ -176,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_new_address_bumps_derivation_index() {
-        let unsafe_rpc = false;
+        let unsafe_rpc = true;
         let (client, _) = start_pseudo_real_server(
             Network::Main,
             HashSet::from([Namespace::Chain, Namespace::Personal]),
@@ -236,7 +236,7 @@ mod tests {
 
     #[tokio::test]
     async fn outgoing_history_empty_wallet_db() {
-        let unsafe_rpc = false;
+        let unsafe_rpc = true;
         let (client, _) = start_pseudo_real_server(
             Network::Main,
             HashSet::from([Namespace::Personal]),
@@ -258,7 +258,7 @@ mod tests {
 
     #[tokio::test]
     async fn count_sent_txs_empty_wallet_db() {
-        let unsafe_rpc = false;
+        let unsafe_rpc = true;
         let (client, _) = start_pseudo_real_server(
             Network::Main,
             HashSet::from([Namespace::Personal]),
@@ -314,7 +314,7 @@ mod tests {
 
     #[tokio::test]
     async fn unspent_utxos_call() {
-        let unsafe_rpc = false;
+        let unsafe_rpc = true;
         let (client, _) = start_pseudo_real_server(
             Network::Main,
             HashSet::from([Namespace::Personal]),
@@ -329,7 +329,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_from_premine_receiver() {
-        let unsafe_rpc = false;
+        let unsafe_rpc = true;
         let (client, _) = start_pseudo_real_server(
             Network::Main,
             HashSet::from([Namespace::Personal, Namespace::Mempool, Namespace::Node]),
@@ -412,7 +412,7 @@ mod tests {
         // Alice sends coins to Bob with an offchain notification. Then Bob
         // registers the UTXO claim. Then the transaction is mined, and Bob's
         // wallet must register the mined UTXO.
-        let unsafe_rpc = false;
+        let unsafe_rpc = true;
         let network = Network::RegTest;
         let (alice_client, mut alice_gsl) = start_pseudo_real_server(
             network,
@@ -551,6 +551,20 @@ mod tests {
             send_amt, after_balance,
             "Bob expected balance: {send_amt}. Was: {after_balance}",
         );
+    }
+
+    #[tokio::test]
+    async fn personal_namespace_blocked_unless_unsafe_rpc_is_set() {
+        let unsafe_rpc = false;
+        let (client, _) = start_pseudo_real_server(
+            Network::Main,
+            HashSet::from([Namespace::Personal]),
+            unsafe_rpc,
+            40600,
+            None,
+        )
+        .await;
+        assert!(client.unspent_utxos().await.is_err());
     }
 
     async fn wait_until_tx_in_mempool_has_single_proof(

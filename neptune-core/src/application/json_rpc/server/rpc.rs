@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use tokio::sync::mpsc;
+use tracing::error;
 use tracing::warn;
 
 use crate::application::json_rpc::core::api::ops::Namespace;
@@ -12,9 +13,14 @@ pub struct RpcServer {
     pub(crate) state: GlobalStateLock,
     pub(crate) to_main_tx: mpsc::Sender<RPCServerToMain>,
 
-    /// Prevents users from doing harm.
+    /// If set, means that 3rd parties should not have access to the RPC server,
+    /// as they can do harm.
+    ///
     /// DOS protection: If set to true, the client may make requests that
     /// require a lot of work or a long time to answer.
+    ///
+    /// Own wallet state protection: If set to true, access to the node's own
+    /// wallet is permitted through the RPC.
     pub(crate) unrestricted: bool,
 }
 
@@ -41,17 +47,23 @@ impl RpcServer {
 
             if !is_archival {
                 namespaces.remove(&Namespace::Archival);
-                warn!("Node is not archival, cannot enable Archival namespace.");
+                error!("Node is not archival, cannot enable Archival namespace.");
             }
         }
 
         if namespaces.contains(&Namespace::Utxoindex) {
-            let has_utxo_index = state.chain.archival_state().utxo_index.is_some();
+            let has_utxo_index =
+                state.chain.is_archival_node() && state.chain.archival_state().utxo_index.is_some();
 
             if !has_utxo_index {
                 namespaces.remove(&Namespace::Utxoindex);
-                warn!("Node does not maintain a UTXO index, cannot enable UTXO Index namespace.");
+                error!("Node does not maintain a UTXO index, cannot enable UTXO Index namespace.");
             }
+        }
+
+        if !self.unrestricted && namespaces.contains(&Namespace::Personal) {
+            namespaces.remove(&Namespace::Personal);
+            error!("The RPC module 'Personal' can only be activated with unsafe RPC set.");
         }
 
         if !self.unrestricted && namespaces.contains(&Namespace::Network) {
@@ -80,9 +92,48 @@ mod tests {
     use crate::application::json_rpc::core::model::json::JsonResponse;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::application::json_rpc::server::service::tests::test_rpc_server;
+    use crate::application::json_rpc::server::service::tests::test_rpc_server_with_cli_args;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
+
+    async fn call_paramless(router: Arc<RpcRouter>, method: &str) -> JsonResponse {
+        let empty_params = json!([]);
+        let response = router.dispatch(method, empty_params).await;
+
+        match response {
+            Ok(result) => JsonResponse::success(None, result),
+            Err(error) => JsonResponse::error(None, error),
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn disallow_personal_namespace_unless_unsafe_rpc_is_set() {
+        let namespaces = vec![Namespace::Personal];
+        let no_unsafe = cli_args::Args {
+            network: Network::Main,
+            unsafe_rpc: false,
+            rpc_modules: namespaces.clone(),
+            ..Default::default()
+        };
+        let no_personal = test_rpc_server_with_cli_args(no_unsafe).await;
+        assert!(!no_personal
+            .enabled_namespaces()
+            .await
+            .contains(&Namespace::Personal));
+
+        let with_unsafe = cli_args::Args {
+            network: Network::Main,
+            unsafe_rpc: true,
+            rpc_modules: namespaces,
+            ..Default::default()
+        };
+        let with_personal = test_rpc_server_with_cli_args(with_unsafe).await;
+        assert!(with_personal
+            .enabled_namespaces()
+            .await
+            .contains(&Namespace::Personal));
+    }
 
     #[apply(shared_tokio_runtime)]
     async fn respects_safety_configuration() {
@@ -101,16 +152,6 @@ mod tests {
         // This can be used in transports where UX is prioritized over security
         let server_unrestricted = RpcServer::new(global_state_lock, Some(true));
         assert!(server_unrestricted.unrestricted);
-    }
-
-    async fn call_paramless(router: Arc<RpcRouter>, method: &str) -> JsonResponse {
-        let empty_params = json!([]);
-        let response = router.dispatch(method, empty_params).await;
-
-        match response {
-            Ok(result) => JsonResponse::success(None, result),
-            Err(error) => JsonResponse::error(None, error),
-        }
     }
 
     #[apply(shared_tokio_runtime)]
