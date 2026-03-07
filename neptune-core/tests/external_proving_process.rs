@@ -15,6 +15,12 @@ use tasm_lib::triton_vm::stark::Stark;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_prove_out_of_process() {
+    // Initialize a global subscriber that definitely writes to stdout.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("debug")
+        .with_test_writer()
+        .try_init();
+
     // Compile claim.
     let fibonacci_code = triton_asm! {
         // _

@@ -327,6 +327,31 @@ impl ProverJob {
                 .stderr(Stdio::piped())
                 .spawn()?;
 
+            // Pipe stderr to matching tracing logs
+            if let Some(stderr) = child.stderr.take() {
+                tokio::spawn(async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let mut reader = tokio::io::BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        let msg = line.trim();
+                        if let Some(suffix) = msg.strip_prefix("DEBUG:") {
+                            tracing::debug!("triton-vm-prover: {}", &suffix);
+                        } else if let Some(suffix) = msg.strip_prefix("INFO:") {
+                            tracing::info!("triton-vm-prover: {}", &suffix);
+                        } else if let Some(suffix) = msg.strip_prefix("TRACE:") {
+                            tracing::trace!("triton-vm-prover: {}", &suffix);
+                        } else if let Some(suffix) = msg.strip_prefix("ERROR:") {
+                            tracing::error!("triton-vm-prover: {}", &suffix);
+                        } else if let Some(suffix) = msg.strip_prefix("WARN:") {
+                            tracing::warn!("triton-vm-prover: {}", &suffix);
+                        } else {
+                            // Default fallback for raw panics or untagged output
+                            tracing::trace!("triton-vm-prover (raw): {}", msg);
+                        }
+                    }
+                });
+            }
+
             let mut child_stdin = child.stdin.take().ok_or(VmProcessError::StdinUnavailable)?;
 
             // Pipe the entire JSON payload at once

@@ -39,7 +39,7 @@ fn set_environment_variables(env_vars: &[(String, String)]) {
     // RAYON_NUM_THREADS, depending on the padded height of the algebraic
     // execution trace.
     for (key, value) in env_vars {
-        eprintln!("Setting env variable for Triton VM: {key}={value}");
+        eprintln!("TRACE: Setting env variable for Triton VM: {key}={value}");
 
         // SAFETY:
         // - "The exact requirement is: you must ensure that there are no
@@ -64,7 +64,7 @@ fn set_environment_variables(env_vars: &[(String, String)]) {
             };
 
             if let Some(d) = decision {
-                eprintln!("overwriting cache lde trace to: {d:?}");
+                eprintln!("TRACE: overwriting cache lde trace to: {d:?}");
                 overwrite_lde_trace_caching_to(d);
             }
         }
@@ -88,11 +88,11 @@ fn execute(
 
     // Use std-err for logging purposes since spawner (caller) doesn't get the
     // log outputs but can capture std-err.
-    eprintln!("actual log2 padded height for proof: {log2_padded_height}");
+    eprintln!("DEBUG: actual log2 padded height for proof: {log2_padded_height}");
 
     if max_log2_padded_height.is_some_and(|max| log2_padded_height > max) {
         eprintln!(
-            "Canceling prover because padded height exceeds max value of {}",
+            "ERROR: Canceling prover because padded height exceeds max value of {}",
             max_log2_padded_height.unwrap()
         );
         // Exit with a specific error code so that the parent process knows
@@ -121,11 +121,12 @@ fn execute(
 /// It consumes JSON-serialized task definitions from STDIN and produces
 /// a binary-serialized Proof on STDOUT.
 fn main() {
+    eprintln!("DEBUG: Starting triton-vm-prover.");
     // Check for a delegated prover, which could be a binary or a command. If
     // set, use that.
     if let Ok(prover_cmd) = std::env::var(TRITON_PROVER_ENV_VAR) {
         if !prover_cmd.trim().is_empty() {
-            eprintln!("Proxying prover job to command: {prover_cmd}");
+            eprintln!("INFO: Proxying prover job to command: `{prover_cmd}`");
 
             let mut cmd = if cfg!(unix) {
                 let mut cmd = std::process::Command::new("sh");
@@ -142,7 +143,7 @@ fn main() {
                 .stdout(std::process::Stdio::inherit())
                 .stderr(std::process::Stdio::inherit())
                 .status()
-                .expect("Failed to execute alternative prover command");
+                .expect("ERROR: Failed to execute alternative prover command");
 
             std::process::exit(exit_status.code().unwrap_or(1));
         }
@@ -156,8 +157,13 @@ fn main() {
 
     // Read task definition from STDIN.
     let stdin = std::io::stdin();
-    let job: TritonVMProverJob = serde_json::from_reader(stdin.lock())
-        .expect("Failed to deserialize TritonVMProverJob from STDIN");
+    let job: TritonVMProverJob = match serde_json::from_reader(stdin.lock()) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("ERROR: Failed to deserialize TritonVMProverJob from STDIN:\n{e}");
+            std::process::exit(1);
+        }
+    };
 
     // Perform task.
     let proof = execute(
@@ -167,7 +173,7 @@ fn main() {
         job.max_log2_padded_height,
         job.env_vars,
     );
-    eprintln!("triton-vm: completed proof");
+    eprintln!("DEBUG: triton-vm-prover: completed proof");
 
     // Write serialized proof to STDOUT.
     let as_bytes = bincode::serialize(&proof).unwrap();
