@@ -18,6 +18,9 @@ use thread_priority::ThreadPriority;
 
 const LDE_TRACE_ENV_VAR: &str = tasm_lib::triton_vm::config::ENV_VAR_LDE_CACHE;
 
+/// If set, turns this executable into a proxy for the given binary or command.
+const TRITON_PROVER_ENV_VAR: &str = "TRITON_PROVER";
+
 /// Sets process-level environment variables to tune Triton VM's performance.
 ///
 /// This is used to toggle LDE (Low Degree Extension) caching and Rayon
@@ -118,6 +121,33 @@ fn execute(
 /// It consumes JSON-serialized task definitions from STDIN and produces
 /// a binary-serialized Proof on STDOUT.
 fn main() {
+    // Check for a delegated prover, which could be a binary or a command. If
+    // set, use that.
+    if let Ok(prover_cmd) = std::env::var(TRITON_PROVER_ENV_VAR) {
+        if !prover_cmd.trim().is_empty() {
+            eprintln!("Proxying prover job to command: {prover_cmd}");
+
+            let mut cmd = if cfg!(unix) {
+                let mut cmd = std::process::Command::new("sh");
+                cmd.arg("-c").arg(&prover_cmd);
+                cmd
+            } else {
+                let mut cmd = std::process::Command::new("cmd");
+                cmd.arg("/C").arg(&prover_cmd);
+                cmd
+            };
+
+            let exit_status = cmd
+                .stdin(std::process::Stdio::inherit())
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .status()
+                .expect("Failed to execute alternative prover command");
+
+            std::process::exit(exit_status.code().unwrap_or(1));
+        }
+    }
+
     // run with a low priority so that neptune-core can remain responsive.
     //
     // todo: we could accept a thread-prioritycli param (0..100) and
