@@ -16,9 +16,18 @@ use tasm_lib::triton_vm::vm::VM;
 use thread_priority::set_current_thread_priority;
 use thread_priority::ThreadPriority;
 
-// TODO: Replace by value exposed in Triton VM
-const LDE_TRACE_ENV_VAR: &str = "TVM_LDE_TRACE";
+const LDE_TRACE_ENV_VAR: &str = tasm_lib::triton_vm::config::ENV_VAR_LDE_CACHE;
 
+/// Sets process-level environment variables to tune Triton VM's performance.
+///
+/// This is used to toggle LDE (Low Degree Extension) caching and Rayon
+/// parallelism  based on the specific resource requirements of the execution
+/// trace. Besides setting the environment variables, this function also calls
+/// a public function exposed by triton_vm to overwrite the LDE cache config --
+/// just to make sure it was set correctly.
+///
+/// This function may not be called more than once and may not be called from a
+/// concurrent or multi-threaded context.
 fn set_environment_variables(env_vars: &[(String, String)]) {
     // Set environment variables for this spawned process only, does not apply
     // globally. Documentation of `set_var` shows it's for the currently
@@ -58,6 +67,7 @@ fn set_environment_variables(env_vars: &[(String, String)]) {
     }
 }
 
+/// Configure and run the STARK prover.
 fn execute(
     claim: Claim,
     program: Program,
@@ -67,6 +77,8 @@ fn execute(
 ) -> Proof {
     let stark: Stark = Stark::default();
 
+    // Generate the Algebraic Execution Trace (AET) to determine the padded
+    // table height, which is an input to later calculations.
     let (aet, _) = VM::trace_execution(program, (&claim.input).into(), non_determinism).unwrap();
     let log2_padded_height = aet.padded_height().ilog2() as u8;
 
@@ -79,13 +91,17 @@ fn execute(
             "Canceling prover because padded height exceeds max value of {}",
             max_log2_padded_height.unwrap()
         );
-        // Exit with error code indicating 1) AET padded height too big, and 2)
-        // the log2 padded height. Guaranteed to be in the range [200-232].
+        // Exit with a specific error code so that the parent process knows
+        // resource limit was hit. This error code indicates that AET padded
+        // height too big, and furthermore communicates the log2 padded height.
+        // It is guaranteed to be in the range [200-232].
         std::process::exit(
             PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE + i32::from(log2_padded_height),
         );
     }
 
+    // Lookup specific environment variable-assignments for this padded table
+    // height.
     let env_vars = env_vars
         .get(&log2_padded_height)
         .map(|x| x.to_owned())
@@ -96,6 +112,10 @@ fn execute(
     stark.prove(&claim, &aet).unwrap()
 }
 
+/// Entry point for the standalone prover process.
+///
+/// It consumes JSON-serialized task definitions from STDIN and produces
+/// a binary-serialized Proof on STDOUT.
 fn main() {
     // run with a low priority so that neptune-core can remain responsive.
     //
@@ -103,6 +123,7 @@ fn main() {
     //       pass it with ThreadPriority::CrossPlatform(x).
     set_current_thread_priority(ThreadPriority::Min).unwrap();
 
+    // Read task definition from STDIN.
     let stdin = std::io::stdin();
     let mut iterator = stdin.lock().lines();
     let claim: Claim = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
@@ -114,6 +135,7 @@ fn main() {
     let env_variables: TritonVmEnvVars =
         serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
 
+    // Perform task.
     let proof = execute(
         claim,
         program,
@@ -123,6 +145,7 @@ fn main() {
     );
     eprintln!("triton-vm: completed proof");
 
+    // Write serialized proof to STDOUT.
     let as_bytes = bincode::serialize(&proof).unwrap();
     let mut stdout = std::io::stdout();
     stdout.write_all(&as_bytes).unwrap();
