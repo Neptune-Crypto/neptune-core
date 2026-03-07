@@ -49,19 +49,20 @@ fn set_environment_variables(env_vars: &[(String, String)]) {
             std::env::set_var(key, value);
         }
 
-        // In case Triton VM has already set the cache decision prior to
+        // In case Triton VM has already made the cache decision prior to
         // the environment variable being set here, we override it through
-        // a publicly exposed function.
+        // a publicly exposed function. This override ensures that the Triton
+        // VM configuration agrees with the environment variable.
         if key == LDE_TRACE_ENV_VAR {
-            let maybe_overwrite = value.to_ascii_lowercase();
-            let cache_lde_trace_overwrite = match maybe_overwrite.as_str() {
+            let decision = match value.to_lowercase().as_str() {
                 "cache" => Some(CacheDecision::Cache),
                 "no_cache" => Some(CacheDecision::NoCache),
                 _ => None,
             };
-            if let Some(cache_lde_trace_overwrite) = cache_lde_trace_overwrite {
-                eprintln!("overwriting cache lde trace to: {cache_lde_trace_overwrite:?}");
-                overwrite_lde_trace_caching_to(cache_lde_trace_overwrite);
+
+            if let Some(d) = decision {
+                eprintln!("overwriting cache lde trace to: {d:?}");
+                overwrite_lde_trace_caching_to(d);
             }
         }
     }
