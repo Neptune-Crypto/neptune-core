@@ -8,14 +8,6 @@
 //!
 //! The queue is used to ensure that only one triton-vm
 //! program can execute at a time.
-#[cfg(not(test))]
-use std::process::Stdio;
-
-use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
-use tasm_lib::triton_vm::error::InstructionError;
-#[cfg(not(test))]
-use tokio::io::AsyncWriteExt;
-
 use crate::application::config::network::Network;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::job_queue::channels::JobCancelReceiver;
@@ -26,13 +18,15 @@ use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-#[cfg(test)]
-use crate::protocol::proof_abstractions::tasm::program::tests;
 use crate::protocol::proof_abstractions::Claim;
 use crate::protocol::proof_abstractions::NonDeterminism;
 use crate::protocol::proof_abstractions::Program;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::vm::VMState;
+use std::process::Stdio;
+use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
+use tasm_lib::triton_vm::error::InstructionError;
+use tokio::io::AsyncWriteExt;
 
 /// Error code from the spawned prover process in the range 200-232 are reserved
 /// for communicating that the proof is too big. The error code returned is
@@ -66,8 +60,8 @@ pub enum VmProcessError {
     #[error("parameter serialization failed")]
     ParameterSerializationFailed(#[from] serde_json::Error),
 
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
+    #[error("could not determine path of own executable: {0}")]
+    CouldNotDetermineExePath(#[from] std::io::Error),
 
     #[error("stdin unavailable")]
     StdinUnavailable,
@@ -102,10 +96,12 @@ pub enum VmProcessError {
     TritonVmFailed(InstructionError),
 }
 
-enum ProverProcessCompletion {
+#[derive(Debug)]
+pub enum ProverProcessCompletion {
     Finished(Proof),
     Cancelled,
 }
+
 impl From<ProverProcessCompletion> for JobCompletion {
     fn from(ppc: ProverProcessCompletion) -> Self {
         match ppc {
@@ -134,7 +130,6 @@ pub struct ProverJobSettings {
     pub triton_vm_env_vars: TritonVmEnvVars,
 }
 
-#[cfg(test)]
 impl Default for ProverJobSettings {
     fn default() -> Self {
         Self {
@@ -149,10 +144,10 @@ impl Default for ProverJobSettings {
 
 #[derive(Debug, Clone)]
 pub struct ProverJob {
-    program: Program,
-    claim: Claim,
-    nondeterminism: NonDeterminism,
-    job_settings: ProverJobSettings,
+    pub(super) program: Program,
+    pub(super) claim: Claim,
+    pub(super) nondeterminism: NonDeterminism,
+    pub(super) job_settings: ProverJobSettings,
 }
 
 impl ProverJob {
@@ -284,29 +279,6 @@ impl ProverJob {
         result.into()
     }
 
-    #[cfg(test)]
-    async fn prove_for_unit_testing(
-        &self,
-        mut rx: JobCancelReceiver,
-    ) -> Result<ProverProcessCompletion, VmProcessError> {
-        let claim = self.claim.clone();
-        let program = self.program.clone();
-        let nondeterminism = self.nondeterminism.clone();
-
-        let prove_jh = tokio::task::spawn_blocking(move || {
-            let proof = tests::load_proof_or_produce_and_save(&claim, program, nondeterminism);
-            ProverProcessCompletion::Finished(proof)
-        });
-
-        tokio::select! {
-            result = prove_jh => Ok(result.unwrap()),
-            _ = rx.changed() => {
-                tracing::debug!("prover job got cancel message.  cancelling.");
-                Ok(ProverProcessCompletion::Cancelled)
-            }
-        }
-    }
-
     /// runs triton-vm prover out of process.
     ///
     /// This method spawns child process and waits for either:
@@ -336,8 +308,7 @@ impl ProverJob {
     ///
     /// The process result is only read if exit code is 0.
     /// A non-zero exit code or no code results in an error.
-    #[cfg(not(test))]
-    async fn prove_out_of_process(
+    pub async fn prove_out_of_process(
         &self,
         mut rx: JobCancelReceiver,
     ) -> Result<ProverProcessCompletion, VmProcessError> {
@@ -346,13 +317,8 @@ impl ProverJob {
 
         // start child process
         let mut child = {
-            let inputs = [
-                serde_json::to_string(&self.claim)?,
-                serde_json::to_string(&self.program)?,
-                serde_json::to_string(&self.nondeterminism)?,
-                serde_json::to_string(&self.job_settings.max_log2_padded_height_for_proofs)?,
-                serde_json::to_string(&self.job_settings.triton_vm_env_vars)?,
-            ];
+            let job_payload = super::triton_vm_prover_job::TritonVMProverJob::from(self.clone());
+            let payload_bytes = serde_json::to_vec(&job_payload)?;
 
             let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
                 .kill_on_drop(true) // extra insurance.
@@ -362,7 +328,12 @@ impl ProverJob {
                 .spawn()?;
 
             let mut child_stdin = child.stdin.take().ok_or(VmProcessError::StdinUnavailable)?;
-            child_stdin.write_all(inputs.join("\n").as_bytes()).await?;
+
+            // Pipe the entire JSON payload at once
+            child_stdin.write_all(&payload_bytes).await?;
+
+            // Drop stdin to signal EOF to the child process
+            drop(child_stdin);
 
             child
         };
@@ -448,11 +419,30 @@ impl ProverJob {
     ///
     /// note: we do not verify that the path exists. That will occur anyway
     /// when triton-vm-prover is executed.
-    #[cfg(not(test))]
-    fn path_to_triton_vm_prover() -> Result<std::path::PathBuf, std::io::Error> {
-        let mut exe_path = std::env::current_exe()?;
-        exe_path.set_file_name("triton-vm-prover");
-        Ok(exe_path)
+    fn path_to_triton_vm_prover() -> Result<std::path::PathBuf, VmProcessError> {
+        let mut path = std::env::current_exe()?;
+
+        // Handle the ".exe" extension for Windows automatically
+        let extension = std::env::consts::EXE_EXTENSION;
+        let bin_name = if extension.is_empty() {
+            "triton-vm-prover".to_string()
+        } else {
+            format!("triton-vm-prover.{extension}")
+        };
+
+        // If we are in 'target/debug/deps', move up to 'target/debug', which is
+        // where we may expect to find the binary if the directory structure is
+        // the standard layout for Cargo integration tests.
+        if let Some(parent) = path.parent() {
+            if parent.ends_with("deps") {
+                path = parent.parent().unwrap_or(parent).to_path_buf();
+            } else {
+                path = parent.to_path_buf();
+            }
+        }
+
+        path.push(bin_name);
+        Ok(path)
     }
 }
 
@@ -502,7 +492,6 @@ impl Job for ProverJob {
 }
 
 // future cleanup: remove this module, when possible.
-#[cfg(not(test))]
 mod process_util {
 
     use std::process::Output;
@@ -562,5 +551,36 @@ mod process_util {
             stdout,
             stderr,
         })
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+
+    use super::*;
+    use crate::protocol::proof_abstractions::tasm::program::tests::load_proof_or_produce_and_save;
+
+    impl ProverJob {
+        pub(crate) async fn prove_for_unit_testing(
+            &self,
+            mut rx: JobCancelReceiver,
+        ) -> Result<ProverProcessCompletion, VmProcessError> {
+            let claim = self.claim.clone();
+            let program = self.program.clone();
+            let nondeterminism = self.nondeterminism.clone();
+
+            let prove_jh = tokio::task::spawn_blocking(move || {
+                let proof = load_proof_or_produce_and_save(&claim, program, nondeterminism);
+                ProverProcessCompletion::Finished(proof)
+            });
+
+            tokio::select! {
+                result = prove_jh => Ok(result.unwrap()),
+                _ = rx.changed() => {
+                    tracing::debug!("prover job got cancel message.  cancelling.");
+                    Ok(ProverProcessCompletion::Cancelled)
+                }
+            }
+        }
     }
 }

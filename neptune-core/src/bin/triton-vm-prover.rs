@@ -1,10 +1,10 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use std::io::BufRead;
 use std::io::Write;
 
 use neptune_cash::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use neptune_cash::protocol::proof_abstractions::tasm::prover_job::PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE;
+use neptune_cash::protocol::proof_abstractions::tasm::triton_vm_prover_job::TritonVMProverJob;
 use tasm_lib::triton_vm::config::overwrite_lde_trace_caching_to;
 use tasm_lib::triton_vm::config::CacheDecision;
 use tasm_lib::triton_vm::prelude::Program;
@@ -125,23 +125,16 @@ fn main() {
 
     // Read task definition from STDIN.
     let stdin = std::io::stdin();
-    let mut iterator = stdin.lock().lines();
-    let claim: Claim = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
-    let program: Program = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
-    let non_determinism: NonDeterminism =
-        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
-    let max_log2_padded_height: Option<u8> =
-        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
-    let env_variables: TritonVmEnvVars =
-        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
+    let job: TritonVMProverJob = serde_json::from_reader(stdin.lock())
+        .expect("Failed to deserialize TritonVMProverJob from STDIN");
 
     // Perform task.
     let proof = execute(
-        claim,
-        program,
-        non_determinism,
-        max_log2_padded_height,
-        env_variables,
+        job.claim,
+        job.program,
+        job.non_determinism,
+        job.max_log2_padded_height,
+        job.env_vars,
     );
     eprintln!("triton-vm: completed proof");
 

@@ -567,7 +567,7 @@ pub mod tests {
             .0
             .iter()
             .copied()
-            .flat_map(|b| b.value().to_be_bytes())
+            .flat_map(|b| b.value().to_be_bytes().to_vec())
             .collect_vec();
         let mut output_file = File::create(path).expect("cannot open file for writing");
         output_file
