@@ -178,8 +178,8 @@ name = "neptune-core"
 path = "src/main.rs"
 
 [[bin]]
-name = "triton-vm-prover"
-path = "src/bin/triton-vm-prover.rs"
+name = "neptune-prover"
+path = "src/bin/neptune-prover.rs"
 
 [lints]
 workspace = true

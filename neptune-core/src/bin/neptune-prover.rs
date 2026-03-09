@@ -19,7 +19,7 @@ use thread_priority::ThreadPriority;
 const LDE_TRACE_ENV_VAR: &str = tasm_lib::triton_vm::config::ENV_VAR_LDE_CACHE;
 
 /// If set, turns this executable into a proxy for the given binary or command.
-const TRITON_PROVER_ENV_VAR: &str = "TRITON_PROVER";
+const NEPTUNE_PROVER_ENV_VAR: &str = "NEPTUNE_PROVER_PROXY";
 
 /// Sets process-level environment variables to tune Triton VM's performance.
 ///
@@ -124,7 +124,7 @@ fn main() {
     eprintln!("DEBUG: Starting triton-vm-prover.");
     // Check for a delegated prover, which could be a binary or a command. If
     // set, use that.
-    if let Ok(prover_cmd) = std::env::var(TRITON_PROVER_ENV_VAR) {
+    if let Ok(prover_cmd) = std::env::var(NEPTUNE_PROVER_ENV_VAR) {
         if !prover_cmd.trim().is_empty() {
             eprintln!("INFO: Proxying prover job to command: `{prover_cmd}`");
 
