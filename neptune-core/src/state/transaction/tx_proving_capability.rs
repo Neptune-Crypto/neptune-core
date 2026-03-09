@@ -9,8 +9,6 @@ use serde::Serialize;
 
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 
-// note: we should consider merging TransactionProofType and TxProvingCapability
-
 /// represents which type of proof a given device is capable of generating
 ///
 /// see also:
@@ -18,20 +16,19 @@ use crate::protocol::consensus::transaction::transaction_proof::TransactionProof
 /// * [TransactionProof](crate::protocol::consensus::transaction::transaction_proof::TransactionProof)
 #[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, GetSize)]
 pub enum TxProvingCapability {
-    LockScript,
+    // Enumeration here must match that used in TransactionProofType.
     #[default]
-    PrimitiveWitness,
-    ProofCollection,
-    SingleProof,
+    PrimitiveWitness = 0,
+    LockScript = 1,
+    ProofCollection = 2,
+    SingleProof = 3,
 }
 
 impl From<TxProvingCapability> for TransactionProofType {
     fn from(c: TxProvingCapability) -> Self {
         match c {
-            // TransactionProofType and TxProvingCapability need to be
-            // reconciled with regards to LockScript, or merged into single type.
-            TxProvingCapability::LockScript => unimplemented!(),
             TxProvingCapability::PrimitiveWitness => Self::PrimitiveWitness,
+            TxProvingCapability::LockScript => unimplemented!(),
             TxProvingCapability::ProofCollection => Self::ProofCollection,
             TxProvingCapability::SingleProof => Self::SingleProof,
         }
@@ -40,17 +37,7 @@ impl From<TxProvingCapability> for TransactionProofType {
 
 impl TxProvingCapability {
     pub(crate) fn can_prove(&self, proof_type: TransactionProofType) -> bool {
-        assert!(proof_type as u8 > 0);
-
-        let self_val = match *self {
-            // TransactionProofType and TxProvingCapability need to be
-            // reconciled with regards to LockScript, or merged into single type.
-            Self::LockScript => 0,
-            Self::PrimitiveWitness => TransactionProofType::PrimitiveWitness as u8,
-            Self::ProofCollection => TransactionProofType::ProofCollection as u8,
-            Self::SingleProof => TransactionProofType::SingleProof as u8,
-        };
-
+        let self_val = *self as u8;
         self_val >= proof_type as u8
     }
 }
@@ -100,5 +87,37 @@ impl rand::distr::Distribution<TxProvingCapability> for rand::distr::StandardUni
             3 => TxProvingCapability::SingleProof,
             _ => unreachable!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_prove_simple() {
+        assert!(
+            TxProvingCapability::PrimitiveWitness.can_prove(TransactionProofType::PrimitiveWitness)
+        );
+        assert!(
+            !TxProvingCapability::PrimitiveWitness.can_prove(TransactionProofType::ProofCollection)
+        );
+        assert!(!TxProvingCapability::PrimitiveWitness.can_prove(TransactionProofType::SingleProof));
+
+        assert!(TxProvingCapability::LockScript.can_prove(TransactionProofType::PrimitiveWitness));
+        assert!(!TxProvingCapability::LockScript.can_prove(TransactionProofType::ProofCollection));
+        assert!(!TxProvingCapability::LockScript.can_prove(TransactionProofType::SingleProof));
+
+        assert!(
+            TxProvingCapability::ProofCollection.can_prove(TransactionProofType::PrimitiveWitness)
+        );
+        assert!(
+            TxProvingCapability::ProofCollection.can_prove(TransactionProofType::ProofCollection)
+        );
+        assert!(!TxProvingCapability::ProofCollection.can_prove(TransactionProofType::SingleProof));
+
+        assert!(TxProvingCapability::SingleProof.can_prove(TransactionProofType::PrimitiveWitness));
+        assert!(TxProvingCapability::SingleProof.can_prove(TransactionProofType::ProofCollection));
+        assert!(TxProvingCapability::SingleProof.can_prove(TransactionProofType::SingleProof));
     }
 }

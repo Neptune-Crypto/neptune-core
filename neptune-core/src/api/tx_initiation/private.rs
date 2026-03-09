@@ -56,6 +56,10 @@ impl TransactionInitiatorPrivate {
         }
 
         let capability = self.global_state_lock.cli().proving_capability();
+
+        // If machine cannot make proof collection, it cannot get the proof into
+        // a shareable state. So this check is needed to inform the user of this
+        // problem.
         let proof_type = TransactionProofType::ProofCollection;
         let network = self.global_state_lock.cli().network;
         if !network.use_mock_proof() && !capability.can_prove(proof_type) {

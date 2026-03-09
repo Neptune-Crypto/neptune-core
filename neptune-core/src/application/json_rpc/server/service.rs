@@ -2536,6 +2536,7 @@ pub mod tests {
                 network,
                 rpc_modules: vec![Namespace::Personal, Namespace::Mempool],
                 unsafe_rpc: true,
+                tx_proving_capability: Some(TxProvingCapability::ProofCollection),
                 ..Default::default()
             };
             let wallet_entropy = WalletEntropy::devnet_wallet();
@@ -2894,6 +2895,7 @@ pub mod tests {
                 network,
                 rpc_modules: vec![Namespace::Personal],
                 unsafe_rpc: true,
+                tx_proving_capability: Some(TxProvingCapability::ProofCollection),
                 ..Default::default()
             };
             let mut rpc_server =
