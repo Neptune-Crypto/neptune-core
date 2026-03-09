@@ -4511,31 +4511,19 @@ impl RPC for NeptuneRPCServer {
             .mutator_set_accumulator_after()
             .expect("Block from state must have mutator set after")
             .hash();
-
         let mempool_transactions = mempool_txkids
             .iter()
             .filter_map(|id| {
-                let mut mptxi = global_state
-                    .mempool
-                    .get(*id)
-                    .map(|tx| (MempoolTransactionInfo::from(tx), tx.kernel.mutator_set_hash))
-                    .map(|(mptxi, tx_msah)| {
-                        if tx_msah == tip_msah {
-                            mptxi.synced()
-                        } else {
-                            mptxi
-                        }
-                    });
-                if mptxi.is_some() {
-                    if let Some(pos_effect) = incoming.get(id) {
-                        mptxi = Some(mptxi.unwrap().with_positive_effect_on_balance(*pos_effect));
-                    }
-                    if let Some(neg_effect) = outgoing.get(id) {
-                        mptxi = Some(mptxi.unwrap().with_negative_effect_on_balance(*neg_effect));
-                    }
-                }
-
-                mptxi
+                global_state.mempool.get(*id).map(|tx| {
+                    let pos_balance_effect = incoming.get(id).copied().unwrap_or_default();
+                    let neg_balance_effect = outgoing.get(id).copied().unwrap_or_default();
+                    MempoolTransactionInfo::new(
+                        tx,
+                        tx.kernel.mutator_set_hash == tip_msah,
+                        pos_balance_effect,
+                        neg_balance_effect,
+                    )
+                })
             })
             .collect_vec();
 

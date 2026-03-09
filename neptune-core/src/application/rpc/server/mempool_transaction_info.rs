@@ -1,11 +1,9 @@
-use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionKernelId;
-use crate::api::export::TransactionProof;
 use crate::api::export::TransactionProofType;
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
@@ -20,45 +18,23 @@ pub struct MempoolTransactionInfo {
     pub synced: bool,
 }
 
-impl From<&Transaction> for MempoolTransactionInfo {
-    fn from(mptx: &Transaction) -> Self {
-        MempoolTransactionInfo {
-            id: mptx.kernel.txid(),
-            proof_type: match mptx.proof {
-                TransactionProof::Witness(_) => TransactionProofType::PrimitiveWitness,
-                TransactionProof::SingleProof(_) => TransactionProofType::SingleProof,
-                TransactionProof::ProofCollection(_) => TransactionProofType::ProofCollection,
-            },
-            num_inputs: mptx.kernel.inputs.len(),
-            num_outputs: mptx.kernel.outputs.len(),
-            positive_balance_effect: NativeCurrencyAmount::zero(),
-            negative_balance_effect: NativeCurrencyAmount::zero(),
-            fee: mptx.kernel.fee,
-            synced: false,
-        }
-    }
-}
-
 impl MempoolTransactionInfo {
-    pub(crate) fn with_positive_effect_on_balance(
-        mut self,
-        positive_balance_effect: NativeCurrencyAmount,
+    pub(crate) fn new(
+        tx: &Transaction,
+        is_synced: bool,
+        pos_balance_effect: NativeCurrencyAmount,
+        neg_balance_effect: NativeCurrencyAmount,
     ) -> Self {
-        self.positive_balance_effect = positive_balance_effect;
-        self
-    }
-
-    pub(crate) fn with_negative_effect_on_balance(
-        mut self,
-        negative_balance_effect: NativeCurrencyAmount,
-    ) -> Self {
-        self.negative_balance_effect = negative_balance_effect;
-        self
-    }
-
-    pub fn synced(mut self) -> Self {
-        self.synced = true;
-        self
+        Self {
+            id: tx.kernel.txid(),
+            proof_type: (&tx.proof).into(),
+            num_inputs: tx.kernel.inputs.len(),
+            num_outputs: tx.kernel.outputs.len(),
+            positive_balance_effect: pos_balance_effect,
+            negative_balance_effect: neg_balance_effect,
+            fee: tx.kernel.fee,
+            synced: is_synced,
+        }
     }
 }
 
