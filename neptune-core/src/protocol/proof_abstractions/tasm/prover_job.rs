@@ -8,6 +8,12 @@
 //!
 //! The queue is used to ensure that only one triton-vm
 //! program can execute at a time.
+use std::process::Stdio;
+
+use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
+use tasm_lib::triton_vm::error::InstructionError;
+use tokio::io::AsyncWriteExt;
+
 use crate::application::config::network::Network;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::job_queue::channels::JobCancelReceiver;
@@ -18,15 +24,12 @@ use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
+use crate::protocol::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
 use crate::protocol::proof_abstractions::Claim;
 use crate::protocol::proof_abstractions::NonDeterminism;
 use crate::protocol::proof_abstractions::Program;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::vm::VMState;
-use std::process::Stdio;
-use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
-use tasm_lib::triton_vm::error::InstructionError;
-use tokio::io::AsyncWriteExt;
 
 /// Error code from the spawned prover process in the range 200-232 are reserved
 /// for communicating that the proof is too big. The error code returned is
@@ -312,13 +315,9 @@ impl ProverJob {
         &self,
         mut rx: JobCancelReceiver,
     ) -> Result<ProverProcessCompletion, VmProcessError> {
-        use tokio::io::AsyncBufReadExt;
-        use tokio::io::BufReader;
-
         // start child process
         let mut child = {
-            let job_payload = super::neptune_prover_job::NeptuneProverJob::from(self.clone());
-            let payload_bytes = serde_json::to_vec(&job_payload)?;
+            let job_payload = serde_json::to_vec(&NeptuneProverJob::from(self.clone()))?;
 
             let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
                 .kill_on_drop(true) // extra insurance.
@@ -355,7 +354,7 @@ impl ProverJob {
             let mut child_stdin = child.stdin.take().ok_or(VmProcessError::StdinUnavailable)?;
 
             // Pipe the entire JSON payload at once
-            child_stdin.write_all(&payload_bytes).await?;
+            child_stdin.write_all(&job_payload).await?;
 
             // Drop stdin to signal EOF to the child process
             drop(child_stdin);
@@ -369,16 +368,6 @@ impl ProverJob {
         };
 
         tracing::debug!("prover job started child process. id: {}", child_process_id);
-
-        // Use std err of spawned process for debugging purposes.
-        if let Some(stderr) = child.stderr.take() {
-            tokio::spawn(async move {
-                let mut reader = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    tracing::debug!("[triton-vm prover]: {line}");
-                }
-            });
-        }
 
         // see <https://github.com/tokio-rs/tokio/discussions/7132>
         tokio::select! {
@@ -436,23 +425,24 @@ impl ProverJob {
         }
     }
 
-    /// obtains path to triton-vm-prover executable
+    /// Obtains path to neptune-prover executable for generating Triton VM
+    /// proofs.
     ///
-    /// triton-vm-prover must reside in the same directory as neptune-core.
-    /// This enables debug build of neptune-core to invoke debug build of triton-vm-prover.
-    /// Also works for release build, and for a package/distribution.
+    /// neptune-prover must reside in the same directory as neptune-core. This
+    /// enables debug build of neptune-core to invoke debug build of neptune-
+    /// prover. Also works for release build, and for a package/distribution.
     ///
     /// note: we do not verify that the path exists. That will occur anyway
-    /// when triton-vm-prover is executed.
+    /// when neptune-prover is executed.
     fn path_to_triton_vm_prover() -> Result<std::path::PathBuf, VmProcessError> {
         let mut path = std::env::current_exe()?;
 
         // Handle the ".exe" extension for Windows automatically
         let extension = std::env::consts::EXE_EXTENSION;
         let bin_name = if extension.is_empty() {
-            "triton-vm-prover".to_string()
+            "neptune-prover".to_string()
         } else {
-            format!("triton-vm-prover.{extension}")
+            format!("neptune-prover.{extension}")
         };
 
         // If we are in 'target/debug/deps', move up to 'target/debug', which is

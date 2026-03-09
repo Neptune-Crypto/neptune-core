@@ -1,17 +1,17 @@
+use std::time::SystemTime;
+
 use neptune_cash::api::export::Claim;
 use neptune_cash::api::export::Program;
 use neptune_cash::protocol::proof_abstractions::tasm::prover_job::ProverJob;
 use neptune_cash::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use neptune_cash::protocol::proof_abstractions::tasm::prover_job::ProverProcessCompletion;
-use std::time::SystemTime;
+use tasm_lib::triton_vm::prelude::triton_asm;
+use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::twenty_first::bfe_vec;
 use tasm_lib::twenty_first::prelude::BFieldElement;
 use tokio::sync::watch;
-
-use tasm_lib::triton_vm::prelude::triton_asm;
-use tasm_lib::triton_vm::stark::Stark;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_prove_out_of_process() {
