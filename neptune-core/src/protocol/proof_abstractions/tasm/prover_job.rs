@@ -317,7 +317,7 @@ impl ProverJob {
 
         // start child process
         let mut child = {
-            let job_payload = super::triton_vm_prover_job::TritonVMProverJob::from(self.clone());
+            let job_payload = super::neptune_prover_job::NeptuneProverJob::from(self.clone());
             let payload_bytes = serde_json::to_vec(&job_payload)?;
 
             let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)

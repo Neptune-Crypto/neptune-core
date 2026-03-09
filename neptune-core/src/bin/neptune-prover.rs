@@ -3,8 +3,8 @@
 use std::io::Write;
 
 use neptune_cash::application::config::triton_vm_env_vars::TritonVmEnvVars;
+use neptune_cash::protocol::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
 use neptune_cash::protocol::proof_abstractions::tasm::prover_job::PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE;
-use neptune_cash::protocol::proof_abstractions::tasm::triton_vm_prover_job::TritonVMProverJob;
 use tasm_lib::triton_vm::config::overwrite_lde_trace_caching_to;
 use tasm_lib::triton_vm::config::CacheDecision;
 use tasm_lib::triton_vm::prelude::Program;
@@ -157,7 +157,7 @@ fn main() {
 
     // Read task definition from STDIN.
     let stdin = std::io::stdin();
-    let job: TritonVMProverJob = match serde_json::from_reader(stdin.lock()) {
+    let job: NeptuneProverJob = match serde_json::from_reader(stdin.lock()) {
         Ok(j) => j,
         Err(e) => {
             eprintln!("ERROR: Failed to deserialize TritonVMProverJob from STDIN:\n{e}");

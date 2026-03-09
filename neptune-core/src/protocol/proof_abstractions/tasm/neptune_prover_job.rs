@@ -11,7 +11,7 @@ use crate::protocol::proof_abstractions::tasm::prover_job::ProverJob;
 /// This struct contains the fields necessary for the external proving process
 /// and only those fields. Phrased, differently, it codifies the input format.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct TritonVMProverJob {
+pub struct NeptuneProverJob {
     pub program: Program,
     pub claim: Claim,
     pub non_determinism: NonDeterminism,
@@ -19,7 +19,7 @@ pub struct TritonVMProverJob {
     pub env_vars: TritonVmEnvVars,
 }
 
-impl From<ProverJob> for TritonVMProverJob {
+impl From<ProverJob> for NeptuneProverJob {
     fn from(job: ProverJob) -> Self {
         Self {
             program: job.program,
