@@ -2,9 +2,9 @@
 
 use std::io::Write;
 
-use neptune_cash::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use neptune_cash::protocol::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
 use neptune_cash::protocol::proof_abstractions::tasm::prover_job::PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE;
+use tasm_lib::triton_vm::aet::AlgebraicExecutionTrace;
 use tasm_lib::triton_vm::config::overwrite_lde_trace_caching_to;
 use tasm_lib::triton_vm::config::CacheDecision;
 use tasm_lib::triton_vm::prelude::Program;
@@ -71,55 +71,57 @@ fn set_environment_variables(env_vars: &[(String, String)]) {
     }
 }
 
-/// Configure and run the STARK prover.
-fn execute(
-    claim: Claim,
+/// Prover the algebraic execution trace in the reference implementation of
+/// Triton VM.
+fn triton_vm_aet(
     program: Program,
+    claim: &Claim,
     non_determinism: NonDeterminism,
-    max_log2_padded_height: Option<u8>,
-    env_vars: TritonVmEnvVars,
-) -> Proof {
-    let stark: Stark = Stark::default();
-
-    // Generate the Algebraic Execution Trace (AET) to determine the padded
-    // table height, which is an input to later calculations.
+) -> AlgebraicExecutionTrace {
     let (aet, _) = VM::trace_execution(program, (&claim.input).into(), non_determinism).unwrap();
-    let log2_padded_height = aet.padded_height().ilog2() as u8;
 
-    // Use std-err for logging purposes since spawner (caller) doesn't get the
-    // log outputs but can capture std-err.
-    eprintln!("DEBUG: actual log2 padded height for proof: {log2_padded_height}");
+    aet
+}
+
+fn execute_prover_job(job: NeptuneProverJob) -> Proof {
+    let max_log2_padded_height = job.max_log2_padded_height;
+    let claim = job.claim.clone();
+    let env_vars = job.env_vars;
+
+    let aet = triton_vm_aet(job.program, &job.claim, job.non_determinism);
+    let log2_padded_height = aet.padded_height().ilog2() as u8;
 
     if max_log2_padded_height.is_some_and(|max| log2_padded_height > max) {
         eprintln!(
             "ERROR: Canceling prover because padded height exceeds max value of {}",
-            max_log2_padded_height.unwrap()
+            job.max_log2_padded_height.unwrap()
         );
-        // Exit with a specific error code so that the parent process knows
-        // resource limit was hit. This error code indicates that AET padded
-        // height too big, and furthermore communicates the log2 padded height.
-        // It is guaranteed to be in the range [200-232].
+
+        // Exit with a specific error code
         std::process::exit(
             PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE + i32::from(log2_padded_height),
         );
     }
 
-    // Lookup specific environment variable-assignments for this padded table
-    // height.
+    // Set environment variables for this specific padded height
     let env_vars = env_vars
         .get(&log2_padded_height)
         .map(|x| x.to_owned())
         .unwrap_or_default();
-
     set_environment_variables(&env_vars);
 
-    stark.prove(&claim, &aet).unwrap()
+    // run with a low priority so that neptune-core can remain responsive.
+    set_current_thread_priority(ThreadPriority::Min).unwrap();
+
+    Stark::default().prove(&claim, &aet).unwrap()
 }
 
 /// Entry point for the standalone prover process.
 ///
 /// It consumes JSON-serialized task definitions from STDIN and produces
 /// a binary-serialized Proof on STDOUT.
+///
+/// Uses standard error for logging purposes in the caller.
 fn main() {
     eprintln!("DEBUG: Starting triton-vm-prover.");
     // Check for a delegated prover, which could be a binary or a command. If
@@ -149,13 +151,6 @@ fn main() {
         }
     }
 
-    // run with a low priority so that neptune-core can remain responsive.
-    //
-    // todo: we could accept a thread-prioritycli param (0..100) and
-    //       pass it with ThreadPriority::CrossPlatform(x).
-    set_current_thread_priority(ThreadPriority::Min).unwrap();
-
-    // Read task definition from STDIN.
     let stdin = std::io::stdin();
     let job: NeptuneProverJob = match serde_json::from_reader(stdin.lock()) {
         Ok(j) => j,
@@ -165,14 +160,8 @@ fn main() {
         }
     };
 
-    // Perform task.
-    let proof = execute(
-        job.claim,
-        job.program,
-        job.non_determinism,
-        job.max_log2_padded_height,
-        job.env_vars,
-    );
+    let proof = execute_prover_job(job);
+
     eprintln!("DEBUG: triton-vm-prover: completed proof");
 
     // Write serialized proof to STDOUT.
@@ -184,7 +173,8 @@ fn main() {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+mod neptune_prover_tests {
+    use neptune_cash::application::config::triton_vm_env_vars::TritonVmEnvVars;
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::isa::triton_asm;
 
@@ -205,14 +195,15 @@ mod tests {
                 ("RAYON_NUM_THREADS".to_owned(), "3".to_owned()),
             ],
         );
-
-        let proof = execute(
-            claim.clone(),
+        let job = NeptuneProverJob {
             program,
+            claim: claim.clone(),
             non_determinism,
             max_log2_padded_height,
             env_vars,
-        );
+        };
+
+        let proof = execute_prover_job(job);
 
         assert!(triton_vm::verify(Stark::default(), &claim, &proof));
 
@@ -235,13 +226,14 @@ mod tests {
         let non_determinism = NonDeterminism::default();
         let max_log2_padded_height = None;
         let env_vars = TritonVmEnvVars::default();
-        let proof = execute(
-            claim.clone(),
+        let job = NeptuneProverJob {
             program,
+            claim: claim.clone(),
             non_determinism,
             max_log2_padded_height,
             env_vars,
-        );
+        };
+        let proof = execute_prover_job(job);
 
         assert!(triton_vm::verify(Stark::default(), &claim, &proof));
     }
