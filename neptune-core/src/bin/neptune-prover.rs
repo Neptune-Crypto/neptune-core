@@ -60,7 +60,7 @@ fn set_environment_variables(env_vars: &[(String, String)]) {
         if key == ENV_VAR_LDE_CACHE {
             let value = value.to_ascii_lowercase();
             let value = value.as_str();
-            let decition = if value == ENV_VAR_LDE_CACHE_WITH_CACHE {
+            let decision = if value == ENV_VAR_LDE_CACHE_WITH_CACHE {
                 Some(CacheDecision::Cache)
             } else if value == ENV_VAR_LDE_CACHE_NO_CACHE {
                 Some(CacheDecision::NoCache)
