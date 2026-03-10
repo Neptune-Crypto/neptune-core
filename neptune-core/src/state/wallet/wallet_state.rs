@@ -434,9 +434,10 @@ impl WalletState {
         // not for windows since this causes a "used by another process" os error 32.
         #[cfg(not(target_os = "windows"))]
         let _db = Self::open_wallet_db(&db_dir).await?;
-        // dummy await point on Windows to avoid "no await statements" error.
-        #[cfg(target_os = "windows")]
-        let _ready = futures::future::ready(()).await;
+
+        // Sleep to allow potential DB file pruning to finish before copying
+        // files. Otherwise race condition during file copying.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
         tracing::info!(
             "backing up wallet database from {} to {}",
