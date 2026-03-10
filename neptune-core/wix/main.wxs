@@ -123,9 +123,9 @@
                         <Component Id='binary0' Guid='*'>
                             <File
                                 Id='exe0'
-                                Name='block-claims.exe'
+                                Name='neptune-block-claims.exe'
                                 DiskId='1'
-                                Source='$(var.CargoTargetBinDir)\block-claims.exe'
+                                Source='$(var.CargoTargetBinDir)\neptune-block-claims.exe'
                                 KeyPath='yes'/>
                         </Component>
                         <Component Id='binary1' Guid='*'>
@@ -139,9 +139,9 @@
                         <Component Id='binary2' Guid='*'>
                             <File
                                 Id='exe2'
-                                Name='triton-vm-prover.exe'
+                                Name='neptune-prover.exe'
                                 DiskId='1'
-                                Source='$(var.CargoTargetBinDir)\triton-vm-prover.exe'
+                                Source='$(var.CargoTargetBinDir)\neptune-prover.exe'
                                 KeyPath='yes'/>
                         </Component>
                     </Directory>

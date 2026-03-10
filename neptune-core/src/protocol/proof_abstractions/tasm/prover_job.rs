@@ -6,14 +6,12 @@
 //! or even the beefiest of today's hardware might run out
 //! of resources.
 //!
-//! The queue is used to ensure that only one triton-vm
+//! The queue is used to ensure that only one `neptune-prover`
 //! program can execute at a time.
-#[cfg(not(test))]
 use std::process::Stdio;
 
 use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
 use tasm_lib::triton_vm::error::InstructionError;
-#[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 
 use crate::application::config::network::Network;
@@ -26,8 +24,7 @@ use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-#[cfg(test)]
-use crate::protocol::proof_abstractions::tasm::program::tests;
+use crate::protocol::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
 use crate::protocol::proof_abstractions::Claim;
 use crate::protocol::proof_abstractions::NonDeterminism;
 use crate::protocol::proof_abstractions::Program;
@@ -66,8 +63,8 @@ pub enum VmProcessError {
     #[error("parameter serialization failed")]
     ParameterSerializationFailed(#[from] serde_json::Error),
 
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
+    #[error("could not determine path of own executable: {0}")]
+    CouldNotDetermineExePath(#[from] std::io::Error),
 
     #[error("stdin unavailable")]
     StdinUnavailable,
@@ -80,7 +77,9 @@ pub enum VmProcessError {
 
     /// Error code indicating that AET was generated and its padded height too
     /// big.
-    #[error("triton-vm program complexity limit exceeded. result: {result}, limit: {limit}")]
+    #[error(
+        "`neptune-prover` program complexity limit exceeded. result: {result}, limit: {limit}"
+    )]
     ProofComplexityLimitExceeded { limit: u32, result: u32 },
 
     // note: on unix an exit with no code indicates the process
@@ -92,7 +91,7 @@ pub enum VmProcessError {
     // *if* we could determine the process was externally killed then
     // it would be reasonable to retry the job.
     #[error(
-        "out-of-process triton-vm proving job terminated without exit code. \
+        "out-of-process `neptune-prover` proving job terminated without exit code. \
         Possibly killed by OS. You might not have enough RAM to construct this \
         proof."
     )]
@@ -102,10 +101,12 @@ pub enum VmProcessError {
     TritonVmFailed(InstructionError),
 }
 
-enum ProverProcessCompletion {
+#[derive(Debug)]
+pub enum ProverProcessCompletion {
     Finished(Proof),
     Cancelled,
 }
+
 impl From<ProverProcessCompletion> for JobCompletion {
     fn from(ppc: ProverProcessCompletion) -> Self {
         match ppc {
@@ -134,7 +135,6 @@ pub struct ProverJobSettings {
     pub triton_vm_env_vars: TritonVmEnvVars,
 }
 
-#[cfg(test)]
 impl Default for ProverJobSettings {
     fn default() -> Self {
         Self {
@@ -149,10 +149,10 @@ impl Default for ProverJobSettings {
 
 #[derive(Debug, Clone)]
 pub struct ProverJob {
-    program: Program,
-    claim: Claim,
-    nondeterminism: NonDeterminism,
-    job_settings: ProverJobSettings,
+    pub(super) program: Program,
+    pub(super) claim: Claim,
+    pub(super) nondeterminism: NonDeterminism,
+    pub(super) job_settings: ProverJobSettings,
 }
 
 impl ProverJob {
@@ -171,12 +171,19 @@ impl ProverJob {
         }
     }
 
-    // runs program in triton_vm to determine complexity
-    //
-    // if complexity exceeds setting `max_log2_padded_height_for_proofs`
-    // then it is unlikely this hardware will be able to generate the
-    // corresponding proof.  In this case a `ProofComplexityLimitExceeded`
-    // error is returned.
+    /// Estimate whether the complexity of this [`ProverJob`] exceeds its
+    /// resource limit.
+    ///
+    /// To estimate the complexity, the job is run in the VM and the log-base-2
+    /// of the cycle count is used as an estimate for the log-2-padded height.
+    /// This estimate is then compared against the max log-2-padded-height of
+    /// the job itself.
+    ///
+    /// Note that this estimate may be too small (but never too large). It is
+    /// possible that the actual log-base-2 padded table height is larger
+    /// because some other table besides the processor table dominates. In that
+    /// case, the out-of-process prover, where the actual check happens based on
+    /// the entire AET, will reject the job.
     async fn check_if_allowed(&self) -> Result<(), ProverJobError> {
         tracing::debug!("job settings: {:?}", self.job_settings);
 
@@ -284,30 +291,7 @@ impl ProverJob {
         result.into()
     }
 
-    #[cfg(test)]
-    async fn prove_for_unit_testing(
-        &self,
-        mut rx: JobCancelReceiver,
-    ) -> Result<ProverProcessCompletion, VmProcessError> {
-        let claim = self.claim.clone();
-        let program = self.program.clone();
-        let nondeterminism = self.nondeterminism.clone();
-
-        let prove_jh = tokio::task::spawn_blocking(move || {
-            let proof = tests::load_proof_or_produce_and_save(&claim, program, nondeterminism);
-            ProverProcessCompletion::Finished(proof)
-        });
-
-        tokio::select! {
-            result = prove_jh => Ok(result.unwrap()),
-            _ = rx.changed() => {
-                tracing::debug!("prover job got cancel message.  cancelling.");
-                Ok(ProverProcessCompletion::Cancelled)
-            }
-        }
-    }
-
-    /// runs triton-vm prover out of process.
+    /// Runs the `neptune-prover` out-of-process Triton VM prover.
     ///
     /// This method spawns child process and waits for either:
     ///   1. the child to finish
@@ -322,47 +306,60 @@ impl ProverJob {
     /// an attempt is made to kill the child process.  If this attempt
     /// fails, the fn will panic.
     ///
-    /// input is sent via stdin, output is received via stdout.
-    /// stderr is ignored.
-    ///
-    /// The prover executable is triton-vm-prover. It must reside
-    /// in same directory as neptune-core.
-    /// see Self::path_to_triton_vm_prover()
-    ///
-    /// parameters claim, program, nondeterminism are passed as
-    /// json strings.
-    ///
-    /// the result is a [Proof], which is bincode serialized.
+    /// The input to this process is a JSON-encoded [`NeptuneProverJob`] object,
+    /// sent via stdin. The output is a bincode-serialized [`Proof`] object.
+    /// Stderr is piped to tracing-logs, with some superficial parsing to
+    /// activate the intended log level.
     ///
     /// The process result is only read if exit code is 0.
     /// A non-zero exit code or no code results in an error.
-    #[cfg(not(test))]
-    async fn prove_out_of_process(
+    pub async fn prove_out_of_process(
         &self,
         mut rx: JobCancelReceiver,
     ) -> Result<ProverProcessCompletion, VmProcessError> {
-        use tokio::io::AsyncBufReadExt;
-        use tokio::io::BufReader;
-
         // start child process
         let mut child = {
-            let inputs = [
-                serde_json::to_string(&self.claim)?,
-                serde_json::to_string(&self.program)?,
-                serde_json::to_string(&self.nondeterminism)?,
-                serde_json::to_string(&self.job_settings.max_log2_padded_height_for_proofs)?,
-                serde_json::to_string(&self.job_settings.triton_vm_env_vars)?,
-            ];
+            let job_payload = serde_json::to_vec(&NeptuneProverJob::from(self.clone()))?;
 
-            let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
+            let mut child = tokio::process::Command::new(Self::path_to_neptune_prover()?)
                 .kill_on_drop(true) // extra insurance.
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()?;
 
+            // Pipe stderr to matching tracing logs
+            if let Some(stderr) = child.stderr.take() {
+                tokio::spawn(async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let mut reader = tokio::io::BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        let msg = line.trim();
+                        if let Some(suffix) = msg.strip_prefix("DEBUG:") {
+                            tracing::debug!("neptune-prover: {}", &suffix);
+                        } else if let Some(suffix) = msg.strip_prefix("INFO:") {
+                            tracing::info!("neptune-prover: {}", &suffix);
+                        } else if let Some(suffix) = msg.strip_prefix("TRACE:") {
+                            tracing::trace!("neptune-prover: {}", &suffix);
+                        } else if let Some(suffix) = msg.strip_prefix("ERROR:") {
+                            tracing::error!("neptune-prover: {}", &suffix);
+                        } else if let Some(suffix) = msg.strip_prefix("WARN:") {
+                            tracing::warn!("neptune-prover: {}", &suffix);
+                        } else {
+                            // Default fallback for raw panics or untagged output
+                            tracing::trace!("neptune-prover (raw): {}", msg);
+                        }
+                    }
+                });
+            }
+
             let mut child_stdin = child.stdin.take().ok_or(VmProcessError::StdinUnavailable)?;
-            child_stdin.write_all(inputs.join("\n").as_bytes()).await?;
+
+            // Pipe the entire JSON payload at once
+            child_stdin.write_all(&job_payload).await?;
+
+            // Drop stdin to signal EOF to the child process
+            drop(child_stdin);
 
             child
         };
@@ -373,16 +370,6 @@ impl ProverJob {
         };
 
         tracing::debug!("prover job started child process. id: {}", child_process_id);
-
-        // Use std err of spawned process for debugging purposes.
-        if let Some(stderr) = child.stderr.take() {
-            tokio::spawn(async move {
-                let mut reader = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    tracing::debug!("[triton-vm prover]: {line}");
-                }
-            });
-        }
 
         // see <https://github.com/tokio-rs/tokio/discussions/7132>
         tokio::select! {
@@ -440,19 +427,40 @@ impl ProverJob {
         }
     }
 
-    /// obtains path to triton-vm-prover executable
+    /// Obtains path to `neptune-prover` executable for generating Triton VM
+    /// proofs.
     ///
-    /// triton-vm-prover must reside in the same directory as neptune-core.
-    /// This enables debug build of neptune-core to invoke debug build of triton-vm-prover.
-    /// Also works for release build, and for a package/distribution.
+    /// `neptune-prover` must reside in the same directory as `neptune-core`.
+    /// This colocation enables debug builds of `neptune-core` to invoke debug
+    /// builds of `neptune-prover`. Also works for release build, and for a
+    /// package/distribution.
     ///
     /// note: we do not verify that the path exists. That will occur anyway
-    /// when triton-vm-prover is executed.
-    #[cfg(not(test))]
-    fn path_to_triton_vm_prover() -> Result<std::path::PathBuf, std::io::Error> {
-        let mut exe_path = std::env::current_exe()?;
-        exe_path.set_file_name("triton-vm-prover");
-        Ok(exe_path)
+    /// when `neptune-prover` is executed.
+    fn path_to_neptune_prover() -> Result<std::path::PathBuf, VmProcessError> {
+        let mut path = std::env::current_exe()?;
+
+        // Handle the ".exe" extension for Windows automatically
+        let extension = std::env::consts::EXE_EXTENSION;
+        let bin_name = if extension.is_empty() {
+            "neptune-prover".to_string()
+        } else {
+            format!("neptune-prover.{extension}")
+        };
+
+        // If we are in 'target/debug/deps', move up to 'target/debug', which is
+        // where we may expect to find the binary if the directory structure is
+        // the standard layout for Cargo integration tests.
+        if let Some(parent) = path.parent() {
+            if parent.ends_with("deps") {
+                path = parent.parent().unwrap_or(parent).to_path_buf();
+            } else {
+                path = parent.to_path_buf();
+            }
+        }
+
+        path.push(bin_name);
+        Ok(path)
     }
 }
 
@@ -502,7 +510,6 @@ impl Job for ProverJob {
 }
 
 // future cleanup: remove this module, when possible.
-#[cfg(not(test))]
 mod process_util {
 
     use std::process::Output;
@@ -562,5 +569,36 @@ mod process_util {
             stdout,
             stderr,
         })
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+
+    use super::*;
+    use crate::protocol::proof_abstractions::tasm::program::tests::load_proof_or_produce_and_save;
+
+    impl ProverJob {
+        pub(crate) async fn prove_for_unit_testing(
+            &self,
+            mut rx: JobCancelReceiver,
+        ) -> Result<ProverProcessCompletion, VmProcessError> {
+            let claim = self.claim.clone();
+            let program = self.program.clone();
+            let nondeterminism = self.nondeterminism.clone();
+
+            let prove_jh = tokio::task::spawn_blocking(move || {
+                let proof = load_proof_or_produce_and_save(&claim, program, nondeterminism);
+                ProverProcessCompletion::Finished(proof)
+            });
+
+            tokio::select! {
+                result = prove_jh => Ok(result.unwrap()),
+                _ = rx.changed() => {
+                    tracing::debug!("prover job got cancel message.  cancelling.");
+                    Ok(ProverProcessCompletion::Cancelled)
+                }
+            }
+        }
     }
 }

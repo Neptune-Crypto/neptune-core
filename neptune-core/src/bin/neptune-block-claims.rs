@@ -1,4 +1,4 @@
-//! block-claims
+//! neptune-block-claims
 //!
 //! Utility for printing `Claim`s related to validity of canonical, stored
 //! blocks. Useful for producing a checkpoint: by adding these claims to the
