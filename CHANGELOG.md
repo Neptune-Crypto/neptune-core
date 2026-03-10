@@ -87,38 +87,6 @@
 - Merge([#860](https://github.com/Neptune-Crypto/neptune-core/issues/860)): Neptune-Crypto/dont-rebuild-nops ([37f344a2](https://github.com/Neptune-Crypto/neptune-core/commit/37f344a2))
 - Merge([#876](https://github.com/Neptune-Crypto/neptune-core/issues/876)): Exchange Integration Endpoints ([3b1207e1](https://github.com/Neptune-Crypto/neptune-core/commit/3b1207e1))
 
-## [0.6.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.6.0..v0.6.1) - 2026-02-14
-
-### ✨ Features
-
-- *(CLI)* Add command: version ([af87a8af](https://github.com/Neptune-Crypto/neptune-core/commit/af87a8af))
-
-### 🐛 Bug Fixes
-
-- Consolidate ([b51d4c55](https://github.com/Neptune-Crypto/neptune-core/commit/b51d4c55))
-
-### ♻️ Refactor
-
-- *(sync-loop)* Proactively push status instead of responding ([8a452cfc](https://github.com/Neptune-Crypto/neptune-core/commit/8a452cfc))
-- *(CLI)* Split commands into subcategories ([05a24d4a](https://github.com/Neptune-Crypto/neptune-core/commit/05a24d4a))
-
-### ⚙️ Miscellaneous
-
-- Update release workflow files ([837627d3](https://github.com/Neptune-Crypto/neptune-core/commit/837627d3))
-- Add MSI distribution files ([08dcf738](https://github.com/Neptune-Crypto/neptune-core/commit/08dcf738))
-- Release v0.6.1 ([33c06f21](https://github.com/Neptune-Crypto/neptune-core/commit/33c06f21))
-
-### 🪵 Log
-
-- Ignore all but errors from module `libp2p` ([#851](https://github.com/Neptune-Crypto/neptune-core/issues/851)) ([08f3b46c](https://github.com/Neptune-Crypto/neptune-core/commit/08f3b46c))
-- Batch warnings about failed MUTXO MSMP restorations ([ad588094](https://github.com/Neptune-Crypto/neptune-core/commit/ad588094))
-- *(network)* Reduce log level of common spurious relay failure notice ([41752652](https://github.com/Neptune-Crypto/neptune-core/commit/41752652))
-- Reduce noise ([d59dac78](https://github.com/Neptune-Crypto/neptune-core/commit/d59dac78))
-- Actually set default log level to INFO ([743403cc](https://github.com/Neptune-Crypto/neptune-core/commit/743403cc))
-- Report on number of own txs confirmed by block proposal ([65064aac](https://github.com/Neptune-Crypto/neptune-core/commit/65064aac))
-
-Note: (!) indicates a breaking change.
-
 
 ## [0.6.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.6.0..v0.6.1) - 2026-02-14
 
@@ -142,8 +110,16 @@ Note: (!) indicates a breaking change.
 
 ### 🪵 Log
 
+- Ignore all but errors from module `libp2p` ([#851](https://github.com/Neptune-Crypto/neptune-core/issues/851)) ([08f3b46c](https://github.com/Neptune-Crypto/neptune-core/commit/08f3b46c))
+- Batch warnings about failed MUTXO MSMP restorations ([ad588094](https://github.com/Neptune-Crypto/neptune-core/commit/ad588094))
+- *(network)* Reduce log level of common spurious relay failure notice ([41752652](https://github.com/Neptune-Crypto/neptune-core/commit/41752652))
+- Actually set default log level to INFO ([743403cc](https://github.com/Neptune-Crypto/neptune-core/commit/743403cc))
 - Reduce noise ([d59dac78](https://github.com/Neptune-Crypto/neptune-core/commit/d59dac78), [743403cc](https://github.com/Neptune-Crypto/neptune-core/commit/743403cc), [08f3b46c](https://github.com/Neptune-Crypto/neptune-core/commit/08f3b46c), [ad588094](https://github.com/Neptune-Crypto/neptune-core/commit/ad588094), [41752652](https://github.com/Neptune-Crypto/neptune-core/commit/41752652))
 - Report on number of own txs confirmed by block proposal ([65064aac](https://github.com/Neptune-Crypto/neptune-core/commit/65064aac))
+
+### 🪢 Merge
+
+- Merge([#779](https://github.com/Neptune-Crypto/neptune-core/issues/779)): Scrollable Tables ([3a4d18d4](https://github.com/Neptune-Crypto/neptune-core/commit/3a4d18d4))
 
 ## [0.6.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.5.0..v0.6.0) - 2026-02-03
 
@@ -302,11 +278,6 @@ Note: (!) indicates a breaking change.
 ### Sec
 
 - Limit announcement size ([ff9de0d5](https://github.com/Neptune-Crypto/neptune-core/commit/ff9de0d5))
-
-### 🪢 Merge
-
-- Merge([#779](https://github.com/Neptune-Crypto/neptune-core/issues/779)): Scrollable Tables ([3a4d18d4](https://github.com/Neptune-Crypto/neptune-core/commit/3a4d18d4))
-
 
 ## [0.5.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.4.0..v0.5.0) - 2025-10-31
 
