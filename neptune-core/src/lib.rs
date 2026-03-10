@@ -713,10 +713,19 @@ pub(crate) fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
         let dest_path = &destination.join(entry.file_name());
-        if entry.path().is_dir() {
-            copy_dir_recursive(&entry.path(), dest_path)?;
+
+        let entry = entry.path();
+        if entry.is_dir() {
+            copy_dir_recursive(&entry, dest_path).inspect_err(|e| {
+                error!(
+                    "error: {e}. source: {}, entry: {}, dest_path: {}",
+                    source.to_string_lossy(),
+                    entry.to_string_lossy(),
+                    dest_path.to_string_lossy()
+                )
+            })?;
         } else {
-            std::fs::copy(entry.path(), dest_path)?;
+            std::fs::copy(entry, dest_path)?;
         }
     }
     Ok(())
