@@ -1,0 +1,31 @@
+# Workflow to validate the changelog file when it is updated in
+# the master branch or in a pull request.
+# An incorrectly formatted changelog will cause the next release
+# to lack Release Notes.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - CHANGELOG.md
+  pull_request:
+    branches:
+      - master
+    paths:
+      - CHANGELOG.md
+
+name: Changelog
+
+jobs:
+  validate:
+    name: validate changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install parse-changelog
+        uses: taiki-e/install-action@parse-changelog
+
+      - name: Validate changelog
+        run: parse-changelog ./CHANGELOG.md
