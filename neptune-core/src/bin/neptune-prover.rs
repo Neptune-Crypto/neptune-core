@@ -7,6 +7,9 @@ use neptune_cash::protocol::proof_abstractions::tasm::prover_job::PROOF_PADDED_H
 use tasm_lib::triton_vm::aet::AlgebraicExecutionTrace;
 use tasm_lib::triton_vm::config::overwrite_lde_trace_caching_to;
 use tasm_lib::triton_vm::config::CacheDecision;
+use tasm_lib::triton_vm::config::ENV_VAR_LDE_CACHE;
+use tasm_lib::triton_vm::config::ENV_VAR_LDE_CACHE_NO_CACHE;
+use tasm_lib::triton_vm::config::ENV_VAR_LDE_CACHE_WITH_CACHE;
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof;
@@ -16,10 +19,8 @@ use tasm_lib::triton_vm::vm::VM;
 use thread_priority::set_current_thread_priority;
 use thread_priority::ThreadPriority;
 
-const LDE_TRACE_ENV_VAR: &str = tasm_lib::triton_vm::config::ENV_VAR_LDE_CACHE;
-
 /// If set, turns this executable into a proxy for the given binary or command.
-const NEPTUNE_PROVER_ENV_VAR: &str = "NEPTUNE_PROVER_PROXY";
+const NEPTUNE_PROVER_PROXY_ENV_VAR: &str = "NEPTUNE_PROVER_PROXY";
 
 /// Sets process-level environment variables to tune Triton VM's performance.
 ///
@@ -56,11 +57,15 @@ fn set_environment_variables(env_vars: &[(String, String)]) {
         // the environment variable being set here, we override it through
         // a publicly exposed function. This override ensures that the Triton
         // VM configuration agrees with the environment variable.
-        if key == LDE_TRACE_ENV_VAR {
-            let decision = match value.to_lowercase().as_str() {
-                "cache" => Some(CacheDecision::Cache),
-                "no_cache" => Some(CacheDecision::NoCache),
-                _ => None,
+        if key == ENV_VAR_LDE_CACHE {
+            let value = value.to_ascii_lowercase();
+            let value = value.as_str();
+            let decition = if value == ENV_VAR_LDE_CACHE_WITH_CACHE {
+                Some(CacheDecision::Cache)
+            } else if value == ENV_VAR_LDE_CACHE_NO_CACHE {
+                Some(CacheDecision::NoCache)
+            } else {
+                None
             };
 
             if let Some(d) = decision {
@@ -71,8 +76,8 @@ fn set_environment_variables(env_vars: &[(String, String)]) {
     }
 }
 
-/// Prover the algebraic execution trace in the reference implementation of
-/// Triton VM.
+/// Produce the algebraic execution trace using the reference (CPU)
+/// implementation of Triton VM.
 fn triton_vm_aet(
     program: Program,
     claim: &Claim,
@@ -83,6 +88,8 @@ fn triton_vm_aet(
     aet
 }
 
+/// Execute the proof job in the current process (as opposed to delegating it to
+/// another one).
 fn execute_prover_job(job: NeptuneProverJob) -> Proof {
     let max_log2_padded_height = job.max_log2_padded_height;
     let claim = job.claim.clone();
@@ -123,10 +130,11 @@ fn execute_prover_job(job: NeptuneProverJob) -> Proof {
 ///
 /// Uses standard error for logging purposes in the caller.
 fn main() {
-    eprintln!("DEBUG: Starting triton-vm-prover.");
+    eprintln!("DEBUG: Starting neptune-prover.");
+
     // Check for a delegated prover, which could be a binary or a command. If
     // set, use that.
-    if let Ok(prover_cmd) = std::env::var(NEPTUNE_PROVER_ENV_VAR) {
+    if let Ok(prover_cmd) = std::env::var(NEPTUNE_PROVER_PROXY_ENV_VAR) {
         if !prover_cmd.trim().is_empty() {
             eprintln!("INFO: Proxying prover job to command: `{prover_cmd}`");
 
@@ -191,7 +199,7 @@ mod neptune_prover_tests {
         env_vars.insert(
             8,
             vec![
-                (LDE_TRACE_ENV_VAR.to_owned(), "no_cache".to_owned()),
+                (ENV_VAR_LDE_CACHE.to_owned(), "no_cache".to_owned()),
                 ("RAYON_NUM_THREADS".to_owned(), "3".to_owned()),
             ],
         );
@@ -210,7 +218,7 @@ mod neptune_prover_tests {
         // Verify that env variables were actually set
         assert_eq!(
             "no_cache",
-            std::env::var(LDE_TRACE_ENV_VAR).expect("Env variable for LDE trace must be set")
+            std::env::var(ENV_VAR_LDE_CACHE).expect("Env variable for LDE trace must be set")
         );
         assert_eq!(
             "3",

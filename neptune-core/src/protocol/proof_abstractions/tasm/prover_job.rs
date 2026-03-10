@@ -6,7 +6,7 @@
 //! or even the beefiest of today's hardware might run out
 //! of resources.
 //!
-//! The queue is used to ensure that only one triton-vm
+//! The queue is used to ensure that only one `neptune-prover`
 //! program can execute at a time.
 use std::process::Stdio;
 
@@ -77,7 +77,9 @@ pub enum VmProcessError {
 
     /// Error code indicating that AET was generated and its padded height too
     /// big.
-    #[error("triton-vm program complexity limit exceeded. result: {result}, limit: {limit}")]
+    #[error(
+        "`neptune-prover` program complexity limit exceeded. result: {result}, limit: {limit}"
+    )]
     ProofComplexityLimitExceeded { limit: u32, result: u32 },
 
     // note: on unix an exit with no code indicates the process
@@ -89,7 +91,7 @@ pub enum VmProcessError {
     // *if* we could determine the process was externally killed then
     // it would be reasonable to retry the job.
     #[error(
-        "out-of-process triton-vm proving job terminated without exit code. \
+        "out-of-process `neptune-prover` proving job terminated without exit code. \
         Possibly killed by OS. You might not have enough RAM to construct this \
         proof."
     )]
@@ -169,12 +171,19 @@ impl ProverJob {
         }
     }
 
-    // runs program in triton_vm to determine complexity
-    //
-    // if complexity exceeds setting `max_log2_padded_height_for_proofs`
-    // then it is unlikely this hardware will be able to generate the
-    // corresponding proof.  In this case a `ProofComplexityLimitExceeded`
-    // error is returned.
+    /// Estimate whether the complexity of this [`ProverJob`] exceeds its
+    /// resource limit.
+    ///
+    /// To estimate the complexity, the job is run in the VM and the log-base-2
+    /// of the cycle count is used as an estimate for the log-2-padded height.
+    /// This estimate is then compared against the max log-2-padded-height of
+    /// the job itself.
+    ///
+    /// Note that this estimate may be too small (but never too large). It is
+    /// possible that the actual log-base-2 padded table height is larger
+    /// because some other table besides the processor table dominates. In that
+    /// case, the out-of-process prover, where the actual check happens based on
+    /// the entire AET, will reject the job.
     async fn check_if_allowed(&self) -> Result<(), ProverJobError> {
         tracing::debug!("job settings: {:?}", self.job_settings);
 
@@ -282,7 +291,7 @@ impl ProverJob {
         result.into()
     }
 
-    /// runs triton-vm prover out of process.
+    /// Runs the `neptune-prover` out-of-process Triton VM prover.
     ///
     /// This method spawns child process and waits for either:
     ///   1. the child to finish
@@ -297,17 +306,10 @@ impl ProverJob {
     /// an attempt is made to kill the child process.  If this attempt
     /// fails, the fn will panic.
     ///
-    /// input is sent via stdin, output is received via stdout.
-    /// stderr is ignored.
-    ///
-    /// The prover executable is triton-vm-prover. It must reside
-    /// in same directory as neptune-core.
-    /// see Self::path_to_triton_vm_prover()
-    ///
-    /// parameters claim, program, nondeterminism are passed as
-    /// json strings.
-    ///
-    /// the result is a [Proof], which is bincode serialized.
+    /// The input to this process is a JSON-encoded [`NeptuneProverJob`] object,
+    /// sent via stdin. The output is a bincode-serialized [`Proof`] object.
+    /// Stderr is piped to tracing-logs, with some superficial parsing to
+    /// activate the intended log level.
     ///
     /// The process result is only read if exit code is 0.
     /// A non-zero exit code or no code results in an error.
@@ -319,7 +321,7 @@ impl ProverJob {
         let mut child = {
             let job_payload = serde_json::to_vec(&NeptuneProverJob::from(self.clone()))?;
 
-            let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
+            let mut child = tokio::process::Command::new(Self::path_to_neptune_prover()?)
                 .kill_on_drop(true) // extra insurance.
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -334,18 +336,18 @@ impl ProverJob {
                     while let Ok(Some(line)) = reader.next_line().await {
                         let msg = line.trim();
                         if let Some(suffix) = msg.strip_prefix("DEBUG:") {
-                            tracing::debug!("triton-vm-prover: {}", &suffix);
+                            tracing::debug!("neptune-prover: {}", &suffix);
                         } else if let Some(suffix) = msg.strip_prefix("INFO:") {
-                            tracing::info!("triton-vm-prover: {}", &suffix);
+                            tracing::info!("neptune-prover: {}", &suffix);
                         } else if let Some(suffix) = msg.strip_prefix("TRACE:") {
-                            tracing::trace!("triton-vm-prover: {}", &suffix);
+                            tracing::trace!("neptune-prover: {}", &suffix);
                         } else if let Some(suffix) = msg.strip_prefix("ERROR:") {
-                            tracing::error!("triton-vm-prover: {}", &suffix);
+                            tracing::error!("neptune-prover: {}", &suffix);
                         } else if let Some(suffix) = msg.strip_prefix("WARN:") {
-                            tracing::warn!("triton-vm-prover: {}", &suffix);
+                            tracing::warn!("neptune-prover: {}", &suffix);
                         } else {
                             // Default fallback for raw panics or untagged output
-                            tracing::trace!("triton-vm-prover (raw): {}", msg);
+                            tracing::trace!("neptune-prover (raw): {}", msg);
                         }
                     }
                 });
@@ -425,16 +427,17 @@ impl ProverJob {
         }
     }
 
-    /// Obtains path to neptune-prover executable for generating Triton VM
+    /// Obtains path to `neptune-prover` executable for generating Triton VM
     /// proofs.
     ///
-    /// neptune-prover must reside in the same directory as neptune-core. This
-    /// enables debug build of neptune-core to invoke debug build of neptune-
-    /// prover. Also works for release build, and for a package/distribution.
+    /// `neptune-prover` must reside in the same directory as `neptune-core`.
+    /// This colocation enables debug builds of `neptune-core` to invoke debug
+    /// builds of `neptune-prover`. Also works for release build, and for a
+    /// package/distribution.
     ///
     /// note: we do not verify that the path exists. That will occur anyway
-    /// when neptune-prover is executed.
-    fn path_to_triton_vm_prover() -> Result<std::path::PathBuf, VmProcessError> {
+    /// when `neptune-prover` is executed.
+    fn path_to_neptune_prover() -> Result<std::path::PathBuf, VmProcessError> {
         let mut path = std::env::current_exe()?;
 
         // Handle the ".exe" extension for Windows automatically
