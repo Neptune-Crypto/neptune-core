@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use crate::api::export::AnnouncementFlag;
 use crate::api::export::KeyType;
+use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
@@ -17,6 +18,7 @@ use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdd
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernelId;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcBlockSelector;
+use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
@@ -78,6 +80,9 @@ pub enum RpcError {
     #[error("Endpoint requires UTXO index which is not present")]
     UtxoIndexNotPresent,
 
+    #[error("Filtering conditions may not be empty")]
+    EmptyFilteringConditions,
+
     // Common case errors
     #[error("Invalid address provided in arguments")]
     InvalidAddress,
@@ -97,6 +102,15 @@ pub enum RpcError {
 
     #[error("Wallet key counter is zero.")]
     WalletKeyCounterIsZero,
+
+    #[error("Number of confirmations is wrong.")]
+    BadConfirmationCount,
+
+    #[error("Failed to create transaction. Error: {0}")]
+    SendError(String),
+
+    #[error("The UTXO that you try to claim cannot be registered by the wallet. Error: {0}")]
+    CannotClaimUtxo(String),
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -296,6 +310,9 @@ pub trait RpcApi: Sync + Send {
         request: FindUtxoOriginRequest,
     ) -> RpcResult<FindUtxoOriginResponse>;
 
+    /// Check if indices in an absolute index set are set in the node's archival
+    /// mutator set. Can be used to check  if a UTXO is spent without having to
+    /// know the mutator set membership proof.
     async fn are_bloom_indices_set(
         &self,
         absolute_index_set: RpcAbsoluteIndexSet,
@@ -333,6 +350,54 @@ pub trait RpcApi: Sync + Send {
     ) -> RpcResult<BurnedSupplyResponse>;
 
     /* Wallet */
+
+    /// Check if a string is a valid Neptune address. Returns metadata about
+    /// the address if the address is valid.
+    async fn validate_address(&self, address_string: String) -> RpcResult<ValidateAddressResponse> {
+        self.validate_address_call(ValidateAddressRequest { address_string })
+            .await
+    }
+
+    async fn validate_address_call(
+        &self,
+        request: ValidateAddressRequest,
+    ) -> RpcResult<ValidateAddressResponse>;
+
+    /// Check if a string represents a valid, non-negative amount of NPT,
+    /// Neptune coins.
+    ///
+    /// If the amount is valid, returns the amount.
+    async fn validate_coins_amount(
+        &self,
+        amount_string: String,
+    ) -> RpcResult<ValidateCoinsAmountResponse> {
+        self.validate_coins_amount_call(ValidateCoinsAmountRequest { amount_string })
+            .await
+    }
+
+    async fn validate_coins_amount_call(
+        &self,
+        request: ValidateCoinsAmountRequest,
+    ) -> RpcResult<ValidateCoinsAmountResponse>;
+
+    /// Check if a string represents a valid, non-negative amount of NPT,
+    /// atomical units, AKA NAU. This is equivalent to checking if the string
+    /// represents a valid, non-negative i128 not exceeding the maximum allowed
+    /// coins amount of 42.000.000.
+    ///
+    /// If the amount is valid, returns the amount.
+    async fn validate_nau_amount(
+        &self,
+        nau_string: String,
+    ) -> RpcResult<ValidateNauAmountResponse> {
+        self.validate_nau_amount_call(ValidateNauAmountRequest { nau_string })
+            .await
+    }
+
+    async fn validate_nau_amount_call(
+        &self,
+        request: ValidateNauAmountRequest,
+    ) -> RpcResult<ValidateNauAmountResponse>;
 
     async fn get_blocks(
         &self,
@@ -386,6 +451,8 @@ pub trait RpcApi: Sync + Send {
         })
         .await
     }
+
+    /* Personal */
 
     async fn rescan_announced_call(
         &self,
@@ -456,6 +523,167 @@ pub trait RpcApi: Sync + Send {
         request: SetDerivationIndexRequest,
     ) -> RpcResult<SetDerivationIndexResponse>;
 
+    async fn generate_address(&self, key_type: KeyType) -> RpcResult<GenerateAddressResponse> {
+        self.generate_address_call(GenerateAddressRequest { key_type })
+            .await
+    }
+
+    async fn generate_address_call(
+        &self,
+        request: GenerateAddressRequest,
+    ) -> RpcResult<GenerateAddressResponse>;
+
+    /// Return all incoming UTXOs tracked by this node's wallet matching the
+    /// specified filters.
+    ///
+    /// Returns all incoming UTXOs if no filter is specified. Allows for
+    /// pagination.
+    #[expect(clippy::too_many_arguments)]
+    async fn incoming_history(
+        &self,
+        include_orphaned: bool,
+        aocl_leaf_index: Option<u64>,
+        output: Option<RpcAdditionRecord>,
+        receiver_preimage: Option<Digest>,
+        receiver_digest: Option<Digest>,
+        lock_script_hash: Option<Digest>,
+        sender_randomness: Option<Digest>,
+        confirmed_height: Option<RpcBlockHeight>,
+        confirmed_block_hash: Option<Digest>,
+        max_num_elements: Option<u64>,
+        page: Option<u64>,
+    ) -> RpcResult<IncomingHistoryResponse> {
+        self.incoming_history_call(IncomingHistoryRequest {
+            aocl_leaf_index,
+            output,
+            receiver_preimage,
+            receiver_digest,
+            lock_script_hash,
+            sender_randomness,
+            confirmed_height,
+            confirmed_block_hash,
+            include_orphaned,
+            max_num_elements,
+            page,
+        })
+        .await
+    }
+
+    async fn incoming_history_call(
+        &self,
+        request: IncomingHistoryRequest,
+    ) -> RpcResult<IncomingHistoryResponse>;
+
+    /// Return all outgoing transactions intiated by this node's wallet matching
+    /// the specified filters.
+    ///
+    /// Returns all outgoing transactions if no filter is specified. Allows for
+    /// pagination.
+    #[expect(clippy::too_many_arguments)]
+    async fn outgoing_history(
+        &self,
+        sender_randomness: Option<Digest>,
+        receiver_digest: Option<Digest>,
+        output_lock_script_hash: Option<Digest>,
+        output: Option<RpcAdditionRecord>,
+        timestamp: Option<Timestamp>,
+        max_num_elements: Option<u64>,
+        page: Option<u64>,
+    ) -> RpcResult<OutgoingHistoryResponse> {
+        self.outgoing_history_call(OutgoingHistoryRequest {
+            sender_randomness,
+            receiver_digest,
+            output_lock_script_hash,
+            output,
+            timestamp,
+            max_num_elements,
+            page,
+        })
+        .await
+    }
+
+    async fn outgoing_history_call(
+        &self,
+        request: OutgoingHistoryRequest,
+    ) -> RpcResult<OutgoingHistoryResponse>;
+
+    async fn unspent_utxos(&self) -> RpcResult<UnspentUtxosResponse> {
+        self.unspent_utxos_call(UnspentUtxosRequest {}).await
+    }
+
+    async fn unspent_utxos_call(
+        &self,
+        request: UnspentUtxosRequest,
+    ) -> RpcResult<UnspentUtxosResponse>;
+
+    async fn get_balance(&self, number_of_confirmations: u32) -> RpcResult<GetBalanceResponse> {
+        self.get_balance_call(GetBalanceRequest {
+            number_of_confirmations,
+        })
+        .await
+    }
+
+    async fn get_balance_call(&self, request: GetBalanceRequest) -> RpcResult<GetBalanceResponse>;
+
+    /// Return the number of transactions initiated while this block was tip.
+    ///
+    /// Does not check if the transactions have been mined, only initiated.
+    async fn count_sent_transactions_at_block(
+        &self,
+        selector: RpcBlockSelector,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse> {
+        self.count_sent_transactions_at_block_call(CountSentTransactionsAtBlockRequest { selector })
+            .await
+    }
+
+    async fn count_sent_transactions_at_block_call(
+        &self,
+        request: CountSentTransactionsAtBlockRequest,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse>;
+
+    #[expect(clippy::too_many_arguments)]
+    async fn send(
+        &self,
+        amount: RpcNativeCurrencyAmount,
+        fee: RpcNativeCurrencyAmount,
+        to_address: String,
+        min_input_confirmations: Option<usize>,
+        max_num_inputs: Option<usize>,
+        notify_self: Option<String>,
+        notify_other: Option<String>,
+        utxo_priority: Option<String>,
+    ) -> RpcResult<SendResponse> {
+        self.send_call(SendRequest {
+            amount,
+            fee,
+            to_address,
+            min_input_confirmations,
+            max_num_inputs,
+            notify_self,
+            notify_other,
+            utxo_priority,
+        })
+        .await
+    }
+
+    async fn send_call(&self, request: SendRequest) -> RpcResult<SendResponse>;
+
+    /// Claim a UTXO which does not have an onchain announcement but whose
+    /// receiver data is shared through an offchain ciphertext.
+    async fn claim_utxo(
+        &self,
+        ciphertext: String,
+        max_search_depth: Option<u64>,
+    ) -> RpcResult<ClaimUtxoResponse> {
+        self.claim_utxo_call(ClaimUtxoRequest {
+            ciphertext,
+            max_search_depth,
+        })
+        .await
+    }
+
+    async fn claim_utxo_call(&self, request: ClaimUtxoRequest) -> RpcResult<ClaimUtxoResponse>;
+
     /* Mining */
 
     async fn get_block_template(
@@ -483,8 +711,10 @@ pub trait RpcApi: Sync + Send {
         request: SubmitBlockRequest,
     ) -> RpcResult<SubmitBlockResponse>;
 
-    /* Utxo Index */
+    /* Utxoindex */
 
+    /// Return block heights for blocks containing announcements with specified
+    /// announcement flags. May return results from orphaned blocks.
     async fn block_heights_by_flags(
         &self,
         announcement_flags: Vec<AnnouncementFlag>,
@@ -498,6 +728,9 @@ pub trait RpcApi: Sync + Send {
         request: BlockHeightsByFlagsRequest,
     ) -> RpcResult<BlockHeightsByFlagsResponse>;
 
+    /// Return block heights for blocks containing specified addition records.
+    /// Returned block heights are guaranteed to reference blocks belonging to
+    /// the canonical chain.
     async fn block_heights_by_addition_records(
         &self,
         addition_records: Vec<RpcAdditionRecord>,
@@ -523,10 +756,37 @@ pub trait RpcApi: Sync + Send {
         .await
     }
 
+    /// Return block heights for blocks containing specified absolute index
+    /// sets. Returned block heights are guaranteed to reference blocks
+    /// belonging to the canonical chain.
     async fn block_heights_by_absolute_index_sets_call(
         &self,
         request: BlockHeightsByAbsoluteIndexSetsRequest,
     ) -> RpcResult<BlockHeightsByAbsoluteIndexSetsResponse>;
+
+    /// Return the block heights for blocks matching *all* elements in the
+    /// specified input/output lists, for blocks belonging to the canonical
+    /// chain. Will not return block heights were e.g. only one of the outputs
+    /// was included if more than one output is included in the outputs list.
+    ///
+    /// Can return multiple blocks in the case where blocks are selected only
+    /// based on addition records and multiple blocks contain the same addition
+    /// records.
+    ///
+    /// Returns an error if no filtering conditions are set.
+    async fn was_mined(
+        &self,
+        inputs: Vec<RpcAbsoluteIndexSet>,
+        outputs: Vec<RpcAdditionRecord>,
+    ) -> RpcResult<WasMinedResponse> {
+        self.was_mined_call(WasMinedRequest {
+            absolute_index_sets: inputs,
+            addition_records: outputs,
+        })
+        .await
+    }
+
+    async fn was_mined_call(&self, request: WasMinedRequest) -> RpcResult<WasMinedResponse>;
 
     /* Mempool */
 
@@ -592,6 +852,8 @@ pub trait RpcApi: Sync + Send {
         request: GetTransactionsByAbsoluteIndexSetsRequest,
     ) -> RpcResult<GetTransactionsByAbsoluteIndexSetsResponse>;
 
+    /// Return transaction most likely to be mined in next block, based on fee
+    /// density, sync status, and proof quality.
     async fn best_transaction_for_next_block(
         &self,
     ) -> RpcResult<BestTransactionForNextBlockResponse> {
@@ -602,6 +864,7 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: BestTransactionForNextBlockRequest,
     ) -> RpcResult<BestTransactionForNextBlockResponse>;
+
     /* Networking */
 
     async fn ban_call(&self, request: BanRequest) -> RpcResult<BanResponse>;

@@ -71,8 +71,8 @@ pub struct MonitoredUtxo {
     /// 0 for all archival nodes.
     pub number_of_mps_per_utxo: usize,
 
-    /// Hash and other metadata of the block, if any, in which this UTXO was
-    /// spent.
+    /// Hash and other metadata of the block, if any, in which a spend of this
+    /// UTXO was observed.
     pub spent: MonitoredUtxoSpentStatus,
 
     /// Hash and other metadata of the block in which this UTXO was confirmed.

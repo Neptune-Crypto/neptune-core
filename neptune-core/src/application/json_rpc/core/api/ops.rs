@@ -23,9 +23,18 @@ pub enum Namespace {
     Chain,
     Mining,
     Archival,
+
+    /// Endpoints for inspecting the mempool status
     Mempool,
+
+    /// Endpoints for serving external wallets
     Wallet,
-    UtxoIndex,
+
+    /// Endpoints for managing personal wallet
+    Personal,
+
+    /// Endpoints relating to and requiring a UTXO index
+    Utxoindex,
 }
 
 #[derive(Router, Routes, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -97,9 +106,6 @@ pub enum RpcMethods {
     #[namespace(Namespace::Archival)]
     FindUtxoOrigin,
 
-    /// Check if indices in an absolute index set are set. Can be used to check
-    /// if a UTXO is spent without having to know the mutator set membership
-    /// proof.
     #[namespace(Namespace::Archival)]
     AreBloomIndicesSet,
 
@@ -113,6 +119,15 @@ pub enum RpcMethods {
     BurnedSupply,
 
     #[namespace(Namespace::Wallet)]
+    ValidateAddress,
+
+    #[namespace(Namespace::Wallet)]
+    ValidateCoinsAmount,
+
+    #[namespace(Namespace::Wallet)]
+    ValidateNauAmount,
+
+    #[namespace(Namespace::Wallet)]
     GetBlocks,
 
     #[namespace(Namespace::Wallet)]
@@ -121,23 +136,47 @@ pub enum RpcMethods {
     #[namespace(Namespace::Wallet)]
     SubmitTransaction,
 
-    #[namespace(Namespace::Wallet)]
+    #[namespace(Namespace::Personal)]
     RescanAnnounced,
 
-    #[namespace(Namespace::Wallet)]
+    #[namespace(Namespace::Personal)]
     RescanExpected,
 
-    #[namespace(Namespace::Wallet)]
+    #[namespace(Namespace::Personal)]
     RescanOutgoing,
 
-    #[namespace(Namespace::Wallet)]
+    #[namespace(Namespace::Personal)]
     RescanGuesserRewards,
 
-    #[namespace(Namespace::Wallet)]
+    #[namespace(Namespace::Personal)]
     DerivationIndex,
 
-    #[namespace(Namespace::Wallet)]
+    #[namespace(Namespace::Personal)]
     SetDerivationIndex,
+
+    #[namespace(Namespace::Personal)]
+    GenerateAddress,
+
+    #[namespace(Namespace::Personal)]
+    IncomingHistory,
+
+    #[namespace(Namespace::Personal)]
+    OutgoingHistory,
+
+    #[namespace(Namespace::Personal)]
+    UnspentUtxos,
+
+    #[namespace(Namespace::Personal)]
+    GetBalance,
+
+    #[namespace(Namespace::Personal)]
+    CountSentTransactionsAtBlock,
+
+    #[namespace(Namespace::Personal)]
+    Send,
+
+    #[namespace(Namespace::Personal)]
+    ClaimUtxo,
 
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
@@ -145,22 +184,17 @@ pub enum RpcMethods {
     #[namespace(Namespace::Mining)]
     SubmitBlock,
 
-    /// Return block heights for blocks containing announcements with specified
-    /// announcement flags. May return results from orphaned blocks.
-    #[namespace(Namespace::UtxoIndex)]
+    #[namespace(Namespace::Utxoindex)]
     BlockHeightsByFlags,
 
-    /// Return block heights for blocks containing specified addition records.
-    /// Returned block heights are guaranteed to reference blocks belonging to
-    /// the canonical chain.
-    #[namespace(Namespace::UtxoIndex)]
+    #[namespace(Namespace::Utxoindex)]
     BlockHeightsByAdditionRecords,
 
-    /// Return block heights for blocks containing specified absolute index
-    /// sets. Returned block heights are guaranteed to reference blocks
-    /// belonging to the canonical chain.
-    #[namespace(Namespace::UtxoIndex)]
+    #[namespace(Namespace::Utxoindex)]
     BlockHeightsByAbsoluteIndexSets,
+
+    #[namespace(Namespace::Utxoindex)]
+    WasMined,
 
     #[namespace(Namespace::Mempool)]
     Transactions,
@@ -177,8 +211,6 @@ pub enum RpcMethods {
     #[namespace(Namespace::Mempool)]
     GetTransactionsByAbsoluteIndexSets,
 
-    /// Return transaction most likely to be mined in next block, based on fee
-    /// density, sync status, and proof quality.
     #[namespace(Namespace::Mempool)]
     BestTransactionForNextBlock,
 

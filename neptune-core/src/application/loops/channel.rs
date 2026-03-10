@@ -7,7 +7,9 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 
 use crate::api::export::KeyType;
+use crate::api::export::ReceivingAddress;
 use crate::api::export::SpendingKey;
+use crate::api::export::TxCreationArtifacts;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::network::overview::NetworkOverview;
 use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -107,7 +109,9 @@ pub(crate) struct ClaimUtxoData {
 /// represents messages that can be sent from RPC server to main loop.
 #[derive(Debug, strum::Display)]
 pub(crate) enum RPCServerToMain {
-    BroadcastTx(Arc<Transaction>),
+    /// Broadcast own transaction, upgrade if necessary
+    BroadcastOwnTx(Arc<Transaction>),
+
     PerformTxProofUpgrade(Box<UpgradeJob>),
     BroadcastMempoolTransactions,
     BroadcastBlockProposal,
@@ -119,7 +123,11 @@ pub(crate) enum RPCServerToMain {
     SetTipToStoredBlock(Digest),
 
     // Used by JSON-RPC
-    SubmitTx(Box<Transaction>),
+    BroadcastThirdPartyTx(Box<Transaction>),
+
+    /// Request that the wallet registers a UTXO claim.
+    ClaimUtxo(Box<ClaimUtxoData>),
+
     RescanAnnounced {
         first: BlockHeight,
         last: BlockHeight,
@@ -142,6 +150,17 @@ pub(crate) enum RPCServerToMain {
     ResetRelayReservations,
     GetNetworkOverview(tokio::sync::oneshot::Sender<NetworkOverview>),
     BumpKeyDerivationIndex(KeyType, u64),
+    GenerateNewAddress {
+        key_type: KeyType,
+        return_channel: tokio::sync::oneshot::Sender<ReceivingAddress>,
+    },
+
+    /// Record self-initialized transaction. Then broadcast and upgrade if
+    /// necessary.
+    RecordAndBroadcastOwnTx {
+        transaction: TxCreationArtifacts,
+        increment_change_key_counter: bool,
+    },
 }
 
 pub trait Cancelable: Send + Sync {

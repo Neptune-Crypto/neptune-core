@@ -21,11 +21,16 @@ use crate::protocol::proof_abstractions::verifier::verify;
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 #[repr(u8)]
 pub enum TransactionProofType {
-    /// a primitive-witness.  exposes secrets (keys).  this proof must not be shared.
-    PrimitiveWitness = 1,
-    /// a weak proof that does not expose secrets. can be shared with peers, but cannot be confirmed into a block.
+    // Enumeration here must match that used in TxProvingCapability.
+    /// Exposes secrets (keys) and privacy. This proof must not be shared.
+    PrimitiveWitness = 0,
+
+    // LockScript = 1,
+    /// A proof that does not expose secrets or privacy. Can be shared with
+    /// peers, but cannot be confirmed into a block.
     ProofCollection = 2,
-    /// a strong proof.  required for confirming a transaction into a block.
+
+    /// Required for confirming a transaction into a block.
     SingleProof = 3,
 }
 

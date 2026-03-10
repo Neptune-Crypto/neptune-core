@@ -8,7 +8,6 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::address::SpendingKey;
-use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::GlobalState;
 use crate::state::StateLock;
 use crate::GlobalStateLock;
@@ -163,24 +162,17 @@ impl<'a> Wallet<'a> {
         state_lock_call_async!(&self.state_lock, worker::balances, timestamp).await
     }
 
-    /// returns all spendable inputs in the wallet at provided time.
-    ///
-    /// timestamp can be a date in the future in order to see what spendable
-    /// inputs would be at that time, with respect to time-locked utxos.
-    ///
-    /// if timestamp is in the past the result will be the same as if the
-    /// present.
-    ///
-    /// the order of returned inputs is undefined.
-    pub async fn spendable_inputs(&self, timestamp: Timestamp) -> TxInputList {
-        state_lock_call_async!(&self.state_lock, worker::spendable_inputs, timestamp).await
+    /// Returns the number of expected UTXOs in the wallet database.
+    pub async fn num_expected_utxos(&self) -> u64 {
+        state_lock_call_async!(&self.state_lock, worker::num_expected_utxos, ()).await
     }
 }
 
 mod worker {
+
     use super::*;
 
-    pub async fn next_unused_spending_key(
+    pub(super) async fn next_unused_spending_key(
         gsm: &mut GlobalState,
         key_type: KeyType,
     ) -> Result<SpendingKey, WalletError> {
@@ -192,15 +184,11 @@ mod worker {
         Ok(address)
     }
 
-    pub async fn balances(gs: &GlobalState, timestamp: Timestamp) -> WalletBalances {
+    pub(super) async fn balances(gs: &GlobalState, timestamp: Timestamp) -> WalletBalances {
         WalletBalances::from_global_state(gs, timestamp).await
     }
 
-    pub async fn spendable_inputs(gs: &GlobalState, timestamp: Timestamp) -> TxInputList {
-        // sadly we have to collect here because we can't hold ref after lock guard is dropped.
-        gs.wallet_spendable_inputs(timestamp)
-            .await
-            .into_iter()
-            .into()
+    pub(super) async fn num_expected_utxos(gs: &GlobalState, _: ()) -> u64 {
+        gs.wallet_state.num_expected_utxos().await
     }
 }

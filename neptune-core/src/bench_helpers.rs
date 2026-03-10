@@ -19,7 +19,6 @@ use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionDetails;
 use crate::api::export::TransactionProof;
-use crate::api::export::TxInput;
 use crate::api::export::TxOutputList;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
@@ -59,11 +58,10 @@ pub fn benchmark_data_directory(network: Network) -> Result<DataDirectory> {
 pub async fn devops_global_state_genesis(cli_args: cli_args::Args) -> GlobalStateLock {
     let data_directory = benchmark_data_directory(cli_args.network).unwrap();
     let genesis = Block::genesis(cli_args.network);
-    let wallet_state = devops_wallet_state_genesis(cli_args.network).await;
-    let gs =
-        GlobalState::try_new_with_wallet_state(data_directory, genesis, cli_args, wallet_state)
-            .await
-            .unwrap();
+    let premine_receiver = WalletEntropy::devnet_wallet();
+    let gs = GlobalState::try_new(data_directory, genesis, cli_args, Some(premine_receiver))
+        .await
+        .unwrap();
     let (rpc_server_to_main_tx, _rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     GlobalStateLock::from_global_state(gs, rpc_server_to_main_tx)
@@ -134,15 +132,13 @@ pub async fn next_block_incoming_utxos(
 
     let msa = parent.mutator_set_accumulator_after().unwrap();
     let wallet_status = sender.get_wallet_status_for_tip().await;
-    let available_balance = wallet_status.available_confirmed(timestamp);
+    let available_balance =
+        wallet_status.confirmed_available_balance(parent.header().height, timestamp);
     let change_amt = available_balance.checked_sub(&intermediate_spend).unwrap();
 
     outputs.push((recipient.clone(), change_amt));
 
-    let mut input_funds: Vec<TxInput> = vec![];
-    for input in sender.spendable_inputs(wallet_status, timestamp).await {
-        input_funds.push(input);
-    }
+    let input_funds = sender.wallet_spendable_inputs_at_time(timestamp).await;
 
     let owned = sender
         .wallet_state

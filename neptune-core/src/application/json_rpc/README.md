@@ -19,6 +19,7 @@ Let’s say you want to add a new method called `submit_block`.
    * In `json_rpc::core::api::rpc::RpcApi`, add two async functions:
 
      ```rust
+     /// Documentation goes here
      async fn submit_block(
          &self,
          block: RpcBlock,
@@ -30,6 +31,9 @@ Let’s say you want to add a new method called `submit_block`.
      ) -> RpcResult<SubmitBlockResponse>;
      ```
    * The first function should just call the second one.
+   * The documentation is added to the first function since this is what the
+     derived client object sees. So software that only uses the client interface
+     has access to the documentation of the endpoint.
 
 ---
 

@@ -99,7 +99,7 @@ mod wallet_state {
 
         let timestamp = blocks.last().unwrap().header().timestamp;
         bencher.bench_local(|| {
-            let _spandable_inputs = rt.block_on(state.wallet_spendable_inputs(timestamp));
+            let _spandable_inputs = rt.block_on(state.wallet_spendable_inputs_at_time(timestamp));
         });
     }
 

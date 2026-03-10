@@ -3,11 +3,16 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::NeptuneProof;
+use crate::api::export::Network;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
+use crate::api::export::Utxo;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
+use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
+use crate::state::wallet::utxo_notification::PrivateNotificationData;
+use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RpcNeptuneProof(RpcBFieldElements);
@@ -132,6 +137,108 @@ impl From<Transaction> for RpcTransaction {
             // ownership...
             kernel: RpcTransactionKernel::from(&tx.kernel),
             proof: tx.proof.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcCoin {
+    pub type_script_hash: Digest,
+    pub state: RpcBFieldElements,
+}
+
+impl From<Coin> for RpcCoin {
+    fn from(value: Coin) -> Self {
+        Self {
+            type_script_hash: value.type_script_hash,
+            state: value.state.into(),
+        }
+    }
+}
+
+impl From<&Coin> for RpcCoin {
+    fn from(value: &Coin) -> Self {
+        Self {
+            type_script_hash: value.type_script_hash,
+            state: value.state.to_owned().into(),
+        }
+    }
+}
+
+impl From<RpcCoin> for Coin {
+    fn from(value: RpcCoin) -> Self {
+        Self {
+            type_script_hash: value.type_script_hash,
+            state: value.state.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcUtxo {
+    lock_script_hash: Digest,
+    coins: Vec<RpcCoin>,
+}
+
+impl From<Utxo> for RpcUtxo {
+    fn from(value: Utxo) -> Self {
+        Self {
+            lock_script_hash: value.lock_script_hash(),
+            coins: value.coins().iter().map(|x| x.into()).collect(),
+        }
+    }
+}
+
+impl From<RpcUtxo> for Utxo {
+    fn from(value: RpcUtxo) -> Self {
+        Self::new(
+            value.lock_script_hash,
+            value.coins.into_iter().map(|x| x.into()).collect(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RpcUtxoNotificationPayload {
+    pub(crate) utxo: RpcUtxo,
+    pub(crate) sender_randomness: Digest,
+}
+
+impl From<UtxoNotificationPayload> for RpcUtxoNotificationPayload {
+    fn from(value: UtxoNotificationPayload) -> Self {
+        Self {
+            utxo: value.utxo.into(),
+            sender_randomness: value.sender_randomness,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcPrivateNotificationData {
+    pub cleartext: RpcUtxoNotificationPayload,
+    pub ciphertext: String,
+    pub recipient_address: String,
+
+    /// Indicates if this client can unlock the UTXO
+    pub owned: bool,
+}
+
+impl RpcPrivateNotificationData {
+    pub(crate) fn from_private_notification_data(
+        value: PrivateNotificationData,
+        network: Network,
+    ) -> Self {
+        Self {
+            cleartext: value.cleartext.into(),
+            ciphertext: value.ciphertext,
+            recipient_address: value
+                .recipient_address
+                .to_bech32m(network)
+                .expect("Locally produced address must be bech32 serializable"),
+            owned: value.owned,
         }
     }
 }

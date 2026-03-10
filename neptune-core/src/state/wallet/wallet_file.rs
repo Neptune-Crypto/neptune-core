@@ -49,6 +49,30 @@ impl WalletFileContext {
         wallet_directory_path.join(WALLET_INCOMING_SECRETS_FILE_NAME)
     }
 
+    /// Allows for the injection of a specified wallet entropy, that will be
+    /// stored to the wallet seed file. This function **must** panic if a seed
+    /// file already exists such that a production-seed is never inadvertently
+    /// deleted.
+    ///
+    /// # Panics
+    /// - If this function would overwrite an existing file.
+    pub(crate) fn new_with_injected_entropy(
+        wallet_directory_path: &Path,
+        injected_entropy: WalletEntropy,
+    ) -> Result<Self> {
+        let wallet_secret_path = WalletFileContext::wallet_secret_path(wallet_directory_path);
+        assert!(
+            !wallet_secret_path.exists(),
+            "This function may not overwrite existing seed found in {}",
+            wallet_secret_path.to_string_lossy()
+        );
+
+        let new_wallet = WalletFile::new(injected_entropy.into());
+        new_wallet.save_to_disk(&wallet_secret_path)?;
+
+        Self::read_from_file_or_create(wallet_directory_path)
+    }
+
     /// Read a wallet from disk or create it.
     ///
     /// Read a wallet file from the `wallet.dat` file in the given directory if
@@ -230,5 +254,29 @@ impl WalletFile {
             .write(true)
             .open(path)?;
         fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::api::export::Network;
+    use crate::application::config::data_directory::DataDirectory;
+    use crate::tests::shared::files::unit_test_data_directory;
+
+    #[should_panic(expected = "This function may not overwrite existing seed found in")]
+    #[tokio::test]
+    async fn wallet_seed_is_never_overwritten() {
+        let network = Network::Main;
+        let dir = unit_test_data_directory(network).unwrap();
+        let wallet_dir = dir.wallet_directory_path();
+        DataDirectory::create_dir_if_not_exists(&wallet_dir)
+            .await
+            .unwrap();
+        let _foo = WalletFileContext::read_from_file_or_create(&wallet_dir).unwrap();
+
+        // Attempt to overwrite created file with new seed. Must panic.
+        let _bar =
+            WalletFileContext::new_with_injected_entropy(&wallet_dir, WalletEntropy::new_random());
     }
 }

@@ -7,6 +7,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::api::export::KeyType;
+use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::body::*;
 use crate::application::json_rpc::core::model::block::header::*;
 use crate::application::json_rpc::core::model::block::transaction_kernel::*;
@@ -15,6 +16,10 @@ use crate::application::json_rpc::core::model::common::*;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
 use crate::application::json_rpc::core::model::wallet::block::*;
 use crate::application::json_rpc::core::model::wallet::mutator_set::*;
+use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
+use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
+use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
+use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNotificationData;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
 use crate::application::json_rpc::core::model::wallet::RpcAnnouncementFlag;
@@ -309,6 +314,45 @@ pub struct BurnedSupplyResponse {
     pub amount: RpcNativeCurrencyAmount,
 }
 
+/* wallet */
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateAddressRequest {
+    pub address_string: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateAddressResponse {
+    pub address_type: Option<String>,
+    pub receiver_identifier: Option<u64>,
+    pub announcement_flags: Option<RpcAnnouncementFlag>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateCoinsAmountRequest {
+    pub amount_string: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateCoinsAmountResponse {
+    pub amount: Option<RpcNativeCurrencyAmount>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateNauAmountRequest {
+    pub nau_string: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateNauAmountResponse {
+    pub amount: Option<RpcNativeCurrencyAmount>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct GetBlocksRequest {
@@ -346,6 +390,7 @@ pub struct SubmitTransactionResponse {
     pub success: bool,
 }
 
+/* Personal */
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct RescanAnnouncedRequest {
@@ -411,6 +456,105 @@ pub struct SetDerivationIndexRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SetDerivationIndexResponse {}
 
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateAddressRequest {
+    pub key_type: KeyType,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateAddressResponse {
+    pub address: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct UnspentUtxosRequest {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnspentUtxosResponse {
+    pub utxos: Vec<RpcCoinWithPossibleTimeLock>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBalanceRequest {
+    pub number_of_confirmations: u32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBalanceResponse {
+    pub confirmed_available: RpcNativeCurrencyAmount,
+    pub confirmed_total: RpcNativeCurrencyAmount,
+    pub unconfirmed_available: RpcNativeCurrencyAmount,
+    pub unconfirmed_total: RpcNativeCurrencyAmount,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct CountSentTransactionsAtBlockRequest {
+    pub selector: RpcBlockSelector,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CountSentTransactionsAtBlockResponse {
+    pub count: u32,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct SendRequest {
+    pub amount: RpcNativeCurrencyAmount,
+    pub fee: RpcNativeCurrencyAmount,
+    pub to_address: String,
+    pub min_input_confirmations: Option<usize>,
+    pub max_num_inputs: Option<usize>,
+    pub notify_self: Option<String>,
+    pub notify_other: Option<String>,
+    pub utxo_priority: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SendResponse {
+    /// An identifier for the transaction that stays valid as long as the
+    /// transaction is not merged with other transactions, or mined.
+    pub transaction_kernel_id: RpcTransactionKernelId,
+
+    /// The absolute indices of the wallet's inputs used in the transactions.
+    pub inputs: Vec<RpcAbsoluteIndexSet>,
+
+    /// The addition records of the transaction outputs.
+    pub outputs: Vec<RpcAdditionRecord>,
+
+    /// Offchain notifications that must be communicated to the recipient to
+    /// allow them to claim the transaction outputs created in this transaction.
+    /// This list will be empty if on-chain notifications are selected.
+    ///
+    /// Does not include notifications pertaning to UTXOs that the transaction
+    /// initiator node can unlock.
+    pub unowned_offchain_notifications: Vec<RpcPrivateNotificationData>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimUtxoRequest {
+    pub ciphertext: String,
+
+    /// Indicates how many blocks to look back in case the UTXO was already
+    /// mined.
+    pub max_search_depth: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimUtxoResponse {
+    pub new: bool,
+}
+
 /* Mining */
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -435,6 +579,54 @@ pub struct SubmitBlockRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SubmitBlockResponse {
     pub success: bool,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingHistoryRequest {
+    pub aocl_leaf_index: Option<u64>,
+    pub output: Option<RpcAdditionRecord>,
+    pub receiver_preimage: Option<Digest>,
+    pub receiver_digest: Option<Digest>,
+    pub lock_script_hash: Option<Digest>,
+    pub sender_randomness: Option<Digest>,
+    pub confirmed_height: Option<RpcBlockHeight>,
+    pub confirmed_block_hash: Option<Digest>,
+    pub include_orphaned: bool,
+
+    /// Upper limit on the number of returned elements
+    pub max_num_elements: Option<u64>,
+
+    /// 0-indexed page.
+    pub page: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingHistoryResponse {
+    pub outputs: Vec<ReceivedTransactionOutput>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct OutgoingHistoryRequest {
+    pub sender_randomness: Option<Digest>,
+    pub receiver_digest: Option<Digest>,
+    pub output_lock_script_hash: Option<Digest>,
+    pub output: Option<RpcAdditionRecord>,
+    pub timestamp: Option<Timestamp>,
+
+    /// Upper limit on the number of returned elements
+    pub max_num_elements: Option<u64>,
+
+    /// 0-indexed page.
+    pub page: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutgoingHistoryResponse {
+    pub matching_sent: Vec<InitiatedTransaction>,
 }
 
 /* Utxo Index */
@@ -471,6 +663,19 @@ pub struct BlockHeightsByAbsoluteIndexSetsRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockHeightsByAbsoluteIndexSetsResponse {
+    pub block_heights: Vec<RpcBlockHeight>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct WasMinedRequest {
+    pub absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+    pub addition_records: Vec<RpcAdditionRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WasMinedResponse {
     pub block_heights: Vec<RpcBlockHeight>,
 }
 

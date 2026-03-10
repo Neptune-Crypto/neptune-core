@@ -1319,10 +1319,21 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::archival_mmr::ArchivalMmr;
+    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
 
     impl Block {
+        /// Return all absolute index sets (transaction inputs) in this block.
+        pub(crate) fn all_absolute_index_sets(&self) -> Vec<AbsoluteIndexSet> {
+            self.body()
+                .transaction_kernel
+                .inputs
+                .iter()
+                .map(|x| x.absolute_indices)
+                .collect()
+        }
+
         pub(crate) fn set_proof(&mut self, proof: BlockProof) {
             self.proof = proof;
             self.unset_digest();

@@ -249,7 +249,7 @@ impl GenesisNode {
     ///
     /// note: no dummy components are used.
     pub async fn start_node(args: Args) -> anyhow::Result<Self> {
-        let mut main_loop_handler = neptune_cash::initialize(args).await?;
+        let mut main_loop_handler = neptune_cash::initialize(args, None).await?;
         let gsl = main_loop_handler.global_state_lock();
 
         let main_loop_join_handle =

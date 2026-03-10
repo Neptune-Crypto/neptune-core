@@ -91,6 +91,7 @@ use crate::application::network::config::NetworkConfig;
 use crate::application::rpc::server::RPC;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::archival_state::ArchivalState;
+use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalStateLock;
 
@@ -118,7 +119,10 @@ pub fn display_banner() {
     println!("{}", NEPTUNE_BANNER);
 }
 
-pub async fn initialize(mut cli_args: cli_args::Args) -> Result<MainLoopHandler> {
+pub async fn initialize(
+    mut cli_args: cli_args::Args,
+    injected_wallet_entropy: Option<WalletEntropy>,
+) -> Result<MainLoopHandler> {
     async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(fut);
     }
@@ -140,11 +144,17 @@ pub async fn initialize(mut cli_args: cli_args::Args) -> Result<MainLoopHandler>
     info!("Data directory is {}", data_directory);
 
     // Initialize global state
+    let genesis = Block::genesis(cli_args.network);
+    let global_state = GlobalState::try_new(
+        data_directory.clone(),
+        genesis,
+        cli_args.clone(),
+        injected_wallet_entropy,
+    )
+    .await?;
+
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
-    let genesis = Block::genesis(cli_args.network);
-    let global_state =
-        GlobalState::try_new(data_directory.clone(), genesis, cli_args.clone()).await?;
     let mut global_state_lock =
         GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
 

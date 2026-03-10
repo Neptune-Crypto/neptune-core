@@ -2,7 +2,7 @@
 //!
 //! They are exported here in one location for convenience.
 
-pub use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+pub use crate::api::tx_initiation::builder::input_selector::InputSelectionPriority;
 pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 pub use crate::api::tx_initiation::consolidate::ConsolidationError;
 pub use crate::api::wallet::WalletBalances;
@@ -33,9 +33,9 @@ pub use crate::state::wallet::address::KeyType;
 pub use crate::state::wallet::address::ReceivingAddress;
 pub use crate::state::wallet::address::SpendingKey;
 pub use crate::state::wallet::change_policy::ChangePolicy;
-pub use crate::state::wallet::transaction_input::TxInput;
-pub use crate::state::wallet::transaction_input::TxInputList;
+pub use crate::state::wallet::input_candidate::InputCandidate;
 pub use crate::state::wallet::transaction_output::TxOutputList;
+pub use crate::state::wallet::unlocked_utxo::TxInputs;
 pub use crate::state::GlobalStateLock;
 pub use crate::state::RecordTransactionError;
 pub use crate::state::StateLock;

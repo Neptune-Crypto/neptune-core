@@ -20,7 +20,7 @@ use super::transaction_kernel::TransactionKernel;
 use super::transaction_kernel::TransactionKernelModifier;
 use super::utxo::Utxo;
 use super::TransactionDetails;
-use crate::api::export::TxInputList;
+use crate::api::export::TxInputs;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::type_scripts::known_type_scripts;
 use crate::protocol::consensus::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
@@ -155,7 +155,7 @@ impl PrimitiveWitness {
     /// # Panics
     /// Panics if transaction validity cannot be satisfied.
     fn generate_primitive_witness(
-        unlocked_utxos: &TxInputList,
+        unlocked_utxos: &TxInputs,
         output_utxos: Vec<Utxo>,
         sender_randomnesses: Vec<Digest>,
         receiver_digests: Vec<Digest>,
