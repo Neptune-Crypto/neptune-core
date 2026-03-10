@@ -35,9 +35,18 @@ postprocessors = [
 [git]
 
 conventional_commits = true
-filter_unconventional = true
+filter_unconventional = false
 split_commits = false
 commit_preprocessors = [
+  # 1. Transform Merge PR lines into conventional format
+  { pattern = '^Merge PR #([0-9]+): (.*)', replace = "merge(#${1}): ${2}" },
+  { pattern = '^Merge pull request #([0-9]+) from (.*)', replace = "merge(#${1}): ${2}" },
+
+  # 2. Drop everything but the first line for all commits
+  # This matches the first newline and everything following it, replacing it with nothing.
+  { pattern = '(?s)\n.*', replace = "" },
+
+  # 3. Your existing issue linker
   { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](<REPO>/issues/${2}))" },
 ]
 
@@ -63,7 +72,9 @@ commit_parsers = [
   { message = "^log|trace", group = "<!-- 130 --> 🪵 Log" },
   { message = "^devops|devx|devex", group = "<!-- 140 --> 🚥 Developer Experience" },
   { message = "^privacy", group = "<!-- 150 --> 🕵️ Privacy" },
+  { message = "^merge", group = "<!-- 160 --> 🪢 Merge" },
   { footer = "^changelog: ?ignore", skip = true },
+  { message = ".*", group = "<!-- 999 --> 🔔 Shame! (Not a Convensional Commit)" },
 ]
 
 protect_breaking_commits = false
