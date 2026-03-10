@@ -117,6 +117,10 @@
 - Reduce noise ([d59dac78](https://github.com/Neptune-Crypto/neptune-core/commit/d59dac78), [743403cc](https://github.com/Neptune-Crypto/neptune-core/commit/743403cc), [08f3b46c](https://github.com/Neptune-Crypto/neptune-core/commit/08f3b46c), [ad588094](https://github.com/Neptune-Crypto/neptune-core/commit/ad588094), [41752652](https://github.com/Neptune-Crypto/neptune-core/commit/41752652))
 - Report on number of own txs confirmed by block proposal ([65064aac](https://github.com/Neptune-Crypto/neptune-core/commit/65064aac))
 
+### 🪢 Merge
+
+- Merge([#779](https://github.com/Neptune-Crypto/neptune-core/issues/779)): Scrollable Tables ([3a4d18d4](https://github.com/Neptune-Crypto/neptune-core/commit/3a4d18d4))
+
 ## [0.6.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.5.0..v0.6.0) - 2026-02-03
 
 ### 🔱 Fork
