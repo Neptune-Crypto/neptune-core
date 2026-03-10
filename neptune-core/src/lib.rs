@@ -709,8 +709,21 @@ pub(crate) fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std
             format!("not a directory: {}", source.display()),
         ));
     }
-    std::fs::create_dir_all(destination)?;
-    for entry in std::fs::read_dir(source)? {
+    std::fs::create_dir_all(destination).inspect_err(|e| {
+        error!(
+            "error creating directory {}: '{e}'. source: {}",
+            destination.to_string_lossy(),
+            source.to_string_lossy()
+        );
+    })?;
+    let entries = std::fs::read_dir(source).inspect_err(|e| {
+        error!(
+            "error reading directory {}: '{e}'. source: {}",
+            destination.to_string_lossy(),
+            source.to_string_lossy()
+        );
+    })?;
+    for entry in entries {
         let entry = entry?;
         let dest_path = &destination.join(entry.file_name());
 
@@ -718,14 +731,21 @@ pub(crate) fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std
         if entry.is_dir() {
             copy_dir_recursive(&entry, dest_path).inspect_err(|e| {
                 error!(
-                    "error: {e}. source: {}, entry: {}, dest_path: {}",
+                    "error in recursive call: '{e}'. source: {}, entry: {}, dest_path: {}",
                     source.to_string_lossy(),
                     entry.to_string_lossy(),
                     dest_path.to_string_lossy()
-                )
+                );
             })?;
         } else {
-            std::fs::copy(entry, dest_path)?;
+            std::fs::copy(entry.clone(), dest_path).inspect_err(|e| {
+                error!(
+                    "error copying: '{e}'. source: {}, entry: {}, dest_path: {}",
+                    source.to_string_lossy(),
+                    entry.to_string_lossy(),
+                    dest_path.to_string_lossy()
+                );
+            })?;
         }
     }
     Ok(())
