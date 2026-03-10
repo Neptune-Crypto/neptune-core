@@ -192,10 +192,6 @@ fn guess_worker(
     );
 
     // Following code must match the rules in `[Block::has_proof_of_work]`.
-    // a difficulty reset (to min difficulty) occurs on testnet(s)
-    // when the elapsed time between two blocks is greater than a
-    // max interval, defined by the network.  It never occurs for
-    // mainnet.
     let should_reset_difficulty =
         Block::should_reset_difficulty(network, now, previous_block_header.timestamp);
     let new_difficulty = if should_reset_difficulty {

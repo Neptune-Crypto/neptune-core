@@ -4248,20 +4248,41 @@ mod tests {
 
         #[traced_test]
         #[test]
-        fn hardfork_alpha_happy_case() {
-            // Ensure that valid blocks are all accepted across hardfork alpha.
+        fn hardforks_happy_cases() {
+            // Ensure that valid blocks are all accepted across hardforks
             // Scenario: Current height is hardfork minus 2. Then receives peer
             // notification of first block after hardfork. Must accept all
             // blocks from peer, not punish peer, and send blocks to main
-            // loop.
-            let init_block_heigth = BlockHeight::from(14999u64);
-            let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
-                init_block_heigth,
-                Difficulty::MINIMUM,
+            // loop. Can be expanded for new hardforks when they are planned.
+            let alpha_fh = (
+                BlockHeight::from(14999u64),
+                ConsensusRuleSet::Reboot,
+                ConsensusRuleSet::HardforkAlpha,
             );
+            let mem_hardness_hf = (
+                BlockHeight::from(39999u64),
+                ConsensusRuleSet::TvmProofVersion1,
+                ConsensusRuleSet::NoMemoryHardness,
+            );
+            for (init_block_height, start_rules, end_rules) in [alpha_fh, mem_hardness_hf] {
+                let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
+                    init_block_height,
+                    Difficulty::MINIMUM,
+                );
+                tokio_runtime().block_on(runner(
+                    bpw,
+                    start_rules,
+                    end_rules,
+                    init_block_height.next(),
+                ));
+            }
 
-            tokio_runtime().block_on(runner(bpw));
-            async fn runner(block_primitive_witness: BlockPrimitiveWitness) {
+            async fn runner(
+                block_primitive_witness: BlockPrimitiveWitness,
+                start_consensus_rule_set: ConsensusRuleSet,
+                end_consensus_rule_set: ConsensusRuleSet,
+                first_block_height_after_hardfork: BlockHeight,
+            ) {
                 let network = Network::Main;
                 let (hard_fork_minus_2, hard_fork_minus_1_no_pow) =
                     Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
@@ -4314,19 +4335,15 @@ mod tests {
                 // Verify assumption about block height of hardfork
                 assert!(hard_fork_minus_1.pow_verify(
                     hard_fork_minus_2.header().difficulty.target(),
-                    ConsensusRuleSet::Reboot
-                ));
-                assert!(!hard_fork_minus_1.pow_verify(
-                    hard_fork_minus_2.header().difficulty.target(),
-                    ConsensusRuleSet::HardforkAlpha
+                    start_consensus_rule_set
                 ));
                 assert!(first_block_after_hardfork.pow_verify(
                     hard_fork_minus_2.header().difficulty.target(),
-                    ConsensusRuleSet::HardforkAlpha
+                    end_consensus_rule_set
                 ));
                 assert!(!first_block_after_hardfork.pow_verify(
-                    hard_fork_minus_2.header().difficulty.target(),
-                    ConsensusRuleSet::Reboot
+                    hard_fork_minus_1.header().difficulty.target(),
+                    start_consensus_rule_set
                 ));
 
                 // Declare expected order of messages
@@ -4334,9 +4351,9 @@ mod tests {
                     Action::Read(PeerMessage::BlockNotification(
                         (&first_block_after_hardfork).into(),
                     )),
-                    Action::Write(PeerMessage::BlockRequestByHeight(BlockHeight::from(
-                        15000u64,
-                    ))),
+                    Action::Write(PeerMessage::BlockRequestByHeight(
+                        first_block_height_after_hardfork,
+                    )),
                     Action::Read(PeerMessage::Block(Box::new(
                         first_block_after_hardfork.clone().try_into().unwrap(),
                     ))),

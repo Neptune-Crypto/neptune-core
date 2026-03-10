@@ -21,6 +21,15 @@ pub const BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET: BlockHeight =
 pub const BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET: BlockHeight =
     BlockHeight::new(BFieldElement::new(23_401u64));
 
+/// Height of 1st block changing PoW algorithm to drop memory hardness
+pub const BLOCK_HEIGHT_HARDFORK_NO_MEMORY_HARDNESS_MAIN_NET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(40_000u64));
+
+/// Height of 1st block changing PoW algorithm to drop memory hardness, for test
+/// net.
+pub const BLOCK_HEIGHT_HARDFORK_NO_MEMORY_HARDNESS_TESTNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(3_700u64));
+
 /// Enumerates all possible sets of consensus rules.
 ///
 /// Specifically, this enum captures *differences* between consensus rules,
@@ -33,10 +42,18 @@ pub const BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET: BlockHeight =
 /// ultimately [`Block::is_valid`][super::block::Block::is_valid].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Default, strum_macros::Display)]
 pub enum ConsensusRuleSet {
+    /// First rule set after reboot
     Reboot,
+
+    /// Allow reuse of preprocessing step for new block proposals
     HardforkAlpha,
+
+    /// Upgrade from Triton VM proof version v0 to v1
     #[default]
     TvmProofVersion1,
+
+    /// Remove memory hardness from PoW algorithm
+    NoMemoryHardness,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum_macros::Display)]
@@ -58,8 +75,10 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::Reboot
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET {
                     ConsensusRuleSet::HardforkAlpha
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_NO_MEMORY_HARDNESS_MAIN_NET {
                     ConsensusRuleSet::TvmProofVersion1
+                } else {
+                    ConsensusRuleSet::NoMemoryHardness
                 }
             }
             Network::TestnetMock => ConsensusRuleSet::TvmProofVersion1,
@@ -69,11 +88,22 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::Reboot
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET {
                     ConsensusRuleSet::HardforkAlpha
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_NO_MEMORY_HARDNESS_TESTNET {
                     ConsensusRuleSet::TvmProofVersion1
+                } else {
+                    ConsensusRuleSet::NoMemoryHardness
                 }
             }
-            Network::Testnet(_) => ConsensusRuleSet::TvmProofVersion1,
+            Network::Testnet(_) => ConsensusRuleSet::NoMemoryHardness,
+        }
+    }
+
+    pub(crate) fn memory_hard_pow(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot => true,
+            ConsensusRuleSet::HardforkAlpha => true,
+            ConsensusRuleSet::TvmProofVersion1 => true,
+            ConsensusRuleSet::NoMemoryHardness => false,
         }
     }
 
@@ -87,6 +117,7 @@ impl ConsensusRuleSet {
                 ConsensusRuleSet::Reboot => TritonProofVersion::V0,
                 ConsensusRuleSet::HardforkAlpha => TritonProofVersion::V0,
                 ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
+                ConsensusRuleSet::NoMemoryHardness => TritonProofVersion::V1,
             }
         }
     }
@@ -96,7 +127,8 @@ impl ConsensusRuleSet {
         match self {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
-            | ConsensusRuleSet::TvmProofVersion1 => {
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::NoMemoryHardness => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -108,21 +140,24 @@ impl ConsensusRuleSet {
         match self {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
-            | ConsensusRuleSet::TvmProofVersion1 => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::NoMemoryHardness => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_outputs(&self) -> usize {
         match self {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
-            | ConsensusRuleSet::TvmProofVersion1 => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::NoMemoryHardness => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_announcements(&self) -> usize {
         match self {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
-            | ConsensusRuleSet::TvmProofVersion1 => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::NoMemoryHardness => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 
