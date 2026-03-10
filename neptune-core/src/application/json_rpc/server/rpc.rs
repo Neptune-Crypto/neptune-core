@@ -13,14 +13,17 @@ pub struct RpcServer {
     pub(crate) state: GlobalStateLock,
     pub(crate) to_main_tx: mpsc::Sender<RPCServerToMain>,
 
-    /// If set, means that 3rd parties should not have access to the RPC server,
-    /// as they can do harm.
+    /// Whether to allow otherwise-restricted commands.
     ///
-    /// DOS protection: If set to true, the client may make requests that
-    /// require a lot of work or a long time to answer.
+    /// With this boolean set to true, the querier can:
+    ///  - make queries that induce large workloads;
+    ///  - effect changes to network topology;
+    ///  - (assuming the "Personal" namespace is also enabled) observe and spend
+    ///    balance.
     ///
-    /// Own wallet state protection: If set to true, access to the node's own
-    /// wallet is permitted through the RPC.
+    /// If untrusted third parties have access to the RPC server, this boolean
+    /// should be set to false, because otherwise the node is exposed to
+    /// malicious behavior.
     pub(crate) unrestricted: bool,
 }
 
