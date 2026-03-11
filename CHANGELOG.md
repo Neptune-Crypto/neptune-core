@@ -279,11 +279,6 @@
 
 - Limit announcement size ([ff9de0d5](https://github.com/Neptune-Crypto/neptune-core/commit/ff9de0d5))
 
-### 🪢 Merge
-
-- Merge([#779](https://github.com/Neptune-Crypto/neptune-core/issues/779)): Scrollable Tables ([3a4d18d4](https://github.com/Neptune-Crypto/neptune-core/commit/3a4d18d4))
-
-
 ## [0.5.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.4.0..v0.5.0) - 2025-10-31
 
 ### 🔱 Fork
