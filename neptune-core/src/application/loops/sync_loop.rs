@@ -905,7 +905,7 @@ mod tests {
                 sync_target_height
             );
             let sync_loop_handle =
-                SyncLoopHandle::new(current_tip, sync_target_height, Network::Testnet(0), false)
+                SyncLoopHandle::new(current_tip, sync_target_height, Network::Testnet(0), false, None)
                     .await;
             let (peer_control_sender, peer_control_receiver) = mpsc::channel::<PeerControl>(10);
             let (blockchain_tip_control_sender, blockchain_tip_control_receiver) =
