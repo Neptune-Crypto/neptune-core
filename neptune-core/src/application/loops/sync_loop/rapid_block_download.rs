@@ -22,15 +22,22 @@ pub(crate) struct RapidBlockDownload {
     index_to_filename: HashMap<u64, PathBuf>,
 
     target_height: BlockHeight,
+
+    /// User-specified sync directory, if any.
+    sync_dir: Option<PathBuf>,
 }
 
 impl RapidBlockDownload {
-    fn temp_dir_base() -> PathBuf {
-        let suffix = format!(
-            "rapid-block-download-{}/",
-            whoami::username().unwrap_or("".to_string())
-        );
-        std::env::temp_dir().join(suffix)
+    fn temp_dir_base(sync_dir: &Option<PathBuf>) -> PathBuf {
+        if let Some(dir) = sync_dir {
+            dir.clone()
+        } else {
+            let suffix = format!(
+                "rapid-block-download-{}/",
+                whoami::username().unwrap_or("".to_string())
+            );
+            std::env::temp_dir().join(suffix)
+        }
     }
 
     /// The target block height we are syncing to.
@@ -42,12 +49,14 @@ impl RapidBlockDownload {
     pub(crate) async fn new(
         target_height: BlockHeight,
         resume_if_possible: bool,
+        sync_dir: Option<PathBuf>,
     ) -> Result<Self, RapidBlockDownloadError> {
-        let temp_directory = match Self::try_resume_directory(resume_if_possible).await {
+        let temp_directory = match Self::try_resume_directory(resume_if_possible, &sync_dir).await {
             Some(d) => d,
             None => {
                 tracing::debug!("No existing temp directory for syncing found, creating new one.");
-                let temp_directory = Self::temp_dir_base().join(format!("{}/", rng().next_u64()));
+                let temp_directory =
+                    Self::temp_dir_base(&sync_dir).join(format!("{}/", rng().next_u64()));
                 tokio::fs::create_dir_all(&temp_directory)
                     .await
                     .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
@@ -92,6 +101,7 @@ impl RapidBlockDownload {
             coverage,
             index_to_filename,
             target_height,
+            sync_dir,
         })
     }
 
@@ -100,12 +110,15 @@ impl RapidBlockDownload {
     ///
     /// If it was aborted, the files should still be there. No need to download
     /// them again.
-    async fn try_resume_directory(resume_if_possible: bool) -> Option<PathBuf> {
+    async fn try_resume_directory(
+        resume_if_possible: bool,
+        sync_dir: &Option<PathBuf>,
+    ) -> Option<PathBuf> {
         if !resume_if_possible {
             return None;
         }
 
-        let temp_dir = Self::temp_dir_base();
+        let temp_dir = Self::temp_dir_base(sync_dir);
         let mut info = tokio::fs::read_dir(&temp_dir)
             .await
             .inspect_err(|e| {
@@ -188,12 +201,13 @@ impl RapidBlockDownload {
             );
             error_directories.push(self.temp_dir_full.clone());
         }
-        if let Err(e) = tokio::fs::remove_dir(Self::temp_dir_base()).await {
+        let base = Self::temp_dir_base(&self.sync_dir);
+        if let Err(e) = tokio::fs::remove_dir(&base).await {
             tracing::warn!(
                 "failed to remove temporary directory '{}' for rapid block download: {e}",
-                Self::temp_dir_base().to_string_lossy()
+                base.to_string_lossy()
             );
-            error_directories.push(Self::temp_dir_base());
+            error_directories.push(base);
         }
 
         if error_directories.is_empty() {
@@ -366,9 +380,10 @@ mod tests {
         let mut tip = rng.random::<Block>();
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download = RapidBlockDownload::new(BlockHeight::from(high), false)
-            .await
-            .unwrap();
+        let mut rapid_block_download =
+            RapidBlockDownload::new(BlockHeight::from(high), false, None)
+                .await
+                .unwrap();
 
         // receive 10 blocks
         let mut received_heights = vec![];
@@ -421,9 +436,10 @@ mod tests {
         let mut tip = rng.random::<Block>();
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download = RapidBlockDownload::new(BlockHeight::from(high), false)
-            .await
-            .unwrap();
+        let mut rapid_block_download =
+            RapidBlockDownload::new(BlockHeight::from(high), false, None)
+                .await
+                .unwrap();
 
         // receive all blocks in random order
         let mut blocks_remaining = (1..=high).map(BlockHeight::from).collect_vec();
@@ -456,9 +472,10 @@ mod tests {
         let high = 200;
         tip.set_header_height(high.into());
 
-        let mut rapid_block_download_a = RapidBlockDownload::new(BlockHeight::from(high), false)
-            .await
-            .unwrap();
+        let mut rapid_block_download_a =
+            RapidBlockDownload::new(BlockHeight::from(high), false, None)
+                .await
+                .unwrap();
         rapid_block_download_a.fast_forward(BlockHeight::from(low));
 
         // receive half the blocks in random order
@@ -478,9 +495,10 @@ mod tests {
         assert!(!rapid_block_download_a.is_complete());
 
         // setup new rapid block download state
-        let mut rapid_block_download_b = RapidBlockDownload::new(BlockHeight::from(high), true)
-            .await
-            .unwrap();
+        let mut rapid_block_download_b =
+            RapidBlockDownload::new(BlockHeight::from(high), true, None)
+                .await
+                .unwrap();
         rapid_block_download_b.fast_forward(BlockHeight::from(low));
         assert!(!rapid_block_download_b.is_complete());
 
@@ -514,9 +532,10 @@ mod tests {
     async fn can_receive_same_block_twice() {
         let mut rng = rng();
         let high = 200;
-        let mut rapid_block_download = RapidBlockDownload::new(BlockHeight::from(high), false)
-            .await
-            .unwrap();
+        let mut rapid_block_download =
+            RapidBlockDownload::new(BlockHeight::from(high), false, None)
+                .await
+                .unwrap();
 
         // receive all blocks in random order, with repetitions
         let mut blocks_remaining = (1..=high).map(BlockHeight::from).collect_vec();
@@ -555,9 +574,10 @@ mod tests {
             println!("seed: {seed}");
             let mut rng = StdRng::seed_from_u64(seed);
             let mut high = 200;
-            let mut rapid_block_download = RapidBlockDownload::new(BlockHeight::from(high), false)
-                .await
-                .unwrap();
+            let mut rapid_block_download =
+                RapidBlockDownload::new(BlockHeight::from(high), false, None)
+                    .await
+                    .unwrap();
 
             // receive all blocks in random order, with repetitions
             let mut blocks_remaining = (1..=high).map(BlockHeight::from).collect_vec();
