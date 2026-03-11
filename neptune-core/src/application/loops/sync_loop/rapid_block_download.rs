@@ -28,7 +28,10 @@ pub(crate) struct RapidBlockDownload {
 }
 
 impl RapidBlockDownload {
-    fn temp_dir_base(sync_dir: &Option<PathBuf>) -> PathBuf {
+    /// The base directory for unprocessed blocks.
+    ///
+    /// Either take the `sync_dir` supplied by the user or, if none, ask the OS for a temporary directory. The "base" indicates that the blocks are actually stored in a random subdirectory of this one -- random so as to avoid collisions.
+    fn base_storage_dir(sync_dir: &Option<PathBuf>) -> PathBuf {
         if let Some(dir) = sync_dir {
             dir.clone()
         } else {
@@ -51,16 +54,16 @@ impl RapidBlockDownload {
         resume_if_possible: bool,
         sync_dir: Option<PathBuf>,
     ) -> Result<Self, RapidBlockDownloadError> {
-        let temp_directory = match Self::try_resume_directory(resume_if_possible, &sync_dir).await {
+        let storage_dir = match Self::try_resume_directory(resume_if_possible, &sync_dir).await {
             Some(d) => d,
             None => {
                 tracing::debug!("No existing temp directory for syncing found, creating new one.");
-                let temp_directory =
-                    Self::temp_dir_base(&sync_dir).join(format!("{}/", rng().next_u64()));
-                tokio::fs::create_dir_all(&temp_directory)
+                let storage_dir =
+                    Self::base_storage_dir(&sync_dir).join(format!("{}/", rng().next_u64()));
+                tokio::fs::create_dir_all(&storage_dir)
                     .await
                     .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
-                temp_directory
+                storage_dir
             }
         };
 
@@ -71,7 +74,7 @@ impl RapidBlockDownload {
         // There is only something to iterate over if we are resuming from an
         // aborted state.
         let mut number_blocks_recovered = 0;
-        let mut entry_iterator = fs::read_dir(&temp_directory)
+        let mut entry_iterator = fs::read_dir(&storage_dir)
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
         while let Some(entry) = entry_iterator
@@ -97,7 +100,7 @@ impl RapidBlockDownload {
         }
 
         Ok(Self {
-            temp_dir_full: temp_directory,
+            temp_dir_full: storage_dir,
             coverage,
             index_to_filename,
             target_height,
@@ -118,7 +121,7 @@ impl RapidBlockDownload {
             return None;
         }
 
-        let temp_dir = Self::temp_dir_base(sync_dir);
+        let temp_dir = Self::base_storage_dir(sync_dir);
         let mut info = tokio::fs::read_dir(&temp_dir)
             .await
             .inspect_err(|e| {
@@ -201,7 +204,7 @@ impl RapidBlockDownload {
             );
             error_directories.push(self.temp_dir_full.clone());
         }
-        let base = Self::temp_dir_base(&self.sync_dir);
+        let base = Self::base_storage_dir(&self.sync_dir);
         if let Err(e) = tokio::fs::remove_dir(&base).await {
             tracing::warn!(
                 "failed to remove temporary directory '{}' for rapid block download: {e}",
