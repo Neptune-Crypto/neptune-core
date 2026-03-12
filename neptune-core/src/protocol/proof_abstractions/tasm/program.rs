@@ -167,82 +167,16 @@ pub struct TritonVmProofJobOptions {
     pub cancel_job_rx: Option<tokio::sync::watch::Receiver<()>>,
 }
 
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub mod tests {
-    use std::fs::create_dir_all;
-    use std::fs::File;
-    use std::io::stdout;
-    use std::io::Write;
+#[cfg(any(test, feature = "spec"))]
+pub mod spec {
+    use super::*;
+
     use std::panic::catch_unwind;
-    use std::path::Path;
-    use std::path::PathBuf;
-    use std::time::SystemTime;
 
     use itertools::Itertools;
-    use macro_rules_attr::apply;
-    use tasm_lib::triton_vm;
     use tracing::debug;
 
-    use super::*;
-    use crate::api::export::Network;
-    use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
-    use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
     use crate::protocol::proof_abstractions::tasm::environment;
-    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-    use crate::tests::shared::files::headers_for_proof_server_request;
-    use crate::tests::shared::files::load_test_proof_servers;
-    use crate::tests::shared::files::test_helper_data_dir;
-    use crate::tests::shared::files::try_fetch_file;
-    use crate::tests::shared::files::try_fetch_from_server;
-    use crate::tests::shared::files::try_load_file_from_disk;
-    use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm::stark::Stark;
-
-    impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
-        fn from(job_priority: TritonVmJobPriority) -> Self {
-            let job_settings = ProverJobSettings {
-                tx_proving_capability: TxProvingCapability::SingleProof,
-                proof_type: TransactionProofType::SingleProof,
-                ..Default::default()
-            };
-            Self {
-                job_priority,
-                job_settings,
-                cancel_job_rx: None,
-            }
-        }
-    }
-
-    impl TritonVmProofJobOptions {
-        pub(crate) fn default_with_network(network: Network) -> Self {
-            let job_settings = ProverJobSettings {
-                network,
-                ..Default::default()
-            };
-            Self {
-                job_settings,
-                ..Default::default()
-            }
-        }
-    }
-
-    impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
-        fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
-            let (job_priority, max_log2_padded_height_for_proofs) = v;
-            Self {
-                job_priority,
-                job_settings: ProverJobSettings {
-                    max_log2_padded_height_for_proofs,
-                    network: Default::default(),
-                    tx_proving_capability: TxProvingCapability::SingleProof,
-                    proof_type: TransactionProofType::SingleProof,
-                    triton_vm_env_vars: TritonVmEnvVars::default(),
-                },
-                cancel_job_rx: None,
-            }
-        }
-    }
 
     pub trait TritonProgramSpecification: TritonProgram {
         /// The canonical reference source code for the Triton program, written
@@ -352,6 +286,82 @@ pub mod tests {
             };
 
             Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub mod tests {
+    use std::fs::create_dir_all;
+    use std::fs::File;
+    use std::io::stdout;
+    use std::io::Write;
+    use std::path::Path;
+    use std::path::PathBuf;
+    use std::time::SystemTime;
+
+    use itertools::Itertools;
+    use macro_rules_attr::apply;
+    use tasm_lib::triton_vm;
+    use tracing::debug;
+
+    use super::*;
+    use crate::api::export::Network;
+    use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
+    use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+    use crate::tests::shared::files::headers_for_proof_server_request;
+    use crate::tests::shared::files::load_test_proof_servers;
+    use crate::tests::shared::files::test_helper_data_dir;
+    use crate::tests::shared::files::try_fetch_file;
+    use crate::tests::shared::files::try_fetch_from_server;
+    use crate::tests::shared::files::try_load_file_from_disk;
+    use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm::stark::Stark;
+
+    impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
+        fn from(job_priority: TritonVmJobPriority) -> Self {
+            let job_settings = ProverJobSettings {
+                tx_proving_capability: TxProvingCapability::SingleProof,
+                proof_type: TransactionProofType::SingleProof,
+                ..Default::default()
+            };
+            Self {
+                job_priority,
+                job_settings,
+                cancel_job_rx: None,
+            }
+        }
+    }
+
+    impl TritonVmProofJobOptions {
+        pub(crate) fn default_with_network(network: Network) -> Self {
+            let job_settings = ProverJobSettings {
+                network,
+                ..Default::default()
+            };
+            Self {
+                job_settings,
+                ..Default::default()
+            }
+        }
+    }
+
+    impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
+        fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
+            let (job_priority, max_log2_padded_height_for_proofs) = v;
+            Self {
+                job_priority,
+                job_settings: ProverJobSettings {
+                    max_log2_padded_height_for_proofs,
+                    network: Default::default(),
+                    tx_proving_capability: TxProvingCapability::SingleProof,
+                    proof_type: TransactionProofType::SingleProof,
+                    triton_vm_env_vars: TritonVmEnvVars::default(),
+                },
+                cancel_job_rx: None,
+            }
         }
     }
 
@@ -474,7 +484,7 @@ pub mod tests {
         let proof = decode_proof_from_server(file_contents, &server)?;
         println!("got proof.");
 
-        Some((proof, server))
+        Some((proof, server.to_string()))
     }
 
     #[apply(shared_tokio_runtime)]

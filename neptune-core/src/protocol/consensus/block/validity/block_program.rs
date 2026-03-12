@@ -355,8 +355,8 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::builtins::verify_stark;
+    use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::protocol::proof_abstractions::SecretWitness;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;

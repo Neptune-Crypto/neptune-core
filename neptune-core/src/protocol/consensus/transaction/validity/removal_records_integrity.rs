@@ -1056,8 +1056,8 @@ mod tests {
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::transaction::TransactionKernelModifier;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
+    use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;

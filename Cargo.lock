@@ -3366,6 +3366,7 @@ dependencies = [
  "libp2p",
  "macro_rules_attr",
  "memmap2",
+ "neptune-cash",
  "neptune-rpc-macros",
  "num-bigint",
  "num-rational",
