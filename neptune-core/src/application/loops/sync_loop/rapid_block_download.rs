@@ -17,7 +17,7 @@ use crate::protocol::consensus::block::Block;
 /// process, and which blocks we have yet to receive.
 #[derive(Debug, Clone)]
 pub(crate) struct RapidBlockDownload {
-    temp_dir_full: PathBuf,
+    block_storage_dir: PathBuf,
     coverage: SynchronizationBitMask,
     index_to_filename: HashMap<u64, PathBuf>,
 
@@ -30,7 +30,7 @@ pub(crate) struct RapidBlockDownload {
 impl RapidBlockDownload {
     /// The base directory for unprocessed blocks.
     ///
-    /// Either take the `sync_dir` supplied by the user or, if none, ask the OS for a temporary directory. The "base" indicates that the blocks are actually stored in a random subdirectory of this one -- random so as to avoid collisions.
+    /// Either take the `sync_dir` supplied by the user or, if none, ask the OS for a storage directory. The "base" indicates that the blocks are actually stored in a random subdirectory of this one -- random so as to avoid collisions.
     fn base_storage_dir(sync_dir: &Option<PathBuf>) -> PathBuf {
         if let Some(dir) = sync_dir {
             dir.clone()
@@ -57,7 +57,9 @@ impl RapidBlockDownload {
         let storage_dir = match Self::try_resume_directory(resume_if_possible, &sync_dir).await {
             Some(d) => d,
             None => {
-                tracing::debug!("No existing temp directory for syncing found, creating new one.");
+                tracing::debug!(
+                    "No existing storage directory for syncing found, creating new one."
+                );
                 let storage_dir =
                     Self::base_storage_dir(&sync_dir).join(format!("{}/", rng().next_u64()));
                 tokio::fs::create_dir_all(&storage_dir)
@@ -70,7 +72,7 @@ impl RapidBlockDownload {
         let mut index_to_filename = HashMap::new();
         let mut coverage = SynchronizationBitMask::new(1, target_height.next().value());
 
-        // Read and process all the files in the temp directory.
+        // Read and process all the files in the storage directory.
         // There is only something to iterate over if we are resuming from an
         // aborted state.
         let mut number_blocks_recovered = 0;
@@ -100,7 +102,7 @@ impl RapidBlockDownload {
         }
 
         Ok(Self {
-            temp_dir_full: storage_dir,
+            block_storage_dir: storage_dir,
             coverage,
             index_to_filename,
             target_height,
@@ -121,15 +123,15 @@ impl RapidBlockDownload {
             return None;
         }
 
-        let temp_dir = Self::base_storage_dir(sync_dir);
-        let mut info = tokio::fs::read_dir(&temp_dir)
+        let base_dir = Self::base_storage_dir(sync_dir);
+        let mut info = tokio::fs::read_dir(&base_dir)
             .await
             .inspect_err(|e| {
                 // Failure to read the directory is a benign error. Likely means
                 // that there was no aborted sync to resume from.
                 tracing::info!(
                     "Cannot resume sync because directory {} cannot be read: {e}",
-                    temp_dir.to_string_lossy()
+                    base_dir.to_string_lossy()
                 );
             })
             .ok()?;
@@ -143,16 +145,16 @@ impl RapidBlockDownload {
                 // previous one. Better to log a message just in case.
                 tracing::warn!(
                     "Cannot resume sync because directory {} cannot be read: {e}",
-                    temp_dir.to_string_lossy()
+                    base_dir.to_string_lossy()
                 );
             })
             .ok()?
         else {
-            // Empty temp dir. Fishy because it should have been removed by
+            // Empty storage dir. Fishy because it should have been removed by
             // clean up.
             tracing::warn!(
                 "Cannot resume sync because directory {} is empty.",
-                temp_dir.to_string_lossy()
+                base_dir.to_string_lossy()
             );
             return None;
         };
@@ -172,7 +174,7 @@ impl RapidBlockDownload {
                 tracing::warn!(
                     "Cannot resume sync because cannot get metadata of first entry '{}' in directory {}. Error: {e}",
                     file_name_as_string,
-                    temp_dir.to_string_lossy()
+                    base_dir.to_string_lossy()
                 );
             })
             .ok()?;
@@ -181,12 +183,12 @@ impl RapidBlockDownload {
             tracing::warn!(
                 "Cannot resume sync because first entry '{}' in directory {} is not a directory.",
                 file_name_as_string,
-                temp_dir.to_string_lossy()
+                base_dir.to_string_lossy()
             );
             return None;
         }
 
-        let directory = temp_dir.join(file_name);
+        let directory = base_dir.join(file_name);
         tracing::info!(
             "Resuming sync from directory {}.",
             directory.to_string_lossy()
@@ -194,20 +196,20 @@ impl RapidBlockDownload {
         Some(directory)
     }
 
-    /// Delete the temp directory and its contents.
+    /// Delete the storage directory and its contents.
     pub(crate) async fn clean_up(&self) -> Result<(), Vec<PathBuf>> {
         let mut error_directories = vec![];
-        if let Err(e) = tokio::fs::remove_dir_all(self.temp_dir_full.clone()).await {
+        if let Err(e) = tokio::fs::remove_dir_all(self.block_storage_dir.clone()).await {
             tracing::error!(
-                "failed to remove temporary directory '{}' for rapid block download: {e}",
-                self.temp_dir_full.clone().to_string_lossy()
+                "failed to remove storage directory '{}' for rapid block download: {e}",
+                self.block_storage_dir.clone().to_string_lossy()
             );
-            error_directories.push(self.temp_dir_full.clone());
+            error_directories.push(self.block_storage_dir.clone());
         }
         let base = Self::base_storage_dir(&self.sync_dir);
         if let Err(e) = tokio::fs::remove_dir(&base).await {
             tracing::warn!(
-                "failed to remove temporary directory '{}' for rapid block download: {e}",
+                "failed to remove storage directory '{}' for rapid block download: {e}",
                 base.to_string_lossy()
             );
             error_directories.push(base);
@@ -245,10 +247,10 @@ impl RapidBlockDownload {
 
     /// Get the file name for the block.
     fn file_name(&self, block: &Block) -> PathBuf {
-        self.temp_dir_full.join(block.hash().to_hex())
+        self.block_storage_dir.join(block.hash().to_hex())
     }
 
-    /// Store the block in the temp directory and mark it as received, if it
+    /// Store the block in the storage directory and mark it as received, if it
     /// wasn't received already.
     pub(crate) async fn receive_block(
         &mut self,
@@ -266,7 +268,7 @@ impl RapidBlockDownload {
         Ok(())
     }
 
-    /// Store the block in the temp directory.
+    /// Store the block in the storage directory.
     async fn store_block(
         &self,
         block: &Block,
@@ -279,7 +281,7 @@ impl RapidBlockDownload {
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))
     }
 
-    /// Load the block from the temp directory.
+    /// Load the block from the storage directory.
     async fn load_block(file_name: &PathBuf) -> Result<Block, RapidBlockDownloadError> {
         let data = tokio::fs::read(file_name)
             .await
@@ -289,7 +291,7 @@ impl RapidBlockDownload {
         Ok(block)
     }
 
-    /// Read a block from the temp directory.
+    /// Read a block from the storage directory.
     pub(crate) async fn get_received_block(
         &self,
         height: BlockHeight,
@@ -323,7 +325,7 @@ impl RapidBlockDownload {
         self.coverage.contains(block_height.value())
     }
 
-    /// Delete the block from the temp dir.
+    /// Delete the block from the storage dir.
     ///
     /// Saves disk / RAM space. However, according to the bit mask, the block
     /// is there. So things go wrong if you ask for the block (which the bit
