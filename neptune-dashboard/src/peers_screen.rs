@@ -326,13 +326,15 @@ impl Widget for PeersScreen {
             .style(style)
             .render(area, buf);
 
-        let inner = area.offset(Offset {
-            y: 2, // apply a margin of 2 rows only at the top
-            x: 0,
-        }).inner(Margin {
-            vertical: 0,
-            horizontal: 2,
-        });
+        let inner = area
+            .offset(Offset {
+                y: 2, // apply a margin of 2 rows only at the top
+                x: 0,
+            })
+            .inner(Margin {
+                vertical: 0,
+                horizontal: 2,
+            });
 
         let mut vrecter = VerticalRectifier::new(inner);
         let peer_count_rect = vrecter.next((5).try_into().unwrap());
