@@ -906,13 +906,19 @@ impl MainLoopHandler {
                     let network = global_state_mut.cli().network;
                     let current_tip = global_state_mut.chain.light_state().clone();
                     let resume_please = !global_state_mut.cli().no_resume_sync;
+                    let sync_dir = global_state_mut.cli().sync_dir.clone();
                     drop(global_state_mut);
 
                     // Create sync loop with handle.
                     let genesis_block = Block::genesis(network);
-                    let mut sync_loop =
-                        SyncLoopHandle::new(genesis_block, claimed_height, network, resume_please)
-                            .await;
+                    let mut sync_loop = SyncLoopHandle::new(
+                        genesis_block,
+                        claimed_height,
+                        network,
+                        resume_please,
+                        sync_dir,
+                    )
+                    .await;
                     sync_loop.start();
 
                     // Tell sync loop about all known peers.

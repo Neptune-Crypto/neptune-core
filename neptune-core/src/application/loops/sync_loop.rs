@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -89,9 +90,11 @@ impl SyncLoop {
         genesis_block: Block,
         target_height: BlockHeight,
         resume_if_possible: bool,
+        sync_dir: Option<PathBuf>,
         block_validator: BlockValidator,
     ) -> Result<(Self, Sender<MainToSync>, Receiver<SyncToMain>), RapidBlockDownloadError> {
-        let mut download_state = RapidBlockDownload::new(target_height, resume_if_possible).await?;
+        let mut download_state =
+            RapidBlockDownload::new(target_height, resume_if_possible, sync_dir).await?;
         download_state.fast_forward(genesis_block.header().height);
         let (main_to_sync_sender, main_to_sync_receiver) =
             mpsc::channel::<MainToSync>(SYNC_LOOP_CHANNEL_CAPACITY);
@@ -901,9 +904,14 @@ mod tests {
                 current_tip.header().height,
                 sync_target_height
             );
-            let sync_loop_handle =
-                SyncLoopHandle::new(current_tip, sync_target_height, Network::Testnet(0), false)
-                    .await;
+            let sync_loop_handle = SyncLoopHandle::new(
+                current_tip,
+                sync_target_height,
+                Network::Testnet(0),
+                false,
+                None,
+            )
+            .await;
             let (peer_control_sender, peer_control_receiver) = mpsc::channel::<PeerControl>(10);
             let (blockchain_tip_control_sender, blockchain_tip_control_receiver) =
                 mpsc::channel::<BlockchainTipControl>(10);

@@ -425,6 +425,14 @@ pub struct Args {
     #[clap(long)]
     pub(crate) no_resume_sync: bool,
 
+    /// Override the directory used to store downloaded blocks during sync.
+    ///
+    /// Defaults to a subdirectory under the system temp dir. Setting this is
+    /// handy when the temp partition is too small or you want sync data to
+    /// survive reboots. The directory is created if it doesn't exist.
+    #[clap(long, value_name = "DIR")]
+    pub(crate) sync_dir: Option<PathBuf>,
+
     /// Multiaddrs (or IPs) of nodes to connect to, e.g.:
     /// ```text
     /// --peer /ip4/8.8.8.8 \
