@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::cmp::min;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -16,6 +17,7 @@ use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::Nat
 use neptune_cash::state::mining::mining_status::MiningStatus;
 use neptune_cash::state::sync_status::SyncStatus;
 use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
+use ratatui::layout::Layout;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
@@ -381,30 +383,37 @@ impl Widget for OverviewScreen {
             .render(vrecter.next(lines.len() as u16 + 2), buf);
 
         // archive
-        lines = vec![];
-        lines.push(format!("size {}", dashifnotset!(data.archive_size)));
-        lines.push(format!(
+        let mut lines_archive = vec![];
+        lines_archive.push(format!("size {}", dashifnotset!(data.archive_size)));
+        lines_archive.push(format!(
             "coverage: {}",
             match data.archive_coverage {
                 Some(percentage) => format!("{percentage}%"),
                 None => "-".to_string(),
             }
         ));
-        Self::report(&lines, "Archive")
-            .style(style)
-            .render(vrecter.next(2 + lines.len() as u16), buf);
 
         // mempool
-        lines = vec![];
-        lines.push(format!("size: {}", dashifnotset!(data.mempool_size)));
-        lines.push(format!(
+        let mut lines_mempool = vec![];
+        lines_mempool.push(format!("size: {}", dashifnotset!(data.mempool_size)));
+        lines_mempool.push(format!(
             "tx count: {} ({} own)",
             dashifnotset!(data.mempool_total_tx_count),
             dashifnotset!(data.mempool_own_tx_count),
         ));
-        Self::report(&lines, "Mempool")
+
+        let side_by_side = Layout::horizontal([
+            ratatui::layout::Constraint::Percentage(50),
+            ratatui::layout::Constraint::Percentage(50),
+        ])
+        .split(vrecter.next(max(lines_archive.len(), lines_mempool.len()) as u16 + 2));
+        Self::report(&lines_archive, "Archive")
             .style(style)
-            .render(vrecter.next(2 + lines.len() as u16), buf);
+            .render(side_by_side[0], buf);
+
+        Self::report(&lines_mempool, "Mempool")
+            .style(style)
+            .render(side_by_side[1], buf);
 
         // network
         lines = vec![];
