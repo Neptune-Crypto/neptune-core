@@ -2794,6 +2794,9 @@ impl GlobalState {
     async fn set_new_tip_internal(&mut self, new_tip: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
+        // set time-to-mine on incoming block
+        new_tip.set_time_to_mine(self.chain.light_state());
+
         debug!("Applying block to archival state.");
         self.chain
             .archival_state_mut()

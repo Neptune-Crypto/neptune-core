@@ -7,6 +7,7 @@ use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::TxProvingCapability;
 use crate::application::network::overview::NetworkOverview;
 use crate::protocol::consensus::block::block_header::BlockHeader;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mining::mining_status::MiningStatus;
 use crate::state::sync_status::SyncStatus;
 
@@ -15,6 +16,8 @@ use crate::state::sync_status::SyncStatus;
 pub struct OverviewData {
     pub tip_digest: Digest,
     pub tip_header: BlockHeader,
+    // `None` symbolizes failure to get tip time-to-mine
+    pub tip_time_to_mine: Option<Timestamp>,
     pub sync_status: SyncStatus,
     pub confirmed_available_balance: NativeCurrencyAmount,
     pub confirmed_total_balance: NativeCurrencyAmount,
@@ -62,6 +65,11 @@ impl rand::distr::Distribution<OverviewData> for rand::distr::StandardUniform {
         OverviewData {
             tip_digest: rng.random(),
             tip_header: rng.random(),
+            tip_time_to_mine: if rng.random_bool(0.5) {
+                Some(Timestamp::millis(rng.random_range(60_000..1_200_000)))
+            } else {
+                None
+            },
             sync_status: rng.random(),
             confirmed_available_balance: rng.random(),
             confirmed_total_balance: rng.random(),

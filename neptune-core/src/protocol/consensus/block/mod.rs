@@ -185,6 +185,13 @@ pub struct Block {
     #[bfield_codec(ignore)]
     #[get_size(ignore)]
     digest: OnceLock<Digest>,
+
+    // cache for contexts in which there is no access to the previous block,
+    // where this can't be calculated.
+    #[serde(skip)]
+    #[bfield_codec(ignore)]
+    #[get_size(ignore)]
+    time_to_mine: OnceLock<Timestamp>,
 }
 
 impl MastHash for Block {
@@ -689,7 +696,20 @@ impl Block {
             digest: OnceLock::default(), // calc'd in hash()
             kernel,
             proof: block_proof,
+            time_to_mine: OnceLock::default(), // calc'd when accepted as tip
         }
+    }
+
+    pub fn set_time_to_mine(&self, previous_block: &Block) {
+        let _ = self
+            .time_to_mine
+            .set(self.kernel.header.timestamp - previous_block.kernel.header.timestamp);
+    }
+
+    /// Note that the time-to-mine information is not always available.
+    /// It is only set when the block is accepted as the tip.
+    pub fn time_to_mine(&self) -> Option<&Timestamp> {
+        self.time_to_mine.get()
     }
 
     /// Verify a block. It is assumed that `previous_block` is valid.

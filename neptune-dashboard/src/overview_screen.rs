@@ -14,6 +14,7 @@ use neptune_cash::application::rpc::auth;
 use neptune_cash::protocol::consensus::block::block_header::BlockHeader;
 use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
 use neptune_cash::state::mining::mining_status::MiningStatus;
 use neptune_cash::state::sync_status::SyncStatus;
 use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
@@ -53,6 +54,7 @@ pub struct OverviewData {
     tip_digest: Option<Digest>,
     block_header: Option<BlockHeader>,
     block_interval: Option<u64>,
+    tip_time_to_mine: Option<Timestamp>,
 
     archive_size: Option<ByteSize>,
     archive_coverage: Option<f64>,
@@ -140,11 +142,11 @@ impl OverviewScreen {
                 _ = &mut dashboard_overview_data => {
                         match rpc_client.dashboard_overview_data(context::current(), token).await {
                         Ok(Ok(resp)) => {
-
                             {
                                 let mut own_overview_data = overview_data.lock().unwrap();
                                 own_overview_data.tip_digest = Some(resp.tip_digest);
                                 own_overview_data.block_header = Some(resp.tip_header);
+                                own_overview_data.tip_time_to_mine = resp.tip_time_to_mine;
                                 own_overview_data.mempool_size = Some(ByteSize::b(resp.mempool_size.try_into().unwrap()));
                                 own_overview_data.mempool_total_tx_count = Some(resp.mempool_total_tx_count.try_into().unwrap());
                                 own_overview_data.mempool_own_tx_count = Some(resp.mempool_own_tx_count.try_into().unwrap());
@@ -377,6 +379,13 @@ impl Widget for OverviewScreen {
                 .block_header
                 .as_ref()
                 .map(|bh| bh.cumulative_proof_of_work))
+        ));
+        lines.push(format!(
+            "tip mining duration: {}",
+            dashifnotset!(data.tip_time_to_mine.map(|ts| humantime::format_duration(
+                Duration::from_secs(ts.as_duration().as_secs()) // trim milliseconds
+            )
+            .to_string()))
         ));
         Self::report(&lines, "Blockchain")
             .style(style)
