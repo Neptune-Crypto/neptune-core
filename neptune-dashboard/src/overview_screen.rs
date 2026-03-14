@@ -154,7 +154,7 @@ impl OverviewScreen {
                                     own_overview_data.network_overview = resp.network_overview;
                                 }
                                 own_overview_data.peer_count = resp.peer_count;
-                                own_overview_data.sync_status=resp.sync_status;
+                                own_overview_data.sync_status = resp.sync_status;
                                 own_overview_data.confirmed_available_balance = Some(resp.confirmed_available_balance);
                                 own_overview_data.confirmed_total_balance = Some(resp.confirmed_total_balance);
                                 own_overview_data.unconfirmed_available_balance = Some(resp.unconfirmed_available_balance);

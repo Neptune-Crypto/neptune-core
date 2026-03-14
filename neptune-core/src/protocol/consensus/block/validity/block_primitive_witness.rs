@@ -380,6 +380,7 @@ pub(crate) mod tests {
                                             kernel: parent_kernel,
                                             proof: BlockProof::Invalid,
                                             digest: OnceLock::new(),
+                                            time_to_mine: OnceLock::new(),
                                         };
 
                                         let coinbase_amount = Block::block_subsidy(
