@@ -53,7 +53,6 @@ pub struct OverviewData {
     mining_status: Option<MiningStatus>,
     tip_digest: Option<Digest>,
     block_header: Option<BlockHeader>,
-    block_interval: Option<u64>,
     tip_time_to_mine: Option<Timestamp>,
 
     archive_size: Option<ByteSize>,
@@ -364,10 +363,6 @@ impl Widget for OverviewScreen {
         lines.push(format!(
             "block height: {}",
             dashifnotset!(data.block_header.as_ref().map(|bh| bh.height)),
-        ));
-        lines.push(format!(
-            "block interval: {}",
-            dashifnotset!(data.block_interval)
         ));
         lines.push(format!(
             "difficulty: {}",
