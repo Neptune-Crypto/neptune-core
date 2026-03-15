@@ -891,6 +891,7 @@ impl Block {
         &self,
         network: Network,
     ) -> Result<(), BlockValidationError> {
+        println!("21CYPHER: hello pre");
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
 
         // 1.a)
@@ -911,9 +912,12 @@ impl Block {
         };
 
         // 1.d)
+        println!("21CYPHER: hello");
         if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
+            println!("21CYPHER: hello2");
             return Err(BlockValidationError::ProofValidity);
         }
+        println!("21CYPHER: hello4");
 
         Ok(())
     }
@@ -1986,11 +1990,17 @@ pub(crate) mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn block_with_empty_proof_fails() {
+            println!("21CYPHER: starting test");
             let (predecesor, time, network, mut block) =
                 deterministic_empty_block1_proposal().await;
+            println!("21CYPHER: yeah");
+
+            block.set_time_to_mine(&predecesor);
+            println!("21CYPHER: yeah2");
 
             // Block validation fails on empty proof
             block.set_proof(BlockProof::SingleProof(Proof(vec![]).into()));
+            println!("21CYPHER: yeah3");
             assert_eq!(
                 BlockValidationError::ProofValidity,
                 block
@@ -1998,6 +2008,7 @@ pub(crate) mod tests {
                     .await
                     .unwrap_err()
             );
+            println!("21CYPHER: yeah4");
         }
 
         #[traced_test]
