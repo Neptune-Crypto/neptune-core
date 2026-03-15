@@ -186,8 +186,10 @@ pub struct Block {
     #[get_size(ignore)]
     digest: OnceLock<Digest>,
 
-    // cache for contexts in which there is no access to the previous block,
-    // where this can't be calculated.
+    // Amount of time passed between creation of this block and the previous
+    // block. Saved here for contexts in which there is no access to the
+    // previous block, where this can't be calculated.
+    // Set when the block is accepted as canonical.
     #[serde(skip)]
     #[bfield_codec(ignore)]
     #[get_size(ignore)]
@@ -698,18 +700,6 @@ impl Block {
             proof: block_proof,
             time_to_mine: OnceLock::default(), // calc'd when accepted as tip
         }
-    }
-
-    pub fn set_time_to_mine(&self, previous_block: &Block) {
-        let _ = self
-            .time_to_mine
-            .set(self.kernel.header.timestamp - previous_block.kernel.header.timestamp);
-    }
-
-    /// Note that the time-to-mine information is not always available.
-    /// It is only set when the block is accepted as the tip.
-    pub fn time_to_mine(&self) -> Option<&Timestamp> {
-        self.time_to_mine.get()
     }
 
     /// Verify a block. It is assumed that `previous_block` is valid.
@@ -1268,6 +1258,20 @@ impl Block {
 
         total
     }
+
+    /// Set the time-to-mine information for this block, by comparing its timestamp
+    /// with the timestamp of the previous block.
+    pub fn set_time_to_mine(&self, previous_block: &Block) {
+        let _ = self
+            .time_to_mine
+            .set(self.kernel.header.timestamp - previous_block.kernel.header.timestamp);
+    }
+
+    /// Note that the time-to-mine information is not always available.
+    /// It is only set when the block is accepted as the tip.
+    pub fn time_to_mine(&self) -> Option<&Timestamp> {
+        self.time_to_mine.get()
+    }
 }
 
 #[cfg(test)]
@@ -1452,9 +1456,9 @@ pub(crate) mod tests {
             block_mmr_accumulator in arb::<MmrAccumulator>(),
             appendix in arb::<BlockAppendix>(),
             mutator_set_accumulator in arb::<MutatorSetAccumulator>(),
-        ) -> Block { 
+        ) -> Block {
             Block {
-                kernel: BlockKernel { 
+                kernel: BlockKernel {
                     header, body: BlockBody::new(
                         transaction_kernel,
                         mutator_set_accumulator,
@@ -2652,6 +2656,26 @@ pub(crate) mod tests {
 
             blocks.push(block);
         }
+    }
+
+    #[test]
+    fn time_to_mine_works() {
+        let mut rng = StdRng::seed_from_u64(893423984254);
+        let previous_block = Block::genesis(Network::Main);
+        let mut new_block: Block = rng.random();
+        new_block.set_header_timestamp_and_difficulty(
+            previous_block.header().timestamp + Timestamp::hours(1),
+            new_block.header().difficulty
+        );
+        new_block.set_time_to_mine(&previous_block);
+        assert_eq!(new_block.time_to_mine(), Some(&Timestamp::hours(1)));
+    }
+
+    #[test]
+    fn time_to_mine_should_be_missing_until_explicitly_set() {
+        let mut rng = StdRng::seed_from_u64(893423984254);
+        let new_block: Block = rng.random();
+        assert_eq!(new_block.time_to_mine(), None);
     }
 
     mod currency_supply {
