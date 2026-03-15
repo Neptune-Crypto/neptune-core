@@ -2665,7 +2665,7 @@ pub(crate) mod tests {
         let mut new_block: Block = rng.random();
         new_block.set_header_timestamp_and_difficulty(
             previous_block.header().timestamp + Timestamp::hours(1),
-            new_block.header().difficulty
+            new_block.header().difficulty,
         );
         new_block.set_time_to_mine(&previous_block);
         assert_eq!(new_block.time_to_mine(), Some(&Timestamp::hours(1)));
