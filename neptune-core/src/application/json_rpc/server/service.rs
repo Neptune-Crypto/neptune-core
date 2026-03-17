@@ -2158,7 +2158,7 @@ pub mod tests {
 
         assert_eq!(
             rpc_server
-                .submit_block(block.clone(), block.kernel.header.pow.clone())
+                .submit_block(block.clone(), block.kernel.header.pow)
                 .await
                 .unwrap_err(),
             RpcError::SubmitBlock(SubmitBlockError::InsufficientWork)
@@ -2167,7 +2167,7 @@ pub mod tests {
         let solution = metadata.solve(ConsensusRuleSet::Reboot);
         assert!(
             rpc_server
-                .submit_block(block.clone(), solution.clone())
+                .submit_block(block.clone(), solution)
                 .await
                 .unwrap()
                 .success,
