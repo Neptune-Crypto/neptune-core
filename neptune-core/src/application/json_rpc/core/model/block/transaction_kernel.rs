@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -20,8 +18,27 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 pub type RpcAbsoluteIndexSet = AbsoluteIndexSet;
 
+/// A chunk dictionary element in either compressed or uncompressed format. See
+/// `RemovalRecordList` for an explanation of the compression algorithm.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct RpcChunkDictionary(pub BTreeMap<u64, (RpcMmrMembershipProof, Vec<u32>)>);
+pub struct RpcChunkDictionaryElement {
+    /// For uncompressed inputs, this is the chunk index. In a block context,
+    /// see RemovalRecordList for an explanation.
+    pub chunk_index: u64,
+
+    /// The MMR membership proof of the chunk into the Bloom filter MMR.
+    pub authentication_path: RpcMmrMembershipProof,
+
+    /// The relative indices contained in this chunk. This is is the preimage to
+    /// the leaf of the Bloom filter MMR. Enumerates the Bloom filter indices
+    /// that are set within the range of this chunk.
+    pub chunk: Vec<u32>,
+}
+
+/// A chunk dictionary in either compressed or uncompressed format. See
+/// `RemovalRecordList` for an explanation of the compression algorithm.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct RpcChunkDictionary(Vec<RpcChunkDictionaryElement>);
 
 impl From<ChunkDictionary> for RpcChunkDictionary {
     fn from(value: ChunkDictionary) -> Self {
@@ -29,7 +46,13 @@ impl From<ChunkDictionary> for RpcChunkDictionary {
             value
                 .dictionary
                 .into_iter()
-                .map(|(index, (proof, chunk))| (index, (proof.into(), chunk.relative_indices)))
+                .map(
+                    |(chunk_index, (membership_proof, chunk))| RpcChunkDictionaryElement {
+                        chunk_index,
+                        authentication_path: membership_proof.into(),
+                        chunk: chunk.relative_indices,
+                    },
+                )
                 .collect(),
         )
     }
@@ -40,10 +63,15 @@ impl From<RpcChunkDictionary> for ChunkDictionary {
         let dictionary = value
             .0
             .into_iter()
-            .map(|(index, (authentication_path, relative_indices))| {
+            .map(|elem| {
                 (
-                    index,
-                    (authentication_path.into(), Chunk { relative_indices }),
+                    elem.chunk_index,
+                    (
+                        elem.authentication_path.into(),
+                        Chunk {
+                            relative_indices: elem.chunk,
+                        },
+                    ),
                 )
             })
             .collect();
