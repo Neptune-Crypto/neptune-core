@@ -2787,8 +2787,26 @@ impl GlobalState {
             .set_new_tip(&new_tip)
             .await?;
 
+        debug!("Getting parent MSA.");
+        let parent_ms_accumulator =
+            if new_tip.header().prev_block_digest == self.chain.light_state().tip().hash() {
+                // Avoid loading parent block from disk if we don't have to.
+                Some(self.chain.light_state().tip_mutator_set_after())
+            } else {
+                self.chain
+                    .archival_state()
+                    .get_tip_parent()
+                    .await
+                    .map(|parent| {
+                        parent
+                            .mutator_set_accumulator_after()
+                            .expect("block from archival state must have mutator set after")
+                    })
+            };
+
+        debug!("Updating light state.");
         self.chain.light_state_mut().update(new_tip);
-        let tip: &Block = self.chain.tip(); // prevents a clone
+        let tip: &Block = self.chain.tip();
 
         // Update mempool with UTXOs from this block. This is done by
         // removing all transaction that became invalid/was mined by this
@@ -2796,17 +2814,6 @@ impl GlobalState {
         // performed by this client.
         debug!("Applying block to mempool.");
         let (mempool_events, update_jobs) = self.mempool.update_with_block(tip)?;
-
-        let parent_ms_accumulator =
-            self.chain
-                .archival_state()
-                .get_tip_parent()
-                .await
-                .map(|parent| {
-                    parent
-                        .mutator_set_accumulator_after()
-                        .expect("block from archival state must have mutator set after")
-                });
 
         // Sanity check: If no parent is known, new block must be the genesis
         // block.
