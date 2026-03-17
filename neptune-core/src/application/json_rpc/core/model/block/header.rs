@@ -18,7 +18,7 @@ use crate::protocol::consensus::block::pow::POW_MEMORY_TREE_HEIGHT;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 
 // TODO: Mirror consensus impl (RpcBlockPow = RpcPow<POW_MEMORY_TREE_HEIGHT>)
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcBlockPow {
     pub root: Digest,
@@ -157,7 +157,7 @@ impl<'de> Deserialize<'de> for RpcProofOfWork {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcBlockHeader {
     pub version: BFieldElement,
