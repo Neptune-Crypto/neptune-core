@@ -203,3 +203,28 @@ impl From<RpcTransactionKernel> for TransactionKernel {
 }
 
 pub type RpcTransactionKernelId = TransactionKernelId;
+
+#[cfg(test)]
+mod tests {
+    use proptest::prop_assert_eq;
+
+    use super::*;
+
+    #[test_strategy::proptest]
+    fn rpcchunk_dictionary_preserved_under_conversion(
+        #[strategy(proptest_arbitrary_interop::arb::<ChunkDictionary>())]
+        chunk_dictionary: ChunkDictionary,
+    ) {
+        let rpc: RpcChunkDictionary = chunk_dictionary.clone().into();
+        prop_assert_eq!(chunk_dictionary, rpc.into());
+    }
+
+    #[test_strategy::proptest]
+    fn tx_kernel_hash_preserved_under_conversion(
+        #[strategy(proptest_arbitrary_interop::arb::<TransactionKernel>())]
+        kernel: TransactionKernel,
+    ) {
+        let rpc: RpcTransactionKernel = (&kernel).into();
+        prop_assert_eq!(kernel, rpc.into());
+    }
+}

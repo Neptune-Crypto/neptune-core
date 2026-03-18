@@ -241,6 +241,12 @@ impl From<&Block> for HeaderToBlockHashWitness {
     }
 }
 
+impl HeaderToBlockHashWitness {
+    pub(crate) fn proof_leaf(&self) -> Digest {
+        self.proof_leaf
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct BlockHeaderWithBlockHashWitness {
     pub(crate) header: BlockHeader,

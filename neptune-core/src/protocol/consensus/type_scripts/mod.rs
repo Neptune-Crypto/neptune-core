@@ -11,7 +11,6 @@ use std::sync::Arc;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
-use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -95,7 +94,7 @@ impl TypeScriptAndWitness {
         }
     }
 
-    pub(crate) fn nondeterminism(&self) -> NonDeterminism {
+    pub fn nondeterminism(&self) -> NonDeterminism {
         NonDeterminism::new(self.nd_tokens.clone())
             .with_digests(self.nd_digests.clone())
             .with_ram(self.nd_memory.iter().copied().collect::<HashMap<_, _>>())
@@ -110,10 +109,10 @@ impl TypeScriptAndWitness {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Proof, CreateProofError> {
-        let input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
+        let input: Vec<_> = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
             .into_iter()
             .flat_map(|d| d.reversed().values())
-            .collect_vec();
+            .collect();
         let claim = Claim::new(self.program.hash()).with_input(input);
 
         ProofBuilder::new()
@@ -148,6 +147,7 @@ impl std::hash::Hash for TypeScriptAndWitness {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use itertools::Itertools;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;

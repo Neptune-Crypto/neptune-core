@@ -29,7 +29,7 @@ pub struct WalletEntropy {
 }
 
 impl WalletEntropy {
-    pub(crate) fn new(secret_seed: SecretKeyMaterial) -> Self {
+    pub fn new(secret_seed: SecretKeyMaterial) -> Self {
         Self { secret_seed }
     }
 
@@ -227,5 +227,11 @@ mod tests {
             wallet_entropy.composer_fee_key().receiver_preimage().hash(),
             wallet_entropy.prover_fee_address().privacy_digest(),
         );
+    }
+
+    #[test]
+    fn devnet_phrase() {
+        let scm: SecretKeyMaterial = WalletEntropy::devnet_wallet().into();
+        println!("{}", scm.to_phrase().join("\n"));
     }
 }

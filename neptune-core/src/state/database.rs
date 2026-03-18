@@ -21,7 +21,7 @@ pub struct BlockFileLocation {
     pub block_length: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct BlockRecord {
     pub block_header: BlockHeader,
     pub file_location: BlockFileLocation,
