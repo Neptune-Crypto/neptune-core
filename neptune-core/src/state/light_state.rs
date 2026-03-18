@@ -6,14 +6,17 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 #[derive(Debug)]
 pub(crate) struct LightStateInner {
     tip: Block,
-    received_at: Timestamp,
+    /// The time at which the current tip was accepted by the node.
+    /// Note that this could change between restarts as blocks may be
+    /// initially received from the network but later read from disk
+    accepted_at: Timestamp,
     time_to_mine: Option<Timestamp>,
 }
 
 impl LightStateInner {
     fn new(block: Block) -> Self {
         Self {
-            received_at: block.header().timestamp,
+            accepted_at: block.header().timestamp,
             tip: block,
             time_to_mine: None,
         }
@@ -62,11 +65,11 @@ impl LightState {
     /// update the light state with a new block, which becomes the new tip.
     /// 
     /// Existing clones of the LightState will not see the new tip, readers should always retrieve it
-    /// via [`crate::state::BlockchainState::light_state()`].
+    /// via the [`crate::state::GlobalState`].
     pub(crate) fn update(&mut self, new_block: Block) {
         new_block.mutator_set_accumulator_after().expect("Stored block must have a valid MSA after.");
 
-        let time_to_mine = if new_block.header().prev_block_digest == self.tip.hash() {
+        let time_to_mine = if new_block.header().prev_block_digest == self.tip().hash() {
             // Only set if new tip is direct descendant of previous tip
             Some(new_block.header().timestamp - self.tip().header().timestamp)
         } else {
@@ -76,7 +79,7 @@ impl LightState {
         self.0 = Arc::new(LightStateInner {
             tip: new_block,
             time_to_mine,
-            received_at: Timestamp::now(),
+            accepted_at: Timestamp::now(),
         });
     }
 }
