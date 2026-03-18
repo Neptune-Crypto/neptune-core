@@ -484,7 +484,7 @@ impl GenesisNode {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .header()
             .height
             < h

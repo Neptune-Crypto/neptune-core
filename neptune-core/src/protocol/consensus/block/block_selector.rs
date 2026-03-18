@@ -96,7 +96,7 @@ impl BlockSelector {
     pub async fn as_digest(&self, state: &GlobalState) -> Option<Digest> {
         match self {
             BlockSelector::Special(BlockSelectorLiteral::Tip) => {
-                Some(state.chain.light_state().hash())
+                Some(state.chain.tip().hash())
             }
             BlockSelector::Special(BlockSelectorLiteral::Genesis) => {
                 Some(state.chain.archival_state().genesis_block().hash())
@@ -176,7 +176,7 @@ pub mod tests {
         .await;
         let mut state = global_state_lock.lock_guard_mut().await;
 
-        let genesis_digest = state.chain.light_state().hash();
+        let genesis_digest = state.chain.tip().hash();
 
         // Test genesis consistency
         assert_eq!(

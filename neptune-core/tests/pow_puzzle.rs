@@ -82,7 +82,7 @@ pub async fn can_find_valid_pow_solution() {
         .to_address();
     proposal.set_header_guesser_address(guesser_address.into());
 
-    let latest_block_header = *alice.gsl.lock_guard().await.chain.light_state().header();
+    let latest_block_header = *alice.gsl.lock_guard().await.chain.tip();
     let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
     println!("puzzle:\n\n{}", serde_json::to_string(&puzzle).unwrap());
 

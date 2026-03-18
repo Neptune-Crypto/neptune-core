@@ -59,7 +59,7 @@ impl TransactionInitiator {
     /// Return all spendable inputs in the wallet.
     pub async fn input_candidates(&self, timestamp: Timestamp) -> Vec<InputCandidate> {
         let state = self.global_state_lock.lock_guard().await;
-        let current_height = state.chain.light_state().header().height;
+        let current_height = state.chain.tip().header().height;
         let validator = state.utxo_validator();
         let wallet_status = state.wallet_state.get_wallet_status(&validator).await;
         let spendable_inputs = wallet_status.spendable_inputs(timestamp);
@@ -330,7 +330,7 @@ impl TransactionInitiator {
         let spend_amount = tx_outputs.total_native_coins() + fee;
         trace!("spend_amount: {spend_amount}");
 
-        let current_height = state_lock.gs().chain.light_state().header().height;
+        let current_height = state_lock.gs().chain.tip().header().height;
         let validator = state_lock.gs().utxo_validator();
         let wallet_status = state_lock
             .gs()
@@ -363,7 +363,7 @@ impl TransactionInitiator {
             .build(&mut state_lock)
             .await?;
 
-        let block_height = state_lock.gs().chain.light_state().header().height;
+        let block_height = state_lock.gs().chain.tip().header().height;
         let network = state_lock.cli().network;
         let proof_job_options = state_lock.cli().as_proof_job_options();
 

@@ -53,7 +53,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .header()
             .height,
         3u64.into()
@@ -182,7 +182,7 @@ pub async fn alice_sends_to_bob(
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .header()
             .height,
         3u64.into()
@@ -311,7 +311,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .header()
             .height,
         3u64.into()
@@ -434,7 +434,7 @@ pub async fn alice_sends_transparent_transaction() -> anyhow::Result<()> {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .header()
             .height,
         3u64.into()
@@ -603,7 +603,7 @@ pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .header()
             .height,
         3u64.into()

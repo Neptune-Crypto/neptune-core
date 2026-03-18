@@ -2151,7 +2151,8 @@ mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                // todo (21cypher): check clone
+                .tip()
                 .clone(),
             &bob,
             in_eight_months,
@@ -2221,7 +2222,8 @@ mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                // todo (21cypher): check clone
+                .tip()
                 .clone(),
             &alice,
             block_5_timestamp,

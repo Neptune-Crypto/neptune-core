@@ -2973,7 +2973,8 @@ pub(super) mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                // todo (21cypher): check clone, does this not compile?
+                .tip()
                 .clone(),
             &premine_rec,
             in_seven_months,
@@ -3231,7 +3232,8 @@ pub(super) mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                // todo (21cypher): check clone
+                .tip()
                 .clone(),
             &premine_rec,
             in_seven_months,

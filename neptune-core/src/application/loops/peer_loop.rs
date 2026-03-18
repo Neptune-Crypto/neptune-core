@@ -242,7 +242,7 @@ impl PeerLoopHandler {
         blocks: Vec<Block>,
         anchor: &MmrAccumulator,
     ) -> Option<Vec<(TransferBlock, MmrMembershipProof)>> {
-        let own_tip_height = state.chain.light_state().header().height;
+        let own_tip_height = state.chain.tip().header().height;
         let block_heights_match_anchor = blocks
             .iter()
             .all(|bl| bl.header().height < anchor.num_leafs().into());
@@ -686,7 +686,7 @@ impl PeerLoopHandler {
                         .lock_guard()
                         .await
                         .chain
-                        .light_state()
+                        .tip()
                         .into(),
                 ))
                 .await?;
@@ -699,7 +699,7 @@ impl PeerLoopHandler {
                 let (tip_header, sync_anchor_height) = {
                     let state = self.global_state_lock.lock_guard().await;
                     (
-                        *state.chain.light_state().header(),
+                        *state.chain.tip().header(),
                         state
                             .net
                             .sync_anchor
@@ -936,7 +936,7 @@ impl PeerLoopHandler {
                     .lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .header();
                 if !challenge_response
                     .check_pow(self.global_state_lock.cli().network, own_tip_header.height)
@@ -1092,7 +1092,7 @@ impl PeerLoopHandler {
                         .lock_guard()
                         .await
                         .chain
-                        .light_state()
+                        .tip()
                         .header()
                         .height;
                     warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
@@ -1246,7 +1246,7 @@ impl PeerLoopHandler {
                 };
 
                 let state = self.global_state_lock.lock_guard().await;
-                let block_mmr_num_leafs = state.chain.light_state().header().height.next().into();
+                let block_mmr_num_leafs = state.chain.tip().header().height.next().into();
                 let luca_is_known = state
                     .chain
                     .archival_state()
@@ -1523,13 +1523,13 @@ impl PeerLoopHandler {
                     let state = self.global_state_lock.lock_guard().await;
 
                     (
-                        state.chain.light_state().hash(),
+                        state.chain.tip().hash(),
                         state
                             .chain
-                            .light_state()
+                            .tip()
                             .mutator_set_accumulator_after()
                             .expect("Block from state must have mutator set after"),
-                        state.chain.light_state().header().height,
+                        state.chain.tip().header().height,
                     )
                 };
 
@@ -1717,7 +1717,7 @@ impl PeerLoopHandler {
                     // `update`.
                     if state
                         .chain
-                        .light_state()
+                        .tip()
                         .mutator_set_accumulator_after()
                         .expect("Block from state must have mutator set after")
                         .hash()
@@ -1830,7 +1830,7 @@ impl PeerLoopHandler {
                 // the block proposal that was validated might not match with
                 // the one whose favorability is being computed.
                 let state = self.global_state_lock.lock_guard().await;
-                let tip = state.chain.light_state();
+                let tip = state.chain.tip();
                 let proposal_is_valid = new_proposal
                     .is_valid(tip, self.now(), self.global_state_lock.cli().network)
                     .await;
@@ -2279,7 +2279,7 @@ impl PeerLoopHandler {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                .tip()
                 .kernel
                 .header
                 .cumulative_proof_of_work
@@ -5134,7 +5134,7 @@ mod tests {
             )
             .await;
             let alice = alice_gsl.lock_guard().await;
-            let genesis_block = alice.chain.light_state();
+            let genesis_block = alice.chain.tip();
             let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
             let prover_capability = match quality {
                 TransactionProofQuality::ProofCollection => TxProvingCapability::ProofCollection,

@@ -185,15 +185,6 @@ pub struct Block {
     #[bfield_codec(ignore)]
     #[get_size(ignore)]
     digest: OnceLock<Digest>,
-
-    // Amount of time passed between creation of this block and the previous
-    // block. Saved here for contexts in which there is no access to the
-    // previous block, where this can't be calculated.
-    // Set when the block is accepted as canonical.
-    #[serde(skip)]
-    #[bfield_codec(ignore)]
-    #[get_size(ignore)]
-    time_to_mine: OnceLock<Timestamp>,
 }
 
 impl MastHash for Block {
@@ -698,7 +689,6 @@ impl Block {
             digest: OnceLock::default(), // calc'd in hash()
             kernel,
             proof: block_proof,
-            time_to_mine: OnceLock::default(), // calc'd when accepted as tip
         }
     }
 
@@ -1258,20 +1248,6 @@ impl Block {
 
         total
     }
-
-    /// Set the time-to-mine information for this block, by comparing its timestamp
-    /// with the timestamp of the previous block.
-    pub fn set_time_to_mine(&self, previous_block: &Block) {
-        let _ = self
-            .time_to_mine
-            .set(self.kernel.header.timestamp - previous_block.kernel.header.timestamp);
-    }
-
-    /// Note that the time-to-mine information is not always available.
-    /// It is only set when the block is accepted as the tip.
-    pub fn time_to_mine(&self) -> Option<&Timestamp> {
-        self.time_to_mine.get()
-    }
 }
 
 #[cfg(test)]
@@ -1288,7 +1264,6 @@ impl rand::distr::Distribution<Block> for rand::distr::StandardUniform {
             kernel,
             proof,
             digest,
-            time_to_mine: OnceLock::new(),
         }
     }
 }
@@ -2660,6 +2635,7 @@ pub(crate) mod tests {
 
     #[test]
     fn time_to_mine_works() {
+        // todo (21cypher) - check
         let mut rng = StdRng::seed_from_u64(893423984254);
         let previous_block = Block::genesis(Network::Main);
         let mut new_block: Block = rng.random();
@@ -2673,6 +2649,7 @@ pub(crate) mod tests {
 
     #[test]
     fn time_to_mine_should_be_missing_until_explicitly_set() {
+        // todo (21cypher) - check
         let mut rng = StdRng::seed_from_u64(893423984254);
         let new_block: Block = rng.random();
         assert_eq!(new_block.time_to_mine(), None);

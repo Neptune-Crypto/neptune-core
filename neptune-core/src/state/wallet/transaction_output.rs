@@ -695,7 +695,7 @@ mod tests {
         .await;
 
         let state = global_state_lock.lock_guard().await;
-        let block_height = state.chain.light_state().header().height;
+        let block_height = state.chain.tip().header().height;
 
         // generate a new receiving address that is not from our wallet.
         let mut rng = rand::rng();
@@ -765,7 +765,7 @@ mod tests {
         let address_sym = spending_key_sym.to_address();
 
         let state = global_state_lock.lock_guard().await;
-        let block_height = state.chain.light_state().header().height;
+        let block_height = state.chain.tip().header().height;
 
         let amount = NativeCurrencyAmount::one_nau();
 

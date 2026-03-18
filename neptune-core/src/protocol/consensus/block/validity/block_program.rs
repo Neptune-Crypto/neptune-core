@@ -468,7 +468,8 @@ pub(crate) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn disallow_double_spends_across_blocks() {
         async fn mine_tx(state: &GlobalStateLock, tx: Transaction, timestamp: Timestamp) -> Block {
-            let predecessor = state.lock_guard().await.chain.light_state().to_owned();
+            // todo (21cypher): Why do we need to owned here?
+            let predecessor = state.lock_guard().await.chain.tip().to_owned();
             let (block_tx, _) = create_block_transaction_from(
                 &predecessor,
                 state.clone(),

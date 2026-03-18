@@ -375,7 +375,7 @@ impl GlobalStateLock {
 
         // acquire write-lock
         let mut gsm = self.lock_guard_mut().await;
-        let block_height = gsm.chain.light_state().header().height;
+        let block_height = gsm.chain.tip().header().height;
         let network = gsm.cli().network;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         tx_artifacts
@@ -405,7 +405,7 @@ impl GlobalStateLock {
 
         // inform wallet about the details of this sent transaction, so it
         // can group inputs and outputs together, eg for history purposes.
-        let tip_digest = gsm.chain.light_state().hash();
+        let tip_digest = gsm.chain.tip().hash();
         gsm.wallet_state
             .add_sent_transaction(SentTransaction::new(details.as_ref(), tip_digest))
             .await;
@@ -600,8 +600,9 @@ impl<'a> StateLock<'a> {
         }
     }
 
-    /// returns present blockchain tip block.
-    pub async fn tip(&self) -> Arc<Block> {
+    /// returns present blockchain tip info.
+    pub async fn light_state(&self) -> LightState {
+        // todo (21cypher): does this fail compilation?
         match self {
             Self::Lock(gsl) => gsl.lock_guard().await.chain.light_state_clone(),
             Self::WriteGuard(gsm) => gsm.chain.light_state_clone(),
@@ -609,7 +610,6 @@ impl<'a> StateLock<'a> {
         }
     }
 
-    /// returns present blockchain tip block.
     pub fn cli(&self) -> &cli_args::Args {
         match self {
             Self::Lock(gsl) => gsl.cli(),
@@ -761,7 +761,7 @@ impl GlobalState {
         let mempool = Mempool::new(
             cli.max_mempool_size,
             cli.proving_capability(),
-            chain.light_state(),
+            chain.tip(),
         );
 
         Ok(Self::new(wallet_state, chain, net, cli, mempool))
@@ -788,7 +788,7 @@ impl GlobalState {
 
     /// Return a seed used to randomize shuffling.
     pub(crate) fn shuffle_seed(&self) -> [u8; 32] {
-        let next_block_height = self.chain.light_state().header().height.next();
+        let next_block_height = self.chain.tip().header().height.next();
         self.wallet_state
             .wallet_entropy
             .shuffle_seed(next_block_height)
@@ -824,10 +824,10 @@ impl GlobalState {
         if self.is_true_archival() {
             UtxoValidator::Archival(self.chain.archival_state())
         } else {
-            let tip = self.chain.light_state().hash();
+            let tip = self.chain.tip().hash();
             let tip_msa = self
                 .chain
-                .light_state()
+                .tip()
                 .mutator_set_accumulator_after()
                 .expect("Stored block must have valid MSA");
             UtxoValidator::Light { tip, tip_msa }
@@ -842,7 +842,7 @@ impl GlobalState {
 
     /// Return the [`ConsensusRuleSet`] that applies for current tip.
     pub(crate) fn consensus_rule_set(&self) -> ConsensusRuleSet {
-        let tip_height = self.chain.light_state().header().height;
+        let tip_height = self.chain.tip().header().height;
         ConsensusRuleSet::infer_from(self.cli().network, tip_height)
     }
 
@@ -1392,7 +1392,7 @@ impl GlobalState {
         claimed_max_height: BlockHeight,
         claimed_cumulative_pow: ProofOfWork,
     ) -> bool {
-        let own_block_tip_header = self.chain.light_state().header();
+        let own_block_tip_header = self.chain.tip().header();
         Self::sync_mode_threshold_stateless(
             own_block_tip_header,
             claimed_max_height,
@@ -1436,7 +1436,7 @@ impl GlobalState {
         incoming_block_height: BlockHeight,
         incoming_guesser_fee: NativeCurrencyAmount,
     ) -> Result<(), BlockProposalRejectError> {
-        let expected_height = self.chain.light_state().header().height.next();
+        let expected_height = self.chain.tip().header().height.next();
         if incoming_block_height != expected_height {
             return Err(BlockProposalRejectError::WrongHeight {
                 received: incoming_block_height,
@@ -1473,7 +1473,7 @@ impl GlobalState {
         incoming_proposal_prev_block_digest: Digest,
         incoming_guesser_fee: NativeCurrencyAmount,
     ) -> Result<(), BlockProposalRejectError> {
-        let current_tip_digest = self.chain.light_state().hash();
+        let current_tip_digest = self.chain.tip().hash();
         if incoming_proposal_prev_block_digest != current_tip_digest {
             return Err(BlockProposalRejectError::WrongParent {
                 received: incoming_proposal_prev_block_digest,
@@ -1557,8 +1557,8 @@ impl GlobalState {
     /// If the incoming block equals the current tip, this function returns
     /// false.
     pub fn incoming_block_is_more_canonical(&self, incoming_block: &Block) -> bool {
-        let winner = Block::fork_choice_rule(self.chain.light_state(), incoming_block);
-        winner.hash() != self.chain.light_state().hash()
+        let winner = Block::fork_choice_rule(self.chain.tip(), incoming_block);
+        winner.hash() != self.chain.tip().hash()
     }
 
     /// Retrieve block height of last change to wallet balance.
@@ -1626,7 +1626,7 @@ impl GlobalState {
                     }
                 }
             } else {
-                let current_tip_digest = self.chain.light_state().hash();
+                let current_tip_digest = self.chain.tip().hash();
                 if max_confirmed_in_block.is_none()
                     && mutxo
                         .get_membership_proof_for_block(current_tip_digest)
@@ -1781,7 +1781,7 @@ impl GlobalState {
                     .expect("Spendable monitored UTXOs must have valid membership proofs")
             } else {
                 // ... from wallet database.
-                let tip_digest = self.chain.light_state().hash();
+                let tip_digest = self.chain.tip().hash();
                 let strong_key = synced_utxo.strong_utxo_key();
                 let mutxo = self
                     .wallet_state
@@ -1827,7 +1827,7 @@ impl GlobalState {
     // Marked public for benchmarking; not part of the public API.
     #[doc(hidden)]
     pub async fn wallet_spendable_inputs_at_time(&self, timestamp: Timestamp) -> TxInputs {
-        let tip_height = self.chain.light_state().header().height;
+        let tip_height = self.chain.tip().header().height;
         let wallet_status = self.get_wallet_status_for_tip().await;
         let inputs = wallet_status.spendable_inputs(timestamp);
         // omit policy
@@ -1841,7 +1841,7 @@ impl GlobalState {
     pub(crate) fn get_own_handshakedata(&self) -> HandshakeData {
         let listen_port = self.cli().own_listen_port();
         HandshakeData {
-            tip_header: *self.chain.light_state().header(),
+            tip_header: *self.chain.tip().header(),
             listen_port,
             network: self.cli().network,
             instance_id: self.net.instance_id,
@@ -1857,7 +1857,7 @@ impl GlobalState {
     /// Return all coins owned by the wallet. Only returns synced and unspent
     /// UTXOs.
     pub async fn coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {
-        let tip_height = self.chain.light_state().header().height;
+        let tip_height = self.chain.tip().header().height;
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
         let mut own_coins = vec![];
 
@@ -2008,7 +2008,7 @@ impl GlobalState {
                     .await
                     .map_err(|x| anyhow::anyhow!("Could not restore mutator set membership proof. Is archival mutator set corrupted? Got error: {x}"))?;
 
-                let tip_digest = self.chain.light_state().hash();
+                let tip_digest = self.chain.tip().hash();
 
                 if !self.is_true_archival() {
                     monitored_utxo.add_membership_proof_for_tip(tip_digest, msmp.clone());
@@ -2071,7 +2071,7 @@ impl GlobalState {
     ///
     /// Panics if the mutator set is not synced to current tip.
     pub(crate) async fn restore_monitored_utxos_from_recovery_data(&mut self) -> Result<()> {
-        let tip_hash = self.chain.light_state().hash();
+        let tip_hash = self.chain.tip().hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
         let asm_sync_label = ams_ref.get_sync_label();
@@ -2270,7 +2270,7 @@ impl GlobalState {
     ///  - If recovery data is provided but out-of-order to the monitored UTXOs
     ///    that don't have any membership proofs.
     pub async fn restore_monitored_utxos_from_archival_mutator_set(&mut self) {
-        let tip_hash = self.chain.light_state().hash();
+        let tip_hash = self.chain.tip().hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
         // Assert that archival mutator set is synced to current tip.
@@ -2295,7 +2295,7 @@ impl GlobalState {
 
         let msa = self
             .chain
-            .light_state()
+            .tip()
             .mutator_set_accumulator_after()
             .expect("Stored block must have valid MSA after");
         let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
@@ -2627,8 +2627,8 @@ impl GlobalState {
         );
 
         // Find monitored_utxo for updating
-        let current_tip_header = self.chain.light_state().header();
-        let current_tip_digest = self.chain.light_state().hash();
+        let current_tip_header = self.chain.tip().header();
+        let current_tip_digest = self.chain.tip().hash();
         let current_tip_info: (Digest, Timestamp, BlockHeight) = (
             current_tip_digest,
             current_tip_header.timestamp,
@@ -2794,16 +2794,14 @@ impl GlobalState {
     async fn set_new_tip_internal(&mut self, new_tip: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
-        // set time-to-mine on incoming block
-        new_tip.set_time_to_mine(self.chain.light_state());
-
         debug!("Applying block to archival state.");
         self.chain
             .archival_state_mut()
             .set_new_tip(&new_tip)
             .await?;
 
-        *self.chain.light_state_mut() = std::sync::Arc::new(new_tip.clone());
+        // todo (21cypher): is it possible to prevent clone() here?
+        self.chain.light_state_mut().update(new_tip.clone());
 
         // Update mempool with UTXOs from this block. This is done by
         // removing all transaction that became invalid/was mined by this
@@ -2872,7 +2870,7 @@ impl GlobalState {
         }
 
         // is it necessary?
-        let current_tip_digest = self.chain.light_state().hash();
+        let current_tip_digest = self.chain.tip().hash();
         if self
             .wallet_state
             .is_synced_to(current_tip_digest, self.is_true_archival())
@@ -3220,7 +3218,8 @@ impl GlobalState {
         );
         let block_file_paths = ArchivalState::read_block_file_names_from_directory(directory)?;
         let mut num_stored_blocks = 0;
-        let mut predecessor = self.chain.light_state().clone();
+        // todo (21cypher): clone
+        let mut predecessor = self.chain.tip().clone();
         let network = self.cli.network;
         let ignore_invalid_threshold = ConsensusRuleSet::first_tvmv1_block(network);
 
@@ -3829,13 +3828,13 @@ mod tests {
         )
         .await;
         let mut alice = alice.lock_guard_mut().await;
-        assert!(alice.chain.light_state().header().height.is_genesis());
+        assert!(alice.chain.tip().header().height.is_genesis());
 
         let genesis = Block::genesis(network);
         let block1 = invalid_empty_block(&genesis, network);
 
         alice.set_new_tip(block1.clone()).await.unwrap();
-        assert!(!alice.chain.light_state().header().height.is_genesis());
+        assert!(!alice.chain.tip().header().height.is_genesis());
         assert!(alice
             .chain
             .archival_state()
@@ -3850,12 +3849,12 @@ mod tests {
             .get_tip_parent()
             .await
             .is_none());
-        assert!(alice.chain.light_state().header().height.is_genesis());
+        assert!(alice.chain.tip().header().height.is_genesis());
 
         alice.set_new_tip(block1.clone()).await.unwrap();
         assert!(alice
             .chain
-            .light_state()
+            .tip()
             .header()
             .height
             .previous()
@@ -4069,7 +4068,7 @@ mod tests {
             current_block.hash()
         );
 
-        assert_eq!(alice_gsl.chain.light_state().hash(), current_block.hash());
+        assert_eq!(alice_gsl.chain.tip().hash(), current_block.hash());
 
         let wallet_status_7 = alice_gsl.get_wallet_status_for_tip().await;
         println!(
@@ -4079,8 +4078,8 @@ mod tests {
 
         println!(
             "Current tip: {} / {}",
-            alice_gsl.chain.light_state().header().height,
-            alice_gsl.chain.light_state().hash()
+            alice_gsl.chain.tip().header().height,
+            alice_gsl.chain.tip().hash()
         );
         let timestamp_7 = current_block.header().timestamp;
         println!("timestamp_7: {}", timestamp_7.standard_format());
@@ -4106,13 +4105,13 @@ mod tests {
             premine_amount,
             wallet_status_8.confirmed_total_balance(genesis.header().height)
         );
-        assert_eq!(alice_gsl.chain.light_state().hash(), genesis.hash());
+        assert_eq!(alice_gsl.chain.tip().hash(), genesis.hash());
 
         // State updates work when tip is genesis
         let block_c_timestamp = genesis.header().timestamp + Timestamp::seconds(556);
         let block_c = invalid_empty_block_with_timestamp(&genesis, block_c_timestamp, network);
         alice_gsl.set_new_tip(block_c.clone()).await.unwrap();
-        assert_eq!(alice_gsl.chain.light_state().hash(), block_c.hash());
+        assert_eq!(alice_gsl.chain.tip().hash(), block_c.hash());
 
         // Can set back and restore balance, with backwards walk (from c to a)
         alice_gsl
@@ -4440,7 +4439,7 @@ mod tests {
 
             alice.set_new_tip(block1.clone()).await.unwrap();
 
-            let balance_timestamp = alice.chain.light_state().header().timestamp;
+            let balance_timestamp = alice.chain.tip().header().timestamp;
             let expected_balance = NativeCurrencyAmount::coins(64);
 
             assert_eq!(
@@ -4588,8 +4587,8 @@ mod tests {
 
                 let mut alice = alice.lock_guard_mut().await;
 
-                let block_height_a = alice.chain.light_state().header().height;
-                let balance_timestamp = alice.chain.light_state().header().timestamp;
+                let block_height_a = alice.chain.tip().header().height;
+                let balance_timestamp = alice.chain.tip().header().timestamp;
                 let expected_balance = NativeCurrencyAmount::coins(5);
                 let balance = alice
                     .get_wallet_status_for_tip()
@@ -4628,7 +4627,7 @@ mod tests {
                 // idempotent.
                 let tip_msa = alice
                     .chain
-                    .light_state()
+                    .tip()
                     .mutator_set_accumulator_after()
                     .unwrap();
                 for _ in 0..2 {
@@ -4902,7 +4901,7 @@ mod tests {
                         .unwrap();
                     assert!(global_state
                         .chain
-                        .light_state()
+                        .tip()
                         .mutator_set_accumulator_after()
                         .unwrap()
                         .verify(ms_item, &msmp,));
@@ -4962,7 +4961,8 @@ mod tests {
                         .set_new_tip(&mock_block_1a)
                         .await
                         .unwrap();
-                    *alice.chain.light_state_mut() = std::sync::Arc::new(mock_block_1a.clone());
+                    // todo (21cypher): maybe update()?
+                    *alice.chain.light_state_mut() = LightState::from(mock_block_1a.clone());
                 }
 
                 // Verify that wallet is unsynced with mock_block_1a
@@ -5653,7 +5653,8 @@ mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                // todo (21cypher): clone
+                .tip()
                 .clone(),
             &premine_receiver,
             in_seven_months,
@@ -5738,7 +5739,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                .tip()
                 .is_valid(&genesis_block, now, network)
                 .await,
             "light state tip must be a valid block"
@@ -5937,7 +5938,7 @@ mod tests {
         ) {
             // Verifying light state integrity
             let expected_tip_digest = expected_tip.hash();
-            assert_eq!(expected_tip_digest, global_state.chain.light_state().hash());
+            assert_eq!(expected_tip_digest, global_state.chain.tip().hash());
 
             // Peeking into archival state
             assert_eq!(
@@ -6169,7 +6170,7 @@ mod tests {
             .await;
 
             let mut alice = alice.global_state_lock.lock_guard_mut().await;
-            assert_eq!(genesis_block.hash(), alice.chain.light_state().hash());
+            assert_eq!(genesis_block.hash(), alice.chain.tip().hash());
 
             let cb_key = WalletEntropy::new_random().nth_generation_spending_key(0);
             let (block_1, _) =
@@ -6178,7 +6179,7 @@ mod tests {
             alice.store_block_not_tip(block_1.clone()).await.unwrap();
             assert_eq!(
                 genesis_block.hash(),
-                alice.chain.light_state().hash(),
+                alice.chain.tip().hash(),
                 "method may not update light state's tip"
             );
             assert_eq!(
@@ -6290,7 +6291,7 @@ mod tests {
                 )
                 .await;
                 let mut alice = alice.global_state_lock.lock_guard_mut().await;
-                assert_eq!(genesis_block.hash(), alice.chain.light_state().hash());
+                assert_eq!(genesis_block.hash(), alice.chain.tip().hash());
                 let chain_a = chain_of_blocks_and_parents(network, depth).await;
                 let chain_b = chain_of_blocks_and_parents(network, depth).await;
                 let blocks_and_parents = [chain_a, chain_b].concat();
@@ -6298,7 +6299,7 @@ mod tests {
                     alice.store_block_not_tip(block.clone()).await.unwrap();
                     assert_eq!(
                         genesis_block.hash(),
-                        alice.chain.light_state().hash(),
+                        alice.chain.tip().hash(),
                         "method may not update light state's tip, depth = {depth}"
                     );
                     assert_eq!(
@@ -6575,8 +6576,8 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_eq!(old_state.chain.light_state(), new_state.chain.light_state());
-            let tip = old_state.chain.light_state();
+            assert_eq!(old_state.chain.tip(), new_state.chain.tip());
+            let tip = old_state.chain.tip();
             assert_eq!(*tip, new_state.chain.archival_state().get_tip().await);
             assert_eq!(*tip, old_state.chain.archival_state().get_tip().await);
             assert_eq!(
@@ -6936,7 +6937,7 @@ mod tests {
                     .await;
 
                 // check alice's initial balance after genesis.
-                let tip_height = alice_state_mut.chain.light_state().header().height;
+                let tip_height = alice_state_mut.chain.tip().header().height;
                 let alice_initial_balance = alice_state_mut
                     .get_wallet_status_for_tip()
                     .await

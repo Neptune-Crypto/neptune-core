@@ -215,7 +215,7 @@ pub(crate) mod tests {
             let validator = state_lock.utxo_validator();
             let wallet_status = state_lock.wallet_state.get_wallet_status(&validator).await;
             let spendable_inputs = wallet_status.spendable_inputs(timestamp);
-            let current_height = state_lock.chain.light_state().header().height;
+            let current_height = state_lock.chain.tip().header().height;
             let input_candidates = spendable_inputs
                 .into_iter()
                 .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
@@ -249,7 +249,7 @@ pub(crate) mod tests {
             .build();
 
         // generate proof
-        let block_height = state.lock_guard().await.chain.light_state().header().height;
+        let block_height = state.lock_guard().await.chain.tip().header().height;
         let network = state.cli().network;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         let proof = TransactionProofBuilder::new()
@@ -355,7 +355,7 @@ pub(crate) mod tests {
         let mut bob = mock_genesis_global_state_with_block(0, bob_wallet, cli, fake_genesis).await;
         bob.set_new_tip(block_10_000.clone()).await.unwrap();
 
-        let observed_block_height = bob.lock_guard().await.chain.light_state().header().height;
+        let observed_block_height = bob.lock_guard().await.chain.tip().header().height;
         assert_eq!(BlockHeight::from(10_000u64), observed_block_height,);
 
         // 2. get a positive balance, by mining.
@@ -371,7 +371,7 @@ pub(crate) mod tests {
             predecessor = next_block;
         }
 
-        let hopefully_plus_5 = bob.lock_guard().await.chain.light_state().header().height;
+        let hopefully_plus_5 = bob.lock_guard().await.chain.tip().header().height;
         assert_eq!(BlockHeight::from(10_005u64), hopefully_plus_5);
         assert!(
             bob.api()
@@ -495,7 +495,7 @@ pub(crate) mod tests {
                 bob.lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .header()
                     .height
                     .value()
@@ -523,7 +523,7 @@ pub(crate) mod tests {
                 bob.lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .header()
                     .height
                     .value()
@@ -551,7 +551,7 @@ pub(crate) mod tests {
                 bob.lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .header()
                     .height
                     .value()
@@ -579,7 +579,7 @@ pub(crate) mod tests {
                 bob.lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .header()
                     .height
                     .value()
@@ -607,7 +607,7 @@ pub(crate) mod tests {
                 bob.lock_guard()
                     .await
                     .chain
-                    .light_state()
+tip.light_state()
                     .header()
                     .height
                     .value()
@@ -644,7 +644,7 @@ pub(crate) mod tests {
                 bob.lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .header()
                     .height
                     .value()

@@ -687,7 +687,7 @@ impl MainLoopHandler {
                     .lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .clone();
                 if block.header().prev_block_digest != current_tip.hash() {
                     warn!(
@@ -904,7 +904,7 @@ impl MainLoopHandler {
                     // Clone info from global state and release write lock ASAP.
                     let peer_map = global_state_mut.net.peer_map.clone();
                     let network = global_state_mut.cli().network;
-                    let current_tip = global_state_mut.chain.light_state().clone();
+                    let current_tip = global_state_mut.chain.tip().clone();
                     let resume_please = !global_state_mut.cli().no_resume_sync;
                     let sync_dir = global_state_mut.cli().sync_dir.clone();
                     drop(global_state_mut);
@@ -990,7 +990,7 @@ impl MainLoopHandler {
                 {
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     if pt2m_transaction.confirmable_for_block
-                        != global_state_mut.chain.light_state().hash()
+                        != global_state_mut.chain.tip().hash()
                     {
                         warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
                         return Ok(());
@@ -2727,7 +2727,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                .tip()
                 .header()
                 .timestamp;
             let expected_balance = NativeCurrencyAmount::coins(13);
@@ -2819,7 +2819,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                .tip()
                 .header()
                 .height
                 .is_genesis(),
@@ -2836,7 +2836,7 @@ mod tests {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .header()
             .height
             .into();
@@ -2994,7 +2994,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                .tip()
                 .header()
                 .timestamp
                 + Timestamp::months(7);
@@ -3624,7 +3624,7 @@ mod tests {
                     .lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .header()
                     .height
             );
@@ -3642,7 +3642,7 @@ mod tests {
                     .lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .header()
                     .height
             );
@@ -3661,7 +3661,7 @@ mod tests {
                     .lock_guard()
                     .await
                     .chain
-                    .light_state()
+                    .tip()
                     .header()
                     .height
             );

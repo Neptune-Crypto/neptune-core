@@ -753,7 +753,7 @@ pub(crate) async fn mine(
                 .guesser_fee_key();
 
             let latest_block_header = global_state_lock
-                .lock(|s| s.chain.light_state().header().to_owned())
+                .lock(|s| s.chain.tip().header().to_owned())
                 .await;
             let guesser_task = guess_nonce(
                 network,
@@ -791,8 +791,9 @@ pub(crate) async fn mine(
         {
             global_state_lock.set_mining_status_to_composing().await;
 
+            // todo (21cypher) - clone
             let latest_block = global_state_lock
-                .lock(|s| s.chain.light_state().to_owned())
+                .lock(|s| s.chain.tip().to_owned())
                 .await;
             let compose_task = compose_block(
                 latest_block,
@@ -936,7 +937,7 @@ pub(crate) async fn mine(
                         // The below PoW check could fail due to race conditions. So we don't panic,
                         // we only ignore what the worker task sent us.
                         let latest_block = global_state_lock
-                            .lock(|s| s.chain.light_state().to_owned())
+                            .lock(|s| s.chain.tip().to_owned())
                             .await;
 
                         if !new_block_found.block.has_proof_of_work(cli_args.network, latest_block.header()) {
@@ -1108,7 +1109,7 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .clone();
 
         let (transaction, _coinbase_utxo_info) = {
@@ -1698,7 +1699,7 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .clone();
 
         let now = tip_block_orig.header().timestamp + Timestamp::minutes(10);
@@ -1805,7 +1806,7 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .clone();
 
         // adjust these to simulate longer mining runs, possibly
@@ -2482,7 +2483,7 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .clone();
 
         // generate 20 blocks

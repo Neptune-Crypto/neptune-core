@@ -2135,7 +2135,7 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .header()
             .height;
         let network = alice_global_lock.cli().network;
@@ -2219,7 +2219,7 @@ pub(crate) mod tests {
 
         // First, check that error is returned, when available balance is not
         // there, as it is timelocked.
-        let block_height = alice.lock_guard().await.chain.light_state().header().height;
+        let block_height = alice.lock_guard().await.chain.tip().header().height;
         assert!(wallet_state_genesis
             .confirmed_available_balance(block_height, launch_timestamp)
             .is_zero());
@@ -2896,6 +2896,8 @@ pub(crate) mod tests {
                     maintain_mps,
                 )
                 .await;
+            // todo (21cypher): would this work?
+            // bob.set_new_tip(new_block.clone()).await.unwrap();
             bob.chain
                 .archival_state_mut()
                 .set_new_tip(&new_block)
@@ -3425,7 +3427,7 @@ pub(crate) mod tests {
                 let gs = global_state_lock.lock_guard().await;
                 let wallet_status = gs.get_wallet_status_for_tip().await;
 
-                let block_height = gs.chain.light_state().header().height;
+                let block_height = gs.chain.tip().header().height;
                 assert_eq!(
                     wallet_status.confirmed_available_balance(block_height, timestamp),
                     half_coinbase_amt
@@ -3477,7 +3479,7 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                .tip()
                 .header()
                 .height;
             {

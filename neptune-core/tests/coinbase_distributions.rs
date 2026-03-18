@@ -72,7 +72,7 @@ pub async fn custom_coinbase_distribution_separate() {
         .lock_guard()
         .await
         .chain
-        .light_state()
+        .tip()
         .header()
         .height;
     assert_eq!(

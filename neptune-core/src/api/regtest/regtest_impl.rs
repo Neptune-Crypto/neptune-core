@@ -130,7 +130,9 @@ impl RegTestPrivate {
 
         let gs = gsl.lock_guard().await;
 
-        let tip_block = gs.chain.light_state_clone();
+        // todo (21cypher) - clone
+        let tip_block_state = gs.chain.light_state_clone();
+        let tip_block= tip_block_state.tip();
 
         let next_block_height = tip_block.header().height + 1;
         let fee_notification_policy = Default::default();
@@ -158,7 +160,8 @@ impl RegTestPrivate {
         drop(gs);
 
         let (mut block, composer_tx_outputs) = MockBlockGenerator::mock_successor_no_pow(
-            tip_block.clone(),
+            // todo (21cypher) - work with LightState instead of Block, to avoid cloning the whole block.  will need to adjust MockBlockGenerator accordingly.
+            std::sync::Arc::new(tip_block.clone()),
             composer_parameters.clone(),
             guesser_key.to_address().into(),
             timestamp,
@@ -242,7 +245,7 @@ impl RegTestPrivate {
         block_hash: Digest,
     ) -> Result<(), RegTestError> {
         let start = std::time::Instant::now();
-        while gsl.lock_guard().await.chain.light_state().hash() != block_hash {
+        while gsl.lock_guard().await.chain.tip().hash() != block_hash {
             if start.elapsed() > std::time::Duration::from_secs(5) {
                 // last chance.  maybe another block buried ours.  we will do an expensive check.
                 if gsl

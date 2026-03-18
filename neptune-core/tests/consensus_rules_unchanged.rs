@@ -70,7 +70,7 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
         .import_blocks_from_directory(&test_data_dir, 0, validate_blocks)
         .await
         .unwrap();
-    let restored_block_height = state.chain.light_state().header().height;
+    let restored_block_height = state.chain.tip().header().height;
     println!("restored_block_height: {restored_block_height}");
     assert_eq!(
         BlockHeight::new(bfe!(250)),
@@ -81,7 +81,7 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
     // Verify that wallet state was handled correctly, that balance is still
     // premine reward, since the devnet reward was not spent during first
     // blocks.
-    let block_height = state.chain.light_state().header().height;
+    let block_height = state.chain.tip().header().height;
     let wallet_status = state.get_wallet_status_for_tip().await;
     let balance = wallet_status
         .confirmed_available_balance(block_height, network.launch_date() + Timestamp::months(7));

@@ -841,6 +841,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .chain
+                // todo (cypher21): clone
                 .light_state()
                 .clone(),
             &bob,
@@ -1068,9 +1069,10 @@ mod tests {
             gsl: GlobalStateLock,
             amount: NativeCurrencyAmount,
         ) -> Block {
-            let tip = gsl.lock_guard().await.chain.light_state().clone();
             let tx = tx_with_expenditure(gsl, amount).await;
-            invalid_block_with_transaction(&tip, tx)
+            let tip = gsl.lock_guard().await.chain.tip();
+            // todo (cypher21) - was clone, check if works
+            invalid_block_with_transaction(tip, tx)
         }
 
         /// Return a btransaction with an expenditure from the provided global
@@ -1093,7 +1095,8 @@ mod tests {
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let mut tx_initiator_internal = gsl.api().tx_initiator_internal();
             let network = gsl.cli().network;
-            let tip = gsl.lock_guard().await.chain.light_state().clone();
+            // todo (cypher21) - clone
+            let tip = gsl.lock_guard().await.chain.light_state().clone().tip();
             let in_seven_months = tip.header().timestamp + Timestamp::months(7);
             let consensus_rule_set = ConsensusRuleSet::infer_from(network, tip.header().height);
             let fee = NativeCurrencyAmount::zero();

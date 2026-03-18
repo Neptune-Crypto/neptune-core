@@ -1,6 +1,6 @@
 use super::archival_state::ArchivalState;
 use super::light_state::LightState;
-use crate::Block;
+use super::Block;
 
 /// `BlockChainState` provides an `Archival` variant
 /// for full nodes and a `Light` variant for light nodes.
@@ -64,7 +64,7 @@ impl BlockchainState {
 
     /// retrieve light state, ie the current tip.
     #[inline]
-    pub fn light_state(&self) -> &Block {
+    pub fn light_state(&self) -> &LightState {
         match self {
             Self::Archival(bac) => &bac.light_state,
             Self::Light(light_state) => light_state,
@@ -86,6 +86,17 @@ impl BlockchainState {
             Self::Archival(bac) => &mut bac.light_state,
             Self::Light(light_state) => light_state,
         }
+    }
+
+    /// shorthand for light_state().tip()
+    #[inline]
+    pub fn tip(&self) -> &Block {
+        self.light_state().tip()
+    }
+
+    // todo (21cypher): this clone is deep copied, probably not good...
+    pub fn tip_cloned(&self) -> Block {
+        self.light_state_clone().tip().clone()
     }
 }
 

@@ -114,6 +114,8 @@ mod maintain_membership_proofs {
     /// Maintain membership proofs, while receiving additional UTXOs.
     mod maintain_msmps {
 
+        use neptune_cash::state::light_state::LightState;
+
         use super::*;
 
         fn update_wallet_with_block2<
@@ -169,7 +171,8 @@ mod maintain_membership_proofs {
                     .update_mutator_set(&block2),
             )
             .unwrap();
-            *global_state.chain.light_state_mut() = std::sync::Arc::new(block2.clone());
+            // todo (21cypher): possible to call update() here instead of assigning? is previous block present?
+            *global_state.chain.light_state_mut() = LightState::from(block2.clone());
 
             bencher.bench_local(|| {
                 rt.block_on(async {

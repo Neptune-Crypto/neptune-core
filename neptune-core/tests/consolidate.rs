@@ -84,7 +84,7 @@ pub async fn consolidation_basic() {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .header()
             .height,
         u64::from(num_blocks_mined).into()
@@ -169,7 +169,7 @@ pub async fn consolidation_basic() {
         .lock_guard()
         .await
         .chain
-        .light_state()
+        .tip()
         .body()
         .transaction_kernel()
         .announcements

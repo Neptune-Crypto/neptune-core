@@ -2165,7 +2165,7 @@ impl NeptuneRPCServer {
     async fn confirmations_internal(&self, state: &GlobalState) -> Option<BlockHeight> {
         match state.get_latest_balance_height().await {
             Some(latest_balance_height) => {
-                let tip_block_header = state.chain.light_state().header();
+                let tip_block_header = state.chain.tip().header();
 
                 assert!(tip_block_header.height >= latest_balance_height);
 
@@ -2196,7 +2196,7 @@ impl NeptuneRPCServer {
         guesser_address: ReceivingAddress,
         mut proposal: Block,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>> {
-        let latest_block_header = *self.state.lock_guard().await.chain.light_state().header();
+        let latest_block_header = *self.state.lock_guard().await.chain.tip().header();
 
         proposal.set_header_guesser_address(guesser_address);
         let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
@@ -2221,7 +2221,7 @@ impl NeptuneRPCServer {
     /// Verify a pow solution and send it to main loop if it is valid.
     async fn pow_solution_inner(&self, mut proposal: Block, pow: BlockPow) -> RpcResult<bool> {
         // Check if solution works.
-        let latest_block_header = *self.state.lock_guard().await.chain.light_state().header();
+        let latest_block_header = *self.state.lock_guard().await.chain.tip().header();
 
         proposal.set_header_pow(pow);
 
@@ -2326,7 +2326,7 @@ impl RPC for NeptuneRPCServer {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .kernel
             .header
             .height)
@@ -2341,7 +2341,7 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let tip_digest = state.chain.light_state().hash();
+        let tip_digest = state.chain.tip().hash();
         let proposal = &state.mining_state.block_proposal;
 
         // Returning BlockInfo here is not completely kosher since a few fields
@@ -2472,7 +2472,7 @@ impl RPC for NeptuneRPCServer {
         let Some(digest) = block_selector.as_digest(&state).await else {
             return Ok(None);
         };
-        let tip_digest = state.chain.light_state().hash();
+        let tip_digest = state.chain.tip().hash();
         let archival_state = state.chain.archival_state();
 
         let Some(block) = archival_state.get_block(digest).await.unwrap() else {
@@ -2587,7 +2587,7 @@ impl RPC for NeptuneRPCServer {
                 .join(", ")
         );
 
-        let cur_block = state.chain.light_state();
+        let cur_block = state.chain.tip();
         let tip_height = cur_block.header().height;
         let tip_hash = cur_block.hash();
         let tip_mutator_set = cur_block
@@ -2686,7 +2686,7 @@ impl RPC for NeptuneRPCServer {
 
         let state = self.state.lock_guard().await;
 
-        let latest_block_digest = state.chain.light_state().hash();
+        let latest_block_digest = state.chain.tip().hash();
 
         Ok(state
             .chain
@@ -2804,7 +2804,7 @@ impl RPC for NeptuneRPCServer {
 
         let gs = self.state.lock_guard().await;
         let wallet_status = gs.get_wallet_status_for_tip().await;
-        let block_height = gs.chain.light_state().header().height;
+        let block_height = gs.chain.tip().header().height;
 
         let confirmed_available =
             wallet_status.confirmed_available_balance(block_height, Timestamp::now());
@@ -2824,7 +2824,7 @@ impl RPC for NeptuneRPCServer {
 
         let gs = self.state.lock_guard().await;
         let wallet_status = gs.get_wallet_status_for_tip().await;
-        let block_height = gs.chain.light_state().header().height;
+        let block_height = gs.chain.tip().header().height;
 
         let confirmed_available =
             wallet_status.confirmed_available_balance(block_height, Timestamp::now());
@@ -3100,12 +3100,12 @@ impl RPC for NeptuneRPCServer {
         let state = self.state.lock_guard().await;
         let tip_digest = {
             log_slow_scope!(fn_name!() + "::hash() tip digest");
-            state.chain.light_state().hash()
+            state.chain.tip().hash()
         };
-        let tip_header = *state.chain.light_state().header();
+        let tip_header = *state.chain.tip().header();
         let tip_time_to_mine = {
-            log_slow_scope!(fn_name!() + "::chain().light_state().time_to_mine().copied()");
-            state.chain.light_state().time_to_mine().copied()
+            log_slow_scope!(fn_name!() + "::chain().light_state().tip_time_to_mine()");
+            state.chain.light_state().tip_time_to_mine()
         };
         let syncing = state.net.sync_status;
         let mempool_size = {
@@ -3138,7 +3138,7 @@ impl RPC for NeptuneRPCServer {
             state.get_wallet_status_for_tip().await
         };
 
-        let block_height = state.chain.light_state().header().height;
+        let block_height = state.chain.tip().header().height;
         let confirmed_available_balance = {
             log_slow_scope!(fn_name!() + "::confirmed_available_balance()");
             wallet_status.confirmed_available_balance(block_height, now)
@@ -3560,7 +3560,7 @@ impl RPC for NeptuneRPCServer {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .mutator_set_accumulator_after()
             .expect("mutator set of tip must exist");
         let is_synced = tx.kernel.mutator_set_hash == current_msa.hash();
@@ -3879,7 +3879,8 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // Since block comes from external source, we need to check validity.
-        let current_tip = self.state.lock_guard().await.chain.light_state().clone();
+        // todo (21cypher): _cloned()? why is clone needed here?
+        let current_tip = self.state.lock_guard().await.chain.light_state_clone().tip().clone();
         if !proposal
             .is_valid(&current_tip, Timestamp::now(), self.state.cli().network)
             .await
@@ -4156,7 +4157,7 @@ impl RPC for NeptuneRPCServer {
                 return Ok(None);
             };
 
-            let latest_block_header = *global_state.chain.light_state().header();
+            let latest_block_header = *global_state.chain.tip().header();
             (proposal, latest_block_header)
         };
 
@@ -4536,7 +4537,7 @@ impl RPC for NeptuneRPCServer {
 
         let tip_msah = global_state
             .chain
-            .light_state()
+            .tip()
             .mutator_set_accumulator_after()
             .expect("Block from state must have mutator set after")
             .hash();
@@ -5694,7 +5695,7 @@ mod tests {
         let ctx = context::current();
 
         let genesis_hash = global_state.chain.archival_state().genesis_block().hash();
-        let tip_hash = global_state.chain.light_state().hash();
+        let tip_hash = global_state.chain.tip().hash();
 
         let genesis_block_info = BlockInfo::new(
             global_state.chain.archival_state().genesis_block(),
@@ -5714,7 +5715,7 @@ mod tests {
         );
 
         let tip_block_info = BlockInfo::new(
-            global_state.chain.light_state(),
+            global_state.chain.tip(),
             genesis_hash,
             tip_hash,
             vec![],
@@ -5902,7 +5903,7 @@ mod tests {
 
         // should find latest/tip block by Tip selector
         assert_eq!(
-            global_state.chain.light_state().hash(),
+            global_state.chain.tip().hash(),
             rpc_server
                 .clone()
                 .block_digest(
@@ -7064,7 +7065,7 @@ mod tests {
 
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
-                    let block_height = state_lock.chain.light_state().header().height;
+                    let block_height = state_lock.chain.tip().header().height;
                     let wallet_status = state_lock.get_wallet_status_for_tip().await;
                     let original_balance =
                         wallet_status.confirmed_available_balance(block_height, timestamp);
@@ -7080,7 +7081,7 @@ mod tests {
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
                     let wallet_status = state_lock.get_wallet_status_for_tip().await;
-                    let block_height = state_lock.chain.light_state().header().height;
+                    let block_height = state_lock.chain.tip().header().height;
                     let new_balance =
                         wallet_status.confirmed_available_balance(block_height, timestamp);
                     let mut expected_balance = Block::block_subsidy(block_1.header().height);

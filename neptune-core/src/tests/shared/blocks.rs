@@ -427,7 +427,8 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .await
         .chain
         .light_state()
-        .to_owned();
+        // todo (cypher21) - clone
+        .to_owned().tip();
 
     let timestamp =
         timestamp.unwrap_or_else(|| tip_block.header().timestamp + Timestamp::minutes(10));
@@ -714,7 +715,8 @@ pub(crate) async fn fake_valid_block_for_tests(
     state_lock: &GlobalStateLock,
     rness: Randomness<2, 2>,
 ) -> Block {
-    let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
+    // todo (cypher21) - clone
+    let current_tip = state_lock.lock_guard().await.chain.light_state().clone().tip();
     fake_valid_successor_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
@@ -781,7 +783,8 @@ pub(crate) async fn block_with_outputs(
     gsl: &mut GlobalStateLock,
     outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
 ) -> Block {
-    let parent_block = gsl.lock_guard().await.chain.light_state().clone();
+    // todo (cypher21) - clone
+    let parent_block = gsl.lock_guard().await.chain.light_state().clone().tip();
     let timestamp = parent_block.header().timestamp + Timestamp::months(7);
     let tx = send_coins(gsl, outputs, timestamp).await;
     invalid_block_with_transaction(&parent_block, tx)
