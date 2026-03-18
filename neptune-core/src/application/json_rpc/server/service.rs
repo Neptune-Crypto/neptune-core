@@ -30,6 +30,7 @@ use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplateMetadata;
+use crate::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
 use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionInput;
@@ -520,9 +521,7 @@ impl RpcApi for RpcServer {
     }
 
     async fn get_blocks_call(&self, request: GetBlocksRequest) -> RpcResult<GetBlocksResponse> {
-        // Reverse get_blocks is not supported yet.
-        // Might be reconsidered after "succinctness" as it might give it a purpose.
-        if request.to_height < request.from_height {
+        if request.to_height < request.from_height || request.from_height.is_genesis() {
             return Ok(GetBlocksResponse { blocks: Vec::new() });
         }
 
@@ -534,20 +533,36 @@ impl RpcApi for RpcServer {
 
         while height <= request.to_height && blocks.len() < max_blocks {
             let block_selector = BlockSelector::Height(height);
-            let Some(digest) = block_selector.as_digest(&state).await else {
+            let Some(block_hash) = block_selector.as_digest(&state).await else {
                 break;
             };
-            let Some(block) = state
+
+            // Avoid having to recalculate hash of block proof again, as that's
+            // expensive. Use the archival state's full capabilities to get the
+            // hashed proof from its state.
+            let Some((block, proof_digest)) = state
                 .chain
                 .archival_state()
-                .get_block(digest)
+                .get_block_kernel_with_proof_digest(block_hash)
                 .await
                 .unwrap()
             else {
                 break;
             };
 
-            blocks.push((&block).into());
+            let block = RpcWalletBlock {
+                kernel: (&block).into(),
+                proof_leaf: proof_digest
+                    .expect("Every block except genesis must have a proof digest leaf"),
+            };
+
+            debug_assert_eq!(
+                block_hash,
+                block.hash(),
+                "Conversion to wallet block must preserve block hash"
+            );
+
+            blocks.push(block);
             height = height.next();
         }
 
@@ -1730,6 +1745,7 @@ pub mod tests {
     use crate::state::wallet::wallet_status::SyncedUtxo;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
@@ -2043,17 +2059,20 @@ pub mod tests {
             &Block::genesis(network),
             devnet_artifacts.transaction().clone(),
         );
+        let block_2 = invalid_empty_block(&block_1, network);
         rpc_server.state.set_new_tip(block_1.clone()).await.unwrap();
+        rpc_server.state.set_new_tip(block_2.clone()).await.unwrap();
 
-        // Fetch genesis and tip and ensure announcement (on tip) matches after de/serialization.
+        // Fetch block 1 and 2 and tip and ensure announcement in block 1
+        // matches after de/serialization.
         let blocks = rpc_server
-            .get_blocks(BlockHeight::genesis(), BlockHeight::genesis().next())
+            .get_blocks(1u64.into(), 2u64.into())
             .await
             .unwrap()
             .blocks;
         assert_eq!(blocks.len(), 2);
 
-        let announcement: Announcement = blocks[1].kernel.body.transaction_kernel.announcements[0]
+        let announcement: Announcement = blocks[0].kernel.body.transaction_kernel.announcements[0]
             .clone()
             .into();
         let expected_announcement = devnet_artifacts.details().announcements()[0].clone();
@@ -2116,7 +2135,7 @@ pub mod tests {
             )
             .await
             .unwrap();
-        let rpc_transaction = artifacts.transaction().clone().into();
+        let rpc_transaction = artifacts.transaction().clone().try_into().unwrap();
         let submit_tx_response = rpc_server
             .submit_transaction(rpc_transaction)
             .await
@@ -2228,7 +2247,7 @@ pub mod tests {
                 TransactionProof::Witness(_) => assert!(proof.is_none()),
                 _ => {
                     assert!(proof.is_some());
-                    assert_eq!(proof.unwrap(), tx.proof.into());
+                    assert_eq!(proof.unwrap(), tx.proof.try_into().unwrap());
                 }
             }
         }

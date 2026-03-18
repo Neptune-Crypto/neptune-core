@@ -42,6 +42,7 @@ use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_height::BLOCKS_PER_GENERATION;
 use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
@@ -1306,6 +1307,42 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
+    /// Return the (block kernel, proof leaf) as identified by block hash.
+    ///
+    /// The proof leaf is the MAST hash leaf of the proof that is used to
+    /// calculate the block hash.
+    ///
+    /// Return:
+    ///  - `Ok(Some((block, None)))` in case of success where the returned block
+    ///    *is* the genesis block.
+    ///  - `Ok(Some((block, Some(proof_leaf))))` in case of success where the
+    ///    returned block is *not* the genesis block.
+    ///  - `Ok(None)` if the block does not live in archival state.
+    ///  - `Err(_)` if there was a problem reading from archival state.
+    pub(crate) async fn get_block_kernel_with_proof_digest(
+        &self,
+        block_digest: Digest,
+    ) -> Result<Option<(BlockKernel, Option<Digest>)>> {
+        let maybe_record = self.get_block_record(block_digest).await;
+        let Some(record) = maybe_record else {
+            let maybe_genesis_block =
+                (self.genesis_block.hash() == block_digest).then_some(*self.genesis_block.clone());
+            let maybe_genesis_block =
+                maybe_genesis_block.map(|genesis| (genesis.kernel.clone(), None));
+            return Ok(maybe_genesis_block);
+        };
+
+        // Fetch block from disk
+        let block = self.get_block_from_block_record(record).await?;
+
+        // Perf: avoid recalculating the proof leaf. Just read it from the
+        // block record.
+        Ok(Some((
+            block.kernel.clone(),
+            Some(record.block_hash_witness.proof_leaf()),
+        )))
+    }
+
     /// Return the canonical block with the given height. None if no height of
     /// this block is known yet.
     async fn canonical_block_by_height(&self, block_height: BlockHeight) -> Option<Block> {
@@ -2282,6 +2319,7 @@ pub(super) mod tests {
     use crate::tests::shared::blocks::block_with_puts;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block;
+    use crate::tests::shared::blocks::invalid_empty_block_with_proof_size;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -2319,6 +2357,37 @@ pub(super) mod tests {
             .unwrap();
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn block_kernel_with_proof_digest_simple() {
+        let network = Network::Main;
+        let mut archive = make_test_archival_state(&Args::default_with_network(network)).await;
+        let genesis = Block::genesis(network);
+        assert_eq!(
+            Some((genesis.kernel.clone(), None)),
+            archive
+                .get_block_kernel_with_proof_digest(genesis.hash())
+                .await
+                .unwrap()
+        );
+
+        let block_1 = invalid_empty_block_with_proof_size(&genesis, network, 62);
+        assert!(archive
+            .get_block_kernel_with_proof_digest(block_1.hash())
+            .await
+            .unwrap()
+            .is_none());
+
+        archive.set_new_tip(&block_1).await.unwrap();
+        let (block_1_kernel, proof_leaf_1) = archive
+            .get_block_kernel_with_proof_digest(block_1.hash())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(block_1.kernel, block_1_kernel);
+        assert_eq!(Some(Tip5::hash(&block_1.proof)), proof_leaf_1);
     }
 
     #[traced_test]
