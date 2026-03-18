@@ -93,11 +93,6 @@ impl BlockchainState {
     pub fn tip(&self) -> &Block {
         self.light_state().tip()
     }
-
-    // todo (21cypher): this clone is deep copied, probably not good...
-    pub fn tip_cloned(&self) -> Block {
-        self.light_state_clone().tip().clone()
-    }
 }
 
 /// The `BlockchainArchivalState` contains database access to block headers.

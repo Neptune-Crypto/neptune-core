@@ -132,8 +132,8 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
 
         assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
 
-        // todo (21cypher): clone
-        let tip = alice.gsl.lock_guard().await.chain.tip().clone();
+        let light_state = alice.gsl.lock_guard().await.chain.light_state_clone();
+        let tip = light_state.tip();
         assert_eq!(
             BlockHeight::from(3u64),
             tip.header().height,

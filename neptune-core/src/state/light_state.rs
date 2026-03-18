@@ -61,7 +61,7 @@ impl LightState {
     /// 
     /// Existing clones of the LightState will not see the new tip, readers should always retrieve it
     /// via the [`crate::state::GlobalState`].
-    pub(crate) fn update(&mut self, new_block: Block) {
+    pub fn update(&mut self, new_block: Block) {
         new_block.mutator_set_accumulator_after().expect("Stored block must have a valid MSA after.");
 
         let time_to_mine = if new_block.header().prev_block_digest == self.tip().hash() {
@@ -93,11 +93,9 @@ pub(crate) mod tests {
     use crate::protocol::consensus::block::block_header::BlockHeader;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::application::config::network::Network;
-    use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
     use rand::Rng;
-    use tasm_lib::twenty_first::tip5::digest::Digest;
 
     #[test]
     fn time_to_mine_works() {

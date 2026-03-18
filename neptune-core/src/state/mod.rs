@@ -602,7 +602,6 @@ impl<'a> StateLock<'a> {
 
     /// returns present blockchain tip info.
     pub async fn light_state(&self) -> LightState {
-        // todo (21cypher): does this fail compilation?
         match self {
             Self::Lock(gsl) => gsl.lock_guard().await.chain.light_state_clone(),
             Self::WriteGuard(gsm) => gsm.chain.light_state_clone(),
@@ -2800,15 +2799,15 @@ impl GlobalState {
             .set_new_tip(&new_tip)
             .await?;
 
-        // todo (21cypher): is it possible to prevent clone() here?
-        self.chain.light_state_mut().update(new_tip.clone());
+        self.chain.light_state_mut().update(new_tip);
+        let new_tip: &Block = self.chain.light_state().tip();
 
         // Update mempool with UTXOs from this block. This is done by
         // removing all transaction that became invalid/was mined by this
         // block. Also returns the list of update-jobs that should be
         // performed by this client.
         debug!("Applying block to mempool.");
-        let (mempool_events, update_jobs) = self.mempool.update_with_block(&new_tip)?;
+        let (mempool_events, update_jobs) = self.mempool.update_with_block(new_tip)?;
 
         let parent_ms_accumulator =
             self.chain
@@ -2841,7 +2840,7 @@ impl GlobalState {
         self.wallet_state
             .update_wallet_state_with_new_block(
                 &parent_ms_accumulator.unwrap_or_default(),
-                &new_tip,
+                new_tip,
                 maintain_mps_in_wallet,
             )
             .await;
@@ -3218,7 +3217,6 @@ impl GlobalState {
         );
         let block_file_paths = ArchivalState::read_block_file_names_from_directory(directory)?;
         let mut num_stored_blocks = 0;
-        // todo (21cypher): clone
         let mut predecessor = self.chain.tip().clone();
         let network = self.cli.network;
         let ignore_invalid_threshold = ConsensusRuleSet::first_tvmv1_block(network);
@@ -4954,6 +4952,7 @@ mod tests {
                 // with the new block.
                 let (mock_block_1a, _) =
                     make_mock_block(&genesis_block, None, bob_key, rng.random(), network).await;
+
                 {
                     alice
                         .chain
@@ -4961,8 +4960,7 @@ mod tests {
                         .set_new_tip(&mock_block_1a)
                         .await
                         .unwrap();
-                    // todo (21cypher): maybe update()?
-                    *alice.chain.light_state_mut() = LightState::from(mock_block_1a.clone());
+                    alice.chain.light_state_mut().update(mock_block_1a.clone());
                 }
 
                 // Verify that wallet is unsynced with mock_block_1a
@@ -5644,18 +5642,19 @@ mod tests {
         assert!(tx_from_bob
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
+
+        let light_state = &premine_receiver
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state_clone();
+
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 7 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 2 coinbases
         let (coinbase_transaction2, _expected_utxo) = make_coinbase_transaction_from_state_lock(
-            &premine_receiver
-                .global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                // todo (21cypher): clone
-                .tip()
-                .clone(),
+            light_state.tip(),
             &premine_receiver,
             in_seven_months,
             TritonVmJobPriority::Normal.into(),

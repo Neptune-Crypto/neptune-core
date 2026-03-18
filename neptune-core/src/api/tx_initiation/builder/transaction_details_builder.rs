@@ -196,7 +196,7 @@ impl TransactionDetailsBuilder {
 
         // Add change output, if required to balance transaction
         let light_state = if has_change_output {
-            let (change_output, tip) = match change_policy {
+            let (change_output, light_state) = match change_policy {
                 ChangePolicy::ExactChange => {
                     return Err(CreateTxError::NotExactChange);
                 }
@@ -214,7 +214,6 @@ impl TransactionDetailsBuilder {
                         Ok((
                             TransactionDetailsBuilder::create_change_output(
                                 &gsm.wallet_state,
-                                // todo (21cypher): rename (double "tip")
                                 light_state.tip().header().height,
                                 change_amount,
                                 key,
@@ -249,7 +248,6 @@ impl TransactionDetailsBuilder {
                         Ok((
                             Self::create_change_output(
                                 &gs.wallet_state,
-                                // todo (21cypher): rename
                                 light_state.tip().header().height,
                                 change_amount,
                                 *key,
@@ -259,7 +257,6 @@ impl TransactionDetailsBuilder {
                         ))
                     };
 
-                    // todo (21cypher): is this a real error?
                     match state_lock {
                         StateLock::Lock(global_state_lock) => {
                             create_change(&*global_state_lock.lock_guard().await)?
@@ -279,7 +276,7 @@ impl TransactionDetailsBuilder {
                 ),
             };
             tx_outputs.push(change_output);
-            tip
+            light_state
         } else {
             state_lock.light_state().await.clone()
         };

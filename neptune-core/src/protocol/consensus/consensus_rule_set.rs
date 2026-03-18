@@ -306,7 +306,7 @@ pub(crate) mod tests {
     ) -> (Block, Vec<ExpectedUtxo>) {
         let current_tip = me.lock_guard().await.chain.archival_state().get_tip().await;
         compose_block_helper(
-            current_tip,
+            &current_tip,
             me,
             timestamp,
             TritonVmProofJobOptions::default(),
@@ -607,7 +607,7 @@ pub(crate) mod tests {
                 bob.lock_guard()
                     .await
                     .chain
-tip.light_state()
+                    .tip()
                     .header()
                     .height
                     .value()

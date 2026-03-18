@@ -130,9 +130,8 @@ impl RegTestPrivate {
 
         let gs = gsl.lock_guard().await;
 
-        // todo (21cypher) - clone
-        let tip_block_state = gs.chain.light_state_clone();
-        let tip_block= tip_block_state.tip();
+        let light_state = gs.chain.light_state_clone();
+        let tip_block= light_state.tip();
 
         let next_block_height = tip_block.header().height + 1;
         let fee_notification_policy = Default::default();
@@ -160,8 +159,7 @@ impl RegTestPrivate {
         drop(gs);
 
         let (mut block, composer_tx_outputs) = MockBlockGenerator::mock_successor_no_pow(
-            // todo (21cypher) - work with LightState instead of Block, to avoid cloning the whole block.  will need to adjust MockBlockGenerator accordingly.
-            std::sync::Arc::new(tip_block.clone()),
+            light_state.clone(),
             composer_parameters.clone(),
             guesser_key.to_address().into(),
             timestamp,

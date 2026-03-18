@@ -3879,10 +3879,9 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // Since block comes from external source, we need to check validity.
-        // todo (21cypher): _cloned()? why is clone needed here?
-        let current_tip = self.state.lock_guard().await.chain.light_state_clone().tip().clone();
+        let current_tip = self.state.lock_guard().await.chain.light_state_clone();
         if !proposal
-            .is_valid(&current_tip, Timestamp::now(), self.state.cli().network)
+            .is_valid(current_tip.tip(), Timestamp::now(), self.state.cli().network)
             .await
         {
             warn!("Got claimed new block that was not valid");

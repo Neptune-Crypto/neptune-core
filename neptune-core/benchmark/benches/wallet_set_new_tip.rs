@@ -171,8 +171,8 @@ mod maintain_membership_proofs {
                     .update_mutator_set(&block2),
             )
             .unwrap();
-            // todo (21cypher): possible to call update() here instead of assigning? is previous block present?
-            *global_state.chain.light_state_mut() = LightState::from(block2.clone());
+
+            global_state.chain.light_state_mut().update(block2);
 
             bencher.bench_local(|| {
                 rt.block_on(async {
@@ -180,7 +180,7 @@ mod maintain_membership_proofs {
                         .wallet_state
                         .update_wallet_state_with_new_block(
                             &block1.mutator_set_accumulator_after().unwrap(),
-                            &block2,
+                            global_state.chain.tip(),
                             maintain_msmps_from_block_data,
                         )
                         .await;

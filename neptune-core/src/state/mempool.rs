@@ -2145,15 +2145,15 @@ mod tests {
             );
         }
 
+
+        let light_state = &bob.global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state_clone();
         // Create next block which includes Bob's, but not Alice's, transaction.
         let (coinbase_transaction, _expected_utxo) = make_coinbase_transaction_from_state_lock(
-            &bob.global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                // todo (21cypher): check clone
-                .tip()
-                .clone(),
+            light_state.tip(),
             &bob,
             in_eight_months,
             TritonVmJobPriority::Normal.into(),
@@ -2216,15 +2216,15 @@ mod tests {
         tx_by_alice_updated =
             mempool.get_transactions_for_block_composition(usize::MAX, None)[0].clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
+
+        let light_state_alice = &alice
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state_clone();
         let (cbtx, _eutxo) = make_coinbase_transaction_from_state_lock(
-            &alice
-                .global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                // todo (21cypher): check clone
-                .tip()
-                .clone(),
+            light_state_alice.tip(),
             &alice,
             block_5_timestamp,
             TritonVmJobPriority::Normal.into(),

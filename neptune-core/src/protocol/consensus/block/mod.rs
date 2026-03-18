@@ -1444,7 +1444,6 @@ pub(crate) mod tests {
                 },
                 proof: Default::default(),
                 digest: Default::default(),
-                time_to_mine: Default::default(),
             }
         }
     }
@@ -2631,28 +2630,6 @@ pub(crate) mod tests {
 
             blocks.push(block);
         }
-    }
-
-    #[test]
-    fn time_to_mine_works() {
-        // todo (21cypher) - check
-        let mut rng = StdRng::seed_from_u64(893423984254);
-        let previous_block = Block::genesis(Network::Main);
-        let mut new_block: Block = rng.random();
-        new_block.set_header_timestamp_and_difficulty(
-            previous_block.header().timestamp + Timestamp::hours(1),
-            new_block.header().difficulty,
-        );
-        new_block.set_time_to_mine(&previous_block);
-        assert_eq!(new_block.time_to_mine(), Some(&Timestamp::hours(1)));
-    }
-
-    #[test]
-    fn time_to_mine_should_be_missing_until_explicitly_set() {
-        // todo (21cypher) - check
-        let mut rng = StdRng::seed_from_u64(893423984254);
-        let new_block: Block = rng.random();
-        assert_eq!(new_block.time_to_mine(), None);
     }
 
     mod currency_supply {
