@@ -6,17 +6,12 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 #[derive(Debug)]
 pub(crate) struct LightStateInner {
     tip: Block,
-    /// The time at which the current tip was accepted by the node.
-    /// Note that this could change between restarts as blocks may be
-    /// initially received from the network but later read from disk
-    accepted_at: Timestamp,
     time_to_mine: Option<Timestamp>,
 }
 
 impl LightStateInner {
     fn new(block: Block) -> Self {
         Self {
-            accepted_at: block.header().timestamp,
             tip: block,
             time_to_mine: None,
         }
@@ -79,7 +74,6 @@ impl LightState {
         self.0 = Arc::new(LightStateInner {
             tip: new_block,
             time_to_mine,
-            accepted_at: Timestamp::now(),
         });
     }
 }
@@ -87,5 +81,72 @@ impl LightState {
 impl Clone for LightState {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) mod tests {
+    use super::*;
+    use crate::protocol::consensus::block::Block;
+    use crate::protocol::consensus::block::BlockProof;
+    use crate::protocol::consensus::block::block_header::BlockHeader;
+    use crate::protocol::consensus::block::block_appendix::BlockAppendix;
+    use crate::application::config::network::Network;
+    use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+    use rand::Rng;
+    use tasm_lib::twenty_first::tip5::digest::Digest;
+
+    #[test]
+    fn time_to_mine_works() {
+        let previous_block = Block::genesis(Network::Main);
+        let previous_block_hash = previous_block.hash();
+        let new_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
+        let mut light_state = LightState::from(previous_block.clone());
+        assert_eq!(light_state.tip().hash(), previous_block_hash);
+
+        let new_block: Block = Block::new(
+            BlockHeader::template_header(
+                previous_block.clone().header(),
+                previous_block_hash,
+                new_timestamp,
+                Timestamp::minutes(10)
+            ),
+            previous_block.body().clone(),
+            BlockAppendix::default(),
+            BlockProof::default(),
+        );
+
+        light_state.update(new_block);
+        assert_eq!(light_state.tip_time_to_mine(), Some(Timestamp::hours(1)));
+    }
+
+    #[test]
+    fn time_to_mine_should_be_missing_until_updated() {
+        let previous_block = Block::genesis(Network::Main);
+        let light_state = LightState::from(previous_block.clone());
+        assert_eq!(light_state.tip_time_to_mine(), None);
+    }
+
+    #[test]
+    fn time_to_mine_should_be_missing_if_tip_not_direct_descendant() {
+        let mut rng: StdRng = SeedableRng::seed_from_u64(893423984254);
+        let previous_block = Block::genesis(Network::Main);
+        let previous_block_hash = previous_block.hash();
+        let new_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
+        let mut light_state = LightState::from(previous_block);
+        assert_eq!(light_state.tip().hash(), previous_block_hash);
+
+        let mut new_block: Block = rng.random();
+
+        new_block.set_header_timestamp_and_difficulty(
+            new_timestamp,
+            new_block.header().difficulty,
+        );
+
+        light_state.update(new_block);
+        assert_eq!(light_state.tip_time_to_mine(), None);
     }
 }
