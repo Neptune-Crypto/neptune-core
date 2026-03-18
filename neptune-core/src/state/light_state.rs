@@ -80,3 +80,9 @@ impl LightState {
         });
     }
 }
+
+impl Clone for LightState {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
