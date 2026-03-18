@@ -399,6 +399,8 @@ pub trait RpcApi: Sync + Send {
         request: ValidateNauAmountRequest,
     ) -> RpcResult<ValidateNauAmountResponse>;
 
+    /// Return all blocks in the specified range (inclusive). Will not return
+    /// the genesis block.
     async fn get_blocks(
         &self,
         from_height: RpcBlockHeight,
