@@ -2896,14 +2896,7 @@ pub(crate) mod tests {
                     maintain_mps,
                 )
                 .await;
-            // todo (21cypher): would this work?
             bob.set_new_tip(new_block.clone()).await.unwrap();
-            // bob.chain
-            //     .archival_state_mut()
-            //     .set_new_tip(&new_block)
-            //     .await
-            //     .unwrap();
-            // *bob.chain.light_state_mut() = new_block.clone().into();
 
             latest_block = new_block;
         }
