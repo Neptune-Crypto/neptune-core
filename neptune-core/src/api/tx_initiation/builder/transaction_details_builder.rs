@@ -21,6 +21,7 @@ use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::light_state::LightState;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::SpendingKey;
@@ -32,7 +33,6 @@ use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::GlobalState;
 use crate::state::StateLock;
-use crate::state::light_state::LightState;
 use crate::WalletState;
 
 /// a builder to generate [TransactionDetails].
@@ -306,7 +306,8 @@ impl TransactionDetailsBuilder {
             fee,
             coinbase,
             timestamp,
-            light_state.tip()
+            light_state
+                .tip()
                 .mutator_set_accumulator_after()
                 .map_err(|_| CreateTxError::NoMutatorSetAccumulatorAfter)?,
             state_lock.cli().network,

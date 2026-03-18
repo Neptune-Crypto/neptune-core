@@ -53,14 +53,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
             .unwrap();
         assert_eq!(
             BlockHeight::from(2u64),
-            alice
-                .gsl
-                .lock_guard()
-                .await
-                .chain
-                .tip()
-                .header()
-                .height,
+            alice.gsl.lock_guard().await.chain.tip().header().height,
             "Expected block height: 2"
         );
 

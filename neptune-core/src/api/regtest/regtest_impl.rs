@@ -131,7 +131,7 @@ impl RegTestPrivate {
         let gs = gsl.lock_guard().await;
 
         let light_state = gs.chain.light_state_clone();
-        let tip_block= light_state.tip();
+        let tip_block = light_state.tip();
 
         let next_block_height = tip_block.header().height + 1;
         let fee_notification_policy = Default::default();

@@ -682,12 +682,7 @@ impl PeerLoopHandler {
                 debug!("Got BlockNotificationRequest");
 
                 peer.send(PeerMessage::BlockNotification(
-                    self.global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .tip()
-                        .into(),
+                    self.global_state_lock.lock_guard().await.chain.tip().into(),
                 ))
                 .await?;
 

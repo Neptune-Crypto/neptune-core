@@ -113,9 +113,6 @@ mod maintain_membership_proofs {
 
     /// Maintain membership proofs, while receiving additional UTXOs.
     mod maintain_msmps {
-
-        use neptune_cash::state::light_state::LightState;
-
         use super::*;
 
         fn update_wallet_with_block2<
@@ -172,7 +169,7 @@ mod maintain_membership_proofs {
             )
             .unwrap();
 
-            global_state.chain.light_state_mut().update(block2);
+            global_state.chain.light_state_mut().update(block2.clone());
 
             bencher.bench_local(|| {
                 rt.block_on(async {
@@ -180,7 +177,7 @@ mod maintain_membership_proofs {
                         .wallet_state
                         .update_wallet_state_with_new_block(
                             &block1.mutator_set_accumulator_after().unwrap(),
-                            global_state.chain.tip(),
+                            &block2,
                             maintain_msmps_from_block_data,
                         )
                         .await;

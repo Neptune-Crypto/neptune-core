@@ -989,8 +989,7 @@ impl MainLoopHandler {
 
                 {
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-                    if pt2m_transaction.confirmable_for_block
-                        != global_state_mut.chain.tip().hash()
+                    if pt2m_transaction.confirmable_for_block != global_state_mut.chain.tip().hash()
                     {
                         warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
                         return Ok(());
@@ -2723,13 +2722,7 @@ mod tests {
             let block = block_with_outputs(&mut alice, outputs).await;
             alice.set_new_tip(block.clone()).await.unwrap();
 
-            let balance_timestamp = alice
-                .lock_guard()
-                .await
-                .chain
-                .tip()
-                .header()
-                .timestamp;
+            let balance_timestamp = alice.lock_guard().await.chain.tip().header().timestamp;
             let expected_balance = NativeCurrencyAmount::coins(13);
             let balance = alice
                 .lock_guard()

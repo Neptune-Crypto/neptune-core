@@ -492,13 +492,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_b.clone()).await.unwrap();
             assert_eq!(
                 14998u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .tip()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // hard fork minus 1
@@ -520,13 +514,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_c.clone()).await.unwrap();
             assert_eq!(
                 14999u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .tip()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // 1st block after hard fork!
@@ -548,13 +536,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_d.clone()).await.unwrap();
             assert_eq!(
                 15000u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .tip()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // 2nd block after hard fork
@@ -576,13 +558,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_e.clone()).await.unwrap();
             assert_eq!(
                 15001u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .tip()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // 3rd block after hard fork
@@ -604,13 +580,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_f.clone()).await.unwrap();
             assert_eq!(
                 15002u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .tip()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // 4th block after hard fork, with a transaction.
@@ -641,13 +611,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_g.clone()).await.unwrap();
             assert_eq!(
                 15003u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .tip()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
         }
     }

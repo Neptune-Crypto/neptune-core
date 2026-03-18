@@ -757,11 +757,7 @@ impl GlobalState {
             archival_state,
         };
         let chain = BlockchainState::Archival(Box::new(chain));
-        let mempool = Mempool::new(
-            cli.max_mempool_size,
-            cli.proving_capability(),
-            chain.tip(),
-        );
+        let mempool = Mempool::new(cli.max_mempool_size, cli.proving_capability(), chain.tip());
 
         Ok(Self::new(wallet_state, chain, net, cli, mempool))
     }
@@ -2800,14 +2796,14 @@ impl GlobalState {
             .await?;
 
         self.chain.light_state_mut().update(new_tip);
-        let new_tip: &Block = self.chain.light_state().tip();
+        let tip: &Block = self.chain.tip(); // prevents a clone
 
         // Update mempool with UTXOs from this block. This is done by
         // removing all transaction that became invalid/was mined by this
         // block. Also returns the list of update-jobs that should be
         // performed by this client.
         debug!("Applying block to mempool.");
-        let (mempool_events, update_jobs) = self.mempool.update_with_block(new_tip)?;
+        let (mempool_events, update_jobs) = self.mempool.update_with_block(tip)?;
 
         let parent_ms_accumulator =
             self.chain
@@ -2825,7 +2821,7 @@ impl GlobalState {
         if parent_ms_accumulator.is_none() {
             assert_eq!(
                 self.chain.archival_state().genesis_block().hash(),
-                new_tip.hash(),
+                tip.hash(),
                 "If no parent is known, new tip must be the genesis block"
             );
         }
@@ -2840,7 +2836,7 @@ impl GlobalState {
         self.wallet_state
             .update_wallet_state_with_new_block(
                 &parent_ms_accumulator.unwrap_or_default(),
-                new_tip,
+                tip,
                 maintain_mps_in_wallet,
             )
             .await;
@@ -4623,11 +4619,7 @@ mod tests {
 
                 // Loop with two iterations to ensure wallet rescan is
                 // idempotent.
-                let tip_msa = alice
-                    .chain
-                    .tip()
-                    .mutator_set_accumulator_after()
-                    .unwrap();
+                let tip_msa = alice.chain.tip().mutator_set_accumulator_after().unwrap();
                 for _ in 0..2 {
                     alice
                         .rescan_wallet(0u64.into(), 15u64.into(), scan_mode)
@@ -5641,7 +5633,6 @@ mod tests {
         assert!(tx_from_bob.is_valid(network, consensus_rule_set).await);
         assert!(tx_from_bob
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
-
 
         let light_state = &premine_receiver
             .global_state_lock

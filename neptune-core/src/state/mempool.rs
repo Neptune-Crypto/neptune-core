@@ -2145,8 +2145,8 @@ mod tests {
             );
         }
 
-
-        let light_state = &bob.global_state_lock
+        let light_state = &bob
+            .global_state_lock
             .lock_guard()
             .await
             .chain

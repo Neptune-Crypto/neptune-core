@@ -48,14 +48,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
     tracing::info!("alice mined 3 blocks!");
 
     assert_eq!(
-        alice
-            .gsl
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .header()
-            .height,
+        alice.gsl.lock_guard().await.chain.tip().header().height,
         3u64.into()
     );
 
@@ -177,14 +170,7 @@ pub async fn alice_sends_to_bob(
     );
 
     assert_eq!(
-        alice
-            .gsl
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .header()
-            .height,
+        alice.gsl.lock_guard().await.chain.tip().header().height,
         3u64.into()
     );
 
@@ -306,14 +292,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
     );
 
     assert_eq!(
-        alice
-            .gsl
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .header()
-            .height,
+        alice.gsl.lock_guard().await.chain.tip().header().height,
         3u64.into()
     );
 
@@ -429,14 +408,7 @@ pub async fn alice_sends_transparent_transaction() -> anyhow::Result<()> {
     );
 
     assert_eq!(
-        alice
-            .gsl
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .header()
-            .height,
+        alice.gsl.lock_guard().await.chain.tip().header().height,
         3u64.into()
     );
 
@@ -598,14 +570,7 @@ pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
     );
 
     assert_eq!(
-        alice
-            .gsl
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .header()
-            .height,
+        alice.gsl.lock_guard().await.chain.tip().header().height,
         3u64.into()
     );
 

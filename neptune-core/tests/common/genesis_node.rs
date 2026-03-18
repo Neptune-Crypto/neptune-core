@@ -479,16 +479,7 @@ impl GenesisNode {
     ) -> anyhow::Result<()> {
         let start = std::time::Instant::now();
         let h: BlockHeight = height.into();
-        while self
-            .gsl
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .header()
-            .height
-            < h
-        {
+        while self.gsl.lock_guard().await.chain.tip().header().height < h {
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
                 anyhow::bail!(
                     "block height {} not reached after {} seconds",

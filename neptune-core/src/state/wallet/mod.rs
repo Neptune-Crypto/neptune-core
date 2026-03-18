@@ -836,14 +836,15 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 
+        let light_state = &bob
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state_clone();
+
         let (cbtx, _cb_expected) = make_coinbase_transaction_from_state_lock(
-            &bob.global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                // todo (cypher21): clone
-                .light_state()
-                .clone().tip(),
+            light_state.tip(),
             &bob,
             in_seven_months,
             TritonVmJobPriority::Normal.into(),
@@ -1071,7 +1072,7 @@ mod tests {
         ) -> Block {
             let tx = tx_with_expenditure(gsl.clone(), amount).await;
             let light_state = gsl.lock_guard().await.chain.light_state_clone();
-            invalid_block_with_transaction(&light_state.tip(), tx)
+            invalid_block_with_transaction(light_state.tip(), tx)
         }
 
         /// Return a btransaction with an expenditure from the provided global
@@ -1094,7 +1095,6 @@ mod tests {
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let mut tx_initiator_internal = gsl.api().tx_initiator_internal();
             let network = gsl.cli().network;
-            // todo (cypher21) - clone
             let light_state = gsl.lock_guard().await.chain.light_state_clone();
             let tip = light_state.tip();
             let in_seven_months = tip.header().timestamp + Timestamp::months(7);

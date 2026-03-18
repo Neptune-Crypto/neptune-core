@@ -95,9 +95,7 @@ impl BlockSelector {
     /// of the block belonging to canonical chain is returned.
     pub async fn as_digest(&self, state: &GlobalState) -> Option<Digest> {
         match self {
-            BlockSelector::Special(BlockSelectorLiteral::Tip) => {
-                Some(state.chain.tip().hash())
-            }
+            BlockSelector::Special(BlockSelectorLiteral::Tip) => Some(state.chain.tip().hash()),
             BlockSelector::Special(BlockSelectorLiteral::Genesis) => {
                 Some(state.chain.archival_state().genesis_block().hash())
             }

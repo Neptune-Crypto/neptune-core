@@ -1167,13 +1167,7 @@ mod tests {
                 ),
             }
 
-            let block_height = alice
-                .lock_guard_mut()
-                .await
-                .chain
-                .tip()
-                .header()
-                .height;
+            let block_height = alice.lock_guard_mut().await.chain.tip().header().height;
             let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
             assert!(mempool_tx.is_valid(network, consensus_rule_set).await);
         }

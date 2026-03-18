@@ -3881,7 +3881,11 @@ impl RPC for NeptuneRPCServer {
         // Since block comes from external source, we need to check validity.
         let current_tip = self.state.lock_guard().await.chain.light_state_clone();
         if !proposal
-            .is_valid(current_tip.tip(), Timestamp::now(), self.state.cli().network)
+            .is_valid(
+                current_tip.tip(),
+                Timestamp::now(),
+                self.state.cli().network,
+            )
             .await
         {
             warn!("Got claimed new block that was not valid");

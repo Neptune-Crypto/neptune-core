@@ -79,14 +79,7 @@ pub async fn consolidation_basic() {
     );
 
     assert_eq!(
-        alice
-            .gsl
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .header()
-            .height,
+        alice.gsl.lock_guard().await.chain.tip().header().height,
         u64::from(num_blocks_mined).into()
     );
 

@@ -22,9 +22,9 @@ use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::light_state::LightState;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::transaction_output::TxOutputList;
-use crate::state::light_state::LightState;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MockBlockGenerator;

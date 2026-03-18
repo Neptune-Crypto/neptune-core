@@ -1068,14 +1068,7 @@ impl RpcApi for RpcServer {
             return Err(RpcError::BadConfirmationCount);
         }
 
-        let block_height = self
-            .state
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .header()
-            .height;
+        let block_height = self.state.lock_guard().await.chain.tip().header().height;
         let threshold_block_height = block_height
             .next()
             .value()

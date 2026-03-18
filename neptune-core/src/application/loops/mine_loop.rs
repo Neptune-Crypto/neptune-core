@@ -1105,12 +1105,7 @@ pub(crate) mod tests {
         )
         .await;
 
-        let previous_block = global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .clone();
+        let previous_block = global_state_lock.lock_guard().await.chain.tip().clone();
 
         let (transaction, _coinbase_utxo_info) = {
             let outputs = (0..num_outputs)
@@ -1516,11 +1511,9 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_1, _) = receiver_1.await.unwrap();
-        let validation_result = block_1.validate(
-            genesis_light_state.tip(),
-            mocked_now,
-            network
-        ).await;
+        let validation_result = block_1
+            .validate(genesis_light_state.tip(), mocked_now, network)
+            .await;
         assert!(validation_result.is_ok(), "{:?}", validation_result);
 
         assert!(
@@ -1701,12 +1694,7 @@ pub(crate) mod tests {
             mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
-        let tip_block_orig = global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .clone();
+        let tip_block_orig = global_state_lock.lock_guard().await.chain.tip().clone();
 
         let now = tip_block_orig.header().timestamp + Timestamp::minutes(10);
 
@@ -1808,12 +1796,7 @@ pub(crate) mod tests {
         )
         .await;
 
-        let mut prev_block = global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .clone();
+        let mut prev_block = global_state_lock.lock_guard().await.chain.tip().clone();
 
         // adjust these to simulate longer mining runs, possibly
         // with shorter or longer target intervals.
@@ -2485,12 +2468,7 @@ pub(crate) mod tests {
         .await;
 
         // obtain previous (genesis) block
-        let mut prev_block = global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .clone();
+        let mut prev_block = global_state_lock.lock_guard().await.chain.tip().clone();
 
         // generate 20 blocks
         for i in 1..=num_blocks {

@@ -17,7 +17,6 @@ impl LightStateInner {
         }
     }
 
-
     fn tip(&self) -> &Block {
         &self.tip
     }
@@ -58,11 +57,13 @@ impl LightState {
     }
 
     /// update the light state with a new block, which becomes the new tip.
-    /// 
+    ///
     /// Existing clones of the LightState will not see the new tip, readers should always retrieve it
     /// via the [`crate::state::GlobalState`].
     pub fn update(&mut self, new_block: Block) {
-        new_block.mutator_set_accumulator_after().expect("Stored block must have a valid MSA after.");
+        new_block
+            .mutator_set_accumulator_after()
+            .expect("Stored block must have a valid MSA after.");
 
         let time_to_mine = if new_block.header().prev_block_digest == self.tip().hash() {
             // Only set if new tip is direct descendant of previous tip
@@ -88,14 +89,14 @@ impl Clone for LightState {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use super::*;
+    use crate::application::config::network::Network;
+    use crate::protocol::consensus::block::block_appendix::BlockAppendix;
+    use crate::protocol::consensus::block::block_header::BlockHeader;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::BlockProof;
-    use crate::protocol::consensus::block::block_header::BlockHeader;
-    use crate::protocol::consensus::block::block_appendix::BlockAppendix;
-    use crate::application::config::network::Network;
     use rand::rngs::StdRng;
-    use rand::SeedableRng;
     use rand::Rng;
+    use rand::SeedableRng;
 
     #[test]
     fn time_to_mine_works() {
@@ -110,7 +111,7 @@ pub(crate) mod tests {
                 previous_block.clone().header(),
                 previous_block_hash,
                 new_timestamp,
-                Timestamp::minutes(10)
+                Timestamp::minutes(10),
             ),
             previous_block.body().clone(),
             BlockAppendix::default(),
@@ -139,10 +140,7 @@ pub(crate) mod tests {
 
         let mut new_block: Block = rng.random();
 
-        new_block.set_header_timestamp_and_difficulty(
-            new_timestamp,
-            new_block.header().difficulty,
-        );
+        new_block.set_header_timestamp_and_difficulty(new_timestamp, new_block.header().difficulty);
 
         light_state.update(new_block);
         assert_eq!(light_state.tip_time_to_mine(), None);
