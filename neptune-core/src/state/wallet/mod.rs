@@ -1070,8 +1070,8 @@ mod tests {
             gsl: GlobalStateLock,
             amount: NativeCurrencyAmount,
         ) -> Block {
-            let tx = tx_with_expenditure(gsl.clone(), amount).await;
             let light_state = gsl.lock_guard().await.chain.light_state_clone();
+            let tx = tx_with_expenditure(gsl, amount).await;
             invalid_block_with_transaction(light_state.tip(), tx)
         }
 
