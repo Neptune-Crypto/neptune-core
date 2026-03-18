@@ -63,7 +63,7 @@ impl TransactionKernel {
     ///
     ///
     /// [new_with_updated_mutator_set_records]: crate::protocol::consensus::transaction::Transaction
-    pub(crate) fn txid(&self) -> TransactionKernelId {
+    pub fn txid(&self) -> TransactionKernelId {
         // Since the `Update` program allows permutation of inputs, we must sort
         // the digests of the absolute indices to arrive at a digest that is
         // unchanged by an update.

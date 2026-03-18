@@ -479,7 +479,7 @@ impl Block {
     /// percolates into the mutator set hash and eventually into all transaction
     /// kernels. The net result is that broadcasting transaction on other
     /// networks invalidates the lock script proofs.
-    pub(crate) fn premine_sender_randomness(network: Network) -> Digest {
+    pub fn premine_sender_randomness(network: Network) -> Digest {
         Digest::new(bfe_array![u64::from(network.id()), 0, 0, 0, 0])
     }
 
@@ -1120,22 +1120,16 @@ impl Block {
     /// Return all addition records (transaction outputs) in this block,
     /// including guesser rewards.
     pub(crate) fn all_addition_records(&self) -> Result<Vec<AdditionRecord>, BlockValidationError> {
-        let mut addition_records = self.body().transaction_kernel.outputs.clone();
-        let guesser_addition_records = self.guesser_fee_addition_records()?;
-        addition_records.extend(guesser_addition_records);
-
-        Ok(addition_records)
+        let block_hash = self.hash();
+        self.kernel.all_addition_records(block_hash)
     }
 
     /// Return the mutator set update corresponding to this block, which sends
     /// the mutator set accumulator after the predecessor to the mutator set
     /// accumulator after self.
     pub(crate) fn mutator_set_update(&self) -> Result<MutatorSetUpdate, BlockValidationError> {
-        let outputs = self.all_addition_records()?;
-        let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
-            .map_err(BlockValidationError::from)?;
-
-        Ok(MutatorSetUpdate::new(inputs, outputs))
+        let block_hash = self.hash();
+        self.kernel.mutator_set_update(block_hash)
     }
 
     /// Compute the total supply of coins that were liquid immediately after

@@ -1,13 +1,18 @@
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 
 use crate::application::json_rpc::core::model::block::appendix::RpcBlockAppendix;
 use crate::application::json_rpc::core::model::block::body::RpcBlockBody;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeader;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
+use crate::protocol::consensus::block::block_appendix::BlockAppendix;
+use crate::protocol::consensus::block::block_body::BlockBody;
+use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockProof;
+use crate::protocol::proof_abstractions::mast_hash::MastHash;
 
 pub mod appendix;
 pub mod body;
@@ -20,6 +25,24 @@ pub struct RpcBlockKernel {
     pub header: RpcBlockHeader,
     pub body: RpcBlockBody,
     pub appendix: RpcBlockAppendix,
+}
+
+impl RpcBlockKernel {
+    /// Mast hash of the block kernel
+    pub fn mast_hash(&self) -> Digest {
+        let kernel: BlockKernel = self.to_owned().into();
+        kernel.mast_hash()
+    }
+}
+
+impl From<RpcBlockKernel> for BlockKernel {
+    fn from(value: RpcBlockKernel) -> Self {
+        BlockKernel {
+            header: BlockHeader::from(value.header),
+            body: BlockBody::from(value.body),
+            appendix: BlockAppendix::from(value.appendix),
+        }
+    }
 }
 
 impl From<&BlockKernel> for RpcBlockKernel {

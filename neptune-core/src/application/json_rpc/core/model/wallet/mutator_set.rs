@@ -41,6 +41,19 @@ impl From<Vec<IndexedAoclAuthPath>> for RpcIndexedAoclAuthPaths {
     }
 }
 
+impl From<RpcIndexedAoclAuthPaths> for Vec<IndexedAoclAuthPath> {
+    fn from(value: RpcIndexedAoclAuthPaths) -> Self {
+        value
+            .0
+            .into_iter()
+            .map(|(leaf_index, auth_path)| IndexedAoclAuthPath {
+                leaf_index,
+                auth_path: auth_path.into(),
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcMsMembershipProofPrivacyPreserving {
@@ -71,6 +84,15 @@ impl RpcMsMembershipProofPrivacyPreserving {
 
 impl From<MsMembershipProofPrivacyPreserving> for RpcMsMembershipProofPrivacyPreserving {
     fn from(value: MsMembershipProofPrivacyPreserving) -> Self {
+        Self {
+            aocl_auth_paths: value.aocl_auth_paths.into(),
+            target_chunks: value.target_chunks.into(),
+        }
+    }
+}
+
+impl From<RpcMsMembershipProofPrivacyPreserving> for MsMembershipProofPrivacyPreserving {
+    fn from(value: RpcMsMembershipProofPrivacyPreserving) -> Self {
         Self {
             aocl_auth_paths: value.aocl_auth_paths.into(),
             target_chunks: value.target_chunks.into(),

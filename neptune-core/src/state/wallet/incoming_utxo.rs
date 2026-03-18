@@ -24,15 +24,14 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 /// [IncomingUtxoRecoveryData](super::wallet_state::IncomingUtxoRecoveryData).
 #[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
-pub(crate) struct IncomingUtxo {
-    pub(crate) utxo: Utxo,
-    pub(crate) sender_randomness: Digest,
-    pub(crate) receiver_preimage: Digest,
+pub struct IncomingUtxo {
+    pub utxo: Utxo,
+    pub sender_randomness: Digest,
+    pub receiver_preimage: Digest,
 
     /// Whether the UTXO is a guesser fee or not. Only to be used for log
-    /// messages and wallet info. Does not affect how the ability to claim the
-    /// UTXO.
-    pub(crate) is_guesser_fee: bool,
+    /// messages and wallet info. Does not affect the ability to claim the UTXO.
+    pub is_guesser_fee: bool,
 }
 
 impl PartialEq for IncomingUtxo {
@@ -78,7 +77,8 @@ impl IncomingUtxo {
             receiver_digest: self.receiver_preimage.hash(),
         }
     }
-    pub(crate) fn addition_record(&self) -> AdditionRecord {
+
+    pub fn addition_record(&self) -> AdditionRecord {
         self.utxo_triple().addition_record()
     }
 

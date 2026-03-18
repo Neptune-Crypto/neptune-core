@@ -102,14 +102,16 @@ impl From<RpcTransactionProof> for TransactionProof {
     }
 }
 
-impl From<TransactionProof> for RpcTransactionProof {
-    fn from(proof: TransactionProof) -> RpcTransactionProof {
-        match proof {
-            TransactionProof::ProofCollection(pc) => {
-                RpcTransactionProof::ProofCollection(Box::new(pc.into()))
+impl TryFrom<TransactionProof> for RpcTransactionProof {
+    type Error = String;
+
+    fn try_from(value: TransactionProof) -> Result<Self, Self::Error> {
+        match value {
+            TransactionProof::Witness(_) => {
+                Err("Cannot convert primitive witness to a transferable transaction proof as this would leak secrets".to_owned())
             }
-            TransactionProof::SingleProof(sp) => RpcTransactionProof::SingleProof(sp.into()),
-            TransactionProof::Witness(_) => panic!("Witness proofs contain secret material and must never be serialized or sent over RPC"),
+            TransactionProof::SingleProof(sp) => Ok(RpcTransactionProof::SingleProof(sp.into())),
+            TransactionProof::ProofCollection(pc) => Ok(RpcTransactionProof::ProofCollection(Box::new(pc.into()))),
         }
     }
 }
@@ -130,14 +132,14 @@ impl From<RpcTransaction> for Transaction {
     }
 }
 
-impl From<Transaction> for RpcTransaction {
-    fn from(tx: Transaction) -> Self {
-        RpcTransaction {
-            // TODO: Two impls when possible, ref clones and other takes
-            // ownership...
-            kernel: RpcTransactionKernel::from(&tx.kernel),
-            proof: tx.proof.into(),
-        }
+impl TryFrom<Transaction> for RpcTransaction {
+    type Error = String;
+
+    fn try_from(value: Transaction) -> Result<Self, Self::Error> {
+        Ok(Self {
+            kernel: RpcTransactionKernel::from(&value.kernel),
+            proof: value.proof.try_into()?,
+        })
     }
 }
 

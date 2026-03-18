@@ -135,7 +135,7 @@ impl BlockBody {
     ///
     /// Includes the guesser-fee UTXOs which are not included by the
     /// `mutator_set_accumulator` field on the block body.
-    pub(crate) fn mutator_set_accumulator_after(
+    pub fn mutator_set_accumulator_after(
         &self,
         guesser_fee_addition_records: Vec<AdditionRecord>,
     ) -> MutatorSetAccumulator {

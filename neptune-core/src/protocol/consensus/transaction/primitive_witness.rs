@@ -229,7 +229,7 @@ impl PrimitiveWitness {
     }
 
     /// Create a [`PrimitiveWitness`] from [`TransactionDetails`].
-    pub(crate) fn from_transaction_details(transaction_details: &TransactionDetails) -> Self {
+    pub fn from_transaction_details(transaction_details: &TransactionDetails) -> Self {
         let kernel = transaction_details.transaction_kernel();
 
         let TransactionDetails {

@@ -338,12 +338,15 @@ impl RpcApi for RpcServer {
     ) -> RpcResult<IsBlockCanonicalResponse> {
         let state = self.state.lock_guard().await;
 
+        let block_hash = request.digest;
+        let is_canonical = state
+            .chain
+            .archival_state()
+            .block_belongs_to_canonical_chain(block_hash)
+            .await;
+
         Ok(IsBlockCanonicalResponse {
-            canonical: state
-                .chain
-                .archival_state()
-                .block_belongs_to_canonical_chain(request.digest)
-                .await,
+            canonical: is_canonical,
         })
     }
 
@@ -1513,7 +1516,10 @@ impl RpcApi for RpcServer {
             proof: transaction.and_then(|t| match t.proof {
                 // Proofs of witness-backed transactions shouldn't be exposed.
                 TransactionProof::Witness(_) => None,
-                other => Some(other.into()),
+
+                // unwrap is OK due to above guard that tx proof is not of
+                // witness type.
+                other => Some(other.try_into().unwrap()),
             }),
         })
     }
