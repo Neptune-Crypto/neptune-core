@@ -1796,7 +1796,11 @@ pub(crate) mod tests {
         )
         .await;
 
-        let mut prev_light_state = global_state_lock.lock_guard().await.chain.light_state_clone();
+        let mut prev_light_state = global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state_clone();
 
         // adjust these to simulate longer mining runs, possibly
         // with shorter or longer target intervals.
@@ -1828,10 +1832,13 @@ pub(crate) mod tests {
         println!("initial difficulty: {}", initial_difficulty);
 
         let prev_timestamp = prev_light_state.tip().header().timestamp;
-        prev_light_state.tip_mut().set_header_timestamp_and_difficulty(
-            prev_timestamp,
-            Difficulty::from_biguint(initial_difficulty).unwrap(),
-        );
+        prev_light_state
+            .tip_mut()
+            .set_header_timestamp_and_difficulty(
+                prev_timestamp,
+                Difficulty::from_biguint(initial_difficulty).unwrap(),
+            );
+        let prev_block = prev_light_state.tip();
 
         let expected_duration = target_block_interval * NUM_BLOCKS;
         let stddev = (guessing_time.pow(2.0_f64) / (NUM_BLOCKS as f64)).sqrt();
@@ -1869,7 +1876,7 @@ pub(crate) mod tests {
 
             let transaction = BlockTransaction::upgrade(transaction);
             let block = Block::block_template_invalid_proof(
-                &prev_block,
+                prev_block,
                 transaction,
                 start_time,
                 Some(target_block_interval),
@@ -1900,13 +1907,13 @@ pub(crate) mod tests {
                 .block
                 .has_proof_of_work(network, prev_block.header()));
 
-            prev_block = *mined_block_info.block;
+            let prev_block_mined = *mined_block_info.block;
 
             let block_time = start_st.elapsed()?.as_millis();
             println!(
                 "Found block {height} in {block_time} milliseconds; \
                 difficulty was {}; total time elapsed so far: {} ms",
-                BigUint::from(prev_block.header().difficulty),
+                BigUint::from(prev_block_mined.header().difficulty),
                 start_instant.elapsed()?.as_millis()
             );
             if i > ignore_first_n_blocks {
