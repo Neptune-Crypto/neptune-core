@@ -1796,7 +1796,7 @@ pub(crate) mod tests {
         )
         .await;
 
-        let mut prev_block = global_state_lock.lock_guard().await.chain.tip().clone();
+        let mut prev_light_state = global_state_lock.lock_guard().await.chain.light_state_clone();
 
         // adjust these to simulate longer mining runs, possibly
         // with shorter or longer target intervals.
@@ -1826,8 +1826,10 @@ pub(crate) mod tests {
         let guessing_time = (target_block_interval.to_millis() as f64) - prepare_time;
         let initial_difficulty = BigUint::from((hash_rate * guessing_time) as u128);
         println!("initial difficulty: {}", initial_difficulty);
-        prev_block.set_header_timestamp_and_difficulty(
-            prev_block.header().timestamp,
+
+        let prev_timestamp = prev_light_state.tip().header().timestamp;
+        prev_light_state.tip_mut().set_header_timestamp_and_difficulty(
+            prev_timestamp,
             Difficulty::from_biguint(initial_difficulty).unwrap(),
         );
 

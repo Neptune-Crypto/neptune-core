@@ -24,6 +24,11 @@ impl LightStateInner {
     fn time_to_mine(&self) -> Option<Timestamp> {
         self.time_to_mine
     }
+
+    #[cfg(test)]
+    fn tip_mut(&mut self) -> &mut Block {
+        &mut self.tip
+    }
 }
 
 // perf: we make LightState an Arc<LightStateInner> so it can be
@@ -76,6 +81,14 @@ impl LightState {
             tip: new_block,
             time_to_mine,
         });
+    }
+
+    /// retrieve a mutable reference to the current tip.
+    #[cfg(test)]
+    pub fn tip_mut(&mut self) -> &mut Block {
+        Arc::get_mut(&mut self.0)
+            .expect("Cannot get mutable reference: LightState is shared elsewhere")
+            .tip_mut()
     }
 }
 
