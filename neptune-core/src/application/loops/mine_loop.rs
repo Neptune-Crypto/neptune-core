@@ -1536,7 +1536,11 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_2, _) = receiver_2.await.unwrap();
-        assert!(block_2.is_valid(block_1_light_state.tip(), mocked_now, network).await);
+        assert!(
+            block_2
+                .is_valid(block_1_light_state.tip(), mocked_now, network)
+                .await
+        );
     }
 
     #[apply(shared_tokio_runtime)]
