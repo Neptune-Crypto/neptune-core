@@ -272,13 +272,13 @@ impl TransactionDetailsBuilder {
                         Digest::default(),
                         Digest::default(),
                     ),
-                    state_lock.light_state().await.clone(),
+                    state_lock.light_state().await,
                 ),
             };
             tx_outputs.push(change_output);
             light_state
         } else {
-            state_lock.light_state().await.clone()
+            state_lock.light_state().await
         };
 
         let mut custom_announcements = self.custom_announcements;
