@@ -1524,8 +1524,10 @@ pub(crate) mod tests {
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();
+
+        let block_1_light_state = LightState::from(block_1.clone());
         compose_block(
-            alice.lock_guard().await.chain.light_state_clone(),
+            block_1_light_state.clone(),
             alice.clone(),
             sender_2,
             cancel_compose_rx,
@@ -1534,7 +1536,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_2, _) = receiver_2.await.unwrap();
-        assert!(block_2.is_valid(&block_1, mocked_now, network).await);
+        assert!(block_2.is_valid(block_1_light_state.tip(), mocked_now, network).await);
     }
 
     #[apply(shared_tokio_runtime)]
