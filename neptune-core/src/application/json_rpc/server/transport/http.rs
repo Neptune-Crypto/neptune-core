@@ -1,12 +1,14 @@
 use std::sync::Arc;
+use std::sync::LazyLock;
 
-use axum::extract::rejection::JsonRejection;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::routing::post;
 use axum::Json;
 use axum::Router;
 use tokio::net::TcpListener;
 
+use crate::application::json_rpc::core::api::ops::Namespace;
 use crate::application::json_rpc::core::api::ops::RpcMethods;
 use crate::application::json_rpc::core::api::rpc::RpcApi;
 use crate::application::json_rpc::core::api::server::router::RpcRouter;
@@ -14,6 +16,14 @@ use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::json::JsonRequest;
 use crate::application::json_rpc::core::model::json::JsonResponse;
 use crate::application::json_rpc::server::rpc::RpcServer;
+
+/// Max request size for any HTTP requests. Enforced by server. This size must
+/// be big enough to handle both the submission of blocks (~8MB) and submission
+/// of proof collections (unbounded). A size of 120MB can handle proof
+/// collections with over 100 inputs though.
+const MAX_REQUEST_SIZE_IN_BYTES: usize = 120 * 1024 * 1024;
+const MAX_REQUEST_SIZE_FOR_BLOCK_SUBMISSION_IN_BYTES: usize = 16 * 1024 * 1024;
+const MAX_DEFAULT_REQUEST_SIZE_IN_BYTES: usize = 1024 * 1024;
 
 impl RpcServer {
     /// Starts the HTTP RPC server.
@@ -28,6 +38,7 @@ impl RpcServer {
 
         let app = Router::new()
             .route("/", post(Self::rpc_handler))
+            .layer(DefaultBodyLimit::max(MAX_REQUEST_SIZE_IN_BYTES))
             .with_state(Arc::new(router));
 
         axum::serve(listener, app).await.unwrap();
@@ -97,12 +108,37 @@ impl RpcServer {
     /// ```
     async fn rpc_handler(
         State(router): State<Arc<RpcRouter>>,
-        // An optimization to avoid deserializing 2 times
-        body: Result<Json<JsonRequest>, JsonRejection>,
+        body: axum::body::Bytes,
     ) -> Json<JsonResponse> {
-        let Ok(Json(request)) = body else {
-            return Json(JsonResponse::error(None, JsonError::ParseError));
+        static SUBMIT_TX: LazyLock<String> =
+            LazyLock::new(|| format!("{}_{}", Namespace::Wallet, RpcMethods::SubmitTransaction));
+        static SUBMIT_BLOCK: LazyLock<String> =
+            LazyLock::new(|| format!("{}_{}", Namespace::Mining, RpcMethods::SubmitBlock));
+
+        let request: JsonRequest = match serde_json::from_slice(&body) {
+            Ok(req) => req,
+            Err(_) => {
+                return Json(JsonResponse::error(None, JsonError::ParseError));
+            }
         };
+
+        let max_size = if request.method == *SUBMIT_TX {
+            MAX_REQUEST_SIZE_IN_BYTES
+        } else if request.method == *SUBMIT_BLOCK {
+            MAX_REQUEST_SIZE_FOR_BLOCK_SUBMISSION_IN_BYTES
+        } else {
+            MAX_DEFAULT_REQUEST_SIZE_IN_BYTES
+        };
+
+        if body.len() > max_size {
+            return Json(JsonResponse::error(
+                request.id,
+                JsonError::RequestBodyTooBig {
+                    max: max_size,
+                    got: body.len(),
+                },
+            ));
+        }
 
         let res = router.dispatch(&request.method, request.params).await;
         let response = match res {
@@ -119,6 +155,7 @@ impl RpcServer {
 mod tests {
     use std::sync::Arc;
 
+    use axum::body::Bytes;
     use axum::extract::State;
     use axum::Json;
     use macro_rules_attr::apply;
@@ -154,8 +191,8 @@ mod tests {
             params: json!([]),
             id: Some(json!(1)),
         };
-        let Json(valid_res) =
-            RpcServer::rpc_handler(State(router.clone()), Ok(Json(valid_req))).await;
+        let valid_req = Bytes::from(serde_json::to_vec(&valid_req).unwrap());
+        let Json(valid_res) = RpcServer::rpc_handler(State(router.clone()), valid_req).await;
         assert!(
             matches!(valid_res, JsonResponse::Success { id: Some(id), result, .. }
                 if id == json!(1) && result.is_object() // shouldn't be null
@@ -169,7 +206,8 @@ mod tests {
             params: json!([1, "x"]),
             id: Some(json!(2)),
         };
-        let Json(bad_res) = RpcServer::rpc_handler(State(router.clone()), Ok(Json(bad_req))).await;
+        let bad_req = Bytes::from(serde_json::to_vec(&bad_req).unwrap());
+        let Json(bad_res) = RpcServer::rpc_handler(State(router.clone()), bad_req).await;
         assert!(
             matches!(bad_res, JsonResponse::Error { id: Some(id), error: JsonError::InvalidParams, .. }
                 if id == json!(2)
@@ -183,10 +221,27 @@ mod tests {
             params: json!([]),
             id: Some(json!(3)),
         };
-        let Json(unknown_res) = RpcServer::rpc_handler(State(router), Ok(Json(unknown_req))).await;
+        let unknown_req = Bytes::from(serde_json::to_vec(&unknown_req).unwrap());
+        let Json(unknown_res) = RpcServer::rpc_handler(State(router.clone()), unknown_req).await;
         assert!(
             matches!(unknown_res, JsonResponse::Error { id: Some(id), error: JsonError::MethodNotFound, .. }
                 if id == json!(3)
+            )
+        );
+
+        // 4. Too big body -> RequestBodyTooBig
+        let large_data = "a".repeat(1_100_000); // ~1.1 MB
+        let large_req = JsonRequest {
+            jsonrpc: Some("2.0".into()),
+            method: TEST_METHOD.into(),
+            params: json!([large_data]),
+            id: Some(json!(4)),
+        };
+        let large_req = Bytes::from(serde_json::to_vec(&large_req).unwrap());
+        let Json(too_big) = RpcServer::rpc_handler(State(router.clone()), large_req).await;
+        assert!(
+            matches!(too_big, JsonResponse::Error { id: Some(id), error: JsonError::RequestBodyTooBig {..}, .. }
+                if id == json!(4)
             )
         );
     }
