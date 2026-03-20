@@ -66,7 +66,7 @@ pub(crate) mod tests {
         let previous_block = Block::genesis(Network::Main);
         let previous_block_hash = previous_block.hash();
         let new_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
-        let mut light_state = LightState::from(previous_block.clone());
+        let mut light_state = LightState::new(previous_block.clone());
         assert_eq!(light_state.tip().hash(), previous_block_hash);
 
         let new_block: Block = Block::new(
@@ -82,14 +82,14 @@ pub(crate) mod tests {
         );
 
         light_state.update(new_block);
-        assert_eq!(light_state.tip_time_to_mine(), Some(Timestamp::hours(1)));
+        assert_eq!(light_state.time_to_mine(), Some(Timestamp::hours(1)));
     }
 
     #[test]
     fn time_to_mine_should_be_missing_until_updated() {
         let previous_block = Block::genesis(Network::Main);
-        let light_state = LightState::from(previous_block.clone());
-        assert_eq!(light_state.tip_time_to_mine(), None);
+        let light_state = LightState::new(previous_block.clone());
+        assert_eq!(light_state.time_to_mine(), None);
     }
 
     #[test]
@@ -98,7 +98,7 @@ pub(crate) mod tests {
         let previous_block = Block::genesis(Network::Main);
         let previous_block_hash = previous_block.hash();
         let new_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
-        let mut light_state = LightState::from(previous_block);
+        let mut light_state = LightState::new(previous_block);
         assert_eq!(light_state.tip().hash(), previous_block_hash);
 
         let mut new_block: Block = rng.random();
