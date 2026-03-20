@@ -3,8 +3,8 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 /// LightState represents the latest accepted block,
 /// along with bookkeeping information about it
-#[derive(Debug)]
-pub(crate) struct LightState {
+#[derive(Debug, Clone)]
+pub struct LightState {
     tip: Block,
     time_to_mine: Option<Timestamp>,
 }
@@ -43,7 +43,7 @@ impl LightState {
     }
 
     #[cfg(test)]
-    fn tip_mut(&mut self) -> &mut Block {
+    pub fn tip_mut(&mut self) -> &mut Block {
         &mut self.tip
     }
 }
