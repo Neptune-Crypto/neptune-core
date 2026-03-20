@@ -10,18 +10,18 @@ pub(crate) struct LightState {
 }
 
 impl LightState {
-    fn new(block: Block) -> Self {
+    pub fn new(block: Block) -> Self {
         Self {
             tip: block,
             time_to_mine: None,
         }
     }
 
-    fn tip(&self) -> &Block {
+    pub fn tip(&self) -> &Block {
         &self.tip
     }
 
-    fn time_to_mine(&self) -> Option<Timestamp> {
+    pub fn time_to_mine(&self) -> Option<Timestamp> {
         self.time_to_mine
     }
 
@@ -31,7 +31,7 @@ impl LightState {
             .mutator_set_accumulator_after()
             .expect("Stored block must have a valid MSA after.");
 
-        let time_to_mine = if new_block.header().prev_block_digest == self.tip().hash() {
+        let time_to_mine = if new_block.header().prev_block_digest == self.tip.hash() {
             // Only set if new tip is direct descendant of previous tip
             Some(new_block.header().timestamp - self.tip.header().timestamp)
         } else {
@@ -106,6 +106,6 @@ pub(crate) mod tests {
         new_block.set_header_timestamp_and_difficulty(new_timestamp, new_block.header().difficulty);
 
         light_state.update(new_block);
-        assert_eq!(light_state.tip_time_to_mine(), None);
+        assert_eq!(light_state.time_to_mine(), None);
     }
 }

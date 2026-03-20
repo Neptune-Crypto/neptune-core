@@ -1493,7 +1493,7 @@ pub(crate) mod tests {
         let mut alice = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
         let genesis_block = Block::genesis(network);
         let mocked_now = genesis_block.header().timestamp + Timestamp::months(7);
-        let genesis_light_state = LightState::from(genesis_block);
+        let genesis_light_state = LightState::new(genesis_block);
 
         assert!(
             alice.lock_guard().await.mempool.is_empty(),
@@ -1525,7 +1525,7 @@ pub(crate) mod tests {
 
         let (sender_2, receiver_2) = oneshot::channel();
 
-        let block_1_light_state = LightState::from(block_1.clone());
+        let block_1_light_state = LightState::new(block_1.clone());
         compose_block(
             block_1_light_state.clone(),
             alice.clone(),
@@ -1578,7 +1578,7 @@ pub(crate) mod tests {
         let (_cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
         let genesis_block = Block::genesis(network);
         let block1_timestamp = genesis_block.header().timestamp + Timestamp::hours(2);
-        let light_state_genesis = LightState::from(genesis_block);
+        let light_state_genesis = LightState::new(genesis_block);
         compose_block(
             light_state_genesis.clone(),
             alice.clone(),

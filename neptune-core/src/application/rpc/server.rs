@@ -3104,8 +3104,8 @@ impl RPC for NeptuneRPCServer {
         };
         let tip_header = *state.chain.tip().header();
         let tip_time_to_mine = {
-            log_slow_scope!(fn_name!() + "::chain().light_state().tip_time_to_mine()");
-            state.chain.light_state().tip_time_to_mine()
+            log_slow_scope!(fn_name!() + "::chain().light_state().time_to_mine()");
+            state.chain.light_state().time_to_mine()
         };
         let syncing = state.net.sync_status;
         let mempool_size = {
