@@ -1,15 +1,15 @@
-use std::sync::Arc;
-
 use crate::protocol::consensus::block::Block;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
+/// LightState represents the latest accepted block,
+/// along with bookkeeping information about it
 #[derive(Debug)]
-pub(crate) struct LightStateInner {
+pub(crate) struct LightState {
     tip: Block,
     time_to_mine: Option<Timestamp>,
 }
 
-impl LightStateInner {
+impl LightState {
     fn new(block: Block) -> Self {
         Self {
             tip: block,
@@ -25,46 +25,7 @@ impl LightStateInner {
         self.time_to_mine
     }
 
-    #[cfg(test)]
-    fn tip_mut(&mut self) -> &mut Block {
-        &mut self.tip
-    }
-}
-
-// perf: we make LightState an Arc<LightStateInner> so it can be
-// cheaply cloned and passed around, eg in
-// channel messages.
-
-/// LightState is a thread-safe struct representing the latest
-/// accepted block, along with bookkeeping information about it
-#[derive(Debug)]
-pub struct LightState(Arc<LightStateInner>);
-
-impl From<Block> for LightState {
-    fn from(tip: Block) -> Self {
-        Self(Arc::new(LightStateInner::new(tip)))
-    }
-}
-
-impl LightState {
-    /// retrieve the current tip.
-    #[inline]
-    pub fn tip(&self) -> &Block {
-        self.0.tip()
-    }
-
-    /// retrieve the time-to-mine of the current tip, if available.
-    ///
-    /// This is only available if the current tip is a direct descendant of the previous tip.
-    #[inline]
-    pub fn tip_time_to_mine(&self) -> Option<Timestamp> {
-        self.0.time_to_mine()
-    }
-
     /// update the light state with a new block, which becomes the new tip.
-    ///
-    /// Existing clones of the LightState will not see the new tip, readers should always retrieve it
-    /// via the [`crate::state::GlobalState`].
     pub fn update(&mut self, new_block: Block) {
         new_block
             .mutator_set_accumulator_after()
@@ -72,29 +33,18 @@ impl LightState {
 
         let time_to_mine = if new_block.header().prev_block_digest == self.tip().hash() {
             // Only set if new tip is direct descendant of previous tip
-            Some(new_block.header().timestamp - self.tip().header().timestamp)
+            Some(new_block.header().timestamp - self.tip.header().timestamp)
         } else {
             None
         };
 
-        self.0 = Arc::new(LightStateInner {
-            tip: new_block,
-            time_to_mine,
-        });
+        self.tip = new_block;
+        self.time_to_mine = time_to_mine;
     }
 
-    /// retrieve a mutable reference to the current tip.
     #[cfg(test)]
-    pub fn tip_mut(&mut self) -> &mut Block {
-        Arc::get_mut(&mut self.0)
-            .expect("Cannot get mutable reference: LightState is shared elsewhere")
-            .tip_mut()
-    }
-}
-
-impl Clone for LightState {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
+    fn tip_mut(&mut self) -> &mut Block {
+        &mut self.tip
     }
 }
 
