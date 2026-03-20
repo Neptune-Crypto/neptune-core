@@ -2,7 +2,6 @@ use neptune_rpc_macros::Router;
 use neptune_rpc_macros::Routes;
 use serde::Deserialize;
 use serde::Serialize;
-use strum::EnumString;
 
 use crate::application::json_rpc::core::api::client::transport::Transport;
 use crate::application::json_rpc::core::api::rpc::RpcApi;
@@ -14,9 +13,20 @@ use crate::application::json_rpc::core::model::message::*;
 /// API version.
 pub const RPC_API_VERSION: u16 = 1;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::EnumString,
+    strum_macros::Display,
+)]
 #[serde(rename_all = "camelCase")]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "camelCase")]
 pub enum Namespace {
     Node,
     Network,
@@ -37,8 +47,21 @@ pub enum Namespace {
     Utxoindex,
 }
 
-#[derive(Router, Routes, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Router,
+    Routes,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum_macros::Display,
+)]
 #[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "camelCase")]
 pub enum RpcMethods {
     #[namespace(Namespace::Node)]
     Network,
@@ -233,7 +256,7 @@ pub enum RpcMethods {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::application::json_rpc::core::api::ops::Namespace;
+    use super::*;
 
     #[test]
     fn namespace_parses_case_insensitively() {
@@ -247,6 +270,15 @@ mod tests {
         assert!(
             Namespace::from_str("nodewallet").is_err(),
             "Expected parse error for invalid namespace"
+        );
+    }
+
+    #[test]
+    fn display_names_use_camelcase() {
+        assert_eq!("wallet".to_owned(), Namespace::Wallet.to_string());
+        assert_eq!(
+            "submitTransaction".to_owned(),
+            RpcMethods::SubmitTransaction.to_string()
         );
     }
 }
