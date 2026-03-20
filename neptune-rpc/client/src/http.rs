@@ -37,15 +37,21 @@ impl Transport for HttpClient {
             id: Some(self.last_id.fetch_add(1, Ordering::SeqCst).into()),
         };
 
-        let response = self
-            .client
-            .post(&self.url)
-            .json(&request)
-            .send()
-            .await
-            .map_err(|_| JsonError::InternalError)?;
-        if !response.status().is_success() {
-            return Err(JsonError::InternalError);
+        let response = self.client.post(&self.url).json(&request).send().await;
+        let response = match response {
+            Ok(resp) => resp,
+            Err(err) => {
+                return Err(JsonError::ConnectionFailed {
+                    message: err.to_string(),
+                });
+            }
+        };
+
+        let status_code = response.status();
+        if !status_code.is_success() {
+            return Err(JsonError::HttpError {
+                message: status_code.to_string(),
+            });
         }
 
         let response: serde_json::Value =
