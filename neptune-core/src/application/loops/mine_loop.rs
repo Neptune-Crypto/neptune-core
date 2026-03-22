@@ -791,9 +791,7 @@ pub(crate) async fn mine(
         {
             global_state_lock.set_mining_status_to_composing().await;
 
-            let tip = global_state_lock
-                .lock(|s| s.chain.tip().clone())
-                .await;
+            let tip = global_state_lock.lock(|s| s.chain.tip().clone()).await;
             let compose_task = compose_block(
                 tip,
                 global_state_lock.clone(),
@@ -1509,9 +1507,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_1, _) = receiver_1.await.unwrap();
-        let validation_result = block_1
-            .validate(&genesis_block, mocked_now, network)
-            .await;
+        let validation_result = block_1.validate(&genesis_block, mocked_now, network).await;
         assert!(validation_result.is_ok(), "{:?}", validation_result);
 
         assert!(
@@ -1533,11 +1529,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_2, _) = receiver_2.await.unwrap();
-        assert!(
-            block_2
-                .is_valid(&block_1, mocked_now, network)
-                .await
-        );
+        assert!(block_2.is_valid(&block_1, mocked_now, network).await);
     }
 
     #[apply(shared_tokio_runtime)]
