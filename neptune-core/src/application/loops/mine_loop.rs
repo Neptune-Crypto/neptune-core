@@ -55,7 +55,6 @@ use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurr
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::shared::SIZE_20MB_IN_BYTES;
-use crate::state::light_state::LightState;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
@@ -103,7 +102,7 @@ pub(crate) async fn compose_block_helper(
 }
 
 async fn compose_block(
-    light_state: LightState,
+    latest_block: Block,
     global_state_lock: GlobalStateLock,
     sender: oneshot::Sender<(Block, Vec<ExpectedUtxo>)>,
     cancel_compose_rx: tokio::sync::watch::Receiver<()>,
@@ -111,7 +110,7 @@ async fn compose_block(
 ) -> Result<()> {
     let timestamp = max(
         now,
-        light_state.tip().header().timestamp + global_state_lock.cli().network.minimum_block_time(),
+        latest_block.header().timestamp + global_state_lock.cli().network.minimum_block_time(),
     );
 
     let mut job_options = global_state_lock
@@ -120,7 +119,7 @@ async fn compose_block(
     job_options.cancel_job_rx = Some(cancel_compose_rx);
 
     let (proposal, composer_utxos) =
-        compose_block_helper(light_state.tip(), global_state_lock, timestamp, job_options).await?;
+        compose_block_helper(&latest_block, global_state_lock, timestamp, job_options).await?;
 
     // Please clap.
     match sender.send((proposal, composer_utxos)) {
@@ -792,11 +791,11 @@ pub(crate) async fn mine(
         {
             global_state_lock.set_mining_status_to_composing().await;
 
-            let light_state = global_state_lock
-                .lock(|s| s.chain.light_state_clone())
+            let tip = global_state_lock
+                .lock(|s| s.chain.tip().clone())
                 .await;
             let compose_task = compose_block(
-                light_state,
+                tip,
                 global_state_lock.clone(),
                 composer_tx,
                 cancel_compose_rx,
@@ -1493,7 +1492,6 @@ pub(crate) mod tests {
         let mut alice = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
         let genesis_block = Block::genesis(network);
         let mocked_now = genesis_block.header().timestamp + Timestamp::months(7);
-        let genesis_light_state = LightState::new(genesis_block);
 
         assert!(
             alice.lock_guard().await.mempool.is_empty(),
@@ -1502,7 +1500,7 @@ pub(crate) mod tests {
         let (sender_1, receiver_1) = oneshot::channel();
         let (_cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
         compose_block(
-            genesis_light_state.clone(),
+            genesis_block.clone(),
             alice.clone(),
             sender_1,
             cancel_compose_rx.clone(),
@@ -1512,7 +1510,7 @@ pub(crate) mod tests {
         .unwrap();
         let (block_1, _) = receiver_1.await.unwrap();
         let validation_result = block_1
-            .validate(genesis_light_state.tip(), mocked_now, network)
+            .validate(&genesis_block, mocked_now, network)
             .await;
         assert!(validation_result.is_ok(), "{:?}", validation_result);
 
@@ -1525,9 +1523,8 @@ pub(crate) mod tests {
 
         let (sender_2, receiver_2) = oneshot::channel();
 
-        let block_1_light_state = LightState::new(block_1.clone());
         compose_block(
-            block_1_light_state.clone(),
+            block_1.clone(),
             alice.clone(),
             sender_2,
             cancel_compose_rx,
@@ -1538,7 +1535,7 @@ pub(crate) mod tests {
         let (block_2, _) = receiver_2.await.unwrap();
         assert!(
             block_2
-                .is_valid(block_1_light_state.tip(), mocked_now, network)
+                .is_valid(&block_1, mocked_now, network)
                 .await
         );
     }
@@ -1578,9 +1575,8 @@ pub(crate) mod tests {
         let (_cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
         let genesis_block = Block::genesis(network);
         let block1_timestamp = genesis_block.header().timestamp + Timestamp::hours(2);
-        let light_state_genesis = LightState::new(genesis_block);
         compose_block(
-            light_state_genesis.clone(),
+            genesis_block.clone(),
             alice.clone(),
             sender_1,
             cancel_compose_rx.clone(),
@@ -1592,7 +1588,7 @@ pub(crate) mod tests {
         let (block_1, _) = receiver_1.await.unwrap();
         assert!(
             block_1
-                .is_valid(light_state_genesis.tip(), block1_timestamp, network)
+                .is_valid(&genesis_block, block1_timestamp, network)
                 .await
         );
     }

@@ -62,7 +62,7 @@ pub(crate) mod tests {
     use rand::SeedableRng;
 
     #[test]
-    fn time_to_mine_works() {
+    fn update_works() {
         let previous_block = Block::genesis(Network::Main);
         let previous_block_hash = previous_block.hash();
         let new_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
@@ -83,6 +83,7 @@ pub(crate) mod tests {
 
         light_state.update(new_block);
         assert_eq!(light_state.time_to_mine(), Some(Timestamp::hours(1)));
+        assert_eq!(light_state.tip().header().timestamp, new_timestamp);
     }
 
     #[test]
