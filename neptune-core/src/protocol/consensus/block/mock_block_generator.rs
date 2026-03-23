@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -24,6 +22,7 @@ use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::light_state::LightState;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::transaction_output::TxOutputList;
 
@@ -170,7 +169,7 @@ impl MockBlockGenerator {
     /// The associated (claim, proof) pair will pass `triton_vm::verify`,
     /// only if the network is regtest.  (The proof is mocked).
     pub fn mock_successor_no_pow(
-        predecessor: Arc<Block>,
+        predecessor: LightState,
         composer_parameters: ComposerParameters,
         guesser_address: ReceivingAddress,
         timestamp: Timestamp,
@@ -182,7 +181,7 @@ impl MockBlockGenerator {
 
         let (block_tx, composer_tx_outputs) = Self::create_mock_block_transaction(
             network,
-            &predecessor,
+            predecessor.tip(),
             composer_parameters,
             timestamp,
             rng.random(),
@@ -192,7 +191,7 @@ impl MockBlockGenerator {
         let prev = predecessor.clone();
 
         let block = Self::mock_block_from_tx_without_pow(
-            (*predecessor).clone(),
+            predecessor.tip().clone(),
             block_tx,
             guesser_address,
             network,
@@ -201,10 +200,10 @@ impl MockBlockGenerator {
         tracing::debug!(
             "new mock block has height: {}, prev block height: {}",
             block.header().height,
-            prev.header().height
+            prev.tip().header().height
         );
 
-        assert_eq!(block.header().height, prev.header().height + 1);
+        assert_eq!(block.header().height, prev.tip().header().height + 1);
 
         (block, composer_tx_outputs)
     }

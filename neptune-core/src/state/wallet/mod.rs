@@ -836,13 +836,15 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 
+        let light_state = &bob
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state_clone();
+
         let (cbtx, _cb_expected) = make_coinbase_transaction_from_state_lock(
-            &bob.global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .clone(),
+            light_state.tip(),
             &bob,
             in_seven_months,
             TritonVmJobPriority::Normal.into(),
@@ -1024,7 +1026,7 @@ mod tests {
             let distant_timestamp = current_block.header().timestamp + Timestamp::years(100);
             let tip_balance = async |gsl: GlobalStateLock| {
                 let gs = gsl.global_state_lock.lock_guard().await;
-                let tip = gs.chain.light_state();
+                let tip = gs.chain.tip();
                 gs.get_wallet_status_for_tip()
                     .await
                     .confirmed_available_balance(tip.header().height, distant_timestamp)
@@ -1068,9 +1070,9 @@ mod tests {
             gsl: GlobalStateLock,
             amount: NativeCurrencyAmount,
         ) -> Block {
-            let tip = gsl.lock_guard().await.chain.light_state().clone();
+            let light_state = gsl.lock_guard().await.chain.light_state_clone();
             let tx = tx_with_expenditure(gsl, amount).await;
-            invalid_block_with_transaction(&tip, tx)
+            invalid_block_with_transaction(light_state.tip(), tx)
         }
 
         /// Return a btransaction with an expenditure from the provided global
@@ -1093,7 +1095,8 @@ mod tests {
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let mut tx_initiator_internal = gsl.api().tx_initiator_internal();
             let network = gsl.cli().network;
-            let tip = gsl.lock_guard().await.chain.light_state().clone();
+            let light_state = gsl.lock_guard().await.chain.light_state_clone();
+            let tip = light_state.tip();
             let in_seven_months = tip.header().timestamp + Timestamp::months(7);
             let consensus_rule_set = ConsensusRuleSet::infer_from(network, tip.header().height);
             let fee = NativeCurrencyAmount::zero();

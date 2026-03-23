@@ -468,9 +468,9 @@ pub(crate) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn disallow_double_spends_across_blocks() {
         async fn mine_tx(state: &GlobalStateLock, tx: Transaction, timestamp: Timestamp) -> Block {
-            let predecessor = state.lock_guard().await.chain.light_state().to_owned();
+            let predecessor_light_state = state.lock_guard().await.chain.light_state_clone();
             let (block_tx, _) = create_block_transaction_from(
-                &predecessor,
+                predecessor_light_state.tip(),
                 state.clone(),
                 timestamp,
                 TritonVmProofJobOptions::default(),
@@ -480,7 +480,7 @@ pub(crate) mod tests {
             .unwrap();
 
             Block::compose(
-                &predecessor,
+                predecessor_light_state.tip(),
                 block_tx,
                 timestamp,
                 TritonVmJobQueue::get_instance(),

@@ -8,8 +8,6 @@
 //! except for a [TransactionProof](crate::protocol::consensus::transaction::TransactionProof).
 //!
 //! see [builder](super) for examples of using the builders together.
-use std::sync::Arc;
-
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
@@ -23,6 +21,7 @@ use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::light_state::LightState;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::SpendingKey;
@@ -34,7 +33,6 @@ use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::GlobalState;
 use crate::state::StateLock;
-use crate::Block;
 use crate::WalletState;
 
 /// a builder to generate [TransactionDetails].
@@ -197,8 +195,8 @@ impl TransactionDetailsBuilder {
         let has_change_output = change_amount.is_positive();
 
         // Add change output, if required to balance transaction
-        let tip_block = if has_change_output {
-            let (change_output, tip) = match change_policy {
+        let light_state = if has_change_output {
+            let (change_output, light_state) = match change_policy {
                 ChangePolicy::ExactChange => {
                     return Err(CreateTxError::NotExactChange);
                 }
@@ -209,19 +207,19 @@ impl TransactionDetailsBuilder {
                         key_type: KeyType,
                         change_amount: NativeCurrencyAmount,
                         medium: UtxoNotificationMedium,
-                    ) -> Result<(TxOutput, Arc<Block>), CreateTxError> {
-                        let tip = gsm.chain.light_state_clone();
+                    ) -> Result<(TxOutput, LightState), CreateTxError> {
+                        let light_state = gsm.chain.light_state_clone();
                         let key = gsm.wallet_state.next_unused_spending_key(key_type).await;
 
                         Ok((
                             TransactionDetailsBuilder::create_change_output(
                                 &gsm.wallet_state,
-                                tip.header().height,
+                                light_state.tip().header().height,
                                 change_amount,
                                 key,
                                 medium,
                             ),
-                            tip,
+                            light_state,
                         ))
                     }
 
@@ -246,16 +244,16 @@ impl TransactionDetailsBuilder {
 
                 ChangePolicy::RecoverToProvidedKey { key, medium } => {
                     let create_change = |gs: &GlobalState| -> Result<_, CreateTxError> {
-                        let tip = gs.chain.light_state_clone();
+                        let light_state = gs.chain.light_state_clone();
                         Ok((
                             Self::create_change_output(
                                 &gs.wallet_state,
-                                tip.header().height,
+                                light_state.tip().header().height,
                                 change_amount,
                                 *key,
                                 medium,
                             ),
-                            tip,
+                            light_state,
                         ))
                     };
 
@@ -274,13 +272,13 @@ impl TransactionDetailsBuilder {
                         Digest::default(),
                         Digest::default(),
                     ),
-                    state_lock.tip().await,
+                    state_lock.light_state().await,
                 ),
             };
             tx_outputs.push(change_output);
-            tip
+            light_state
         } else {
-            state_lock.tip().await
+            state_lock.light_state().await
         };
 
         let mut custom_announcements = self.custom_announcements;
@@ -308,7 +306,8 @@ impl TransactionDetailsBuilder {
             fee,
             coinbase,
             timestamp,
-            tip_block
+            light_state
+                .tip()
                 .mutator_set_accumulator_after()
                 .map_err(|_| CreateTxError::NoMutatorSetAccumulatorAfter)?,
             state_lock.cli().network,

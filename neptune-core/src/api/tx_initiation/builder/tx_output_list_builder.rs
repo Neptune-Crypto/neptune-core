@@ -221,13 +221,13 @@ impl TxOutputListBuilder {
         match state_lock {
             StateLock::Lock(gsl) => {
                 let gs = gsl.lock_guard().await;
-                self.build_worker(&gs.wallet_state, gs.chain.light_state().header().height)
+                self.build_worker(&gs.wallet_state, gs.chain.tip().header().height)
             }
             StateLock::ReadGuard(gs) => {
-                self.build_worker(&gs.wallet_state, gs.chain.light_state().header().height)
+                self.build_worker(&gs.wallet_state, gs.chain.tip().header().height)
             }
             StateLock::WriteGuard(gs) => {
-                self.build_worker(&gs.wallet_state, gs.chain.light_state().header().height)
+                self.build_worker(&gs.wallet_state, gs.chain.tip().header().height)
             }
         }
     }

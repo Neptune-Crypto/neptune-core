@@ -19,7 +19,7 @@ pub enum BlockchainState {
     /// represents a Archival blockchain state
     Archival(Box<BlockchainArchivalState>),
     /// represents Light node blockchain state (ie the current tip)
-    Light(LightState),
+    Light(Box<LightState>),
 }
 
 impl BlockchainState {
@@ -64,7 +64,7 @@ impl BlockchainState {
 
     /// retrieve light state, ie the current tip.
     #[inline]
-    pub fn light_state(&self) -> &Block {
+    pub fn light_state(&self) -> &LightState {
         match self {
             Self::Archival(bac) => &bac.light_state,
             Self::Light(light_state) => light_state,
@@ -75,7 +75,7 @@ impl BlockchainState {
     pub fn light_state_clone(&self) -> LightState {
         match self {
             Self::Archival(bac) => bac.light_state.clone(),
-            Self::Light(light_state) => light_state.clone(),
+            Self::Light(light_state) => *light_state.clone(),
         }
     }
 
@@ -86,6 +86,12 @@ impl BlockchainState {
             Self::Archival(bac) => &mut bac.light_state,
             Self::Light(light_state) => light_state,
         }
+    }
+
+    /// shorthand for light_state().tip()
+    #[inline]
+    pub fn tip(&self) -> &Block {
+        self.light_state().tip()
     }
 }
 

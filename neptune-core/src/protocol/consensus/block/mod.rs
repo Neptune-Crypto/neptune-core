@@ -1431,13 +1431,21 @@ pub(crate) mod tests {
             block_mmr_accumulator in arb::<MmrAccumulator>(),
             appendix in arb::<BlockAppendix>(),
             mutator_set_accumulator in arb::<MutatorSetAccumulator>(),
-        ) -> Block {Block{
-            kernel: BlockKernel{ header, body: BlockBody::new(
-                transaction_kernel, mutator_set_accumulator, lock_free_mmr_accumulator, block_mmr_accumulator
-            ), appendix },
-            proof: Default::default(),
-            digest: Default::default()
-        }}
+        ) -> Block {
+            Block {
+                kernel: BlockKernel {
+                    header, body: BlockBody::new(
+                        transaction_kernel,
+                        mutator_set_accumulator,
+                        lock_free_mmr_accumulator,
+                        block_mmr_accumulator
+                    ),
+                    appendix
+                },
+                proof: Default::default(),
+                digest: Default::default(),
+            }
+        }
     }
 
     #[test]

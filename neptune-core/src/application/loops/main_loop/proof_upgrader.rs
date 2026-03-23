@@ -442,7 +442,7 @@ impl UpgradeJob {
                 let state = global_state_lock.lock_guard().await;
                 (
                     state.wallet_state.wallet_entropy.clone(),
-                    state.chain.light_state().header().height,
+                    state.chain.tip().header().height,
                 )
             };
 
@@ -484,7 +484,7 @@ impl UpgradeJob {
                 let mut global_state = global_state_lock.lock_guard_mut().await;
                 let tip_mutator_set = global_state
                     .chain
-                    .light_state()
+                    .tip()
                     .mutator_set_accumulator_after()
                     .expect("Block from state must have mutator set after");
 
@@ -858,7 +858,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
 ) -> Option<UpgradeJob> {
     let tip_mutator_set = global_state
         .chain
-        .light_state()
+        .tip()
         .mutator_set_accumulator_after()
         .expect("Block from state must have mutator set after");
     let gobbling_fraction = global_state.gobbling_fraction();
@@ -1008,7 +1008,7 @@ mod tests {
         let (change_key, block_height) = {
             let mut gsm = state.lock_guard_mut().await;
             let change_key = gsm.wallet_state.next_unused_symmetric_key().await;
-            let block_height = gsm.chain.light_state().header().height;
+            let block_height = gsm.chain.tip().header().height;
             (change_key, block_height)
         };
         let dummy = TritonVmJobQueue::get_instance();
@@ -1167,13 +1167,7 @@ mod tests {
                 ),
             }
 
-            let block_height = alice
-                .lock_guard_mut()
-                .await
-                .chain
-                .light_state()
-                .header()
-                .height;
+            let block_height = alice.lock_guard_mut().await.chain.tip().header().height;
             let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
             assert!(mempool_tx.is_valid(network, consensus_rule_set).await);
         }
@@ -1282,7 +1276,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .chain
-                .light_state()
+                .tip()
                 .mutator_set_accumulator_after()
                 .unwrap();
             assert!(mempool_tx.is_confirmable_relative_to(&mutator_set_accumulator_after));
@@ -1350,7 +1344,7 @@ mod tests {
         // for sharing unconfirmable transactions.
         let mined_tx = transactions[0].clone();
         let unmined_tx = transactions[1].clone();
-        let block1 = alice.lock_guard().await.chain.light_state().to_owned();
+        let block1 = alice.lock_guard().await.chain.tip().to_owned();
 
         let now = block1.header().timestamp + Timestamp::hours(1);
         let block2 = fake_block_successor_with_merged_tx(

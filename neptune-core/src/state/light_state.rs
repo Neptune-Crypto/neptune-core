@@ -1,11 +1,112 @@
-use std::sync::Arc;
-
 use crate::protocol::consensus::block::Block;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
-// perf: we make LightState an Arc<Block> so it can be
-// cheaply cloned and passed around, eg in
-// channel messages.
+/// LightState represents the latest accepted block,
+/// along with bookkeeping information about it
+#[derive(Debug, Clone)]
+pub struct LightState {
+    tip: Block,
+    time_to_mine: Option<Timestamp>,
+}
 
-/// LightState is just a thread-safe Block.
-/// (always representing the latest block)
-pub type LightState = Arc<Block>;
+impl LightState {
+    pub fn new(block: Block) -> Self {
+        Self {
+            tip: block,
+            time_to_mine: None,
+        }
+    }
+
+    pub fn tip(&self) -> &Block {
+        &self.tip
+    }
+
+    pub fn time_to_mine(&self) -> Option<Timestamp> {
+        self.time_to_mine
+    }
+
+    /// update the light state with a new block, which becomes the new tip.
+    pub fn update(&mut self, new_block: Block) {
+        new_block
+            .mutator_set_accumulator_after()
+            .expect("Stored block must have a valid MSA after.");
+
+        let time_to_mine = if new_block.header().prev_block_digest == self.tip.hash() {
+            // Only set if new tip is direct descendant of previous tip
+            Some(new_block.header().timestamp - self.tip.header().timestamp)
+        } else {
+            None
+        };
+
+        self.tip = new_block;
+        self.time_to_mine = time_to_mine;
+    }
+
+    #[cfg(test)]
+    pub fn tip_mut(&mut self) -> &mut Block {
+        &mut self.tip
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) mod tests {
+    use super::*;
+    use crate::application::config::network::Network;
+    use crate::protocol::consensus::block::block_appendix::BlockAppendix;
+    use crate::protocol::consensus::block::block_header::BlockHeader;
+    use crate::protocol::consensus::block::Block;
+    use crate::protocol::consensus::block::BlockProof;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn update_works() {
+        let previous_block = Block::genesis(Network::Main);
+        let previous_block_hash = previous_block.hash();
+        let new_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
+        let mut light_state = LightState::new(previous_block.clone());
+        assert_eq!(light_state.tip().hash(), previous_block_hash);
+
+        let new_block: Block = Block::new(
+            BlockHeader::template_header(
+                previous_block.clone().header(),
+                previous_block_hash,
+                new_timestamp,
+                Timestamp::minutes(10),
+            ),
+            previous_block.body().clone(),
+            BlockAppendix::default(),
+            BlockProof::default(),
+        );
+
+        light_state.update(new_block);
+        assert_eq!(light_state.time_to_mine(), Some(Timestamp::hours(1)));
+        assert_eq!(light_state.tip().header().timestamp, new_timestamp);
+    }
+
+    #[test]
+    fn time_to_mine_should_be_missing_until_updated() {
+        let previous_block = Block::genesis(Network::Main);
+        let light_state = LightState::new(previous_block.clone());
+        assert_eq!(light_state.time_to_mine(), None);
+    }
+
+    #[test]
+    fn time_to_mine_should_be_missing_if_tip_not_direct_descendant() {
+        let mut rng: StdRng = SeedableRng::seed_from_u64(893423984254);
+        let previous_block = Block::genesis(Network::Main);
+        let previous_block_hash = previous_block.hash();
+        let new_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
+        let mut light_state = LightState::new(previous_block);
+        assert_eq!(light_state.tip().hash(), previous_block_hash);
+
+        let mut new_block: Block = rng.random();
+
+        new_block.set_header_timestamp_and_difficulty(new_timestamp, new_block.header().difficulty);
+
+        light_state.update(new_block);
+        assert_eq!(light_state.time_to_mine(), None);
+    }
+}

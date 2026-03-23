@@ -2967,14 +2967,15 @@ pub(super) mod tests {
         let tx_to_alice_and_bob = artifacts_alice_and_bob.transaction;
         println!("Generated transaction for Alice and Bob.");
 
+        let light_state = &premine_rec
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state_clone();
+
         let (cbtx, _composer_expected_utxos) = make_coinbase_transaction_from_state_lock(
-            &premine_rec
-                .global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .clone(),
+            light_state.tip(),
             &premine_rec,
             in_seven_months,
             TritonVmJobPriority::Normal.into(),
@@ -3222,17 +3223,17 @@ pub(super) mod tests {
 
         println!("Generated new transaction to Alice and Bob");
 
+        let light_state_premine = &premine_rec
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state_clone();
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 7 outputs: 2 from Alice to premine rec, 3 from Bob to premine rec, and 2 coinbases to premine rec
         let (cbtx2, expected_composer_utxos2) = make_coinbase_transaction_from_state_lock(
-            &premine_rec
-                .global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .clone(),
+            light_state_premine.tip(),
             &premine_rec,
             in_seven_months,
             TritonVmJobPriority::Normal.into(),

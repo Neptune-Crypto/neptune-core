@@ -62,13 +62,13 @@ impl RpcApi for RpcServer {
         let state = self.state.lock_guard().await;
 
         Ok(HeightResponse {
-            height: state.chain.light_state().kernel.header.height,
+            height: state.chain.tip().kernel.header.height,
         })
     }
 
     async fn tip_digest_call(&self, _: TipDigestRequest) -> RpcResult<TipDigestResponse> {
         let state = self.state.lock_guard().await;
-        let block = state.chain.light_state();
+        let block = state.chain.tip();
 
         Ok(TipDigestResponse {
             digest: block.hash(),
@@ -77,7 +77,7 @@ impl RpcApi for RpcServer {
 
     async fn tip_call(&self, _: TipRequest) -> RpcResult<TipResponse> {
         let state = self.state.lock_guard().await;
-        let block = state.chain.light_state();
+        let block = state.chain.tip();
 
         Ok(TipResponse {
             block: block.into(),
@@ -86,7 +86,7 @@ impl RpcApi for RpcServer {
 
     async fn tip_proof_call(&self, _: TipProofRequest) -> RpcResult<TipProofResponse> {
         let state = self.state.lock_guard().await;
-        let proof = &state.chain.light_state().proof;
+        let proof = &state.chain.tip().proof;
 
         Ok(TipProofResponse {
             proof: proof.into(),
@@ -95,7 +95,7 @@ impl RpcApi for RpcServer {
 
     async fn tip_kernel_call(&self, _: TipKernelRequest) -> RpcResult<TipKernelResponse> {
         let state = self.state.lock_guard().await;
-        let kernel = &state.chain.light_state().kernel;
+        let kernel = &state.chain.tip().kernel;
 
         Ok(TipKernelResponse {
             kernel: kernel.into(),
@@ -106,7 +106,7 @@ impl RpcApi for RpcServer {
         let state = self.state.lock_guard().await;
 
         Ok(TipHeaderResponse {
-            header: state.chain.light_state().header().into(),
+            header: state.chain.tip().header().into(),
         })
     }
 
@@ -114,7 +114,7 @@ impl RpcApi for RpcServer {
         let state = self.state.lock_guard().await;
 
         Ok(TipBodyResponse {
-            body: state.chain.light_state().body().into(),
+            body: state.chain.tip().body().into(),
         })
     }
 
@@ -125,7 +125,7 @@ impl RpcApi for RpcServer {
         let state = self.state.lock_guard().await;
 
         Ok(TipTransactionKernelResponse {
-            kernel: state.chain.light_state().body().transaction_kernel().into(),
+            kernel: state.chain.tip().body().transaction_kernel().into(),
         })
     }
 
@@ -138,7 +138,7 @@ impl RpcApi for RpcServer {
         Ok(TipAnnouncementsResponse {
             announcements: state
                 .chain
-                .light_state()
+                .tip()
                 .body()
                 .transaction_kernel()
                 .announcements
@@ -580,7 +580,7 @@ impl RpcApi for RpcServer {
             }
         }
 
-        let current_tip = state.chain.light_state();
+        let current_tip = state.chain.tip();
         let tip_mutator_set = current_tip
             .mutator_set_accumulator_after()
             .expect("Tip must have valid MSA after");
@@ -633,7 +633,7 @@ impl RpcApi for RpcServer {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .mutator_set_accumulator_after()
             .expect("Tip block must have mutator set");
         if !transaction.is_confirmable_relative_to(&msa) {
@@ -1068,14 +1068,7 @@ impl RpcApi for RpcServer {
             return Err(RpcError::BadConfirmationCount);
         }
 
-        let block_height = self
-            .state
-            .lock_guard()
-            .await
-            .chain
-            .light_state()
-            .header()
-            .height;
+        let block_height = self.state.lock_guard().await.chain.tip().header().height;
         let threshold_block_height = block_height
             .next()
             .value()
@@ -1303,7 +1296,7 @@ impl RpcApi for RpcServer {
         let (maybe_proposal, tip) = {
             let global_state = self.state.lock_guard().await;
             let proposal = global_state.mining_state.block_proposal.map(|p| p.clone());
-            let tip = *global_state.chain.light_state().header();
+            let tip = *global_state.chain.tip().header();
 
             (proposal, tip)
         };
@@ -1334,7 +1327,7 @@ impl RpcApi for RpcServer {
         let mut template: Block = request.template.into();
 
         // Since block comes from external source, we need to check validity.
-        let tip = self.state.lock_guard().await.chain.light_state().clone();
+        let tip = self.state.lock_guard().await.chain.tip().clone();
         if !template
             .is_valid(&tip, Timestamp::now(), self.state.cli().network)
             .await
@@ -2112,7 +2105,7 @@ pub mod tests {
             .lock_guard()
             .await
             .chain
-            .light_state()
+            .tip()
             .mutator_set_accumulator_after()
             .unwrap();
         assert!(msa.verify(item, &extracted_msmp));

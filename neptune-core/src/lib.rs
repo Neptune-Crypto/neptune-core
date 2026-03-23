@@ -185,12 +185,13 @@ pub async fn initialize(
     }
 
     // Roll back blocks if necessary.
-    let tip = global_state_lock
+    let light_state = global_state_lock
         .lock_guard()
         .await
         .chain
-        .light_state()
-        .clone();
+        .light_state_clone();
+
+    let tip = light_state.tip();
     if !tip.header().height.is_genesis()
         && tip.validate_block_proof(cli_args.network).await.is_err()
     {

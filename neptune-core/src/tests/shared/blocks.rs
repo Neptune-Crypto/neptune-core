@@ -77,7 +77,7 @@ use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block) -> Block {
     let network = global_state_lock.cli().network;
     let (child_no_pow, _) = compose_block_helper(
-        parent.clone(),
+        &parent,
         global_state_lock.clone(),
         parent.header().timestamp,
         TritonVmProofJobOptions::default(),
@@ -422,19 +422,20 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     global_state_lock: &mut GlobalStateLock,
     timestamp: Option<Timestamp>,
 ) -> anyhow::Result<Block> {
-    let tip_block = global_state_lock
+    let light_state = global_state_lock
         .lock_guard()
         .await
         .chain
-        .light_state()
-        .to_owned();
+        .light_state_clone();
+
+    let tip_block = light_state.tip();
 
     let timestamp =
         timestamp.unwrap_or_else(|| tip_block.header().timestamp + Timestamp::minutes(10));
 
     let (transaction, expected_composer_utxos) =
         crate::application::loops::mine_loop::create_block_transaction(
-            &tip_block,
+            tip_block,
             global_state_lock.clone(),
             timestamp,
             Default::default(),
@@ -450,7 +451,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     let guesser_address = guesser_key.to_address();
     let network = global_state_lock.cli().network;
     let mut block =
-        Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None, network);
+        Block::block_template_invalid_proof(tip_block, transaction, timestamp, None, network);
     block.set_header_guesser_address(guesser_address.into());
 
     global_state_lock
@@ -714,9 +715,10 @@ pub(crate) async fn fake_valid_block_for_tests(
     state_lock: &GlobalStateLock,
     rness: Randomness<2, 2>,
 ) -> Block {
-    let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
+    let light_state = state_lock.lock_guard().await.chain.light_state_clone();
+    let current_tip = light_state.tip();
     fake_valid_successor_for_tests(
-        &current_tip,
+        current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
         rness,
         state_lock.cli().network,
@@ -781,10 +783,11 @@ pub(crate) async fn block_with_outputs(
     gsl: &mut GlobalStateLock,
     outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
 ) -> Block {
-    let parent_block = gsl.lock_guard().await.chain.light_state().clone();
+    let light_state = gsl.lock_guard().await.chain.light_state_clone();
+    let parent_block = light_state.tip();
     let timestamp = parent_block.header().timestamp + Timestamp::months(7);
     let tx = send_coins(gsl, outputs, timestamp).await;
-    invalid_block_with_transaction(&parent_block, tx)
+    invalid_block_with_transaction(parent_block, tx)
 }
 
 mod tests {

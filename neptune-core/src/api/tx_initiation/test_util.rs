@@ -61,7 +61,7 @@ impl TransactionInitiatorInternal {
 
         // select inputs
         let wallet_status = state_lock.gs().get_wallet_status_for_tip().await;
-        let current_height = state_lock.gs().chain.light_state().header().height;
+        let current_height = state_lock.gs().chain.tip().header().height;
         let spendable_inputs = wallet_status.spendable_inputs(timestamp);
         let input_candidates = spendable_inputs
             .into_iter()

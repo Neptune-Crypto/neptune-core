@@ -53,14 +53,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
             .unwrap();
         assert_eq!(
             BlockHeight::from(2u64),
-            alice
-                .gsl
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .header()
-                .height,
+            alice.gsl.lock_guard().await.chain.tip().header().height,
             "Expected block height: 2"
         );
 
@@ -132,7 +125,8 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
 
         assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
 
-        let tip = alice.gsl.lock_guard().await.chain.light_state().clone();
+        let light_state = alice.gsl.lock_guard().await.chain.light_state_clone();
+        let tip = light_state.tip();
         assert_eq!(
             BlockHeight::from(3u64),
             tip.header().height,

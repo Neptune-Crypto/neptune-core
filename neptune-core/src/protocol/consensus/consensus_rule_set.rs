@@ -215,7 +215,7 @@ pub(crate) mod tests {
             let validator = state_lock.utxo_validator();
             let wallet_status = state_lock.wallet_state.get_wallet_status(&validator).await;
             let spendable_inputs = wallet_status.spendable_inputs(timestamp);
-            let current_height = state_lock.chain.light_state().header().height;
+            let current_height = state_lock.chain.tip().header().height;
             let input_candidates = spendable_inputs
                 .into_iter()
                 .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
@@ -249,7 +249,7 @@ pub(crate) mod tests {
             .build();
 
         // generate proof
-        let block_height = state.lock_guard().await.chain.light_state().header().height;
+        let block_height = state.lock_guard().await.chain.tip().header().height;
         let network = state.cli().network;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         let proof = TransactionProofBuilder::new()
@@ -306,7 +306,7 @@ pub(crate) mod tests {
     ) -> (Block, Vec<ExpectedUtxo>) {
         let current_tip = me.lock_guard().await.chain.archival_state().get_tip().await;
         compose_block_helper(
-            current_tip,
+            &current_tip,
             me,
             timestamp,
             TritonVmProofJobOptions::default(),
@@ -355,7 +355,7 @@ pub(crate) mod tests {
         let mut bob = mock_genesis_global_state_with_block(0, bob_wallet, cli, fake_genesis).await;
         bob.set_new_tip(block_10_000.clone()).await.unwrap();
 
-        let observed_block_height = bob.lock_guard().await.chain.light_state().header().height;
+        let observed_block_height = bob.lock_guard().await.chain.tip().header().height;
         assert_eq!(BlockHeight::from(10_000u64), observed_block_height,);
 
         // 2. get a positive balance, by mining.
@@ -371,7 +371,7 @@ pub(crate) mod tests {
             predecessor = next_block;
         }
 
-        let hopefully_plus_5 = bob.lock_guard().await.chain.light_state().header().height;
+        let hopefully_plus_5 = bob.lock_guard().await.chain.tip().header().height;
         assert_eq!(BlockHeight::from(10_005u64), hopefully_plus_5);
         assert!(
             bob.api()
@@ -492,13 +492,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_b.clone()).await.unwrap();
             assert_eq!(
                 14998u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // hard fork minus 1
@@ -520,13 +514,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_c.clone()).await.unwrap();
             assert_eq!(
                 14999u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // 1st block after hard fork!
@@ -548,13 +536,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_d.clone()).await.unwrap();
             assert_eq!(
                 15000u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // 2nd block after hard fork
@@ -576,13 +558,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_e.clone()).await.unwrap();
             assert_eq!(
                 15001u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // 3rd block after hard fork
@@ -604,13 +580,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_f.clone()).await.unwrap();
             assert_eq!(
                 15002u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
 
             // 4th block after hard fork, with a transaction.
@@ -641,13 +611,7 @@ pub(crate) mod tests {
             bob.set_new_tip(block_g.clone()).await.unwrap();
             assert_eq!(
                 15003u64,
-                bob.lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .header()
-                    .height
-                    .value()
+                bob.lock_guard().await.chain.tip().header().height.value()
             );
         }
     }

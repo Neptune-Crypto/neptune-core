@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::cmp::min;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -13,9 +14,11 @@ use neptune_cash::application::rpc::auth;
 use neptune_cash::protocol::consensus::block::block_header::BlockHeader;
 use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
 use neptune_cash::state::mining::mining_status::MiningStatus;
 use neptune_cash::state::sync_status::SyncStatus;
 use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
+use ratatui::layout::Layout;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
@@ -50,7 +53,7 @@ pub struct OverviewData {
     mining_status: Option<MiningStatus>,
     tip_digest: Option<Digest>,
     block_header: Option<BlockHeader>,
-    block_interval: Option<u64>,
+    tip_time_to_mine: Option<Timestamp>,
 
     archive_size: Option<ByteSize>,
     archive_coverage: Option<f64>,
@@ -138,11 +141,11 @@ impl OverviewScreen {
                 _ = &mut dashboard_overview_data => {
                         match rpc_client.dashboard_overview_data(context::current(), token).await {
                         Ok(Ok(resp)) => {
-
                             {
                                 let mut own_overview_data = overview_data.lock().unwrap();
                                 own_overview_data.tip_digest = Some(resp.tip_digest);
                                 own_overview_data.block_header = Some(resp.tip_header);
+                                own_overview_data.tip_time_to_mine = resp.tip_time_to_mine;
                                 own_overview_data.mempool_size = Some(ByteSize::b(resp.mempool_size.try_into().unwrap()));
                                 own_overview_data.mempool_total_tx_count = Some(resp.mempool_total_tx_count.try_into().unwrap());
                                 own_overview_data.mempool_own_tx_count = Some(resp.mempool_own_tx_count.try_into().unwrap());
@@ -150,7 +153,7 @@ impl OverviewScreen {
                                     own_overview_data.network_overview = resp.network_overview;
                                 }
                                 own_overview_data.peer_count = resp.peer_count;
-                                own_overview_data.sync_status=resp.sync_status;
+                                own_overview_data.sync_status = resp.sync_status;
                                 own_overview_data.confirmed_available_balance = Some(resp.confirmed_available_balance);
                                 own_overview_data.confirmed_total_balance = Some(resp.confirmed_total_balance);
                                 own_overview_data.unconfirmed_available_balance = Some(resp.unconfirmed_available_balance);
@@ -362,10 +365,6 @@ impl Widget for OverviewScreen {
             dashifnotset!(data.block_header.as_ref().map(|bh| bh.height)),
         ));
         lines.push(format!(
-            "block interval: {}",
-            dashifnotset!(data.block_interval)
-        ));
-        lines.push(format!(
             "difficulty: {}",
             dashifnotset!(data.block_header.as_ref().map(|bh| bh.difficulty)),
         ));
@@ -376,35 +375,49 @@ impl Widget for OverviewScreen {
                 .as_ref()
                 .map(|bh| bh.cumulative_proof_of_work))
         ));
+        lines.push(format!(
+            "tip mining duration: {}",
+            dashifnotset!(data.tip_time_to_mine.map(|ts| humantime::format_duration(
+                Duration::from_secs(ts.as_duration().as_secs()) // trim milliseconds
+            )
+            .to_string()))
+        ));
         Self::report(&lines, "Blockchain")
             .style(style)
-            .render(vrecter.next(4 + lines.len() as u16), buf);
+            .render(vrecter.next(lines.len() as u16 + 2), buf);
 
         // archive
-        lines = vec![];
-        lines.push(format!("size {}", dashifnotset!(data.archive_size)));
-        lines.push(format!(
+        let mut lines_archive = vec![];
+        lines_archive.push(format!("size {}", dashifnotset!(data.archive_size)));
+        lines_archive.push(format!(
             "coverage: {}",
             match data.archive_coverage {
                 Some(percentage) => format!("{percentage}%"),
                 None => "-".to_string(),
             }
         ));
-        Self::report(&lines, "Archive")
-            .style(style)
-            .render(vrecter.next(2 + lines.len() as u16), buf);
 
         // mempool
-        lines = vec![];
-        lines.push(format!("size: {}", dashifnotset!(data.mempool_size)));
-        lines.push(format!(
+        let mut lines_mempool = vec![];
+        lines_mempool.push(format!("size: {}", dashifnotset!(data.mempool_size)));
+        lines_mempool.push(format!(
             "tx count: {} ({} own)",
             dashifnotset!(data.mempool_total_tx_count),
             dashifnotset!(data.mempool_own_tx_count),
         ));
-        Self::report(&lines, "Mempool")
+
+        let side_by_side = Layout::horizontal([
+            ratatui::layout::Constraint::Percentage(50),
+            ratatui::layout::Constraint::Percentage(50),
+        ])
+        .split(vrecter.next(max(lines_archive.len(), lines_mempool.len()) as u16 + 2));
+        Self::report(&lines_archive, "Archive")
             .style(style)
-            .render(vrecter.next(2 + lines.len() as u16), buf);
+            .render(side_by_side[0], buf);
+
+        Self::report(&lines_mempool, "Mempool")
+            .style(style)
+            .render(side_by_side[1], buf);
 
         // network
         lines = vec![];

@@ -113,7 +113,6 @@ mod maintain_membership_proofs {
 
     /// Maintain membership proofs, while receiving additional UTXOs.
     mod maintain_msmps {
-
         use super::*;
 
         fn update_wallet_with_block2<
@@ -169,7 +168,8 @@ mod maintain_membership_proofs {
                     .update_mutator_set(&block2),
             )
             .unwrap();
-            *global_state.chain.light_state_mut() = std::sync::Arc::new(block2.clone());
+
+            global_state.chain.light_state_mut().update(block2.clone());
 
             bencher.bench_local(|| {
                 rt.block_on(async {

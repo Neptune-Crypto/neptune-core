@@ -75,13 +75,13 @@ pub(crate) struct GuessingConfiguration {
 /// and the composer UTXOs. Block will reward caller according to block
 /// proposal parameters.
 pub(crate) async fn compose_block_helper(
-    latest_block: Block,
+    latest_block: &Block,
     global_state_lock: GlobalStateLock,
     coinbase_timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Block, Vec<ExpectedUtxo>)> {
     let (transaction, composer_utxos) = create_block_transaction(
-        &latest_block,
+        latest_block,
         global_state_lock,
         coinbase_timestamp,
         job_options.clone(),
@@ -90,7 +90,7 @@ pub(crate) async fn compose_block_helper(
 
     let block_timestamp = transaction.kernel.timestamp;
     let compose_result = Block::compose(
-        &latest_block,
+        latest_block,
         transaction,
         block_timestamp,
         vm_job_queue(),
@@ -119,7 +119,7 @@ async fn compose_block(
     job_options.cancel_job_rx = Some(cancel_compose_rx);
 
     let (proposal, composer_utxos) =
-        compose_block_helper(latest_block, global_state_lock, timestamp, job_options).await?;
+        compose_block_helper(&latest_block, global_state_lock, timestamp, job_options).await?;
 
     // Please clap.
     match sender.send((proposal, composer_utxos)) {
@@ -753,7 +753,7 @@ pub(crate) async fn mine(
                 .guesser_fee_key();
 
             let latest_block_header = global_state_lock
-                .lock(|s| s.chain.light_state().header().to_owned())
+                .lock(|s| s.chain.tip().header().to_owned())
                 .await;
             let guesser_task = guess_nonce(
                 network,
@@ -791,11 +791,9 @@ pub(crate) async fn mine(
         {
             global_state_lock.set_mining_status_to_composing().await;
 
-            let latest_block = global_state_lock
-                .lock(|s| s.chain.light_state().to_owned())
-                .await;
+            let tip = global_state_lock.lock(|s| s.chain.tip().clone()).await;
             let compose_task = compose_block(
-                latest_block,
+                tip,
                 global_state_lock.clone(),
                 composer_tx,
                 cancel_compose_rx,
@@ -936,7 +934,7 @@ pub(crate) async fn mine(
                         // The below PoW check could fail due to race conditions. So we don't panic,
                         // we only ignore what the worker task sent us.
                         let latest_block = global_state_lock
-                            .lock(|s| s.chain.light_state().to_owned())
+                            .lock(|s| s.chain.tip().to_owned())
                             .await;
 
                         if !new_block_found.block.has_proof_of_work(cli_args.network, latest_block.header()) {
@@ -1104,12 +1102,7 @@ pub(crate) mod tests {
         )
         .await;
 
-        let previous_block = global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .light_state()
-            .clone();
+        let previous_block = global_state_lock.lock_guard().await.chain.tip().clone();
 
         let (transaction, _coinbase_utxo_info) = {
             let outputs = (0..num_outputs)
@@ -1525,6 +1518,7 @@ pub(crate) mod tests {
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();
+
         compose_block(
             block_1.clone(),
             alice.clone(),
@@ -1694,12 +1688,7 @@ pub(crate) mod tests {
             mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
-        let tip_block_orig = global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .light_state()
-            .clone();
+        let tip_block_orig = global_state_lock.lock_guard().await.chain.tip().clone();
 
         let now = tip_block_orig.header().timestamp + Timestamp::minutes(10);
 
@@ -1801,12 +1790,11 @@ pub(crate) mod tests {
         )
         .await;
 
-        let mut prev_block = global_state_lock
+        let mut prev_light_state = global_state_lock
             .lock_guard()
             .await
             .chain
-            .light_state()
-            .clone();
+            .light_state_clone();
 
         // adjust these to simulate longer mining runs, possibly
         // with shorter or longer target intervals.
@@ -1836,10 +1824,15 @@ pub(crate) mod tests {
         let guessing_time = (target_block_interval.to_millis() as f64) - prepare_time;
         let initial_difficulty = BigUint::from((hash_rate * guessing_time) as u128);
         println!("initial difficulty: {}", initial_difficulty);
-        prev_block.set_header_timestamp_and_difficulty(
-            prev_block.header().timestamp,
-            Difficulty::from_biguint(initial_difficulty).unwrap(),
-        );
+
+        let prev_timestamp = prev_light_state.tip().header().timestamp;
+        prev_light_state
+            .tip_mut()
+            .set_header_timestamp_and_difficulty(
+                prev_timestamp,
+                Difficulty::from_biguint(initial_difficulty).unwrap(),
+            );
+        let prev_block = prev_light_state.tip();
 
         let expected_duration = target_block_interval * NUM_BLOCKS;
         let stddev = (guessing_time.pow(2.0_f64) / (NUM_BLOCKS as f64)).sqrt();
@@ -1877,7 +1870,7 @@ pub(crate) mod tests {
 
             let transaction = BlockTransaction::upgrade(transaction);
             let block = Block::block_template_invalid_proof(
-                &prev_block,
+                prev_block,
                 transaction,
                 start_time,
                 Some(target_block_interval),
@@ -1908,13 +1901,13 @@ pub(crate) mod tests {
                 .block
                 .has_proof_of_work(network, prev_block.header()));
 
-            prev_block = *mined_block_info.block;
+            let prev_block_mined = *mined_block_info.block;
 
             let block_time = start_st.elapsed()?.as_millis();
             println!(
                 "Found block {height} in {block_time} milliseconds; \
                 difficulty was {}; total time elapsed so far: {} ms",
-                BigUint::from(prev_block.header().difficulty),
+                BigUint::from(prev_block_mined.header().difficulty),
                 start_instant.elapsed()?.as_millis()
             );
             if i > ignore_first_n_blocks {
@@ -2478,12 +2471,7 @@ pub(crate) mod tests {
         .await;
 
         // obtain previous (genesis) block
-        let mut prev_block = global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .light_state()
-            .clone();
+        let mut prev_block = global_state_lock.lock_guard().await.chain.tip().clone();
 
         // generate 20 blocks
         for i in 1..=num_blocks {
