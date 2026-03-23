@@ -1,11 +1,10 @@
 //! implements an RPC server and client based on [tarpc]
 //!
-//! request and response data is json serialized.
+//! Request and response data is JSON-serialized.
 //!
-//! It is presently easiest to create a tarpc client in rust.
-//! To do so, one should add neptune-cash as a dependency and
-//! then do something like:
-//!
+//! It is presently easiest to create a `tarpc` client in Rust.
+//! To do so, one should add `neptune-cash` as a dependency and
+//! then do something like the following.
 //! ```no_run
 //! use anyhow::Result;
 //! use neptune_cash::application::rpc::server::RPCClient;
@@ -43,6 +42,7 @@
 //!
 //! Every RPC method returns an [RpcResult] which is wrapped inside a
 //! [tarpc::Response] by the rpc server.
+
 pub mod coinbase_output_readable;
 pub mod mempool_transaction_info;
 pub mod overview_data;
@@ -68,6 +68,8 @@ use systemstat::Platform;
 use systemstat::System;
 use tarpc::context;
 use tasm_lib::prelude::Tip5;
+use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -79,6 +81,7 @@ use super::auth;
 use crate::api;
 use crate::api::export::AnnouncementFlag;
 use crate::api::export::ConsolidationError;
+use crate::api::export::NeptuneProof;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
@@ -95,6 +98,7 @@ use crate::application::rpc::server::overview_data::OverviewData;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::application::rpc::server::ui_utxo::UiUtxo;
 use crate::application::rpc::server::ui_utxo::UtxoStatusEvent;
+use crate::application::util_proof::sent;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::protocol::consensus::block::block_header::BlockHeader;
@@ -115,6 +119,7 @@ use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::proof_abstractions::SecretWitness;
 use crate::state::claim_error::ClaimError;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::state::transaction::transaction_details::TransactionDetails;
@@ -1867,7 +1872,7 @@ pub trait RPC {
     ///
     /// if the utxo has already been claimed, this call has no effect.
     ///
-    /// Return true if a new expected UTXO was added, otherwise false.
+    /// Return `true` if a new expected UTXO was added, otherwise `false`.
     ///
     /// ```no_run
     /// # use anyhow::Result;
@@ -1893,7 +1898,7 @@ pub trait RPC {
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
-    /// // Encryted value of utxo transfer
+    /// // encryted value of utxo transfer
     /// let utxo_transfer_encrypted = "XXXXXXX".to_string();
     ///
     /// // max search depth is set to 3
@@ -2019,12 +2024,12 @@ pub trait RPC {
     /// [`RPC::set_coinbase_distribution()`].
     async fn unset_coinbase_distribution(token: auth::Token) -> RpcResult<()>;
 
-    /// mine a series of blocks to the node's wallet.
+    /// Mine a series of blocks to the node's wallet.
     ///
     /// Can be used only if the network uses mock blocks.
     /// (presently only the regtest network)
     ///
-    /// these blocks can be generated quickly because they do not have
+    /// These blocks can be generated quickly because they do not have
     /// a real ZK proof.  they have a witness "proof" and will validate correctly.
     /// witness proofs contain secrets that must not be shared, so this is
     /// allowed only on the regtest network, for development purposes.
@@ -2060,9 +2065,7 @@ pub trait RPC {
         block_proposal: Block,
     ) -> RpcResult<bool>;
 
-    /// mark MUTXOs as abandoned. Does not actually delete any elements in the
-    /// list.
-    ///
+    /// Mark MUTXOs as abandoned. Does not actually delete any elements in the list.
     /// ```no_run
     /// # use anyhow::Result;
     /// # use neptune_cash::application::rpc::server::RPCClient;
@@ -2100,7 +2103,6 @@ pub trait RPC {
     async fn set_tip(token: auth::Token, indicated_tip: Digest) -> RpcResult<()>;
 
     /// Gracious shutdown.
-    ///
     /// ```no_run
     /// # use anyhow::Result;
     /// # use neptune_cash::application::rpc::server::RPCClient;
@@ -2204,10 +2206,10 @@ pub(crate) struct NeptuneRPCServer {
     pub(crate) state: GlobalStateLock,
     pub(crate) rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 
-    // copy of DataDirectory for this neptune-core instance.
+    // Copy of `DataDirectory` for this `neptune-core` instance.
     data_directory: DataDirectory,
 
-    // list of tokens that are valid.  RPC clients must present a token that
+    // List of tokens that are valid.  RPC clients must present a token that
     // matches one of these.  there should only be one of each `Token` variant
     // in the list (dups ignored).
     valid_tokens: Vec<auth::Token>,
@@ -2292,19 +2294,18 @@ impl NeptuneRPCServer {
 
         proposal.set_header_pow(pow);
 
-        if !proposal.has_proof_of_work(self.state.cli().network, &latest_block_header) {
+        if proposal.has_proof_of_work(self.state.cli().network, &latest_block_header) {
+            // No time to waste! Inform main_loop!
+            self.rpc_server_to_main_tx
+                .send(RPCServerToMain::ProofOfWorkSolution(Box::new(proposal)))
+                .await
+                .map_err(|e| RpcError::SendError(e.to_string()))?;
+
+            Ok(true)
+        } else {
             warn!("Got claimed PoW solution but PoW solution is not valid.");
-            return Ok(false);
+            Ok(false)
         }
-
-        // No time to waste! Inform main_loop!
-        let solution = Box::new(proposal);
-        let _ = self
-            .rpc_server_to_main_tx
-            .send(RPCServerToMain::ProofOfWorkSolution(solution))
-            .await;
-
-        Ok(true)
     }
 
     /// get the data_directory for this neptune-core instance
@@ -2336,7 +2337,7 @@ impl NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn cookie_hint(self, _: context::Context) -> RpcResult<auth::CookieHint> {
         log_slow_scope!(fn_name!());
 
@@ -2350,14 +2351,14 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn network(self, _: context::Context) -> RpcResult<Network> {
         log_slow_scope!(fn_name!());
 
         Ok(self.state.cli().network)
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn own_listen_address_for_peers(
         self,
         _context: context::Context,
@@ -2371,7 +2372,7 @@ impl RPC for NeptuneRPCServer {
         Ok(listen_port.map(|port| SocketAddr::new(listen_for_peers_ip, port)))
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn own_instance_id(
         self,
         _context: context::Context,
@@ -2383,7 +2384,7 @@ impl RPC for NeptuneRPCServer {
         Ok(self.state.lock_guard().await.net.instance_id)
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn block_height(self, _: context::Context, token: auth::Token) -> RpcResult<BlockHeight> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2762,7 +2763,7 @@ impl RPC for NeptuneRPCServer {
             .await)
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn peer_info(self, _: context::Context, token: auth::Token) -> RpcResult<Vec<PeerInfo>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2778,7 +2779,7 @@ impl RPC for NeptuneRPCServer {
             .collect())
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn all_punished_peers(
         self,
         _context: tarpc::context::Context,
@@ -2791,7 +2792,7 @@ impl RPC for NeptuneRPCServer {
 
         let global_state = self.state.lock_guard().await;
 
-        // Get all connected peers
+        // get all connected peers
         for peer_info in global_state.net.peer_map.values() {
             if peer_info.standing().is_negative() {
                 let maybe_ip = peer_info
@@ -2810,7 +2811,7 @@ impl RPC for NeptuneRPCServer {
 
         let sanctions_in_db = global_state.net.all_peer_sanctions_in_database();
 
-        // Combine result for currently connected peers and previously connected peers but
+        // combine result for currently connected peers and previously connected peers but
         // use result for currently connected peer if there is an overlap
         let mut all_sanctions = sanctions_in_memory;
         for (ip_addr, sanction) in sanctions_in_db {
@@ -2822,7 +2823,7 @@ impl RPC for NeptuneRPCServer {
         Ok(all_sanctions)
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn validate_address(
         self,
         _ctx: context::Context,
@@ -4621,7 +4622,7 @@ impl RPC for NeptuneRPCServer {
         Ok(mempool_transactions)
     }
 
-    // documented in trait. do not add doc-comment.
+    // Documented in trait. Do not add doc-comment.
     async fn mempool_tx_kernel(
         self,
         _context: ::tarpc::context::Context,

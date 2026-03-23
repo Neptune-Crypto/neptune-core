@@ -1,5 +1,3 @@
-// private module.  no need for module docs.
-
 use super::error::WalletError;
 use super::wallet_balances::WalletBalances;
 use crate::macros::state_lock_call_async;
@@ -8,11 +6,12 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::address::SpendingKey;
+use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::GlobalState;
 use crate::state::StateLock;
 use crate::GlobalStateLock;
 
-/// provides an API for interacting with the neptune-core wallet.
+/// Provides an API for interacting with the `neptune-core` wallet.
 ///
 /// This type is built from a [StateLock] which means it can
 /// use a [GlobalStateLock] or an already-acquired lock guard.
@@ -64,22 +63,22 @@ impl<'a> From<Wallet<'a>> for StateLock<'a> {
     }
 }
 
-// these methods just call a worker method, so the public API
-// is easy to read and digest.  Please keep it that way.
+// These methods just call a worker method, so the public API
+// is easy to read and digest.
 impl<'a> Wallet<'a> {
     /// convert into inner `StateLock`
     ///
-    /// this is useful if the `StateLock` holds a lock guard and one wishes to
+    /// This is useful if the `StateLock` holds a lock guard and one wishes to
     /// continue using the guard.
     ///
-    /// note: this is a convienence fn as `into()` also exists.
+    /// Note: this is a convienence `fn` as `into()` also exists.
     pub fn into_inner(self) -> StateLock<'a> {
         self.state_lock
     }
 
     /// generate a new spending key of the specified type
     ///
-    /// note: for receiving payments use [Wallet::next_receiving_address()].
+    /// Note: for receiving payments use [Wallet::next_receiving_address()].
     ///
     /// # important! read or risk losing funds!!!
     ///
@@ -153,10 +152,10 @@ impl<'a> Wallet<'a> {
 
     /// get wallet balances as of timestamp
     ///
-    /// timestamp can be a date in the future in order to see what the balances
+    /// Timestamp can be a date in the future in order to see what the balances
     /// would be at that time, with respect to time-locked utxos.
     ///
-    /// if timestamp is in the past the result will be the same as if the
+    /// If timestamp is in the past the result will be the same as if the
     /// present.
     pub async fn balances(&self, timestamp: Timestamp) -> WalletBalances {
         state_lock_call_async!(&self.state_lock, worker::balances, timestamp).await
