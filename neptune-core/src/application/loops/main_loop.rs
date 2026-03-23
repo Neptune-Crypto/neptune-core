@@ -904,7 +904,7 @@ impl MainLoopHandler {
                     // Clone info from global state and release write lock ASAP.
                     let peer_map = global_state_mut.net.peer_map.clone();
                     let network = global_state_mut.cli().network;
-                    let current_tip = global_state_mut.chain.tip().clone();
+                    let current_height = global_state_mut.chain.tip_height();
                     let resume_please = !global_state_mut.cli().no_resume_sync;
                     let sync_dir = global_state_mut.cli().sync_dir.clone();
                     drop(global_state_mut);
@@ -945,10 +945,10 @@ impl MainLoopHandler {
                     // to find LUCA, and that happens as a side effect of the
                     // sync loop querying random blocks. When those random
                     // blocks come in, we fast-forward if we can.
-                    if !current_tip.header().height.is_genesis() {
+                    if !current_height.is_genesis() {
                         self.main_to_peer_broadcast(MainToPeerTask::RequestBlockByHeight {
                             target_peer: peer_id,
-                            height: current_tip.header().height,
+                            height: current_height,
                         });
                     }
                 }

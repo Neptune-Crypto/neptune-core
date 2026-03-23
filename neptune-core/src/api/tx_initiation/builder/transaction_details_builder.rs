@@ -21,7 +21,6 @@ use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::light_state::LightState;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::SpendingKey;
@@ -33,6 +32,7 @@ use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::GlobalState;
 use crate::state::StateLock;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::WalletState;
 
 /// a builder to generate [TransactionDetails].
@@ -195,8 +195,8 @@ impl TransactionDetailsBuilder {
         let has_change_output = change_amount.is_positive();
 
         // Add change output, if required to balance transaction
-        let light_state = if has_change_output {
-            let (change_output, light_state) = match change_policy {
+        let mutator_set = if has_change_output {
+            let (change_output, mutator_set) = match change_policy {
                 ChangePolicy::ExactChange => {
                     return Err(CreateTxError::NotExactChange);
                 }
@@ -207,19 +207,21 @@ impl TransactionDetailsBuilder {
                         key_type: KeyType,
                         change_amount: NativeCurrencyAmount,
                         medium: UtxoNotificationMedium,
-                    ) -> Result<(TxOutput, LightState), CreateTxError> {
-                        let light_state = gsm.chain.light_state_clone();
+                    ) -> Result<(TxOutput, MutatorSetAccumulator), CreateTxError>
+                    {
+                        let height = gsm.chain.tip_height();
+                        let msa = gsm.chain.tip_mutator_set_after();
                         let key = gsm.wallet_state.next_unused_spending_key(key_type).await;
 
                         Ok((
                             TransactionDetailsBuilder::create_change_output(
                                 &gsm.wallet_state,
-                                light_state.tip().header().height,
+                                height,
                                 change_amount,
                                 key,
                                 medium,
                             ),
-                            light_state,
+                            msa,
                         ))
                     }
 
@@ -244,16 +246,17 @@ impl TransactionDetailsBuilder {
 
                 ChangePolicy::RecoverToProvidedKey { key, medium } => {
                     let create_change = |gs: &GlobalState| -> Result<_, CreateTxError> {
-                        let light_state = gs.chain.light_state_clone();
+                        let height = gs.chain.tip_height();
+                        let msa = gs.chain.tip_mutator_set_after();
                         Ok((
                             Self::create_change_output(
                                 &gs.wallet_state,
-                                light_state.tip().header().height,
+                                height,
                                 change_amount,
                                 *key,
                                 medium,
                             ),
-                            light_state,
+                            msa,
                         ))
                     };
 
@@ -272,13 +275,21 @@ impl TransactionDetailsBuilder {
                         Digest::default(),
                         Digest::default(),
                     ),
-                    state_lock.light_state().await,
+                    state_lock
+                        .tip()
+                        .await
+                        .mutator_set_accumulator_after()
+                        .expect("Stored block must have valid mutator set after"),
                 ),
             };
             tx_outputs.push(change_output);
-            light_state
+            mutator_set
         } else {
-            state_lock.light_state().await
+            state_lock
+                .tip()
+                .await
+                .mutator_set_accumulator_after()
+                .expect("Stored block must have valid mutator set after")
         };
 
         let mut custom_announcements = self.custom_announcements;
@@ -306,10 +317,7 @@ impl TransactionDetailsBuilder {
             fee,
             coinbase,
             timestamp,
-            light_state
-                .tip()
-                .mutator_set_accumulator_after()
-                .map_err(|_| CreateTxError::NoMutatorSetAccumulatorAfter)?,
+            mutator_set,
             state_lock.cli().network,
         )
         .with_announcements(custom_announcements);

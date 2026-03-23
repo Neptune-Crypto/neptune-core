@@ -130,10 +130,9 @@ impl RegTestPrivate {
 
         let gs = gsl.lock_guard().await;
 
-        let light_state = gs.chain.light_state_clone();
-        let tip_block = light_state.tip();
+        let tip = gs.chain.tip().to_owned();
 
-        let next_block_height = tip_block.header().height + 1;
+        let next_block_height = tip.header().height.next();
         let fee_notification_policy = Default::default();
         let guesser_fraction = gs.cli().guesser_fraction;
         let overridden_coinbase_distribution = gs.mining_state.overridden_coinbase_distribution();
@@ -158,8 +157,9 @@ impl RegTestPrivate {
 
         drop(gs);
 
+        let parent_difficulty = tip.header().difficulty;
         let (mut block, composer_tx_outputs) = MockBlockGenerator::mock_successor_no_pow(
-            light_state.clone(),
+            tip,
             composer_parameters.clone(),
             guesser_key.to_address().into(),
             timestamp,
@@ -169,7 +169,7 @@ impl RegTestPrivate {
         );
 
         if find_valid_pow {
-            block.satisfy_mock_pow(tip_block.header().difficulty, rand::random());
+            block.satisfy_mock_pow(parent_difficulty, rand::random());
         }
 
         (

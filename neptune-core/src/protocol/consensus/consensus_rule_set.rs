@@ -290,7 +290,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         Block::compose(
-            &current_tip,
+            current_tip,
             block_tx,
             timestamp,
             vm_job_queue(),
@@ -306,7 +306,7 @@ pub(crate) mod tests {
     ) -> (Block, Vec<ExpectedUtxo>) {
         let current_tip = me.lock_guard().await.chain.archival_state().get_tip().await;
         compose_block_helper(
-            &current_tip,
+            current_tip,
             me,
             timestamp,
             TritonVmProofJobOptions::default(),

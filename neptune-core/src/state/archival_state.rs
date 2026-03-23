@@ -2996,7 +2996,7 @@ pub(super) mod tests {
         println!("Generated block transaction");
 
         let block_1 = Block::compose(
-            &genesis_block,
+            genesis_block.clone(),
             block_tx,
             in_seven_months,
             TritonVmJobQueue::get_instance(),
@@ -3261,7 +3261,7 @@ pub(super) mod tests {
         .await
         .unwrap();
         let block_2 = Block::compose(
-            &block_1,
+            block_1.clone(),
             block_tx2,
             in_seven_months + network.minimum_block_time(),
             TritonVmJobQueue::get_instance(),

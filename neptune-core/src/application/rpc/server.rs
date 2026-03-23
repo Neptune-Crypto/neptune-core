@@ -2341,7 +2341,7 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let tip_digest = state.chain.tip().hash();
+        let tip_digest = state.chain.tip_hash();
         let proposal = &state.mining_state.block_proposal;
 
         // Returning BlockInfo here is not completely kosher since a few fields
@@ -2472,7 +2472,7 @@ impl RPC for NeptuneRPCServer {
         let Some(digest) = block_selector.as_digest(&state).await else {
             return Ok(None);
         };
-        let tip_digest = state.chain.tip().hash();
+        let tip_digest = state.chain.tip_hash();
         let archival_state = state.chain.archival_state();
 
         let Some(block) = archival_state.get_block(digest).await.unwrap() else {
@@ -2587,12 +2587,9 @@ impl RPC for NeptuneRPCServer {
                 .join(", ")
         );
 
-        let cur_block = state.chain.tip();
-        let tip_height = cur_block.header().height;
-        let tip_hash = cur_block.hash();
-        let tip_mutator_set = cur_block
-            .mutator_set_accumulator_after()
-            .expect("Tip must have valid MSA after");
+        let tip_height = state.chain.tip_height();
+        let tip_hash = state.chain.tip_hash();
+        let tip_mutator_set = state.chain.tip_mutator_set_after();
 
         Ok(ResponseMsMembershipProofPrivacyPreserving {
             tip_height,
@@ -3100,7 +3097,7 @@ impl RPC for NeptuneRPCServer {
         let state = self.state.lock_guard().await;
         let tip_digest = {
             log_slow_scope!(fn_name!() + "::hash() tip digest");
-            state.chain.tip().hash()
+            state.chain.tip_hash()
         };
         let tip_header = *state.chain.tip().header();
         let tip_time_to_mine = {
@@ -3555,14 +3552,7 @@ impl RPC for NeptuneRPCServer {
             return Ok(false);
         };
 
-        let current_msa = self
-            .state
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .mutator_set_accumulator_after()
-            .expect("mutator set of tip must exist");
+        let current_msa = self.state.lock_guard().await.chain.tip_mutator_set_after();
         let is_synced = tx.kernel.mutator_set_hash == current_msa.hash();
 
         let upgrade_job = match (&tx.proof, is_synced) {
@@ -4538,12 +4528,7 @@ impl RPC for NeptuneRPCServer {
             (incoming_iter.collect(), outgoing_iter.collect())
         };
 
-        let tip_msah = global_state
-            .chain
-            .tip()
-            .mutator_set_accumulator_after()
-            .expect("Block from state must have mutator set after")
-            .hash();
+        let tip_msah = global_state.chain.tip_mutator_set_after().hash();
         let mempool_transactions = mempool_txkids
             .iter()
             .filter_map(|id| {
@@ -5698,7 +5683,7 @@ mod tests {
         let ctx = context::current();
 
         let genesis_hash = global_state.chain.archival_state().genesis_block().hash();
-        let tip_hash = global_state.chain.tip().hash();
+        let tip_hash = global_state.chain.tip_hash();
 
         let genesis_block_info = BlockInfo::new(
             global_state.chain.archival_state().genesis_block(),

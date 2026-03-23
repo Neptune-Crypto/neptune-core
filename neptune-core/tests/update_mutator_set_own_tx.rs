@@ -125,8 +125,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
 
         assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
 
-        let light_state = alice.gsl.lock_guard().await.chain.light_state_clone();
-        let tip = light_state.tip();
+        let tip = alice.gsl.lock_guard().await.chain.tip().to_owned();
         assert_eq!(
             BlockHeight::from(3u64),
             tip.header().height,
@@ -161,6 +160,6 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
             .get(txid)
             .unwrap()
             .to_owned();
-        assert!(tx.is_confirmable_relative_to(&tip.mutator_set_accumulator_after().unwrap()));
+        assert!(tx.is_confirmable_relative_to(&tip_msa));
     }
 }

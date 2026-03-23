@@ -1,5 +1,9 @@
+use tasm_lib::prelude::Digest;
+
 use super::archival_state::ArchivalState;
 use super::light_state::LightState;
+use crate::api::export::BlockHeight;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Block;
 
 /// `BlockChainState` provides an `Archival` variant
@@ -16,9 +20,11 @@ use crate::Block;
 // see: https://github.com/rust-lang/rust-clippy/issues/9798
 #[derive(Debug)]
 pub enum BlockchainState {
-    /// represents a Archival blockchain state
+    /// Archival blockchain state. Contains all historical blocks and book
+    /// keeping information.
     Archival(Box<BlockchainArchivalState>),
-    /// represents Light node blockchain state (ie the current tip)
+    /// Light node blockchain state, current tip and some book
+    /// keeping information
     Light(Box<LightState>),
 }
 
@@ -62,7 +68,7 @@ impl BlockchainState {
         }
     }
 
-    /// retrieve light state, ie the current tip.
+    /// retrieve light state, ie the current tip and book keeping information.
     #[inline]
     pub fn light_state(&self) -> &LightState {
         match self {
@@ -92,6 +98,23 @@ impl BlockchainState {
     #[inline]
     pub fn tip(&self) -> &Block {
         self.light_state().tip()
+    }
+
+    /// The mutator set accumulator as it looks after applying the tip block.
+    ///
+    /// Includes guesser reward outputs.
+    pub(crate) fn tip_mutator_set_after(&self) -> MutatorSetAccumulator {
+        self.light_state().tip_mutator_set_after()
+    }
+
+    /// Block height of current tip.
+    pub(crate) fn tip_height(&self) -> BlockHeight {
+        self.tip().header().height
+    }
+
+    /// Hash of current tip.
+    pub(crate) fn tip_hash(&self) -> Digest {
+        self.tip().hash()
     }
 }
 

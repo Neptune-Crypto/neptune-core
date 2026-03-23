@@ -1518,13 +1518,9 @@ impl PeerLoopHandler {
                     let state = self.global_state_lock.lock_guard().await;
 
                     (
-                        state.chain.tip().hash(),
-                        state
-                            .chain
-                            .tip()
-                            .mutator_set_accumulator_after()
-                            .expect("Block from state must have mutator set after"),
-                        state.chain.tip().header().height,
+                        state.chain.tip_hash(),
+                        state.chain.tip_mutator_set_after(),
+                        state.chain.tip_height(),
                     )
                 };
 
@@ -1710,12 +1706,7 @@ impl PeerLoopHandler {
 
                     // Only accept transactions that do not require executing
                     // `update`.
-                    if state
-                        .chain
-                        .tip()
-                        .mutator_set_accumulator_after()
-                        .expect("Block from state must have mutator set after")
-                        .hash()
+                    if state.chain.tip_mutator_set_after().hash()
                         != tx_notification.mutator_set_hash
                     {
                         debug!("transaction refers to non-canonical mutator set state");

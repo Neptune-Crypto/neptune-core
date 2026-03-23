@@ -86,7 +86,7 @@ impl TransactionInitiatorPrivate {
 
         if state.chain.tip().header().height < RATE_LIMIT_UNTIL_HEIGHT.into() {
             const RATE_LIMIT: usize = 2;
-            let tip_digest = state.chain.tip().hash();
+            let tip_digest = state.chain.tip_hash();
             let send_count_at_tip = state
                 .wallet_state
                 .count_sent_transactions_at_block(tip_digest)

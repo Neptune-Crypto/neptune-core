@@ -482,11 +482,7 @@ impl UpgradeJob {
             /* Check if upgrade resulted in valid transaction */
             upgrade_job = {
                 let mut global_state = global_state_lock.lock_guard_mut().await;
-                let tip_mutator_set = global_state
-                    .chain
-                    .tip()
-                    .mutator_set_accumulator_after()
-                    .expect("Block from state must have mutator set after");
+                let tip_mutator_set = global_state.chain.tip_mutator_set_after();
 
                 let transaction_is_up_to_date =
                     upgraded.kernel.mutator_set_hash == tip_mutator_set.hash();
@@ -856,11 +852,7 @@ impl UpgradeJob {
 pub(super) async fn get_upgrade_task_from_mempool(
     global_state: &mut GlobalState,
 ) -> Option<UpgradeJob> {
-    let tip_mutator_set = global_state
-        .chain
-        .tip()
-        .mutator_set_accumulator_after()
-        .expect("Block from state must have mutator set after");
+    let tip_mutator_set = global_state.chain.tip_mutator_set_after();
     let gobbling_fraction = global_state.gobbling_fraction();
     let min_gobbling_fee = global_state.min_gobbling_fee();
     let num_proofs_threshold = global_state.max_num_proofs();
@@ -1272,13 +1264,8 @@ mod tests {
             assert!(mempool_tx.is_valid(network, consensus_rule_set).await);
 
             // Ensure tx was updated to latest mutator set
-            let mutator_set_accumulator_after = alice
-                .lock_guard()
-                .await
-                .chain
-                .tip()
-                .mutator_set_accumulator_after()
-                .unwrap();
+            let mutator_set_accumulator_after =
+                alice.lock_guard().await.chain.tip_mutator_set_after();
             assert!(mempool_tx.is_confirmable_relative_to(&mutator_set_accumulator_after));
         }
     }

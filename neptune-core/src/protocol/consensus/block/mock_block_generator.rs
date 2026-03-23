@@ -22,7 +22,6 @@ use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::light_state::LightState;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::transaction_output::TxOutputList;
 
@@ -168,8 +167,8 @@ impl MockBlockGenerator {
     ///
     /// The associated (claim, proof) pair will pass `triton_vm::verify`,
     /// only if the network is regtest.  (The proof is mocked).
-    pub fn mock_successor_no_pow(
-        predecessor: LightState,
+    pub(crate) fn mock_successor_no_pow(
+        predecessor: Block,
         composer_parameters: ComposerParameters,
         guesser_address: ReceivingAddress,
         timestamp: Timestamp,
@@ -181,29 +180,24 @@ impl MockBlockGenerator {
 
         let (block_tx, composer_tx_outputs) = Self::create_mock_block_transaction(
             network,
-            predecessor.tip(),
+            &predecessor,
             composer_parameters,
             timestamp,
             rng.random(),
             mempool_tx,
         );
 
-        let prev = predecessor.clone();
+        let prev_height = predecessor.header().height;
 
-        let block = Self::mock_block_from_tx_without_pow(
-            predecessor.tip().clone(),
-            block_tx,
-            guesser_address,
-            network,
-        );
+        let block =
+            Self::mock_block_from_tx_without_pow(predecessor, block_tx, guesser_address, network);
+        let new_height = block.header().height;
 
         tracing::debug!(
-            "new mock block has height: {}, prev block height: {}",
-            block.header().height,
-            prev.tip().header().height
+            "new mock block has height: {new_height}, prev block height: {prev_height}",
         );
 
-        assert_eq!(block.header().height, prev.tip().header().height + 1);
+        assert_eq!(new_height, prev_height + 1);
 
         (block, composer_tx_outputs)
     }

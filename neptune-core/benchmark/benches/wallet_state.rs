@@ -24,11 +24,10 @@ mod wallet_state {
             .next_unused_spending_key(KeyType::Generation)
             .await
             .to_address();
-        let prev_light_state = global_state.chain.light_state_clone();
-        let prev = prev_light_state.tip();
+        let prev = global_state.chain.tip().to_owned();
         let timestamp = prev.header().timestamp + Timestamp::months(7);
         let (block, _) = next_block_incoming_utxos(
-            prev,
+            &prev,
             own_address.clone(),
             num_outputs_in_tx,
             global_state,

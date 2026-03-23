@@ -405,7 +405,7 @@ impl GlobalStateLock {
 
         // inform wallet about the details of this sent transaction, so it
         // can group inputs and outputs together, eg for history purposes.
-        let tip_digest = gsm.chain.tip().hash();
+        let tip_digest = gsm.chain.tip_hash();
         gsm.wallet_state
             .add_sent_transaction(SentTransaction::new(details.as_ref(), tip_digest))
             .await;
@@ -601,11 +601,11 @@ impl<'a> StateLock<'a> {
     }
 
     /// returns present blockchain tip info.
-    pub async fn light_state(&self) -> LightState {
+    pub async fn tip(&self) -> Block {
         match self {
-            Self::Lock(gsl) => gsl.lock_guard().await.chain.light_state_clone(),
-            Self::WriteGuard(gsm) => gsm.chain.light_state_clone(),
-            Self::ReadGuard(gs) => gs.chain.light_state_clone(),
+            Self::Lock(gsl) => gsl.lock_guard().await.chain.tip().to_owned(),
+            Self::WriteGuard(gsm) => gsm.chain.tip().to_owned(),
+            Self::ReadGuard(gs) => gs.chain.tip().to_owned(),
         }
     }
 
@@ -819,12 +819,8 @@ impl GlobalState {
         if self.is_true_archival() {
             UtxoValidator::Archival(self.chain.archival_state())
         } else {
-            let tip = self.chain.tip().hash();
-            let tip_msa = self
-                .chain
-                .tip()
-                .mutator_set_accumulator_after()
-                .expect("Stored block must have valid MSA");
+            let tip = self.chain.tip_hash();
+            let tip_msa = self.chain.tip_mutator_set_after();
             UtxoValidator::Light { tip, tip_msa }
         }
     }
@@ -837,7 +833,7 @@ impl GlobalState {
 
     /// Return the [`ConsensusRuleSet`] that applies for current tip.
     pub(crate) fn consensus_rule_set(&self) -> ConsensusRuleSet {
-        let tip_height = self.chain.tip().header().height;
+        let tip_height = self.chain.tip_height();
         ConsensusRuleSet::infer_from(self.cli().network, tip_height)
     }
 
@@ -1776,7 +1772,7 @@ impl GlobalState {
                     .expect("Spendable monitored UTXOs must have valid membership proofs")
             } else {
                 // ... from wallet database.
-                let tip_digest = self.chain.tip().hash();
+                let tip_digest = self.chain.tip_hash();
                 let strong_key = synced_utxo.strong_utxo_key();
                 let mutxo = self
                     .wallet_state
@@ -1822,7 +1818,7 @@ impl GlobalState {
     // Marked public for benchmarking; not part of the public API.
     #[doc(hidden)]
     pub async fn wallet_spendable_inputs_at_time(&self, timestamp: Timestamp) -> TxInputs {
-        let tip_height = self.chain.tip().header().height;
+        let tip_height = self.chain.tip_height();
         let wallet_status = self.get_wallet_status_for_tip().await;
         let inputs = wallet_status.spendable_inputs(timestamp);
         // omit policy
@@ -1852,7 +1848,7 @@ impl GlobalState {
     /// Return all coins owned by the wallet. Only returns synced and unspent
     /// UTXOs.
     pub async fn coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {
-        let tip_height = self.chain.tip().header().height;
+        let tip_height = self.chain.tip_height();
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
         let mut own_coins = vec![];
 
@@ -2003,7 +1999,7 @@ impl GlobalState {
                     .await
                     .map_err(|x| anyhow::anyhow!("Could not restore mutator set membership proof. Is archival mutator set corrupted? Got error: {x}"))?;
 
-                let tip_digest = self.chain.tip().hash();
+                let tip_digest = self.chain.tip_hash();
 
                 if !self.is_true_archival() {
                     monitored_utxo.add_membership_proof_for_tip(tip_digest, msmp.clone());
@@ -2066,7 +2062,7 @@ impl GlobalState {
     ///
     /// Panics if the mutator set is not synced to current tip.
     pub(crate) async fn restore_monitored_utxos_from_recovery_data(&mut self) -> Result<()> {
-        let tip_hash = self.chain.tip().hash();
+        let tip_hash = self.chain.tip_hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
         let asm_sync_label = ams_ref.get_sync_label();
@@ -2265,7 +2261,7 @@ impl GlobalState {
     ///  - If recovery data is provided but out-of-order to the monitored UTXOs
     ///    that don't have any membership proofs.
     pub async fn restore_monitored_utxos_from_archival_mutator_set(&mut self) {
-        let tip_hash = self.chain.tip().hash();
+        let tip_hash = self.chain.tip_hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
         // Assert that archival mutator set is synced to current tip.
@@ -2288,11 +2284,7 @@ impl GlobalState {
             asm_sync_label.to_hex()
         );
 
-        let msa = self
-            .chain
-            .tip()
-            .mutator_set_accumulator_after()
-            .expect("Stored block must have valid MSA after");
+        let msa = self.chain.tip_mutator_set_after();
         let num_mutxos = self.wallet_state.wallet_db.monitored_utxos().len().await;
         trace!("monitored_utxos.len() = {num_mutxos}");
         let mut failures = vec![];
@@ -4617,7 +4609,7 @@ mod tests {
 
                 // Loop with two iterations to ensure wallet rescan is
                 // idempotent.
-                let tip_msa = alice.chain.tip().mutator_set_accumulator_after().unwrap();
+                let tip_msa = alice.chain.tip_mutator_set_after();
                 for _ in 0..2 {
                     alice
                         .rescan_wallet(0u64.into(), 15u64.into(), scan_mode)
@@ -5449,7 +5441,7 @@ mod tests {
         .unwrap();
 
         let block_1 = Block::compose(
-            &genesis_block,
+            genesis_block.clone(),
             block_transaction,
             in_seven_months,
             TritonVmJobQueue::get_instance(),
@@ -5688,7 +5680,7 @@ mod tests {
         // We can't check confirmability of transaction since its records are now packed.
         // So we produce a block instead and validate it.
         let block_2 = Block::compose(
-            &block_1,
+            block_1.clone(),
             block_transaction2,
             in_eight_months,
             TritonVmJobQueue::get_instance(),
@@ -6822,7 +6814,7 @@ mod tests {
                 .await
                 .unwrap();
                 let block_1 = Block::compose(
-                    &genesis_block,
+                    genesis_block,
                     block_1_tx,
                     seven_months_post_launch,
                     TritonVmJobQueue::get_instance(),
@@ -6925,7 +6917,7 @@ mod tests {
                     .await;
 
                 // check alice's initial balance after genesis.
-                let tip_height = alice_state_mut.chain.tip().header().height;
+                let tip_height = alice_state_mut.chain.tip_height();
                 let alice_initial_balance = alice_state_mut
                     .get_wallet_status_for_tip()
                     .await

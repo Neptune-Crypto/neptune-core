@@ -75,13 +75,13 @@ pub(crate) struct GuessingConfiguration {
 /// and the composer UTXOs. Block will reward caller according to block
 /// proposal parameters.
 pub(crate) async fn compose_block_helper(
-    latest_block: &Block,
+    latest_block: Block,
     global_state_lock: GlobalStateLock,
     coinbase_timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Block, Vec<ExpectedUtxo>)> {
     let (transaction, composer_utxos) = create_block_transaction(
-        latest_block,
+        &latest_block,
         global_state_lock,
         coinbase_timestamp,
         job_options.clone(),
@@ -119,7 +119,7 @@ async fn compose_block(
     job_options.cancel_job_rx = Some(cancel_compose_rx);
 
     let (proposal, composer_utxos) =
-        compose_block_helper(&latest_block, global_state_lock, timestamp, job_options).await?;
+        compose_block_helper(latest_block, global_state_lock, timestamp, job_options).await?;
 
     // Please clap.
     match sender.send((proposal, composer_utxos)) {
@@ -1405,7 +1405,7 @@ pub(crate) mod tests {
                 "Coinbase transaction with empty mempool must have zero inputs"
             );
             let block_1_empty_mempool = Block::compose(
-                &genesis_block,
+                genesis_block.clone(),
                 transaction_empty_mempool,
                 now,
                 TritonVmJobQueue::get_instance(),
@@ -1455,7 +1455,7 @@ pub(crate) mod tests {
 
             // Build and verify block template
             let block_1_nonempty_mempool = Block::compose(
-                &genesis_block,
+                genesis_block.clone(),
                 transaction_non_empty_mempool,
                 now,
                 TritonVmJobQueue::get_instance(),

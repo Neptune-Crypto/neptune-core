@@ -580,13 +580,12 @@ impl RpcApi for RpcServer {
             }
         }
 
-        let current_tip = state.chain.tip();
-        let tip_mutator_set = current_tip
-            .mutator_set_accumulator_after()
-            .expect("Tip must have valid MSA after");
+        let tip_height = state.chain.tip_height();
+        let tip_hash = state.chain.tip_hash();
+        let tip_mutator_set = state.chain.tip_mutator_set_after();
         let snapshot = RpcMsMembershipSnapshot {
-            synced_height: current_tip.header().height.into(),
-            synced_hash: current_tip.hash(),
+            synced_height: tip_height.into(),
+            synced_hash: tip_hash,
             membership_proofs,
             synced_mutator_set: (&tip_mutator_set).into(),
         };
@@ -628,14 +627,7 @@ impl RpcApi for RpcServer {
             ));
         }
 
-        let msa = self
-            .state
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .mutator_set_accumulator_after()
-            .expect("Tip block must have mutator set");
+        let msa = self.state.lock_guard().await.chain.tip_mutator_set_after();
         if !transaction.is_confirmable_relative_to(&msa) {
             return Err(RpcError::SubmitTransaction(
                 SubmitTransactionError::NotConfirmable,
@@ -2105,9 +2097,7 @@ pub mod tests {
             .lock_guard()
             .await
             .chain
-            .tip()
-            .mutator_set_accumulator_after()
-            .unwrap();
+            .tip_mutator_set_after();
         assert!(msa.verify(item, &extracted_msmp));
 
         // Try submitting a valid transaction (ProofCollection) by RPC.

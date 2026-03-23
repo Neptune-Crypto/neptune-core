@@ -2217,14 +2217,15 @@ mod tests {
             mempool.get_transactions_for_block_composition(usize::MAX, None)[0].clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
 
-        let light_state_alice = &alice
+        let tip_alice = alice
             .global_state_lock
             .lock_guard()
             .await
             .chain
-            .light_state_clone();
+            .tip()
+            .to_owned();
         let (cbtx, _eutxo) = make_coinbase_transaction_from_state_lock(
-            light_state_alice.tip(),
+            &tip_alice,
             &alice,
             block_5_timestamp,
             TritonVmJobPriority::Normal.into(),

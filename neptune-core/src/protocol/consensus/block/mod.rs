@@ -250,7 +250,7 @@ impl Block {
     }
 
     async fn make_block_template_with_valid_proof(
-        predecessor: &Block,
+        predecessor: Block,
         transaction: BlockTransaction,
         block_timestamp: Timestamp,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
@@ -277,8 +277,7 @@ impl Block {
             transaction.kernel.merge_bit,
             "Merge-bit must be set in transactions before they can be included in blocks."
         );
-        let primitive_witness =
-            BlockPrimitiveWitness::new(predecessor.to_owned(), transaction, network);
+        let primitive_witness = BlockPrimitiveWitness::new(predecessor, transaction, network);
         Self::block_template_from_block_primitive_witness(
             primitive_witness,
             block_timestamp,
@@ -292,7 +291,7 @@ impl Block {
     ///
     /// Create a block with valid block proof, but without proof-of-work.
     pub(crate) async fn compose(
-        predecessor: &Block,
+        predecessor: Block,
         transaction: BlockTransaction,
         block_timestamp: Timestamp,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
@@ -1904,7 +1903,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
             let block1_proposal = Block::compose(
-                &genesis,
+                genesis.clone(),
                 transaction,
                 plus_one_hour,
                 vm_job_queue(),
@@ -2072,7 +2071,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
                 let block2_without_valid_pow = Block::compose(
-                    &block1,
+                    block1.clone(),
                     block2_tx,
                     plus_eight_months,
                     TritonVmJobQueue::get_instance(),
@@ -2134,7 +2133,7 @@ pub(crate) mod tests {
                     "block transaction 3 must have inputs"
                 );
                 let block3_without_valid_pow = Block::compose(
-                    &block2_without_valid_pow,
+                    block2_without_valid_pow.clone(),
                     block3_tx,
                     plus_nine_months,
                     TritonVmJobQueue::get_instance(),
@@ -2609,7 +2608,7 @@ pub(crate) mod tests {
 
             // compose block
             let block = Block::compose(
-                blocks.last().unwrap(),
+                blocks.last().unwrap().to_owned(),
                 transaction.try_into().expect(
                     "went through at least one iteration of above loop, so merge bit must be set",
                 ),

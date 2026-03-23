@@ -720,7 +720,7 @@ mod tests {
         .unwrap();
         let timestamp = merged_tx.kernel.timestamp;
         let block_3_b = Block::compose(
-            &block_2_b,
+            block_2_b.clone(),
             merged_tx,
             timestamp,
             TritonVmJobQueue::get_instance(),
@@ -887,7 +887,7 @@ mod tests {
         .await
         .unwrap();
         let block_1 = Block::compose(
-            &genesis_block,
+            genesis_block.clone(),
             tx_for_block,
             in_seven_months,
             TritonVmJobQueue::get_instance(),
@@ -1026,10 +1026,10 @@ mod tests {
             let distant_timestamp = current_block.header().timestamp + Timestamp::years(100);
             let tip_balance = async |gsl: GlobalStateLock| {
                 let gs = gsl.global_state_lock.lock_guard().await;
-                let tip = gs.chain.tip();
+                let tip_height = gs.chain.tip_height();
                 gs.get_wallet_status_for_tip()
                     .await
-                    .confirmed_available_balance(tip.header().height, distant_timestamp)
+                    .confirmed_available_balance(tip_height, distant_timestamp)
             };
 
             for i in 1u32..=7 {

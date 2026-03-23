@@ -4993,7 +4993,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
             let block_one = Block::compose(
-                &genesis_block,
+                genesis_block.clone(),
                 block_transaction,
                 now,
                 dummy_queue.clone(),
@@ -5073,7 +5073,7 @@ pub(crate) mod tests {
 
             // create block with that transaction
             let block_two = Block::compose(
-                &block_one,
+                block_one,
                 block_two_transaction,
                 now + Timestamp::minutes(10),
                 dummy_queue,

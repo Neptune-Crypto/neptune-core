@@ -1,36 +1,61 @@
 use crate::protocol::consensus::block::Block;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// LightState represents the latest accepted block,
 /// along with bookkeeping information about it
 #[derive(Debug, Clone)]
 pub struct LightState {
+    /// The mutator set accumulator as it looks after the application of this
+    /// block, after having added the guesser rewards.
+    mutator_set_accumulator_after: MutatorSetAccumulator,
+
+    /// A valid block that has the most accumulated proof-of-work of all blocks
+    /// seen on the network.
+    ///
+    /// Usually just refers to the block with the highest block height, and the
+    /// most-recently mined block. Often referred to as "the most canonical
+    /// block".
     tip: Block,
+
+    /// The timestamp difference between the tip and its immediate predecessor.
+    ///
+    /// Will only be set if the previous tip was the immediate predecessor of
+    /// the current. In normal operations, this will be the time it took miners
+    /// to find the current tip.
     time_to_mine: Option<Timestamp>,
 }
 
 impl LightState {
+    /// Contruct a new light state, from a block.
     pub fn new(block: Block) -> Self {
         Self {
+            mutator_set_accumulator_after: block
+                .mutator_set_accumulator_after()
+                .expect("Block stored as tip must be valid"),
             tip: block,
             time_to_mine: None,
         }
     }
 
+    /// A reference to the most canonical block seen on the network.
     pub fn tip(&self) -> &Block {
         &self.tip
     }
 
+    /// Return the mutator set accumulator as it looks after the application of
+    /// this block, after having added the guesser rewards.
+    pub(super) fn tip_mutator_set_after(&self) -> MutatorSetAccumulator {
+        self.mutator_set_accumulator_after.clone()
+    }
+
+    /// The time it took miners to mine the current tip.
     pub fn time_to_mine(&self) -> Option<Timestamp> {
         self.time_to_mine
     }
 
     /// update the light state with a new block, which becomes the new tip.
     pub fn update(&mut self, new_block: Block) {
-        new_block
-            .mutator_set_accumulator_after()
-            .expect("Stored block must have a valid MSA after.");
-
         let time_to_mine = if new_block.header().prev_block_digest == self.tip.hash() {
             // Only set if new tip is direct descendant of previous tip
             Some(new_block.header().timestamp - self.tip.header().timestamp)
@@ -38,12 +63,16 @@ impl LightState {
             None
         };
 
+        self.mutator_set_accumulator_after = new_block
+            .mutator_set_accumulator_after()
+            .expect("Stored block must have a valid MSA after.");
+
         self.tip = new_block;
         self.time_to_mine = time_to_mine;
     }
 
     #[cfg(test)]
-    pub fn tip_mut(&mut self) -> &mut Block {
+    pub(crate) fn tip_mut(&mut self) -> &mut Block {
         &mut self.tip
     }
 }
@@ -51,15 +80,16 @@ impl LightState {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
+
     use super::*;
     use crate::application::config::network::Network;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_header::BlockHeader;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::BlockProof;
-    use rand::rngs::StdRng;
-    use rand::Rng;
-    use rand::SeedableRng;
 
     #[test]
     fn update_works() {
