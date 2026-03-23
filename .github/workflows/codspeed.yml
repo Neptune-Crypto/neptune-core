@@ -20,11 +20,11 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        benchmark: [ wallet_state ]
-        mode: [ simulation ]
+        benchmark: [wallet_state]
+        mode: [simulation]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -33,6 +33,14 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-codspeed
+
+      # CodSpeed-specific caching
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # We use a distinct key because CodSpeed builds
+          # are instrumented differently than standard builds
+          prefix-key: "v1-codspeed"
 
       - name: Build benchmarks
         run: cargo codspeed build --bench ${{ matrix.benchmark }}
