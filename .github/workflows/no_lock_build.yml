@@ -32,23 +32,7 @@ jobs:
         with:
           # A unique prefix for the "no-lock" build to avoid
           # conflicting with other caches.
-          prefix-key: "v1-no-lock-${{ matrix.os }}"
-
-      - name: Show available compilers (debug)
-        if: matrix.os != 'windows-latest'
-        run: |
-          echo "c++ -> $(which c++ 2>/dev/null || true)"
-          c++ --version || true
-          echo "clang++ -> $(which clang++ 2>/dev/null || true)"
-          clang++ --version || true
-        shell: bash
-
-      - name: Install clang (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang
-        shell: bash
+          prefix-key: "v2-no-lock-${{ matrix.os }}"
 
       - name: Build (linux & macos)
         if: matrix.os != 'windows-latest'

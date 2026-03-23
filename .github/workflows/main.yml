@@ -74,7 +74,7 @@ jobs:
             test(verify_all_proof_servers_work)
           )'
 
-      - name: Run Ignored Tests (Nextest)
+      - name: Run Ignored Tests
         run: >
           cargo nextest run
           --run-ignored all
