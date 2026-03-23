@@ -16,6 +16,8 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)
 
 [workspace.lints.clippy]
 cast_lossless = "warn"
+# Enforcing this can break nice pattern in a `match` statement
+collapsible-match = "allow"
 cloned_instead_of_copied = "warn"
 copy_iterator = "warn"
 doc_link_with_quotes = "warn"
