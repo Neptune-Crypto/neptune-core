@@ -166,6 +166,34 @@ impl<'a> Wallet<'a> {
     pub async fn num_expected_utxos(&self) -> u64 {
         state_lock_call_async!(&self.state_lock, worker::num_expected_utxos, ()).await
     }
+
+    /// Retrieve the [`TxOutput`] given the index of the `SentTransaction` in
+    /// the wallet database and the index of the desired output UTXO.
+    ///
+    /// A [`NeptuneProof`] for the tx UTXO (determined by a pair of indices, see below) transferred
+    /// the `amount` (it discloses) of [`NativeCurrency`] to the address with the components it discloses
+    /// (`receiver_digest` & `lock_postimange`). The UTXO is binded by hashing `sender_randomness` which serves
+    /// for identification between the similar transfers.
+    ///
+    /// The data is taken from the wallet of this node. `tx_ix` & `utxo_ix` are indicies for getting the UTXO
+    /// you want to prove from the wallet.
+    ///
+    /// The `block` is needed to prove the UTXO was mined. It's determined by its [`Digest`], the relevant
+    /// data is taken from this node DB. During verification the same data will be pulled from the same block.
+    ///
+    /// A verifier can use [`tasm_lib::triton_vm::verify`] exposed on his API/RPC, or the [TUI](https://github.com/TritonVM/triton-tui).
+    ///
+    /// # Panics.
+    /// The implementation detail is when `tx_ix` is out of its bound it crashes the node until
+    /// <https://github.com/Neptune-Crypto/neptune-core/issues/816> is done.
+    pub async fn txoutput_by_index(
+        &self,
+        tx_ix: u64,
+        utxo_ix: usize,
+        // block: Digest,
+    ) -> Result<TxOutput, WalletError> {
+        state_lock_call_async!(&self.state_lock, worker::txoutput_by_index, tx_ix, utxo_ix).await
+    }
 }
 
 mod worker {
@@ -190,5 +218,25 @@ mod worker {
 
     pub(super) async fn num_expected_utxos(gs: &GlobalState, _: ()) -> u64 {
         gs.wallet_state.num_expected_utxos().await
+    }
+
+    /// returns result just in hope that some day failure in the indecies would be distinguished
+    pub async fn txoutput_by_index(
+        gs: &GlobalState,
+        sent_transaction_index: u64,
+        output_index_in_transaction: usize,
+        // block: Digest,
+    ) -> Result<TxOutput, WalletError> {
+        let tx_sent =
+            crate::application::database::storage::storage_vec::traits::StorageVecBase::get(
+                gs.wallet_state.wallet_db.sent_transactions(),
+                sent_transaction_index,
+            )
+            .await;
+        tx_sent
+            .tx_outputs
+            .get(output_index_in_transaction)
+            .ok_or_else(|| WalletError::Failed("sent tx output index is out of bounds".to_string()))
+            .cloned()
     }
 }

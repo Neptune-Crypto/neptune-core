@@ -2130,6 +2130,73 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     async fn shutdown(token: auth::Token) -> RpcResult<bool>;
+
+    /// Prove a transfer of the native coin from the current wallet. Discloses
+    /// - the amount transferred,
+    /// - the sender's address,
+    /// - the receiver's address,
+    /// - hashed sender randomness to distinguish similar transfers,
+    /// - the AOCL of the block used for the argument.
+    /// Other info is hidden in the proof, such as the exact UTXO that were spent and the exact block height at which the transfer was
+    /// confirmed. The native coin is indicated by `tx_ix` & `utxo_ix` inside it; `block` is any which contains the transfer (the verifier must have this block as canonical).
+    /// *Probably you will want to pass `block` along a successfull result so that a verifier won't need to search it by the AOCL digest from `Claim`.*
+    ///
+    /// For verification see `triton_verify` in this API.
+    ///
+    /// Wraps [`Wallet::prove_transfer()`]. Returns `Auth` or `CreateProofError` variants of [`RpcError`] on a failure.
+    ///
+    /// # example
+    /// ```no_run
+    /// # use anyhow::Result;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
+    /// # use tarpc::tokio_serde::formats::Json;
+    /// # use tarpc::serde_transport::tcp;
+    /// # use tarpc::client;
+    /// # use tarpc::context;
+    /// # use twenty_first::tip5::digest::Digest;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<()>{
+    /// #
+    /// # // create a serde/json transport over tcp.
+    /// # let transport = tcp::connect("127.0.0.1:9799", Json::default).await?;
+    /// #
+    /// # // Create an RPC-client using the transport.
+    /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
+    /// #
+    /// # // defines cookie hint
+    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// #
+    /// # // load the cookie file from disk and assign it to a token
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// #
+    /// // from the current wallet
+    /// // the index of the sent tx containing the transfer to prove
+    /// let tx_ix: u64 = 0xAAAAAAA;
+    /// // the index of the UTXO with that transfer inside this tx
+    /// let utxo_ix = 0xAA;
+    /// /* The digest of a block after spending (verifiers must check this block as canonical). For better privacy a recent block can be chosen, if the need is to show
+    /// when it was already took place --- choose a block by its timestamp accordingly, up to the block which first confirmed the tx (including). */
+    /// let block: Digest = Digest::try_from_hex(0xAAAAAAAA)?;
+    /// // get the claim and a proof
+    /// let (claim, proof) = client.prove_transfer(context::current(), token, tx_ix, utxo_ix, block).await??;
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn prove_transfer(
+        token: auth::Token,
+        tx_ix: u64,
+        utxo_ix: usize,
+        block: Digest,
+    ) -> RpcResult<(Claim, NeptuneProof)>;
+
+    /// Triton VM `verify`.
+    async fn triton_verify(
+        token: auth::Token,
+        claim: Claim,
+        proof: NeptuneProof,
+    ) -> RpcResult<bool>;
 }
 
 #[derive(Clone)]
@@ -4573,9 +4640,125 @@ impl RPC for NeptuneRPCServer {
             .map(|tx| &tx.kernel)
             .cloned())
     }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn prove_transfer(
+        self,
+        _context: ::tarpc::context::Context,
+        token: auth::Token,
+        sent_transaction_index: u64,
+        output_index_in_transaction: usize,
+        block: Digest,
+    ) -> RpcResult<(Claim, NeptuneProof)> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let block = self
+            .state
+            .lock_async(|s| futures::FutureExt::boxed(s.chain.archival_state().get_block(block)))
+            .await?
+            .ok_or(RpcError::NoSuchCanonicalBlock)?;
+
+        let tx_output = self
+            .state
+            .api()
+            .wallet()
+            .txoutput_by_index(sent_transaction_index, output_index_in_transaction)
+            .await?;
+
+        let utxo = tx_output.utxo();
+        let sender_randomness = tx_output.sender_randomness();
+        let additionrec = tx_output.addition_record();
+
+        let block_aocl = block
+            .body()
+            .mutator_set_accumulator_without_guesser_fees()
+            .aocl;
+        let block_aocl_numleafs = block_aocl.num_leafs();
+
+        tracing::info!["Lock the global state for *reading.* Until the membership proof is computed for proving the transfer."];
+        let gs_lock = self.state.lock_guard().await;
+        let aocl_archival = &gs_lock
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .aocl;
+
+        let aocl_leaf_ix = aocl_archival
+            .get_leaf_range_inclusive_async(0..=(block_aocl_numleafs - 1))
+            .await
+            .iter()
+            .position(|leaf| *leaf == additionrec.canonical_commitment)
+            .ok_or(RpcError::Failed(
+                "Can't find the UTXO in the AOCL of the given block".to_string(),
+            ))? as u64;
+        let aocl_membership_proof = aocl_archival
+            .prove_membership_relative_to_smaller_mmr(aocl_leaf_ix, block_aocl_numleafs)
+            .await;
+
+        drop(gs_lock);
+        tracing::info!["Unlock the global state from *reading.* Computed the membership proof."];
+
+        let sent = crate::application::util_proof::ProofOfTransfer::new(
+            sent::claim_outputs(
+                sent::claim_inputs(
+                    tasm_lib::triton_vm::proof::Claim::new(sent::hash()),
+                    tx_output.receiver_digest(),
+                    // TODO `ProofOfTransfer` ignores time locks yet
+                    utxo.release_date().unwrap_or_default(),
+                ),
+                sender_randomness.hash(),
+                block_aocl.bag_peaks(),
+                utxo.lock_script_hash(),
+                tx_output.native_currency_amount(),
+            ),
+            block_aocl,
+            sender_randomness,
+            aocl_leaf_ix,
+            utxo,
+            aocl_membership_proof,
+        );
+
+        let claim = sent.claim();
+
+        let proof = crate::protocol::proof_abstractions::tasm::program::TritonProgram::prove(
+            &sent,
+            claim.clone(),
+            sent.nondeterminism(),
+            crate::application::triton_vm_job_queue::vm_job_queue(),
+            tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder::new()
+                .job_priority(crate::api::export::TritonVmJobPriority::Normal)
+                .build(),
+        )
+        .await
+        .map_err(|e| RpcError::CreateProofError(e.to_string()))?;
+
+        Ok((claim, proof))
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn triton_verify(
+        self,
+        _context: ::tarpc::context::Context,
+        token: auth::Token,
+        claim: Claim,
+        proof: NeptuneProof,
+    ) -> RpcResult<bool> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(tasm_lib::triton_vm::verify(
+            Default::default(),
+            &claim,
+            &proof,
+        ))
+    }
 }
 
 pub mod error {
+    use crate::api::tx_initiation::error::CreateProofError;
+
     use super::*;
 
     /// enumerates possible rpc api errors
@@ -4599,6 +4782,9 @@ pub mod error {
 
         #[error("create transaction error: {0}")]
         CreateTxError(String),
+
+        #[error("create proof error: {0}")]
+        CreateProofError(String),
 
         #[error("upgrade proof error: {0}")]
         UpgradeProofError(String),
@@ -4644,11 +4830,19 @@ pub mod error {
 
         #[error("Derivation index must be in interval [{0}, {1}]")]
         InvalidDerivationIndexRange(u64, u64),
+        #[error("no canonical block with the given digest")]
+        NoSuchCanonicalBlock,
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
         fn from(err: tx_initiation::error::CreateTxError) -> Self {
             RpcError::CreateTxError(err.to_string())
+        }
+    }
+
+    impl From<CreateProofError> for RpcError {
+        fn from(err: CreateProofError) -> Self {
+            RpcError::CreateProofError(err.to_string())
         }
     }
 
@@ -4682,8 +4876,14 @@ pub mod error {
         }
     }
 
-    // convert anyhow::Error to an RpcError::Failed.
-    // note that anyhow Error is not serializable.
+    impl From<ClaimError> for RpcError {
+        fn from(err: ClaimError) -> Self {
+            RpcError::ClaimError(err.to_string())
+        }
+    }
+
+    // convert `anyhow::Error` to an `RpcError::Failed`.
+    // note that `anyhow` `Error` is not serializable.
     impl From<anyhow::Error> for RpcError {
         fn from(e: anyhow::Error) -> Self {
             Self::Failed(e.to_string())
