@@ -9,7 +9,7 @@ use crate::api::tx_initiation::error::ProofRequirement;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::protocol::proof_abstractions::tasm::program::prove_consensus_program;
+use crate::protocol::proof_abstractions::tasm::program::prove_triton_program;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::triton_vm::prelude::Program;
 use crate::triton_vm::proof::Claim;
@@ -211,6 +211,6 @@ impl<'a> ProofBuilder<'a> {
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
 
-        prove_consensus_program(program, claim, nondeterminism, job_queue, proof_job_options).await
+        prove_triton_program(program, claim, nondeterminism, job_queue, proof_job_options).await
     }
 }

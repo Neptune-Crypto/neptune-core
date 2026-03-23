@@ -38,7 +38,7 @@ use crate::protocol::consensus::transaction::validity::tasm::compute_absolute_in
 use crate::protocol::consensus::transaction::PrimitiveWitness;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -365,7 +365,7 @@ impl RemovalRecordsIntegrityWitness {
     }
 }
 
-impl ConsensusProgram for RemovalRecordsIntegrity {
+impl TritonProgram for RemovalRecordsIntegrity {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         type MmrAccumulatorTip5 = MmrAccumulator;
         const MAX_JUMP_LENGTH: usize = 2_000_000;
@@ -1057,13 +1057,13 @@ mod tests {
     use crate::protocol::consensus::transaction::TransactionKernelModifier;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
-    impl ConsensusProgramSpecification for RemovalRecordsIntegrity {
+    impl TritonProgramSpecification for RemovalRecordsIntegrity {
         fn source(&self) {
             let txk_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
 

@@ -20,27 +20,25 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 /// ```notest
 /// predecessor : Block --------.
 ///                             |-- new --> BlockPrimitiveWitness
-/// transaction : Transaction --'                               |
-///                                                             |
-///                                                             |---> BlockBody ----}-.
-///                                                             |                     |
-///        SingleProof : BlockConsensusProgram <-- conversion --+-> }                 |
-///         |        ? : BlockConsensusProgram <-- conversion --+-> } Appendix -----}-|
-///         | ...... ? : BlockConsensusProgram <-- conversion --'-> }                 |
-///        prove                                                                      |
-///         | prove                                                                   |
-///         |  | prove                                                                |
-///         |  |  |                                                                   |-> Block
-///         v  v  v                                                                   |
-/// BlockProofWitness -------------  produce  ----------------------> BlockProof ---}-|
-///                                                                               |   |
-///                                                                   mining -----'   |
-///                                                                      |            |
-///                                                                      v            |
-///                                                                   Header -------}-'
+/// transaction : Transaction --'                      |
+///                                                    |
+///                                                    |---> BlockBody --.------}--.
+///                                                    |                 |         |
+///        SingleProof : BlockProgram <-- conversion --+-> }             |         |
+///         |        ? : BlockProgram <-- conversion --+-> } Appendix ---+------}--|
+///         | ...... ? : BlockProgram <-- conversion --'-> }             |         |
+///        prove                                                         |         |
+///         | prove                                                      |         |
+///         |  | prove                                                   |         |
+///         |  |  |                                                      |          > Block
+///         v  v  v                                                      |         |
+/// BlockProofWitness ---------  produce  -----> BlockProof -------------+------}--|
+///                                                                      |         |
+///                                                                   mining       |
+///                                                                      |         |
+///                                                                      v         |
+///                                                               Blockheader --}--'
 /// ```
-// note: I removed unused PartialEq, Eq derive.   If we ever need one
-// PartialEq should be derived manually to ignore maybe_body.
 #[derive(Clone, Debug)]
 pub(crate) struct BlockPrimitiveWitness {
     pub(super) predecessor_block: Block,

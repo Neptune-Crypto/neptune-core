@@ -17,17 +17,14 @@ use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 
 #[derive(Debug, Clone)]
-pub enum ConsensusError {
+pub enum TritonError {
     RustShadowPanic(String),
     TritonVMPanic(String, InstructionError),
 }
 
-/// A `ConsensusProgram` represents the logic subprogram for transaction or
+/// A [`TritonProgram`] represents the logic subprogram for transaction or
 /// block validity.
-///
-/// This trait is required for benchmarks, but is not part of the public API.
-#[doc(hidden)]
-pub trait ConsensusProgram
+pub trait TritonProgram
 where
     Self: RefUnwindSafe + std::fmt::Debug,
 {
@@ -90,11 +87,11 @@ where
 /// there, generate it and store it to disk.
 ///
 /// This method works for arbitrary programs, including ones that do not
-/// implement trait [`ConsensusProgram`].
+/// implement trait [`TritonProgram`].
 ///
 /// The proof is executed as a triton-vm-job-queue job which ensures that
 /// no two tasks run the prover simultaneously.
-pub(crate) async fn prove_consensus_program(
+pub(crate) async fn prove_triton_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
@@ -244,11 +241,11 @@ pub mod tests {
         }
     }
 
-    pub(crate) trait ConsensusProgramSpecification: ConsensusProgram {
-        /// The canonical reference source code for the consensus program, written in
-        /// the subset of rust that the tasm-lang compiler understands. To run this
-        /// program, call [`Self::run_rust`], which spawns a new thread, boots the
-        /// environment, and executes the program.
+    pub trait TritonProgramSpecification: TritonProgram {
+        /// The canonical reference source code for the Triton program, written
+        /// in the subset of rust that the tasm-lang compiler understands. To
+        /// run this program, call [`Self::run_rust`], which spawns a new
+        /// thread, boots the environment, and executes the program.
         fn source(&self);
 
         /// Run the source program natively in rust, but with the emulated TritonVM
@@ -257,9 +254,9 @@ pub mod tests {
             &self,
             input: &PublicInput,
             nondeterminism: NonDeterminism,
-        ) -> Result<Vec<BFieldElement>, ConsensusError> {
+        ) -> Result<Vec<BFieldElement>, TritonError> {
             debug!(
-                "Running consensus program with input: {}",
+                "Running triton program with input: {}",
                 input.individual_tokens.iter().map(|b| b.value()).join(",")
             );
             let program_digest = catch_unwind(|| self.hash()).unwrap_or_default();
@@ -270,7 +267,7 @@ pub mod tests {
                 environment::PUB_OUTPUT.take()
             });
 
-            emulation_result.map_err(|e| ConsensusError::RustShadowPanic(format!("{e:?}")))
+            emulation_result.map_err(|e| TritonError::RustShadowPanic(format!("{e:?}")))
         }
 
         /// Use Triton VM to run the tasm code.
@@ -280,7 +277,7 @@ pub mod tests {
             &self,
             input: &PublicInput,
             nondeterminism: NonDeterminism,
-        ) -> Result<Vec<BFieldElement>, ConsensusError> {
+        ) -> Result<Vec<BFieldElement>, TritonError> {
             let mut vm_state = VMState::new(self.program(), input.clone(), nondeterminism.clone());
             tasm_lib::maybe_write_debuggable_vm_state_to_disk(&vm_state);
 
@@ -288,24 +285,24 @@ pub mod tests {
             if let Err(err) = vm_state.run() {
                 let err_str = format!("Triton VM failed.\nError: {err}\nVMState:\n{vm_state}");
                 eprintln!("{err_str}");
-                return Err(ConsensusError::TritonVMPanic(err_str, err));
+                return Err(TritonError::TritonVMPanic(err_str, err));
             }
 
             // Do some sanity checks that are likely to catch programming
-            // errors in the consensus program. This doesn't catch
+            // errors in the Triton program. This doesn't catch
             // soundness errors, though, since a valid proof could still be
             // generated even though one of these checks fail.
             assert!(
                 vm_state.secret_digests.is_empty(),
-                "Secret digest list must be empty after executing consensus program"
+                "Secret digest list must be empty after executing Triton program"
             );
             assert!(
                 vm_state.secret_individual_tokens.is_empty(),
-                "Secret token list must be empty after executing consensus program"
+                "Secret token list must be empty after executing Triton program"
             );
             assert!(
                 vm_state.public_input.is_empty(),
-                "input must be empty after executing consensus program"
+                "input must be empty after executing Triton program"
             );
             assert_eq!(&init_stack, &vm_state.op_stack);
 
@@ -325,7 +322,7 @@ pub mod tests {
                 |reason: String| Err(proptest::test_runner::TestCaseError::Fail(reason.into()));
 
             let tasm_result = self.run_tasm(&public_input, non_determinism.clone());
-            let Err(ConsensusError::TritonVMPanic(_, err)) = tasm_result else {
+            let Err(TritonError::TritonVMPanic(_, err)) = tasm_result else {
                 return fail("expected a failure in Triton VM, but it halted gracefully".into());
             };
 
@@ -347,7 +344,7 @@ pub mod tests {
             );
 
             let rust_result = self.run_rust(&public_input, non_determinism.clone());
-            let Err(ConsensusError::RustShadowPanic(_)) = rust_result else {
+            let Err(TritonError::RustShadowPanic(_)) = rust_result else {
                 return fail("rust shadowing must fail, but did not".into());
             };
 
@@ -476,7 +473,7 @@ pub mod tests {
         // Ensure file exists on machine, in case this machine syncs automatically with proof server
         let program = triton_program!(halt);
         let claim = Claim::about_program(&program);
-        prove_consensus_program(
+        prove_triton_program(
             program,
             claim.clone(),
             NonDeterminism::default(),
@@ -575,11 +572,11 @@ pub mod tests {
             .expect("cannot write to file");
     }
 
-    /// Test for regressions in a consensus program.
+    /// Test for regressions in a Triton program.
     ///
-    /// As consensus programs are refactored to improve readability, it is
-    /// important to ensure that the program does not actually change. Any such
-    /// change would constitute a hard fork.
+    /// As Triton programs are refactored to improve readability, it is
+    /// important to ensure that the program does not actually change. If such a
+    /// change affects a *consensus program* then BOOM! hard fork.
     ///
     /// This test checks the program's hash against a hardcoded value. If the
     /// program changes and that hardcoded value is not updated in lockstep, the
@@ -592,7 +589,7 @@ pub mod tests {
     ///
     /// struct MyProgram;
     ///
-    /// impl ConsensusProgram for MyProgram {
+    /// impl TritonProgram for MyProgram {
     ///     fn library_and_code() ->  (Library, Vec<LabelledInstruction>) {
     ///         /// ...
     ///         (Library::new(), vec![])

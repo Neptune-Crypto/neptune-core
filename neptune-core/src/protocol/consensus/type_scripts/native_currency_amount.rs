@@ -27,7 +27,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::native_currency::NativeCurrency;
 use crate::protocol::consensus::transaction::utxo::Coin;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::triton_vm::prelude::triton_instr;
 
 /// Records an amount of Neptune coins. Amounts are internally represented by an
