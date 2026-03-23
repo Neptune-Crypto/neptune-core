@@ -9,34 +9,50 @@ on:
 name: Rust
 
 jobs:
-  runner-matrix:
-    name: format, lint, test
+  # Job 1: Lint & Format (Fast, Linux only)
+  fmt-clippy-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build Docs
+        run: cargo doc --no-deps --workspace --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # Job 2: Multi-OS Tests & Builds
+  tests:
+    needs: fmt-clippy-docs # don't waste OS minutes if linting fails
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Install stable toolchain
+      - name: Install stable Toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
         with:
-          components: rustfmt, clippy
+          prefix-key: "v1-test-${{ matrix.os }}"
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
-
-      - name: Build documentation
-        run: cargo doc --no-deps --workspace --document-private-items
-        env:
-          RUSTDOCFLAGS: -D warnings
-
-      - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Build benches
+      - name: Build Benches
         run: cargo build --benches
 
       - name: Run tests without benches
