@@ -248,7 +248,7 @@ pub fn pseudorandom_mmra_with_mps_and_indices(
             .filter(
                 |(_leaf, (_original_index, _mmr_index, _mt_index, peak_index))| *peak_index == tree,
             )
-            .zip(authentication_paths.into_iter())
+            .zip(authentication_paths)
             .map(
                 |(
                     (_leaf, (_original_index, mmr_index, _mt_index, _peak_index)),
@@ -413,13 +413,13 @@ mod tests {
                 }
             }
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.random()).collect_vec();
-            let leafs_and_indices = leafs.into_iter().zip(indices.into_iter()).collect_vec();
+            let leafs_and_indices = leafs.into_iter().zip(indices).collect_vec();
             let (root, paths) = pseudorandom_merkle_root_with_authentication_paths(
                 inner_rng.random(),
                 tree_height,
                 &leafs_and_indices,
             );
-            for ((leaf, index), path) in leafs_and_indices.into_iter().zip(paths.into_iter()) {
+            for ((leaf, index), path) in leafs_and_indices.into_iter().zip(paths) {
                 assert!(
                     merkle_verify_tester_helper(root, index, &path, leaf),
                     "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"

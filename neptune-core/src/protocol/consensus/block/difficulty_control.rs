@@ -265,9 +265,7 @@ where
         let mut result = [0; Self::NUM_LIMBS];
         let mut carry = 0;
         let mut n = 0;
-        for (i, (difficulty_digit, pow_digit)) in
-            rhs.into_iter().zip(self.0.into_iter()).enumerate()
-        {
+        for (i, (difficulty_digit, pow_digit)) in rhs.into_iter().zip(self.0).enumerate() {
             let sum = u64::from(carry) + u64::from(difficulty_digit) + u64::from(pow_digit);
             result[i] = sum as u32;
             carry = (sum >> 32) as u32;

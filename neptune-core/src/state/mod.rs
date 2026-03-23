@@ -1721,8 +1721,8 @@ impl GlobalState {
         let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
             .wallet_state
             .mempool_outgoing_utxos
-            .iter()
-            .flat_map(|(_txkid, tx_inputs)| tx_inputs.keys())
+            .values()
+            .flat_map(|tx_inputs| tx_inputs.keys())
             .copied()
             .collect();
 
@@ -3692,10 +3692,8 @@ mod tests {
             let mut handles = vec![];
 
             // for every branch, spawn a new task to produce it
-            for (i, (first_block, branch_length)) in first_blocks
-                .into_iter()
-                .zip(branch_lengths.into_iter())
-                .enumerate()
+            for (i, (first_block, branch_length)) in
+                first_blocks.into_iter().zip(branch_lengths).enumerate()
             {
                 let seed: [u8; 32] = rng.random();
                 let first_block = first_block.clone();

@@ -324,7 +324,7 @@ impl RemovalRecordsIntegrityWitness {
                         *peak_index == tree
                     },
                 )
-                .zip(authentication_paths.into_iter())
+                .zip(authentication_paths)
                 .map(
                     |(
                         (_leaf, (_original_index, mmr_index, _mt_index, _peak_index)),
