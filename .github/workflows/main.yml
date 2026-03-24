@@ -82,7 +82,8 @@ jobs:
         run: >
           cargo nextest run
           --run-ignored all
-          -E 'test(can_resume_block_download_from_saved_state) or test(can_resume_sync_from_saved_state)'
+          --test-threads=1
+          -E 'test(can_resume_block_download_from_saved_incomplete_state) or test(can_resume_block_download_from_saved_overcomplete_state) or test(can_resume_sync_from_saved_state)'
 
       # `--doc` cannot be mixed with other target option
       - name: Run documentation tests

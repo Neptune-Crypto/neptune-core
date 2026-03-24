@@ -18,7 +18,8 @@ macro_rules! shared_tokio_runtime {
     ) => {
         $(#[$fn_meta])*
         #[test]
-        fn $fn_name() $(-> $ret)? { // Propagate the return type to the #[test] fn
+        // Propagate the return type and visibility to the #[test] fn.
+        $vis fn $fn_name() $(-> $ret)? {
             let runtime = $crate::tests::tokio_runtime();
             runtime.block_on(async {
                 $vis async fn __inner() $(-> $ret)? {
