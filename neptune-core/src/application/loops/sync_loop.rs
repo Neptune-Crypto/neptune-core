@@ -1664,15 +1664,4 @@ mod tests {
             *updated_sync_target_height.lock().await
         );
     }
-
-    #[test]
-    fn run_parallelism_unfriendly_tests_in_sequence() {
-        println!("\n---\ncan_resume_block_download_from_saved_incomplete_state ...");
-        super::rapid_block_download::tests::can_resume_block_download_from_saved_incomplete_state();
-        println!("\n---\ncan_resume_block_download_from_saved_overcomplete_state ...");
-        super::rapid_block_download::tests::can_resume_block_download_from_saved_overcomplete_state(
-        );
-        println!("\n---\ncan_resume_sync_from_saved_state ...");
-        can_resume_sync_from_saved_state();
-    }
 }
