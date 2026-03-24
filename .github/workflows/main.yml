@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
@@ -52,6 +52,7 @@ jobs:
           --skip alice_updates_mutator_set_data_on_own_transaction
           --skip can_sync_from
           --skip can_sync_with_moving
+          --skip verify_all_proof_servers_work
 
       - name: Run non-parallel test "resume block download from saved state"
         run: >

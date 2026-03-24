@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use clienter::HttpHeaders;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use rand::seq::SliceRandom;
@@ -65,8 +66,10 @@ pub(crate) fn test_helper_data_dir() -> PathBuf {
     path
 }
 
-/// Load a list of proof-servers from test data directory
-fn load_servers() -> Vec<String> {
+/// Load a list of proof-servers from test data directory. These servers are
+/// expected to server data required for tests. That data is mainly proofs but
+/// may also be blocks.
+pub(crate) fn load_test_proof_servers() -> Vec<String> {
     let mut server_list_path = test_helper_data_dir();
     server_list_path.push(Path::new("proof_servers").with_extension("txt"));
     let Ok(mut input_file) = File::open(server_list_path.clone()) else {
@@ -107,9 +110,70 @@ pub(crate) fn try_load_file_from_disk(path: &Path) -> Option<Vec<u8>> {
     Some(file_contents)
 }
 
-/// Return the specified file from a server, along with the name of the server
-/// providing the result.
-pub(crate) fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, String)> {
+pub(crate) fn try_fetch_from_server(
+    filename: String,
+    server: String,
+    headers: HttpHeaders,
+) -> Option<Vec<u8>> {
+    let filename_ = filename.clone();
+    let server_ = server.clone();
+    let handle = std::thread::spawn(move || {
+        let server__ = &server_;
+        let filename__ = &filename_;
+        let url = format!("{server__}{filename__}");
+
+        debug!("requesting: <{url}>");
+
+        let uri: clienter::Uri = url.into();
+
+        let mut http_client = clienter::HttpClient::new();
+        http_client.timeout = Some(Duration::from_millis(1600));
+        http_client.headers = headers;
+        let request = http_client.request(clienter::HttpMethod::GET, uri);
+
+        // note: send() blocks
+        let Ok(mut response) = http_client.send(&request) else {
+            println!("server '{server__}' failed for file '{filename__}'; trying next ...",);
+
+            return None;
+        };
+
+        // only retrieve body if we got a 2xx code.
+        // addresses #477
+        // https://github.com/Neptune-Crypto/neptune-core/issues/477
+        let body = if response.status.is_success() {
+            response.body()
+        } else {
+            Ok(vec![])
+        };
+
+        Some((response.status, body))
+    });
+
+    let Some((status_code, body)) = handle.join().unwrap() else {
+        eprintln!("Could not connect to server {server}.");
+        return None;
+    };
+
+    if !status_code.is_success() {
+        eprintln!("{server} responded with {status_code}");
+        return None;
+    }
+
+    println!("{server} responded with successful HTTP status code");
+
+    let Ok(file_contents) = body else {
+        eprintln!("error reading file '{filename}' from server '{server}'");
+
+        return None;
+    };
+
+    Some(file_contents)
+}
+
+/// Build headers expected by proof server. Allows proof server to see which
+/// test is requesting the data.
+pub(crate) fn headers_for_proof_server_request() -> clienter::HttpHeaders {
     const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
 
     fn get_test_name_from_tracing() -> String {
@@ -133,9 +197,6 @@ pub(crate) fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, S
         }
     }
 
-    let mut servers = load_servers();
-    servers.shuffle(&mut rand::rng());
-
     // Add test name to request to allow server to see which test requires this
     // file.
     let mut headers = clienter::HttpHeaders::default();
@@ -144,65 +205,22 @@ pub(crate) fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, S
         attempt_to_get_test_name(),
     );
 
+    headers
+}
+
+/// Return the specified file from a server, along with the name of the server
+/// providing the result.
+pub(crate) fn try_fetch_file(filename: String) -> Option<(Vec<u8>, String)> {
+    let headers = headers_for_proof_server_request();
+
+    let mut servers = load_test_proof_servers();
+    servers.shuffle(&mut rand::rng());
+
     for server in servers {
-        let server_ = server.clone();
-        let filename_ = filename.clone();
-        let headers_ = headers.clone();
-        let handle = std::thread::spawn(move || {
-            let url = format!("{}{}", server_, filename_);
-
-            debug!("requesting: <{url}>");
-
-            let uri: clienter::Uri = url.into();
-
-            let mut http_client = clienter::HttpClient::new();
-            http_client.timeout = Some(Duration::from_millis(1600));
-            http_client.headers = headers_;
-            let request = http_client.request(clienter::HttpMethod::GET, uri);
-
-            // note: send() blocks
-            let Ok(mut response) = http_client.send(&request) else {
-                println!(
-                    "server '{}' failed for file '{}'; trying next ...",
-                    server_.clone(),
-                    filename_
-                );
-
-                return None;
-            };
-
-            // only retrieve body if we got a 2xx code.
-            // addresses #477
-            // https://github.com/Neptune-Crypto/neptune-core/issues/477
-            let body = if response.status.is_success() {
-                response.body()
-            } else {
-                Ok(vec![])
-            };
-
-            Some((response.status, body))
-        });
-
-        let Some((status_code, body)) = handle.join().unwrap() else {
-            eprintln!("Could not connect to server {server}.");
-            continue;
-        };
-
-        if !status_code.is_success() {
-            eprintln!("{server} responded with {status_code}");
-            continue;
+        let body = try_fetch_from_server(filename.clone(), server.clone(), headers.clone());
+        if let Some(body) = body {
+            return Some((body, server));
         }
-
-        let Ok(file_contents) = body else {
-            eprintln!(
-                "error reading file '{}' from server '{}'; trying next ...",
-                filename, server
-            );
-
-            continue;
-        };
-
-        return Some((file_contents, server));
     }
 
     println!("No known servers serve file `{}`", filename);
@@ -233,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_load_servers() {
-        let servers = load_servers();
+        let servers = load_test_proof_servers();
         for server in servers {
             println!("read server: {}", server);
         }

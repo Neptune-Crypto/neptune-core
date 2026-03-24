@@ -193,8 +193,11 @@ pub mod tests {
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
     use crate::protocol::proof_abstractions::tasm::environment;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+    use crate::tests::shared::files::headers_for_proof_server_request;
+    use crate::tests::shared::files::load_test_proof_servers;
     use crate::tests::shared::files::test_helper_data_dir;
-    use crate::tests::shared::files::try_fetch_file_from_server;
+    use crate::tests::shared::files::try_fetch_file;
+    use crate::tests::shared::files::try_fetch_from_server;
     use crate::tests::shared::files::try_load_file_from_disk;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm::stark::Stark;
@@ -447,33 +450,40 @@ pub mod tests {
         Some(proof)
     }
 
+    fn decode_proof_from_server(data: Vec<u8>, server: &str) -> Option<Proof> {
+        let mut proof_data = vec![];
+        for ch in data.chunks(8) {
+            if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
+                proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
+            } else {
+                eprintln!("cannot cast chunk to eight bytes. Server was: {server}");
+                return None;
+            }
+        }
+
+        let proof = Proof::from(proof_data);
+
+        Some(proof)
+    }
+
     /// Tries to fetch a proof from a server, does not validate the proof
     ///
     /// If a proof was found, returns it along with the URL of the server
     /// serving the proof. The caller should validate the proof. Does
     /// not store the proof to disk.
-    /// TODO: Consider making this async.
     fn try_fetch_from_server_inner(filename: String) -> Option<(Proof, String)> {
-        let (file_contents, server) = try_fetch_file_from_server(filename)?;
+        let (file_contents, server) = try_fetch_file(filename)?;
 
-        let mut proof_data = vec![];
-        for ch in file_contents.chunks(8) {
-            if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
-                proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
-            } else {
-                eprintln!("cannot cast chunk to eight bytes. Server was: {server}");
-            }
-        }
-
-        let proof = Proof::from(proof_data);
+        let proof = decode_proof_from_server(file_contents, &server)?;
         println!("got proof.");
 
         Some((proof, server))
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn test_query_proof() {
-        // Ensure file exists on machine, in case this machine syncs automatically with proof server
+    async fn verify_all_proof_servers_work() {
+        // Ensure file exists on machine, in case this machine syncs
+        // automatically with proof server.
         let program = triton_program!(halt);
         let claim = Claim::about_program(&program);
         prove_consensus_program(
@@ -488,12 +498,22 @@ pub mod tests {
 
         // Then verify that the proof server has this file
         let filename = proof_filename(&claim);
-        let (proof, url) =
-            try_fetch_from_server_inner(filename).expect("Expected this proof on the proof server");
-        assert!(
-            triton_vm::verify(Stark::default(), &claim, &proof),
-            "Returned proof from {url} must be valid"
-        );
+        let servers = load_test_proof_servers();
+        let headers = headers_for_proof_server_request();
+        for server in servers {
+            let response = try_fetch_from_server(filename.clone(), server.clone(), headers.clone());
+
+            let proof = match response {
+                Some(data) => decode_proof_from_server(data, &server)
+                    .expect("Returned data must be decodable as proof"),
+                None => panic!("Server: {server} failed to respond with a proof"),
+            };
+
+            assert!(
+                triton_vm::verify(Stark::default(), &claim, &proof),
+                "Returned proof from {server} must be valid"
+            );
+        }
     }
 
     #[test]
