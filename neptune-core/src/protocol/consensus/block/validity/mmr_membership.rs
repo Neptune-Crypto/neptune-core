@@ -8,7 +8,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +35,7 @@ pub struct MmrMembership {
     witness: MmrMembershipWitness,
 }
 
-impl ConsensusProgram for MmrMembership {
+impl TritonProgram for MmrMembership {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
     }
@@ -51,9 +51,9 @@ impl ConsensusProgram for MmrMembership {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
 
-    impl ConsensusProgramSpecification for MmrMembership {
+    impl TritonProgramSpecification for MmrMembership {
         fn source(&self) {
             todo!()
         }

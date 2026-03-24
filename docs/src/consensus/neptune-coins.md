@@ -4,7 +4,7 @@ Neptune Coins refers to two things
  - the native currency coin type for Neptune Cash;
  - the unit in which quantities of the former are measured.
 
-In the code, the struct `NativeCurrencyAmount` defines the unit. The native currency *type script* is encapsulated as a struct `NativeCurrency` implementing trait `ConsensusProgram` in `native_currency.rs`.
+In the code, the struct `NativeCurrencyAmount` defines the unit. The native currency *type script* is encapsulated as a struct `NativeCurrency` implementing trait `TritonProgram` in `native_currency.rs`.
 
 ## The Unit
 

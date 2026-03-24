@@ -1,5 +1,5 @@
-//! Implements a triton-vm-job-queue job for proving
-//! consensus programs.
+//! Implements a triton-vm-job-queue job for proving Triton programs, both
+//! consensus and non-consensus.
 //!
 //! These proofs take a lot of time, cpu, and memory to
 //! create. As such, only one should execute at a time

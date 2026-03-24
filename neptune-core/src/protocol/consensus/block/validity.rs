@@ -14,7 +14,7 @@ use self::correct_mutator_set_update::CorrectMutatorSetUpdate;
 use self::mmr_membership::MmrMembership;
 use self::predecessor_is_valid::PredecessorIsValid;
 use super::Block;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 
 pub mod block_primitive_witness;
@@ -75,7 +75,7 @@ impl SecretWitness for PrincipalBlockValidationWitness {
     }
 }
 
-impl ConsensusProgram for PrincipalBlockValidationLogic {
+impl TritonProgram for PrincipalBlockValidationLogic {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
     }
@@ -91,9 +91,9 @@ impl ConsensusProgram for PrincipalBlockValidationLogic {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
 
-    impl ConsensusProgramSpecification for PrincipalBlockValidationLogic {
+    impl TritonProgramSpecification for PrincipalBlockValidationLogic {
         fn source(&self) {
             todo!()
         }

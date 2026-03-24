@@ -24,7 +24,7 @@ use crate::prelude::triton_vm;
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::primitive_witness::SaltedUtxos;
 use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
@@ -74,7 +74,7 @@ impl CollectLockScripts {
     const JUMP_OUT_OF_BOUNDS: i128 = 1_000_260;
 }
 
-impl ConsensusProgram for CollectLockScripts {
+impl TritonProgram for CollectLockScripts {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         const MAX_JUMP_LENGTH: usize = 2_000_000;
 
@@ -208,9 +208,9 @@ mod tests {
     use super::*;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
 
-    impl ConsensusProgramSpecification for CollectLockScripts {
+    impl TritonProgramSpecification for CollectLockScripts {
         fn source(&self) {
             let siu_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
             let start_address: BFieldElement =

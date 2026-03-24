@@ -24,7 +24,7 @@ mod transaction {
     use neptune_cash::protocol::consensus::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use neptune_cash::protocol::consensus::type_scripts::time_lock::TimeLock;
     use neptune_cash::protocol::consensus::type_scripts::time_lock::TimeLockWitness;
-    use neptune_cash::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+    use neptune_cash::protocol::proof_abstractions::tasm::program::TritonProgram;
     use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
     use neptune_cash::protocol::proof_abstractions::SecretWitness;
     use proptest::strategy::Strategy;
@@ -41,9 +41,9 @@ mod transaction {
     const COMMON: (usize, usize) = (2, 2);
     const LARGEISH: (usize, usize) = (4, 4);
 
-    /// Benchmark the TASM code for a consensus program, and write the result to
+    /// Benchmark the TASM code for a Triton program, and write the result to
     /// disk.
-    pub fn bench_consensus_program<CP: ConsensusProgram>(
+    pub fn bench_triton_program<CP: TritonProgram>(
         cp: CP,
         input: &PublicInput,
         nondeterminism: NonDeterminism,
@@ -63,7 +63,7 @@ mod transaction {
     }
 
     /// Generate a profile report for the program and store it to disk.
-    fn profile_consensus_program<CP: ConsensusProgram>(
+    fn profile_consensus_program<CP: TritonProgram>(
         cp: CP,
         input: &PublicInput,
         nondeterminism: NonDeterminism,
@@ -88,14 +88,14 @@ mod transaction {
             .expect("cannot write to file");
     }
 
-    fn bench_and_profile_consensus_program<CP: ConsensusProgram + Clone>(
+    fn bench_and_profile_consensus_program<CP: TritonProgram + Clone>(
         cp: CP,
         input: &PublicInput,
         nondeterminism: NonDeterminism,
         name: &str,
         case: BenchmarkCase,
     ) {
-        bench_consensus_program(cp.clone(), input, nondeterminism.clone(), name, case);
+        bench_triton_program(cp.clone(), input, nondeterminism.clone(), name, case);
         profile_consensus_program(cp, input, nondeterminism, name);
     }
 

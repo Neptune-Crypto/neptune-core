@@ -29,7 +29,7 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::verifier::verify;
 
 /// Verifies that all claims listed in the appendix are true.
@@ -65,7 +65,7 @@ impl BlockProgram {
     }
 }
 
-impl ConsensusProgram for BlockProgram {
+impl TritonProgram for BlockProgram {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         // restrict proof size to avoid jumping backwards or to arbitrary
         // place in memory.
@@ -356,7 +356,7 @@ pub(crate) mod tests {
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::builtins::verify_stark;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::protocol::proof_abstractions::SecretWitness;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
@@ -367,7 +367,7 @@ pub(crate) mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::GlobalStateLock;
 
-    impl ConsensusProgramSpecification for BlockProgram {
+    impl TritonProgramSpecification for BlockProgram {
         fn source(&self) {
             let block_body_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
             let start_address: BFieldElement =
