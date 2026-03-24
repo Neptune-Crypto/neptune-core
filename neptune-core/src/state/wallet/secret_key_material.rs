@@ -167,12 +167,12 @@ impl SecretKeyMaterial {
     /// Convert the secret key material into a BIP-39 phrase consisting of 18
     /// words (for 192 bits of entropy).
     pub fn to_phrase(&self) -> Vec<String> {
-        let entropy = self
+        let entropy: Vec<_> = self
             .0
             .coefficients
             .iter()
             .flat_map(|bfe| bfe.value().to_le_bytes())
-            .collect_vec();
+            .collect();
         assert_eq!(
             entropy.len(),
             24,
