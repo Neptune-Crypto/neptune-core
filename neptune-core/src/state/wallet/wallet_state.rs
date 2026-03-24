@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use itertools::Itertools;
-use serde_derive::Deserialize;
-use serde_derive::Serialize;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;

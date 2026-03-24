@@ -8,8 +8,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use serde_derive::Deserialize;
-use serde_derive::Serialize;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Manages a persistent blacklist of IP addresses to enforce network-level
 /// bans.

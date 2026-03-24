@@ -220,7 +220,7 @@ impl TransactionKernel {
     }
 }
 
-#[derive(VariantArray, Debug, Clone, EnumCount, Copy, strum_macros::Display)]
+#[derive(VariantArray, Debug, Clone, EnumCount, Copy, strum::Display)]
 #[strum(serialize_all = "snake_case")]
 pub enum TransactionKernelField {
     Inputs,

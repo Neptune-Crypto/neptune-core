@@ -16,7 +16,7 @@ use arbitrary::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
-use serde_derive::Serialize;
+use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::structure::tasm_object::TasmObject;

@@ -2,8 +2,8 @@
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
-use serde_derive::Deserialize;
-use serde_derive::Serialize;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use thiserror::Error;

@@ -23,7 +23,7 @@ pub const RPC_API_VERSION: u16 = 1;
     Serialize,
     Deserialize,
     strum::EnumString,
-    strum_macros::Display,
+    strum::Display,
 )]
 #[serde(rename_all = "camelCase")]
 #[strum(ascii_case_insensitive, serialize_all = "camelCase")]
@@ -48,17 +48,7 @@ pub enum Namespace {
 }
 
 #[derive(
-    Router,
-    Routes,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    strum_macros::Display,
+    Router, Routes, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum::Display,
 )]
 #[serde(rename_all = "camelCase")]
 #[strum(serialize_all = "camelCase")]

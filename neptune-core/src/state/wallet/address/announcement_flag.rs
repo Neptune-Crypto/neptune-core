@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
+use serde::Deserialize;
 use serde::Serialize;
-use serde_derive::Deserialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::api::export::Announcement;

@@ -2,7 +2,6 @@ use anyhow::bail;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
-use strum_macros::EnumString;
 use tasm_lib::triton_vm::prelude::Digest;
 use tracing::warn;
 
@@ -19,7 +18,7 @@ use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, strum::EnumString)]
 #[strum(serialize_all = "snake_case", ascii_case_insensitive)]
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[repr(u8)]

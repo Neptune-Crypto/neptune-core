@@ -1,5 +1,3 @@
-use strum_macros::EnumIter;
-
 use crate::api::export::BlockHeight;
 use crate::api::export::Network;
 use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
@@ -31,7 +29,7 @@ pub const BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET: BlockHeight =
 /// Consensus logic not captured by this encapsulation lives on
 /// [`Transaction::is_valid`][super::transaction::Transaction::is_valid] and
 /// ultimately [`Block::is_valid`][super::block::Block::is_valid].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Default, strum_macros::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter, Default, strum::Display)]
 pub enum ConsensusRuleSet {
     Reboot,
     HardforkAlpha,
@@ -39,7 +37,7 @@ pub enum ConsensusRuleSet {
     TvmProofVersion1,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum_macros::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum TritonProofVersion {
     V0,
     V1,
