@@ -470,7 +470,7 @@ mod tests {
     #[ignore = "cannot run in parallel with other tests"]
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn can_resume_block_download_from_saved_state() {
+    async fn can_resume_block_download_from_saved_incomplete_state() {
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
         let low = 100;
@@ -528,6 +528,54 @@ mod tests {
             "missing blocks: {}",
             rapid_block_download_b.coverage.sample(rng.random())
         );
+
+        // clean up
+        let _ = rapid_block_download_b.clean_up().await;
+    }
+
+    /// Test that the RapidBlockDownload can resume from a directory of saved
+    /// blocks that spans a larger distance than the one we are syncing to.
+    ///
+    /// This unit test triggers edge cases that are possible but very unlikely
+    /// to occur benignly in practice. For instance, if you sync from server A,
+    /// abort the sync, reconnect, and then sync from server B which itself is
+    /// not fully synced yet. In this case you will end up using B's tip as the
+    /// sync anchor, but there may be descendants of this tip in the sync dir.
+    #[ignore = "cannot run in parallel with other tests"]
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_resume_block_download_from_saved_overcomplete_state() {
+        let mut rng = rng();
+        let mut tip = rng.random::<Block>();
+        let low = 100;
+        let first_high = 250;
+        let second_high = 200;
+        tip.set_header_height(first_high.into());
+
+        let mut rapid_block_download_a =
+            RapidBlockDownload::new(BlockHeight::from(first_high), false, None)
+                .await
+                .unwrap();
+        rapid_block_download_a.fast_forward(BlockHeight::from(low));
+
+        // receive all the blocks in random order
+        for i in low..first_high {
+            let mut block = rng.random::<Block>();
+            let height = BlockHeight::from(i);
+            block.set_header_height(height);
+            let _ = rapid_block_download_a.receive_block(&block).await;
+        }
+
+        // setup new rapid block download state
+        let mut rapid_block_download_b =
+            RapidBlockDownload::new(BlockHeight::from(second_high), true, None)
+                .await
+                .unwrap();
+        rapid_block_download_b.fast_forward(BlockHeight::from(low));
+        assert!(rapid_block_download_b.is_complete());
+
+        // verify that we are finished
+        assert!(rapid_block_download_b.is_complete(),);
 
         // clean up
         let _ = rapid_block_download_b.clean_up().await;
