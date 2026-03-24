@@ -340,6 +340,8 @@ impl SynchronizationBitMask {
     /// Sample an index between lower and upper bounds with the given value. Do
     /// this many times.
     ///
+    /// The distribution is not uniform but biased towards the lower bound.
+    ///
     /// # Panics
     ///
     ///  - If lower bound >= upper bound.
@@ -349,7 +351,13 @@ impl SynchronizationBitMask {
         let mut elements = vec![];
         let mut num_misses = 0;
         while elements.len() != N {
-            let index = rng.random_range(self.lower_bound..self.upper_bound);
+            let index = if rng.random_bool(0.5f64) {
+                rng.random_range(
+                    self.lower_bound..u64::min(self.upper_bound, self.lower_bound + 10),
+                )
+            } else {
+                rng.random_range(self.lower_bound..self.upper_bound)
+            };
             if !self.contains(index) {
                 elements.push(index);
             } else {
