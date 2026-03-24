@@ -252,6 +252,7 @@ impl VerticalRectifier {
     pub fn remaining(&mut self) -> Rect {
         let mut rect = self.container;
         rect.y = self.inner_y;
+        rect.height = self.container.height - self.inner_y;
         self.inner_y = self.container.height;
         rect
     }

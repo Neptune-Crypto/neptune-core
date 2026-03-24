@@ -14,6 +14,7 @@ use neptune_cash::application::rpc::auth;
 use neptune_cash::protocol::peer::peer_info::PeerInfo;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
+use ratatui::layout::Offset;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -325,10 +326,15 @@ impl Widget for PeersScreen {
             .style(style)
             .render(area, buf);
 
-        let inner = area.inner(Margin {
-            vertical: 2,
-            horizontal: 2,
-        });
+        let inner = area
+            .offset(Offset {
+                y: 2, // apply a margin of 2 rows only at the top
+                x: 0,
+            })
+            .inner(Margin {
+                vertical: 0,
+                horizontal: 2,
+            });
 
         let mut vrecter = VerticalRectifier::new(inner);
         let peer_count_rect = vrecter.next((5).try_into().unwrap());
@@ -536,7 +542,6 @@ impl Widget for PeersScreen {
         ));
 
         let mut table_rect = vrecter.remaining();
-        table_rect.height -= 2; // shouldn't be necessary???
 
         table_rect.width = min(
             table_rect.width,
