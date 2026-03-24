@@ -90,8 +90,12 @@ impl RapidBlockDownload {
                     entry.path().to_string_lossy()
                 );
             }) {
-                coverage.set(block.header().height.value());
-                index_to_filename.insert(block.header().height.value(), entry.path());
+                let height = block.header().height.value();
+                if height >= coverage.upper_bound {
+                    coverage = coverage.expand(height + 1);
+                }
+                coverage.set(height);
+                index_to_filename.insert(height, entry.path());
                 number_blocks_recovered += 1;
             }
         }
