@@ -711,7 +711,7 @@ mod tests {
         #[strategy(arb())] old_timestamp: Timestamp,
         #[strategy(Timestamp::arbitrary_after(#old_timestamp))] new_timestamp: Timestamp,
         #[strategy(arb())] old_difficulty: Difficulty,
-        #[strategy(Timestamp::arbitrary_between(Timestamp::seconds(0), Timestamp::days(1)))]
+        #[strategy(Timestamp::arbitrary_between(Timestamp::millis(1), Timestamp::days(1)))]
         target_block_interval: Timestamp,
         #[strategy(arb())] previous_block_height: BlockHeight,
     ) {
