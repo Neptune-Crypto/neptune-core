@@ -47,9 +47,6 @@ pub mod coinbase_output_readable;
 pub mod mempool_transaction_info;
 pub mod overview_data;
 pub mod proof_of_work_puzzle;
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests;
 pub mod ui_utxo;
 
 use std::collections::HashMap;
@@ -101,7 +98,7 @@ use crate::application::rpc::server::overview_data::OverviewData;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::application::rpc::server::ui_utxo::UiUtxo;
 use crate::application::rpc::server::ui_utxo::UtxoStatusEvent;
-use crate::application::util_proof::sent;
+use crate::util_types::sent;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::protocol::consensus::block::block_header::BlockHeader;
@@ -4713,7 +4710,7 @@ impl RPC for NeptuneRPCServer {
         drop(gs_lock);
         tracing::trace!["Unlocked reading the global state. Computed the membership proof."];
 
-        let sent = crate::application::util_proof::ProofOfTransfer::new(
+        let sent = crate::util_types::ProofOfTransfer::new(
             sent::claim_outputs(
                 sent::claim_inputs(
                     tasm_lib::triton_vm::proof::Claim::new(sent::hash()),
