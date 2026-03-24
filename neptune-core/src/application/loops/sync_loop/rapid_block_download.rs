@@ -371,7 +371,7 @@ pub(crate) enum RapidBlockDownloadError {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use rand::rng;
@@ -474,7 +474,7 @@ pub mod tests {
     #[ignore = "cannot run in parallel with other tests"]
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
-    pub(crate) async fn can_resume_block_download_from_saved_incomplete_state() {
+    async fn can_resume_block_download_from_saved_incomplete_state() {
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
         let low = 100;
@@ -548,7 +548,7 @@ pub mod tests {
     #[ignore = "cannot run in parallel with other tests"]
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
-    pub(crate) async fn can_resume_block_download_from_saved_overcomplete_state() {
+    async fn can_resume_block_download_from_saved_overcomplete_state() {
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
         let low = 100;
