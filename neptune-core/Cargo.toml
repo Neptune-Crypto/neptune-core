@@ -109,7 +109,7 @@ tarpc = { version = "^0.34", features = [
 ] }
 tasm-lib = "2.0.0"
 tiny-bip39 = "1.0"
-tokio = { version = "1.41", features = ["full", "tracing"] }
+tokio = { version = "1.47", features = ["fs", "io-util", "macros", "process", "signal", "sync", "time", "tracing"] }
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
 tokio-util = { version = "0.7", features = ["codec", "rt", "compat"] }
 tracing = "0.1"

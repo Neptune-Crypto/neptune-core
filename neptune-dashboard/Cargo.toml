@@ -32,7 +32,7 @@ tarpc = { version = "^0.34", features = [
     "serde-transport-json",
     "tcp",
 ] }
-tokio = { version = "1.41", features = ["full", "tracing"] }
+tokio = { version = "1.47", features = ["fs", "io-util", "sync", "macros", "time", "tracing"] }
 ratatui = "0.30"
 itertools = "0.14"
 num-traits = "0.2"
