@@ -207,8 +207,8 @@ mod tests {
 
     use super::*;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
+    use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
 
     impl TritonProgramSpecification for CollectLockScripts {
         fn source(&self) {

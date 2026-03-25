@@ -25,14 +25,14 @@ thread_local! {
     pub(super) static PROGRAM_DIGEST: RefCell<Digest> = RefCell::new(Digest::default());
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "spec"))]
 pub(crate) fn audit_end_state() {
     assert!(ND_DIGESTS.with_borrow(|f| f.is_empty()));
     assert!(PUB_INPUT.with_borrow(|f| f.is_empty()));
     assert!(ND_INDIVIDUAL_TOKEN.with_borrow(|f| f.is_empty()));
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "spec"))]
 pub(crate) fn init(
     program_digest: Digest,
     input: &[BFieldElement],
