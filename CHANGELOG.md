@@ -1,3 +1,71 @@
+## [0.8.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.7.0..v0.8.0) - 2026-03-25
+
+### ✨ Features
+
+- *(sync)* Add `--sync-dir` to override sync block storage location ([34fb2b31](https://github.com/Neptune-Crypto/neptune-core/commit/34fb2b31))
+- *(json_rpc)* Better error messages in HTTP client ([6b999dca](https://github.com/Neptune-Crypto/neptune-core/commit/6b999dca))
+- *(dashboard)* Add tip mining time information to dashboard ([#885](https://github.com/Neptune-Crypto/neptune-core/issues/885)) ([7489f4fe](https://github.com/Neptune-Crypto/neptune-core/commit/7489f4fe))
+
+### 🐛 Bug Fixes
+
+- *(wallet)* Sleep before making backup on migration ([c817affd](https://github.com/Neptune-Crypto/neptune-core/commit/c817affd))
+- *(CHANGELOG.md)* Delete double-entry for v0.6.1 ([f006fb90](https://github.com/Neptune-Crypto/neptune-core/commit/f006fb90))
+- *(json_rpc)* Make Rpc block hash agree with block hash ([299e9841](https://github.com/Neptune-Crypto/neptune-core/commit/299e9841))
+
+### 🚀 Performance
+
+- *(set_new_tip)* Don't load parent block unless necessary ([4a6bcfcf](https://github.com/Neptune-Crypto/neptune-core/commit/4a6bcfcf))
+- *(json_rpc)* Wallet::get_blocks ([914cf0c7](https://github.com/Neptune-Crypto/neptune-core/commit/914cf0c7))
+
+### 📚 Documentation
+
+- Bump RPC API version ([1bf82a23](https://github.com/Neptune-Crypto/neptune-core/commit/1bf82a23))
+
+### ♻️ Refactor
+
+- *(LightState)* Store mutator set accumulator after ([cf6d3404](https://github.com/Neptune-Crypto/neptune-core/commit/cf6d3404))
+- Make things `pub` for downstream VXB wallet ([eb477547](https://github.com/Neptune-Crypto/neptune-core/commit/eb477547))
+- *(json_rpc)* Increase max body size beyond 2MB ([6f2b1dda](https://github.com/Neptune-Crypto/neptune-core/commit/6f2b1dda))
+
+### ✅ Testing
+
+- Avoid sampling target block interval of 0 ([61e621f8](https://github.com/Neptune-Crypto/neptune-core/commit/61e621f8))
+
+### 🎨 Styling
+
+- Avoid collect_vec failing in IDE ([b2f527aa](https://github.com/Neptune-Crypto/neptune-core/commit/b2f527aa))
+- Rename "consensus program" to "triton program" ([66ce82c7](https://github.com/Neptune-Crypto/neptune-core/commit/66ce82c7))
+
+### ⚙️ Miscellaneous
+
+- Fix red CI in PRs from forks ([700e88da](https://github.com/Neptune-Crypto/neptune-core/commit/700e88da))
+- Validate changelog ([928b4939](https://github.com/Neptune-Crypto/neptune-core/commit/928b4939))
+- Make 1.96 linter happy ([d923aedf](https://github.com/Neptune-Crypto/neptune-core/commit/d923aedf))
+- *(json_rpc)* Make some data structures `Copy` ([bd62b6ce](https://github.com/Neptune-Crypto/neptune-core/commit/bd62b6ce))
+- Skip installation of clang in build without Cargo.lock ([57a3b77f](https://github.com/Neptune-Crypto/neptune-core/commit/57a3b77f))
+- Share build cache in `main` job ([fb286312](https://github.com/Neptune-Crypto/neptune-core/commit/fb286312))
+- Cargo update ([f61f61e2](https://github.com/Neptune-Crypto/neptune-core/commit/f61f61e2))
+- Remove unused dependencies ([422fa445](https://github.com/Neptune-Crypto/neptune-core/commit/422fa445))
+
+### 🪵 Log
+
+- Add info to logs on error event ([e604f04b](https://github.com/Neptune-Crypto/neptune-core/commit/e604f04b))
+- Make error messages noisier ([632c2f5f](https://github.com/Neptune-Crypto/neptune-core/commit/632c2f5f))
+
+### 🚥 Developer Experience
+
+- Faster CI failures & runs ([73a519ed](https://github.com/Neptune-Crypto/neptune-core/commit/73a519ed))
+- More faster builds ([431b9254](https://github.com/Neptune-Crypto/neptune-core/commit/431b9254))
+- Disable `collapsible-match` clippy rule ([93ffd4e1](https://github.com/Neptune-Crypto/neptune-core/commit/93ffd4e1))
+- Cleaner tokio dependency ([874b350e](https://github.com/Neptune-Crypto/neptune-core/commit/874b350e))
+- Don't run the 'Release' workflow in PRs, as it fails for forks regardless, because it requires secrets ([23a3b509](https://github.com/Neptune-Crypto/neptune-core/commit/23a3b509))
+- Verify *all* proof servers work ([69a61603](https://github.com/Neptune-Crypto/neptune-core/commit/69a61603))
+
+### 🪢 Merge
+
+- Merge([#690](https://github.com/Neptune-Crypto/neptune-core/issues/690)): Add granularity to `MainToMinerChannel::send` ([fc318527](https://github.com/Neptune-Crypto/neptune-core/commit/fc318527))
+- Merge([#857](https://github.com/Neptune-Crypto/neptune-core/issues/857)): Fix incorrectly rendered table in peer screen ([7fc853af](https://github.com/Neptune-Crypto/neptune-core/commit/7fc853af))
+- Merge([#892](https://github.com/Neptune-Crypto/neptune-core/issues/892)): Sync Loop Fixes ([c111ee77](https://github.com/Neptune-Crypto/neptune-core/commit/c111ee77))
 
 ## [0.7.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.6.1..v0.7.0) - 2026-03-10
 
