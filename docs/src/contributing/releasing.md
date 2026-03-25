@@ -62,6 +62,9 @@ At the time of writing, you need to bump the versions in these files:
  - `neptune-rpc/client/Cargo.toml`
  - `neptune-rpc/macros/Cargo.toml`
 
+The `RPC_API_VERSION` constant needs to be bumped whenever there are *breaking* changes to the JSON RPC interface. That, however, is the responsibility of the
+JSON RPC developers and not of the releaser.
+
 
 ### Confirm Version Bump as Semantic
 
