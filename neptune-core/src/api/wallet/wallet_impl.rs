@@ -8,6 +8,7 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::address::SpendingKey;
+use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::GlobalState;
 use crate::state::StateLock;
 use crate::GlobalStateLock;
@@ -166,6 +167,25 @@ impl<'a> Wallet<'a> {
     pub async fn num_expected_utxos(&self) -> u64 {
         state_lock_call_async!(&self.state_lock, worker::num_expected_utxos, ()).await
     }
+
+    /// Gets the output of a sent transaction by its indices in the wallet.
+    ///
+    /// # Panics.
+    /// The implementation detail is when `tx_ix` is out of its bound it crashes the node until
+    /// <https://github.com/Neptune-Crypto/neptune-core/issues/816> is done.
+    pub async fn sentoutput_by_indicies(
+        &self,
+        tx_ix: u64,
+        utxo_ix: usize,
+    ) -> Result<TxOutput, WalletError> {
+        state_lock_call_async!(
+            &self.state_lock,
+            worker::sentoutput_by_indicies,
+            tx_ix,
+            utxo_ix
+        )
+        .await
+    }
 }
 
 mod worker {
@@ -190,5 +210,23 @@ mod worker {
 
     pub(super) async fn num_expected_utxos(gs: &GlobalState, _: ()) -> u64 {
         gs.wallet_state.num_expected_utxos().await
+    }
+
+    pub async fn sentoutput_by_indicies(
+        gs: &GlobalState,
+        tx_ix: u64,
+        utxo_ix: usize,
+    ) -> Result<TxOutput, WalletError> {
+        let tx_sent =
+            crate::application::database::storage::storage_vec::traits::StorageVecBase::get(
+                gs.wallet_state.wallet_db.sent_transactions(),
+                tx_ix,
+            )
+            .await;
+        tx_sent
+            .tx_outputs
+            .get(utxo_ix)
+            .ok_or_else(|| WalletError::Failed("sent tx output index is out of bounds".to_string()))
+            .cloned()
     }
 }
