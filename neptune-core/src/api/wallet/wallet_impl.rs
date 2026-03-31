@@ -212,7 +212,7 @@ mod worker {
         gs.wallet_state.num_expected_utxos().await
     }
 
-    pub async fn sentoutput_by_indicies(
+    pub(super) async fn sentoutput_by_indicies(
         gs: &GlobalState,
         tx_ix: u64,
         utxo_ix: usize,
