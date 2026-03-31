@@ -948,7 +948,7 @@ impl NetworkActor {
                     self.active_connections.remove(&peer_id);
                     tracing::debug!("Connection to peer {peer_id} closed.",);
                 } else {
-                    tracing::warn!(closed_abruptly = %peer_id, "Connection closed abruptly: {:?}", cause);
+                    tracing::warn!(target: "net::abrupt_closure", peer = %peer_id, "Connection closed abruptly: {:?}", cause);
                     // Do nothing: nothing to remove.
                 }
             }

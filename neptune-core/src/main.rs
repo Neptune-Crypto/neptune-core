@@ -82,6 +82,13 @@ fn set_up_logger() {
         .unwrap();
     let bounce_only = Targets::new().with_target("net::bounce", LevelFilter::WARN);
 
+    // Throttle abrupt closure messages to no more than 1 per 20s per peer.
+    let abrupt_closure_throttle = TracingRateLimitLayer::builder()
+        .with_policy(Policy::token_bucket(1.0, 0.05).unwrap())
+        .build()
+        .unwrap();
+    let abrupt_closure_only = Targets::new().with_target("net::abrupt_closure", LevelFilter::WARN);
+
     tracing_subscriber::registry()
         .with(env_filter)
         .with(
@@ -93,11 +100,19 @@ fn set_up_logger() {
                 .with_filter(bounce_throttle),
         )
         .with(
+            // Abrupt closure layer: throttle ALL warn! events that reach it
+            tracing_subscriber::fmt::layer()
+                .with_timer(UtcTime::rfc_3339())
+                .with_thread_ids(true)
+                .with_filter(abrupt_closure_only)
+                .with_filter(abrupt_closure_throttle),
+        )
+        .with(
             // Regular layer: everything except bounce target
             tracing_subscriber::fmt::layer()
                 .with_timer(UtcTime::rfc_3339())
                 .with_thread_ids(true)
-                .with_filter(EnvFilter::new("net::bounce=off")),
+                .with_filter(EnvFilter::new("net::bounce=off,net::abrupt_closure=off")),
         )
         .init();
 }
