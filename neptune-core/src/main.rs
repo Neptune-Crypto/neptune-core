@@ -76,11 +76,11 @@ fn set_up_logger() {
         .add_directive("libp2p_ping=off".parse().unwrap())
         .add_directive("libp2p_kad=warn".parse().unwrap());
 
+    // Throttle bounce messages to no more than 1 per 20s per connection.
     let bounce_throttle = TracingRateLimitLayer::builder()
-        .with_policy(Policy::token_bucket(1.0, 0.2).unwrap()) // 1 per 5s
+        .with_policy(Policy::token_bucket(1.0, 0.05).unwrap())
         .build()
         .unwrap();
-
     let bounce_only = Targets::new().with_target("net::bounce", LevelFilter::WARN);
 
     tracing_subscriber::registry()
