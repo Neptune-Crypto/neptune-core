@@ -10,7 +10,6 @@ use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::FmtSubscriber;
 use tracing_subscriber::Layer;
 use tracing_throttle::Policy;
 use tracing_throttle::TracingRateLimitLayer;
@@ -90,6 +89,7 @@ fn set_up_logger() {
             tracing_subscriber::fmt::layer()
                 .with_timer(UtcTime::rfc_3339())
                 .with_thread_ids(true)
+                .with_filter(bounce_only)
                 .with_filter(bounce_throttle),
         )
         .with(
