@@ -917,7 +917,11 @@ impl NetworkActor {
                 send_back_addr,
             } => {
                 if let Some(reason) = self.should_bounce(&send_back_addr) {
-                    tracing::warn!(target: "net::bounce", bouncee = %send_back_addr, "Bouncing incoming connection from {send_back_addr} because {reason}.");
+                    if reason == BounceReason::MaxReached {
+                        tracing::trace!(target: "net::bounce", bouncee = %send_back_addr, "Bouncing incoming connection from {send_back_addr} because {reason}.");
+                    } else {
+                        tracing::warn!(target: "net::bounce", bouncee = %send_back_addr, "Bouncing incoming connection from {send_back_addr} because {reason}.");
+                    }
 
                     // Signal the swarm to drop this connection
                     // immediately to prevent Identify/Kademlia from
@@ -948,7 +952,11 @@ impl NetworkActor {
                     self.active_connections.remove(&peer_id);
                     tracing::debug!("Connection to peer {peer_id} closed.",);
                 } else {
-                    tracing::warn!(target: "net::abrupt_closure", peer = %peer_id, "Connection closed abruptly: {:?}", cause);
+                    // A bounced connection because of max number of peers being
+                    // reached triggers this event. We already log the bounce
+                    // events. The reason we still log something here is because
+                    // we cannot rule out triggers for this event.
+                    tracing::trace!(target: "net::abrupt_closure", "Connection to {peer_id} closed abruptly: {:?}", cause);
                     // Do nothing: nothing to remove.
                 }
             }
@@ -980,7 +988,11 @@ impl NetworkActor {
                 // dials (as happens in Kademlia), it is possible for banned
                 // connections to get to this stage.
                 if let Some(reason) = self.should_bounce(&address) {
-                    tracing::warn!(target: "net::bounce", bouncee = %address, "Bouncing established connection to {address} because {reason}.");
+                    if reason == BounceReason::MaxReached {
+                        tracing::trace!(target: "net::bounce", bouncee = %address,  "Bouncing established connection to {address} because {reason}.");
+                    } else {
+                        tracing::warn!(target: "net::bounce", bouncee = %address, "Bouncing established connection to {address} because {reason}.");
+                    }
                     self.swarm.close_connection(connection_id);
                     return Ok(());
                 }

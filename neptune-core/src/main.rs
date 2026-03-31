@@ -97,7 +97,7 @@ fn set_up_logger() {
     let abrupt_closure_layer = tracing_subscriber::fmt::layer()
         .with_timer(UtcTime::rfc_3339())
         .with_thread_ids(true)
-        .with_filter(Targets::new().with_target("net::abrupt_closure", LevelFilter::WARN))
+        .with_filter(Targets::new().with_target("net::abrupt_closure", LevelFilter::TRACE))
         .with_filter(abrupt_closure_throttle);
 
     // Let everything not filtered through
