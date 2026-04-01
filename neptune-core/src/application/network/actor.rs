@@ -27,6 +27,7 @@ use crate::application::loops::peer_loop::PeerLoopHandler;
 use crate::application::network::address_book::AddressBook;
 use crate::application::network::address_book::ADDRESS_BOOK_MAX_SIZE;
 use crate::application::network::ban::BlackList;
+use crate::application::network::bounce_reason::BounceReason;
 use crate::application::network::bridge::bridge_libp2p_stream;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
@@ -915,8 +916,12 @@ impl NetworkActor {
                 local_addr: _,
                 send_back_addr,
             } => {
-                if self.bounce(&send_back_addr) {
-                    tracing::warn!(%send_back_addr, %connection_id, "Bouncing incoming connection.");
+                if let Some(reason) = self.should_bounce(&send_back_addr) {
+                    if reason == BounceReason::MaxReached {
+                        tracing::trace!(target: "net::bounce", bouncee = %send_back_addr, "Bouncing incoming connection from {send_back_addr} because {reason}.");
+                    } else {
+                        tracing::warn!(target: "net::bounce", bouncee = %send_back_addr, "Bouncing incoming connection from {send_back_addr} because {reason}.");
+                    }
 
                     // Signal the swarm to drop this connection
                     // immediately to prevent Identify/Kademlia from
@@ -947,7 +952,11 @@ impl NetworkActor {
                     self.active_connections.remove(&peer_id);
                     tracing::debug!("Connection to peer {peer_id} closed.",);
                 } else {
-                    tracing::warn!(peer = %peer_id, "Connection closed abruptly: {:?}", cause);
+                    // A bounced connection because of max number of peers being
+                    // reached triggers this event. We already log the bounce
+                    // events. The reason we still log something here is because
+                    // we cannot rule out triggers for this event.
+                    tracing::trace!(target: "net::abrupt_closure", "Connection to {peer_id} closed abruptly: {:?}", cause);
                     // Do nothing: nothing to remove.
                 }
             }
@@ -978,8 +987,12 @@ impl NetworkActor {
                 // race conditions, masked addresses, and automatic outgoing
                 // dials (as happens in Kademlia), it is possible for banned
                 // connections to get to this stage.
-                if self.bounce(&address) {
-                    tracing::warn!(%address, %connection_id, "Bouncing established connection.");
+                if let Some(reason) = self.should_bounce(&address) {
+                    if reason == BounceReason::MaxReached {
+                        tracing::trace!(target: "net::bounce", bouncee = %address,  "Bouncing established connection to {address} because {reason}.");
+                    } else {
+                        tracing::warn!(target: "net::bounce", bouncee = %address, "Bouncing established connection to {address} because {reason}.");
+                    }
                     self.swarm.close_connection(connection_id);
                     return Ok(());
                 }
@@ -1031,11 +1044,14 @@ impl NetworkActor {
         Ok(())
     }
 
-    /// Check if a connection to the given address should be allowed.
-    fn bounce(&self, address: &Multiaddr) -> bool {
+    /// Check if a connection to the given address should be disallowed.
+    ///
+    /// Return Some(reason) with reason: BounceReason if the connection should
+    /// be bounced; and None otherwise.
+    fn should_bounce(&self, address: &Multiaddr) -> Option<BounceReason> {
         if self.active_connections.len() >= self.max_num_peers {
             tracing::debug!("Max active connections reached");
-            return true;
+            return Some(BounceReason::MaxReached);
         }
         if let Some(ip) = address.iter().find_map(|protocol| match protocol {
             libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
@@ -1044,20 +1060,20 @@ impl NetworkActor {
         }) {
             if self.black_list.is_banned(&ip) {
                 tracing::debug!("IP is banned");
-                return true;
+                return Some(BounceReason::Banned);
             }
         } else if address
             .iter()
             .all(|proto| matches!(proto, libp2p::multiaddr::Protocol::P2p(_)))
         {
             // Accept incoming connections via single-hop circuits.
-            return false;
+            return None;
         } else {
             tracing::debug!("No IP address and not bare p2p");
-            return true;
+            return Some(BounceReason::UnsupportedAddressFormat);
         }
 
-        false
+        None
     }
 
     /// Handles Identify protocol events to synchronize protocol versions and

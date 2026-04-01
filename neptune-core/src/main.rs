@@ -5,8 +5,14 @@ use clap::Parser;
 use neptune_cash::application::config::cli_args;
 use neptune_cash::display_banner;
 use tracing::level_filters::LevelFilter;
+use tracing_subscriber::filter::Targets;
+use tracing_subscriber::fmt::time::UtcTime;
+use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::Layer;
+use tracing_throttle::Policy;
+use tracing_throttle::TracingRateLimitLayer;
 
 pub fn main() -> Result<()> {
     display_banner();
@@ -61,19 +67,54 @@ pub fn main() -> Result<()> {
 fn set_up_logger() {
     // Use the log level set by the environment (which defaults to INFO) for
     // messages logged in this crate. In upstream crates, hardcode it.
-    let info_env_filter = EnvFilter::builder()
+    let env_filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
         .from_env_lossy()
         .add_directive("tarpc=warn".parse().unwrap())
         .add_directive("libp2p=error".parse().unwrap())
         .add_directive("libp2p_ping=off".parse().unwrap())
-        .add_directive("libp2p_kad=warn".parse().unwrap());
-    let subscriber = FmtSubscriber::builder()
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_env_filter(info_env_filter)
+        .add_directive("libp2p_kad=warn".parse().unwrap())
+        .add_directive("quinn_udp=trace".parse().unwrap());
+
+    // Throttle bounce messages to no more than 1 per 20s per connection.
+    let bounce_throttle = TracingRateLimitLayer::builder()
+        .with_policy(Policy::token_bucket(1.0, 0.05).unwrap())
+        .build()
+        .unwrap();
+
+    let bounce_layer = tracing_subscriber::fmt::layer()
+        .with_timer(UtcTime::rfc_3339())
         .with_thread_ids(true)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .map_err(|_err| eprintln!("Unable to set global default subscriber"))
-        .expect("Failed to set trace subscriber");
+        .with_filter(Targets::new().with_target("net::bounce", LevelFilter::WARN))
+        .with_filter(bounce_throttle);
+
+    // Throttle abrupt closure messages to no more than 1 per 20s per peer.
+    let abrupt_closure_throttle = TracingRateLimitLayer::builder()
+        .with_policy(Policy::token_bucket(1.0, 0.05).unwrap())
+        .build()
+        .unwrap();
+
+    let abrupt_closure_layer = tracing_subscriber::fmt::layer()
+        .with_timer(UtcTime::rfc_3339())
+        .with_thread_ids(true)
+        .with_filter(Targets::new().with_target("net::abrupt_closure", LevelFilter::TRACE))
+        .with_filter(abrupt_closure_throttle);
+
+    // Let everything not filtered through
+    let main_layer = tracing_subscriber::fmt::layer()
+        .with_timer(UtcTime::rfc_3339())
+        .with_thread_ids(true)
+        .with_filter(
+            Targets::new()
+                .with_target("net::bounce", LevelFilter::OFF)
+                .with_target("net::abrupt_closure", LevelFilter::OFF)
+                .with_default(LevelFilter::TRACE),
+        );
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(bounce_layer)
+        .with(abrupt_closure_layer)
+        .with(main_layer)
+        .init();
 }

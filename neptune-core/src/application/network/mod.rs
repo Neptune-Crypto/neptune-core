@@ -12,3 +12,4 @@ pub(crate) mod stack;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod arbitrary;
+pub(crate) mod bounce_reason;
