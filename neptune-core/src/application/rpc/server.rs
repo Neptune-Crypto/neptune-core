@@ -5574,7 +5574,7 @@ mod tests {
             .num_leafs()
             .await;
 
-        debug_assert!(aocl_leaves > 0);
+        assert!(aocl_leaves > 0);
 
         assert!(rpc_server
             .clone()

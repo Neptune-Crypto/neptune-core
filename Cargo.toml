@@ -110,10 +110,7 @@ build-override.opt-level = 3
 [profile.dev]
 build-override.opt-level = 2
 opt-level = 0
-debug = false
 incremental = true
-debug-assertions = false
-overflow-checks = false
 lto = false
 panic = "abort"
 
