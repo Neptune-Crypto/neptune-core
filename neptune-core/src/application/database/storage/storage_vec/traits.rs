@@ -22,6 +22,9 @@ pub trait StorageVecBase<T: Send> {
     // fn len(&self) -> impl Future<Output = Index > + Send;
 
     /// get single element at index
+    ///
+    /// # Panics
+    /// - If index is out-of-bounds.
     async fn get(&self, index: Index) -> T;
 
     /// get multiple elements matching indices
@@ -49,6 +52,9 @@ pub trait StorageVecBase<T: Send> {
     /// set a single element.
     ///
     /// note: The update is performed as a single atomic operation.
+    ///
+    /// # Panics
+    /// - If index is out-of-bounds.
     async fn set(&mut self, index: Index, value: T);
 
     /// set multiple elements.

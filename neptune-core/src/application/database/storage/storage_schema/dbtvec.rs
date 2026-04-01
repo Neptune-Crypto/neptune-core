@@ -48,7 +48,6 @@ where
 
 #[async_trait::async_trait]
 impl<V> StorageVecBase<V> for DbtVec<V>
-// impl<V> DbtVec<V>
 where
     V: Clone + Debug,
     V: Serialize + DeserializeOwned + Send + Sync,
@@ -154,6 +153,7 @@ impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> St
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use futures::FutureExt;
     use macro_rules_attr::apply;
 
     use super::super::SimpleRustyStorage;
@@ -210,6 +210,54 @@ mod tests {
 
         rusty_storage.persist().await;
         assert_eq!(2, vec.len().await);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn panic_on_out_of_bounds_get_and_set() {
+        let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
+            .await
+            .unwrap();
+        let mut rusty_storage = SimpleRustyStorage::new(db);
+        let mut vec = rusty_storage.schema.new_vec::<u64>("test-vector").await;
+
+        let empty_list_out_of_bounds = std::panic::AssertUnwindSafe(async {
+            vec.get(0).await;
+        })
+        .catch_unwind()
+        .await;
+
+        assert!(empty_list_out_of_bounds.is_err());
+
+        vec.push(44).await;
+        rusty_storage.persist().await;
+
+        // Persisted length is now 1, and stays 1.
+        assert_eq!(1, vec.inner.persisted_length().await.unwrap());
+        assert_eq!(1, vec.len().await);
+
+        vec.pop().await.unwrap();
+        assert_eq!(1, vec.inner.persisted_length().await.unwrap());
+        assert_eq!(0, vec.len().await);
+        let get_empty_list_unpersisted = std::panic::AssertUnwindSafe(async {
+            vec.get(0).await;
+        })
+        .catch_unwind()
+        .await;
+        assert!(
+            get_empty_list_unpersisted.is_err(),
+            "get must panic, also when pop is not persisted."
+        );
+
+        // Same for `set`
+        let set_empty_list_unpersisted = std::panic::AssertUnwindSafe(async {
+            vec.set(0, 123).await;
+        })
+        .catch_unwind()
+        .await;
+        assert!(
+            set_empty_list_unpersisted.is_err(),
+            "set must panic, also when pop is not persisted."
+        );
     }
 
     pub mod streams {

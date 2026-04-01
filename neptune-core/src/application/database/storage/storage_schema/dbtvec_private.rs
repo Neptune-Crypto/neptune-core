@@ -45,8 +45,6 @@ where
 impl<V: Clone + Serialize + DeserializeOwned> DbtVecPrivate<V> {
     #[inline]
     pub(super) async fn get(&self, index: Index) -> V {
-        // Disallow getting values out-of-bounds
-
         assert!(
             index < self.len().await,
             "Out-of-bounds. Got {index} but length was {}. persisted vector name: {}",
