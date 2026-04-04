@@ -104,8 +104,17 @@ opt-level = 2                # Set to make execution of tests in this crate fast
 [profile.release]
 build-override.opt-level = 3
 
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
 [profile.bench]
-build-override.opt-level = 3
+# bench inherits from "release" so we don't need to repeat, cf.
+# https://doc.rust-lang.org/cargo/reference/profiles.html#bench
+# Only override what must differ
+# Exception is "panic" values which are always "unwind" in benches.
 
 [profile.dev]
 build-override.opt-level = 2
@@ -117,4 +126,4 @@ panic = "abort"
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
-lto = "thin"
+
