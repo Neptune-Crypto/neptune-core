@@ -282,6 +282,25 @@ pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
 }
 
 impl<const MERKLE_TREE_HEIGHT: usize> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+    /// Return a guesser buffer for non-memory hard guessing. Contains an empty
+    /// Merkle tree since a Merkle tree is not required when the PoW algorithm
+    /// is not memory-hard.
+    fn empty(prev_block_digest: Digest) -> Self {
+        Self {
+            merkle_tree: MTree::default(),
+            prev_block_digest,
+        }
+    }
+
+    /// Returns true if the [Self::merkle_tree] field is required for efficient
+    /// guessing.
+    ///
+    /// True indicates that the PoW algorithm is memory hard, false that it is
+    /// not.
+    fn is_memory_hard(&self) -> bool {
+        !self.merkle_tree.leafs.is_empty()
+    }
+
     /// A commitment that refers to both the Merkle tree of the guesser buffer
     /// and the current proposal being guessed on, designed in such a way that
     /// the Merkle tree root must be known before indices can be picked.
@@ -368,6 +387,10 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         consensus_rule_set: ConsensusRuleSet,
         prev_block_digest: Digest,
     ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+        if !consensus_rule_set.memory_hard_pow() {
+            return GuesserBuffer::empty(prev_block_digest);
+        }
+
         let bud_prefix = if consensus_rule_set == ConsensusRuleSet::Reboot {
             // Commitment to all the fields in the block that are not pow
             mast_auth_paths.commit()
@@ -475,27 +498,36 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         nonce: Digest,
         target: Digest,
     ) -> Option<Self> {
-        let root = buffer.merkle_tree.root();
+        let pow = if buffer.is_memory_hard() {
+            let root = buffer.merkle_tree.root();
 
-        let (index_a, index_b) = Self::indices(index_picker_preimage, nonce);
+            let (index_a, index_b) = Self::indices(index_picker_preimage, nonce);
 
-        let path_a = buffer
-            .merkle_tree
-            .path(index_a as usize)
-            .try_into()
-            .unwrap();
+            let path_a = buffer
+                .merkle_tree
+                .path(index_a as usize)
+                .try_into()
+                .unwrap();
 
-        let path_b = buffer
-            .merkle_tree
-            .path(index_b as usize)
-            .try_into()
-            .unwrap();
+            let path_b = buffer
+                .merkle_tree
+                .path(index_b as usize)
+                .try_into()
+                .unwrap();
 
-        let pow = Pow {
-            nonce,
-            root,
-            path_a,
-            path_b,
+            Pow {
+                nonce,
+                root,
+                path_a,
+                path_b,
+            }
+        } else {
+            Pow {
+                nonce,
+                root: Default::default(),
+                path_a: [Digest::default(); MERKLE_TREE_HEIGHT],
+                path_b: [Digest::default(); MERKLE_TREE_HEIGHT],
+            }
         };
 
         let pow_digest = mast_auth_paths.fast_mast_hash(pow);
@@ -513,10 +545,20 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         consensus_rule_set: ConsensusRuleSet,
         parent_digest: Digest,
     ) -> Result<(), PowValidationError> {
+        let pow_digest = auth_paths.fast_mast_hash(self);
+        let meets_threshold = pow_digest <= target;
         let leaf_prefix = match consensus_rule_set {
             ConsensusRuleSet::Reboot => auth_paths.commit(),
             ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::TvmProofVersion1 => parent_digest,
+            ConsensusRuleSet::NoMemoryHardness => {
+                if !meets_threshold {
+                    return Err(PowValidationError::ThresholdNotMet);
+                }
+
+                return Ok(());
+            }
         };
+
         let index_picker_preimage = Tip5::hash_pair(self.root, auth_paths.commit());
         let (index_a, index_b) = Self::indices(index_picker_preimage, self.nonce);
 
@@ -547,8 +589,6 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             return Err(PowValidationError::PathBInvalid);
         }
 
-        let pow_digest = auth_paths.fast_mast_hash(self);
-        let meets_threshold = pow_digest <= target;
         if !meets_threshold {
             return Err(PowValidationError::ThresholdNotMet);
         }
@@ -615,6 +655,21 @@ pub(crate) mod tests {
         fn leaf(&self, index: usize) -> Digest {
             self.leafs[index]
         }
+    }
+
+    #[test]
+    fn hardfork_no_memory_hardness_is_not_memory_hard() {
+        let mut rng = rng();
+        let auth_paths = rng.random::<PowMastPaths>();
+        let prev_block_digest = rng.random();
+        let buffer = Pow::<10>::preprocess(
+            auth_paths,
+            None,
+            ConsensusRuleSet::NoMemoryHardness,
+            prev_block_digest,
+        );
+
+        assert!(!buffer.is_memory_hard());
     }
 
     #[test]
@@ -721,8 +776,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn happy_path() {
-        const MERKLE_TREE_HEIGHT: usize = 10;
+    fn happy_path_all_consensus_rule_sets() {
+        const MERKLE_TREE_HEIGHT: usize = 8;
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
         let prev_block_digest = rng.random();
@@ -735,7 +790,7 @@ pub(crate) mod tests {
                 prev_block_digest,
             );
 
-            for difficulty in [2_u32, 4] {
+            for difficulty in [2_u32, 8] {
                 let difficulty = Difficulty::from(difficulty);
                 let successful_guess = solve(&buffer, &auth_paths, difficulty);
                 assert!(successful_guess
