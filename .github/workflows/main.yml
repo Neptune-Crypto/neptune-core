@@ -62,7 +62,6 @@ jobs:
       - name: Check Benches
         run: cargo check --benches
 
-      # Nextest uses a filter expression (-E) for skipping tests.
       - name: Run tests without benches
         run: >
           cargo nextest run
@@ -77,6 +76,22 @@ jobs:
             test(can_sync_with_moving) |
             test(verify_all_proof_servers_work)
           )'
+
+      - name: Tests without debug assertions
+        run: >
+          cargo nextest run --release
+          -E '
+             test(panic_on_out_of_bounds_get)
+          or test(panic_on_out_of_bounds_get_many)
+          or test(panic_on_out_of_bounds_set)
+          or test(panic_on_out_of_bounds_set_many)
+          or test(panic_on_size_mismatch_set_all)
+          or test(panic_on_out_of_bounds_get_even_though_value_exists_in_persistent_memory)
+          or test(panic_on_out_of_bounds_set_even_though_value_exists_in_persistent_memory)
+          or test(out_of_bounds_using_set_many)
+          or test(out_of_bounds_using_get_many)
+          or test(out_of_bounds_using_get)
+          or test(panic_on_out_of_bounds_get_and_set)'
 
       - name: Run Ignored Tests
         run: >
