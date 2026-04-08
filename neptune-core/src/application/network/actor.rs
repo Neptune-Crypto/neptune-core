@@ -734,7 +734,7 @@ impl NetworkActor {
                     .count()
                     > 1;
                 if is_multihop {
-                    tracing::warn!(
+                    tracing::trace!(
                         "Rejecting multi-hop listen address {address} because multi-hop."
                     );
                     return Ok(());
