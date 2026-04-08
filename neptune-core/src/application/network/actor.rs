@@ -968,19 +968,22 @@ impl NetworkActor {
                 connection_id,
                 ..
             } => {
-                // Gatekeep: one connection per peer.
-                // We allow the duplicate connection to remain because libp2p
-                // deals with that and we do not want to interfere with that
-                // logic. However, we should avoid repeating our own
-                // state-keeping.
+                let address = endpoint.get_remote_address().clone();
+
+                // Duplicate connection: book-keep address only. All the other
+                // actions that follow should only happen on the first
+                // connection to this peer.
                 if self.active_connections.contains_key(&peer_id) {
+                    self.active_connections.entry(peer_id).and_modify(
+                        |(_timestamp, address_map)| {
+                            address_map.insert(connection_id, address);
+                        },
+                    );
                     tracing::debug!(
-                        "Established duplicate {connection_id} to peer {peer_id}; ignoring.",
+                        "Established duplicate {connection_id} to peer {peer_id}; tracking address.",
                     );
                     return Ok(());
                 }
-
-                let address = endpoint.get_remote_address().clone();
 
                 // Check for banned IPs again. The catch above in
                 // `IncomingConnection` is a good first filter but because of
