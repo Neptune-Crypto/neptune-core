@@ -131,14 +131,14 @@ impl<'a> ProofBuilder<'a> {
         self
     }
 
-    /// generate the proof.
+    /// generate the proof
     ///
     /// if the network uses mock proofs (eg Network::RegTest), this will return
-    /// immediately with a mock [Proof].
+    /// immediately with a mock [Proof]
     ///
-    /// otherwise it will initiate an async job that could take many minutes.
+    /// otherwise it will initiate an `async` job that could take many minutes
     ///
-    /// note that these jobs occur in a global (per process) job queue that only
+    /// Note that these jobs occur in a global (per process) job queue that only
     /// permits one VM job to process at a time.  This prevents parallel jobs
     /// from bringing the machine to its knees when each is using all available
     /// CPU cores and RAM.
@@ -148,28 +148,27 @@ impl<'a> ProofBuilder<'a> {
     ///
     /// One can query the job_queue to determine how many jobs are in the queue.
     ///
-    /// RegTest mode:
-    ///
+    /// # RegTest mode:
     /// mock proofs are used on the regtest network (only) because
     /// they can be generated instantly.
     ///
-    /// External Process:
+    /// # External Process.
     ///
     /// Proofs are generated in the Triton VM. The proof generation occurs in a
     /// separate executable, `triton-vm-prover`, which is spawned by the
     /// job-queue for each proving job.  Only one `triton-vm-prover` process
-    /// should be executing at a time for a given neptune-core instance.
+    /// should be executing at a time for a given `neptune-core` instance.
     ///
     /// If the external process is killed for any reason, the proof-generation job will fail
     /// and this method will return an error.
     ///
-    /// Cancellation:
+    /// # Cancellation.
     ///
     /// See [TritonVmProofJobOptions::cancel_job_rx].
     ///
-    /// note that cancelling the future returned by build() will NOT cancel the
+    /// note that cancelling the future returned by `build()` will NOT cancel the
     /// job in the job-queue, as that runs in a separately spawned tokio task
-    /// managed by the job-queue.
+    /// managed by the job-queue
     pub async fn build(self) -> Result<Proof, CreateProofError> {
         let Self {
             program,
@@ -193,24 +192,25 @@ impl<'a> ProofBuilder<'a> {
 
         // non-determinism cannot reliably be obtained for mock proofs, so
         // we invoke a callback to obtain it here only once certain we are
-        // building a real proof.
+        // building a real proof
         let nondeterminism = nondeterminism_callback();
 
         let proof_type = proof_job_options.job_settings.proof_type;
         let capability = proof_job_options.job_settings.tx_proving_capability;
-        if !capability.can_prove(proof_type) {
-            return Err(CreateProofError::TooWeak {
+        if capability.can_prove(proof_type) {
+            // This builder only supports proofs that can be executed in Triton-vm.
+            if proof_type.executes_in_vm() {
+                let job_queue = job_queue.unwrap_or_else(vm_job_queue);
+
+                prove_triton_program(program, claim, nondeterminism, job_queue, proof_job_options).await
+            } else {
+                Err(CreateProofError::NotVmProof(proof_type))
+            }
+        } else {
+            Err(CreateProofError::TooWeak {
                 proof_type,
                 capability,
-            });
+            })
         }
-        // this builder only supports proofs that can be executed in triton-vm.
-        if !proof_type.executes_in_vm() {
-            return Err(CreateProofError::NotVmProof(proof_type));
-        }
-
-        let job_queue = job_queue.unwrap_or_else(vm_job_queue);
-
-        prove_triton_program(program, claim, nondeterminism, job_queue, proof_job_options).await
     }
 }
