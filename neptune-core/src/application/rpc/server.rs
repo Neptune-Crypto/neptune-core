@@ -2219,13 +2219,15 @@ impl NeptuneRPCServer {
     }
 
     /// Verify a pow solution and send it to main loop if it is valid.
-    async fn pow_solution_inner(&self, mut proposal: Block, pow: BlockPow) -> RpcResult<bool> {
-        // Check if solution works.
-        let latest_block_header = *self.state.lock_guard().await.chain.tip().header();
-
+    async fn pow_solution_inner(
+        &self,
+        mut proposal: Block,
+        pow: BlockPow,
+        tip_header: BlockHeader,
+    ) -> RpcResult<bool> {
         proposal.set_header_pow(pow);
 
-        if !proposal.has_proof_of_work(self.state.cli().network, &latest_block_header) {
+        if !proposal.has_proof_of_work(self.state.cli().network, &tip_header) {
             warn!("Got claimed PoW solution but PoW solution is not valid.");
             return Ok(false);
         }
@@ -3838,23 +3840,25 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // Find proposal from list of exported proposals.
-        let Some(proposal) = self
-            .state
-            .lock_guard()
-            .await
-            .mining_state
-            .exported_block_proposals
-            .get(&proposal_id)
-            .map(|x| x.to_owned())
-        else {
-            warn!(
-                "Got claimed PoW solution but no challenge was known. \
-                Did solution come in too late?"
-            );
-            return Ok(false);
+        let (proposal, tip_header) = {
+            let state = self.state.lock_guard().await;
+            let Some(proposal) = state
+                .mining_state
+                .exported_block_proposals
+                .get(&proposal_id)
+                .map(|x| x.to_owned())
+            else {
+                warn!(
+                    "Got claimed PoW solution but no challenge was known. \
+                    Did solution come in too late?"
+                );
+                return Ok(false);
+            };
+
+            (proposal, *state.chain.tip().header())
         };
 
-        self.pow_solution_inner(proposal, pow).await
+        self.pow_solution_inner(proposal, pow, tip_header).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -3869,20 +3873,20 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // Since block comes from external source, we need to check validity.
-        let current_tip = self.state.lock_guard().await.chain.light_state_clone();
-        if !proposal
-            .is_valid(
-                current_tip.tip(),
-                Timestamp::now(),
-                self.state.cli().network,
-            )
-            .await
-        {
-            warn!("Got claimed new block that was not valid");
-            return Ok(false);
-        }
+        let tip_header = {
+            let network = self.state.cli().network;
+            let state = self.state.lock_guard().await;
+            let tip = state.chain.tip();
+            if !proposal.is_valid(tip, Timestamp::now(), network).await {
+                warn!("Got claimed new block that was not valid");
+                return Ok(false);
+            }
 
-        self.pow_solution_inner(proposal, pow).await
+            *state.chain.tip().header()
+        };
+
+        // No locks may be held here
+        self.pow_solution_inner(proposal, pow, tip_header).await
     }
 
     // documented in trait. do not add doc-comment.

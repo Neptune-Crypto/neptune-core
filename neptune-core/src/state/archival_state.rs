@@ -1345,7 +1345,10 @@ impl ArchivalState {
 
     /// Return the canonical block with the given height. None if no height of
     /// this block is known yet.
-    async fn canonical_block_by_height(&self, block_height: BlockHeight) -> Option<Block> {
+    pub(crate) async fn canonical_block_by_height(
+        &self,
+        block_height: BlockHeight,
+    ) -> Option<Block> {
         let block_hash = self
             .archival_block_mmr
             .ammr()
@@ -1422,6 +1425,24 @@ impl ArchivalState {
                 leaf_index_liquid,
             ),
         ])
+    }
+
+    /// Return the largest AOCL leaf index of all outputs in the canonical block
+    /// of the given height.
+    ///
+    /// Returns `None` if no block with that height is known.
+    pub(crate) async fn max_aocl_leaf_index_of_block(
+        &self,
+        block_height: BlockHeight,
+    ) -> Option<u64> {
+        self.addition_record_indices_for_block_by_height(block_height.value())
+            .await
+            .map(|(res, _)| {
+                *res.values()
+                    .flatten()
+                    .max()
+                    .expect("All blocks have at least two outputs")
+            })
     }
 
     /// Returns a [`HashMap`] of [`AdditionRecord`] to  AOCL leaf indices for

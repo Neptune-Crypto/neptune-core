@@ -14,6 +14,7 @@ pub mod mutator_set_update;
 pub mod pow;
 pub mod validity;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -52,6 +53,7 @@ use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::transaction::utxo::Utxo;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
+use crate::api::export::TransparentInput;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::application::config::network::Network;
 use crate::application::loops::channel::Cancelable;
@@ -67,6 +69,7 @@ use crate::protocol::consensus::block::pow::GuesserBuffer;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::consensus_rule_set::LustrationCounterRule;
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
@@ -721,10 +724,11 @@ impl Block {
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+        let new_height = self.header().height;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_height);
 
         // 0.a)
-        if previous_block.kernel.header.height.next() != self.kernel.header.height {
+        if previous_block.kernel.header.height.next() != new_height {
             return Err(BlockValidationError::BlockHeight);
         }
 
@@ -869,6 +873,132 @@ impl Block {
             > consensus_rule_set.max_num_announcements()
         {
             return Err(BlockValidationError::TooManyAnnouncements);
+        }
+
+        let first_lustration_block = ConsensusRuleSet::first_lustration_block(network);
+        if new_height >= first_lustration_block {
+            let last_aocl_leaf_index = self.body().max_aocl_leaf_index();
+            let transparency_rule = ConsensusRuleSet::lustration_counter_rule(
+                network,
+                new_height,
+                last_aocl_leaf_index,
+            )
+            .expect("Must have transparency rule if height exceeds first such block");
+
+            // 2.m)
+            let read = match self.header().pow.lustration_status() {
+                Ok(value) => value,
+                Err(_) => return Err(BlockValidationError::BadLustrationCounterEncoding),
+            };
+
+            match transparency_rule {
+                LustrationCounterRule::Initial(expected) => {
+                    // 2.o
+                    if read.counter != expected.counter {
+                        return Err(BlockValidationError::BadLustrationCounter {
+                            got: read.counter,
+                            expected: expected.counter,
+                        });
+                    }
+
+                    // 2.p
+                    if read.max_lustrating_aocl_leaf_index
+                        != expected.max_lustrating_aocl_leaf_index
+                    {
+                        return Err(BlockValidationError::BadLustrationAoclThreshold {
+                            got: read.max_lustrating_aocl_leaf_index,
+                            expected: expected.max_lustrating_aocl_leaf_index,
+                        });
+                    }
+                }
+                LustrationCounterRule::Updated { initial_counter } => {
+                    // 2.m) (parent)
+                    let parent = match previous_block.header().pow.lustration_status() {
+                        Ok(value) => value,
+                        Err(_) => return Err(BlockValidationError::BadLustrationCounterEncoding),
+                    };
+
+                    // 2.p
+                    if read.max_lustrating_aocl_leaf_index != parent.max_lustrating_aocl_leaf_index
+                    {
+                        return Err(BlockValidationError::BadLustrationAoclThreshold {
+                            got: read.max_lustrating_aocl_leaf_index,
+                            expected: parent.max_lustrating_aocl_leaf_index,
+                        });
+                    }
+
+                    let aocl_threshold = parent.max_lustrating_aocl_leaf_index;
+                    let required_lustrations = inputs
+                        .into_iter()
+                        .filter(|x| {
+                            let (min_aocl_index, _) = x
+                                .absolute_indices
+                                .aocl_range()
+                                .expect("Must be able to derive AOCL range from inputs");
+                            min_aocl_index <= aocl_threshold
+                        })
+                        .map(|rr| rr.absolute_indices);
+                    let mut required_lustrations: HashSet<_> = required_lustrations.collect();
+
+                    const LUSTRATION_FLAG: BFieldElement = BFieldElement::new(51022176260u64);
+                    let all_lustrations = self
+                        .body()
+                        .transaction_kernel()
+                        .announcements
+                        .iter()
+                        .filter(|ann| {
+                            ann.message
+                                .first()
+                                .is_some_and(|elem0| *elem0 == LUSTRATION_FLAG)
+                        })
+                        .collect_vec();
+
+                    let mut acc_amount = NativeCurrencyAmount::zero();
+                    for lustration in all_lustrations {
+                        let Ok(lustration) = TransparentInput::decode(&lustration.message[1..])
+                        else {
+                            continue;
+                        };
+                        let implied_index_set = lustration.absolute_index_set();
+                        let was_present = required_lustrations.remove(&implied_index_set);
+                        if was_present {
+                            acc_amount += lustration.utxo.get_native_currency_amount();
+                        }
+                    }
+
+                    // 2.n
+                    if !required_lustrations.is_empty() {
+                        return Err(BlockValidationError::MissingLustrationAnnouncement);
+                    }
+
+                    // 2.q
+                    let Some(expected_counter) = parent.counter.checked_sub(&acc_amount) else {
+                        return Err(BlockValidationError::NegativeLustrationCounter {
+                            got: -acc_amount
+                                .checked_sub(&parent.counter)
+                                .expect("subtracting smaller amount from bigger amount"),
+                        });
+                    };
+
+                    // I don't think this error *can* be hit without the next
+                    // error also being hit. But security-in-depth!
+                    // 2.r
+                    if read.counter > initial_counter {
+                        return Err(BlockValidationError::LustrationCounterExceedsInitialValue {
+                            got: read.counter,
+                            initial: initial_counter,
+                        });
+                    }
+
+                    // 2.o
+                    if expected_counter != read.counter {
+                        return Err(BlockValidationError::BadLustrationCounter {
+                            got: read.counter,
+                            expected: expected_counter,
+                        });
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -1912,7 +2042,7 @@ pub(crate) mod tests {
         #[apply(shared_tokio_runtime)]
         async fn block_with_valid_proof_passes() {
             let (predecesor, time, network, block) = deterministic_empty_block1_proposal().await;
-            assert!(block.validate(&predecesor, time, network).await.is_ok());
+            assert!(block.validate(&predecesor, time, network,).await.is_ok());
         }
 
         #[traced_test]
@@ -1942,7 +2072,7 @@ pub(crate) mod tests {
             assert_eq!(
                 BlockValidationError::ProofValidity,
                 block
-                    .validate(&predecesor, time, network)
+                    .validate(&predecesor, time, network,)
                     .await
                     .unwrap_err()
             );
@@ -1961,7 +2091,7 @@ pub(crate) mod tests {
             assert_eq!(
                 BlockValidationError::ProofValidity,
                 block
-                    .validate(&predecesor, time, network)
+                    .validate(&predecesor, time, network,)
                     .await
                     .unwrap_err()
             );
