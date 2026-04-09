@@ -714,13 +714,17 @@ pub(crate) async fn mine(
         // Wait before starting mining task to ensure that peers have sent us
         // information about their latest blocks. This should prevent the client
         // from finding blocks that will later be orphaned.
-        const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
-
+        // RegTest has no real peers to sync from, so a short sleep suffices.
+        let initial_sleep_secs = if global_state_lock.cli().network.is_reg_test() {
+            1
+        } else {
+            60
+        };
         tracing::info!(
             "sleeping for {} seconds while node initializes",
-            INITIAL_MINING_SLEEP_IN_SECONDS
+            initial_sleep_secs
         );
-        tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+        tokio::time::sleep(Duration::from_secs(initial_sleep_secs)).await;
     }
 
     let cli_args = global_state_lock.cli().clone();
