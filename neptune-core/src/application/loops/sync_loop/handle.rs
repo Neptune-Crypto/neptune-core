@@ -32,7 +32,7 @@ impl SyncLoopHandle {
         resume_if_possible: bool,
         sync_dir: Option<std::path::PathBuf>,
     ) -> Self {
-        let block_validator = BlockValidator::from_network(network);
+        let block_validator = BlockValidator::new(network);
         let (state, sender, receiver) = SyncLoop::new(
             genesis_block,
             target_height,

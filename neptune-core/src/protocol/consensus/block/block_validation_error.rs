@@ -1,3 +1,4 @@
+use crate::api::export::NativeCurrencyAmount;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 
 /// The reasons why a [`Block`](crate::protocol::consensus::block::Block) can be
@@ -88,6 +89,34 @@ pub enum BlockValidationError {
     ///   2.l) restrict number of announcements.
     #[error("number of announcements may not be too large")]
     TooManyAnnouncements,
+
+    ///   2.m) Lustration barrier can be parsed as amount
+    #[error("Could not parse lustration counter")]
+    BadLustrationCounterEncoding,
+    ///   2.n) Missing lustration announcement
+    #[error("Missing lustration announcement in transaction kernel")]
+    MissingLustrationAnnouncement,
+    ///   2.o) Lustration counter is updated correctly
+    #[error("Lustration barrier must be correctly updated. Got {got}, expected: {expected}")]
+    BadLustrationCounter {
+        got: NativeCurrencyAmount,
+        expected: NativeCurrencyAmount,
+    },
+    ///   2.p Value for which AOCL leaf indices must lustrate is correct. Once
+    ///       set, all descendents of that block must have the same value.
+    #[error(
+        "Lustration AOCL leaf index threshold must set correctly. Got {got}, expected: {expected}."
+    )]
+    BadLustrationAoclThreshold { got: u64, expected: u64 },
+    ///  2.q
+    #[error("Negative lustration counter: {got}")]
+    NegativeLustrationCounter { got: NativeCurrencyAmount },
+    /// 2.r
+    #[error("Lustration counter exceeds initial value. Got: {got}, initial: {initial}")]
+    LustrationCounterExceedsInitialValue {
+        got: NativeCurrencyAmount,
+        initial: NativeCurrencyAmount,
+    },
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {
@@ -160,7 +189,7 @@ mod tests {
                 .validate(
                     &b_prev,
                     b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
-                    Network::Main
+                    Network::Main,
                 )
                 .await
                 .err()
@@ -180,7 +209,7 @@ mod tests {
                 .validate(
                     &b_prev,
                     b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
-                    Network::Main
+                    Network::Main,
                 )
                 .await
                 .err()
@@ -201,7 +230,7 @@ mod tests {
                 .validate(
                     &b_prev,
                     b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
-                    Network::Main
+                    Network::Main,
                 )
                 .await
                 .err()

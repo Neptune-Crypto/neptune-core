@@ -11,6 +11,7 @@ use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::MerkleTree;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::api::export::AdditionRecord;
@@ -155,6 +156,15 @@ impl BlockBody {
         self.mutator_set_accumulator.clone()
     }
 
+    /// Return the highest AOCL leaf index of outputs defined by this block.
+    /// Includes the guesser reward outputs in this number.
+    pub(crate) fn max_aocl_leaf_index(&self) -> u64 {
+        const NUM_GUESSER_FEE_OUTPUTS: u64 = 2;
+        const NUMBER_TO_INDEX_OFFSET: u64 = 1;
+        self.mutator_set_accumulator.aocl.num_leafs() + NUM_GUESSER_FEE_OUTPUTS
+            - NUMBER_TO_INDEX_OFFSET
+    }
+
     /// The amount rewarded to the guesser who finds a valid nonce for this
     /// block.
     pub(crate) fn total_guesser_reward(
@@ -246,13 +256,31 @@ impl rand::distr::Distribution<BlockBody> for rand::distr::StandardUniform {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest::prelude::BoxedStrategy;
+    use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
+
+    #[proptest(cases = 10)]
+    fn aocl_leaf_count_and_index_consistency(
+        #[strategy(arb())] _mutator_set_accumulator: MutatorSetAccumulator,
+        #[strategy(BlockBody::arbitrary_with_mutator_set_accumulator(#_mutator_set_accumulator))]
+        body: BlockBody,
+        #[strategy(arb())] guesser_outputs: [AdditionRecord; 2],
+    ) {
+        prop_assert_eq!(
+            body.mutator_set_accumulator_after(guesser_outputs.to_vec())
+                .aocl
+                .num_leafs()
+                - 1, // converting a number into an index
+            body.max_aocl_leaf_index()
+        )
+    }
 
     impl BlockBody {
         pub(crate) fn arbitrary_with_mutator_set_accumulator(

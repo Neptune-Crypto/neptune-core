@@ -25,6 +25,7 @@ use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::consensus_rule_set::LustrationStatus;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
@@ -381,6 +382,34 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             .collect()
     }
 
+    /// Return the lustration status set in the PoW field of the block header.
+    pub(crate) fn lustration_status(&self) -> Result<LustrationStatus, PowValidationError> {
+        let [e0, e1, e2, e3, e4] = self.path_a[MERKLE_TREE_HEIGHT - 2].values();
+        let e5 = self.path_a[MERKLE_TREE_HEIGHT - 1].values()[0];
+
+        let lustration_status = match LustrationStatus::decode(&[e0, e1, e2, e3, e4, e5]) {
+            Ok(status) => status,
+            Err(_) => return Err(PowValidationError::CannotParseLustrationCounter),
+        };
+
+        Ok(*lustration_status)
+    }
+
+    pub(crate) fn set_lustration_status(&mut self, value: LustrationStatus) {
+        // This encoding leaves nine free B field elements free after the
+        // the lustration encoding. Those **nine** elements can be used to
+        // encode other data, without negatively affecting optimized mining
+        // hardware or software.
+        let encoding = value.encode();
+        let [e0, e1, e2, e3, e4, e5] = encoding
+            .try_into()
+            .expect("Lustration status encoding must have size six");
+        self.path_a[MERKLE_TREE_HEIGHT - 2] = Digest([e0, e1, e2, e3, e4]);
+        let [_prev_e0, prev_e1, prev_e2, prev_e3, prev_e4] =
+            self.path_a[MERKLE_TREE_HEIGHT - 1].values();
+        self.path_a[MERKLE_TREE_HEIGHT - 1] = Digest([e5, prev_e1, prev_e2, prev_e3, prev_e4]);
+    }
+
     pub(crate) fn preprocess(
         mast_auth_paths: PowMastPaths,
         cancel_channel: Option<&dyn Cancelable>,
@@ -550,7 +579,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         let leaf_prefix = match consensus_rule_set {
             ConsensusRuleSet::Reboot => auth_paths.commit(),
             ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::TvmProofVersion1 => parent_digest,
-            ConsensusRuleSet::NoMemoryHardness => {
+            ConsensusRuleSet::HardforkBeta => {
                 if !meets_threshold {
                     return Err(PowValidationError::ThresholdNotMet);
                 }
@@ -602,6 +631,7 @@ pub(crate) enum PowValidationError {
     PathAInvalid,
     PathBInvalid,
     ThresholdNotMet,
+    CannotParseLustrationCounter,
 }
 
 // Not under test flag since it's used in both tests and benchmarks
@@ -629,8 +659,11 @@ impl<const MERKLE_TREE_HEIGHT: usize> Distribution<Pow<MERKLE_TREE_HEIGHT>> for 
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::i128;
     use std::time::Instant;
 
+    use num_traits::Zero;
+    use proptest::prelude::TestCaseError;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
@@ -645,6 +678,7 @@ pub(crate) mod tests {
     use crate::api::export::Network;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::protocol::consensus::block::tests::DIFFICULTY_LIMIT_FOR_TESTS;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::tests::shared::blocks::invalid_empty_block;
 
     impl MTree {
@@ -665,7 +699,7 @@ pub(crate) mod tests {
         let buffer = Pow::<10>::preprocess(
             auth_paths,
             None,
-            ConsensusRuleSet::NoMemoryHardness,
+            ConsensusRuleSet::HardforkBeta,
             prev_block_digest,
         );
 
@@ -721,6 +755,41 @@ pub(crate) mod tests {
         report::<27>(auth_paths, parent_block_hash);
         report::<28>(auth_paths, parent_block_hash);
         report::<29>(auth_paths, parent_block_hash);
+    }
+
+    #[test]
+    fn lustration_counter_is_followed_by_9_unbound_elems_in_encoding() {
+        // Leaving 9 unbound b field elements after the lustration counter
+        // allows for the insertion of more data into the PoW field (through
+        // later forks) without punishing heavily optimized guesser hardware
+        // or software.
+        let amount = NativeCurrencyAmount::from_raw_i128(u128::MAX as i128);
+        assert_eq!(
+            i128::BITS,
+            amount.to_nau().count_ones(),
+            "Test value must be all ones"
+        );
+        let mut pow = Pow::<10>::default();
+        pow.set_lustration_status(LustrationStatus {
+            counter: amount,
+            max_lustrating_aocl_leaf_index: u64::MAX,
+        });
+        let encoding = pow.encode();
+        let mut iterator = encoding.iter().peekable();
+
+        while iterator.peek().is_some_and(|x| x.is_zero()) {
+            iterator.next();
+        }
+        for _ in 0..6 {
+            assert_eq!(bfe!(u32::MAX), *iterator.next().unwrap());
+        }
+
+        // Next 9 B-field elements are zero
+        for _ in 0..9 {
+            assert!(iterator.next().unwrap().is_zero());
+        }
+
+        assert!(iterator.next().is_none());
     }
 
     #[test]
@@ -803,6 +872,37 @@ pub(crate) mod tests {
                     .is_ok());
             }
         }
+    }
+
+    fn lustration_encoding_prop(lustration_status: LustrationStatus) -> Result<(), TestCaseError> {
+        let mut pow = Pow::<29>::default();
+        pow.set_lustration_status(lustration_status);
+        let read = pow.lustration_status().unwrap();
+        prop_assert_eq!(lustration_status, read);
+
+        Ok(())
+    }
+
+    #[proptest(cases = 20)]
+    fn lustration_encoding_consistency_u64(
+        #[strategy(arb())] amount: NativeCurrencyAmount,
+        #[strategy(arb())] aocl_leaf_index: u64,
+    ) {
+        lustration_encoding_prop(LustrationStatus {
+            counter: amount,
+            max_lustrating_aocl_leaf_index: aocl_leaf_index,
+        })?;
+    }
+
+    #[proptest(cases = 20)]
+    fn lustration_encoding_consistency_u32(
+        #[strategy(arb())] amount: NativeCurrencyAmount,
+        #[strategy(arb())] aocl_leaf_index: u32,
+    ) {
+        lustration_encoding_prop(LustrationStatus {
+            counter: amount,
+            max_lustrating_aocl_leaf_index: aocl_leaf_index.into(),
+        })?;
     }
 
     /// Ensure that indices cannot be reused over two proposals that share the

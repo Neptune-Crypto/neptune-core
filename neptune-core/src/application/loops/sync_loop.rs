@@ -196,8 +196,9 @@ impl SyncLoop {
                         let moved_download_state = self.download_state.clone();
                         let moved_main_channel_sender = self.main_channel_sender.clone();
                         let moved_return_sender = successors_sender.clone();
+                        let moved_block_validator = self.block_validator.clone();
                         maybe_successors_subtask = Some(tokio::spawn(async move {
-                            Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_sender, self.block_validator).await
+                            Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_sender, moved_block_validator).await
                         }));
                     } else {
                         maybe_successors_subtask = None;
@@ -265,13 +266,14 @@ impl SyncLoop {
                                 let moved_download_state = self.download_state.clone();
                                 let moved_main_channel_sender = self.main_channel_sender.clone();
                                 let moved_return_channel_sender = successors_sender.clone();
+                                let moved_block_validator = self.block_validator.clone();
                                 maybe_successors_subtask = Some(tokio::spawn(async move {
                                     Self::process_successors_of_tip(
                                         moved_tip,
                                         moved_download_state,
                                         moved_main_channel_sender,
                                         moved_return_channel_sender,
-                                        self.block_validator
+                                        moved_block_validator
                                     ).await
                                 }));
                             }
@@ -420,8 +422,9 @@ impl SyncLoop {
                         let moved_download_state = self.download_state.clone();
                         let moved_main_channel_sender = self.main_channel_sender.clone();
                         let moved_return_sender = successors_sender.clone();
+                        let moved_block_validator = self.block_validator.clone();
                         maybe_successors_subtask = Some(tokio::spawn(async move {
-                            Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_sender, self.block_validator).await
+                            Self::process_successors_of_tip(moved_tip, moved_download_state, moved_main_channel_sender, moved_return_sender, moved_block_validator).await
                         }));
                     }
 

@@ -1337,11 +1337,9 @@ impl RpcApi for RpcServer {
         let mut template: Block = request.template.into();
 
         // Since block comes from external source, we need to check validity.
+        let network = self.state.cli().network;
         let tip = self.state.lock_guard().await.chain.tip().clone();
-        if !template
-            .is_valid(&tip, Timestamp::now(), self.state.cli().network)
-            .await
-        {
+        if !template.is_valid(&tip, Timestamp::now(), network).await {
             return Err(RpcError::SubmitBlock(SubmitBlockError::InvalidBlock));
         }
 

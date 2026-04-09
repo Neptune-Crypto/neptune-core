@@ -320,18 +320,16 @@ impl PeerLoopHandler {
                 "blocks"
             }
         );
+        let network = self.global_state_lock.cli().network;
         let now = self.now();
         debug!("validating with respect to current timestamp {now}");
         let mut previous_block = &parent_of_first_block;
+
         for new_block in &received_blocks {
-            let new_block_has_proof_of_work = new_block.has_proof_of_work(
-                self.global_state_lock.cli().network,
-                previous_block.header(),
-            );
+            let new_block_has_proof_of_work =
+                new_block.has_proof_of_work(network, previous_block.header());
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
-            let new_block_is_valid = new_block
-                .is_valid(previous_block, now, self.global_state_lock.cli().network)
-                .await;
+            let new_block_is_valid = new_block.is_valid(previous_block, now, network).await;
             debug!("new block is valid? {new_block_is_valid}");
             if !new_block_has_proof_of_work {
                 warn!(
@@ -1817,9 +1815,9 @@ impl PeerLoopHandler {
                 // the one whose favorability is being computed.
                 let state = self.global_state_lock.lock_guard().await;
                 let tip = state.chain.tip();
-                let proposal_is_valid = new_proposal
-                    .is_valid(tip, self.now(), self.global_state_lock.cli().network)
-                    .await;
+
+                let network = self.global_state_lock.cli().network;
+                let proposal_is_valid = new_proposal.is_valid(tip, self.now(), network).await;
                 if !proposal_is_valid {
                     drop(state);
                     self.punish(NegativePeerSanction::InvalidBlockProposal)
@@ -4248,7 +4246,7 @@ mod tests {
             let mem_hardness_hf = (
                 BlockHeight::from(39999u64),
                 ConsensusRuleSet::TvmProofVersion1,
-                ConsensusRuleSet::NoMemoryHardness,
+                ConsensusRuleSet::HardforkBeta,
             );
             for (init_block_height, start_rules, end_rules) in [alpha_fh, mem_hardness_hf] {
                 let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(

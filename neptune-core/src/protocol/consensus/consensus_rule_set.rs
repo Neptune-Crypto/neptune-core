@@ -1,6 +1,14 @@
+use num_traits::Zero;
+use tasm_lib::prelude::TasmObject;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
+
 use crate::api::export::BlockHeight;
+use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
+use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
 use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
+use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
 use crate::BFieldElement;
 
 /// Height of 1st block that follows the alpha consensus ruleset, for main net.
@@ -20,12 +28,12 @@ pub const BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET: BlockHeight =
     BlockHeight::new(BFieldElement::new(23_401u64));
 
 /// Height of 1st block changing PoW algorithm to drop memory hardness
-pub const BLOCK_HEIGHT_HARDFORK_NO_MEMORY_HARDNESS_MAIN_NET: BlockHeight =
+pub const BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET: BlockHeight =
     BlockHeight::new(BFieldElement::new(40_000u64));
 
 /// Height of 1st block changing PoW algorithm to drop memory hardness, for test
 /// net.
-pub const BLOCK_HEIGHT_HARDFORK_NO_MEMORY_HARDNESS_TESTNET: BlockHeight =
+pub const BLOCK_HEIGHT_HARDFORK_BETA_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(3_700u64));
 
 /// Enumerates all possible sets of consensus rules.
@@ -51,13 +59,36 @@ pub enum ConsensusRuleSet {
     TvmProofVersion1,
 
     /// Remove memory hardness from PoW algorithm
-    NoMemoryHardness,
+    HardforkBeta,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum TritonProofVersion {
     V0,
     V1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject)]
+pub struct LustrationStatus {
+    /// Remaining number of coins that can pass through the lustration barrier.
+    pub counter: NativeCurrencyAmount,
+
+    /// An upper limit of which AOCL leafs that need to lustrate.
+    ///
+    /// All AOCL leaf indices at or below this threshold must lustrate.
+    ///
+    /// All indices above this value do not have to lustrate.
+    pub max_lustrating_aocl_leaf_index: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LustrationCounterRule {
+    Initial(LustrationStatus),
+    Updated {
+        // This data is actually redundant but allows for an security-in-depth
+        // extra sanity check.
+        initial_counter: NativeCurrencyAmount,
+    },
 }
 
 impl ConsensusRuleSet {
@@ -73,10 +104,10 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::Reboot
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET {
                     ConsensusRuleSet::HardforkAlpha
-                } else if block_height < BLOCK_HEIGHT_HARDFORK_NO_MEMORY_HARDNESS_MAIN_NET {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET {
                     ConsensusRuleSet::TvmProofVersion1
                 } else {
-                    ConsensusRuleSet::NoMemoryHardness
+                    ConsensusRuleSet::HardforkBeta
                 }
             }
             Network::TestnetMock => ConsensusRuleSet::TvmProofVersion1,
@@ -86,13 +117,13 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::Reboot
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET {
                     ConsensusRuleSet::HardforkAlpha
-                } else if block_height < BLOCK_HEIGHT_HARDFORK_NO_MEMORY_HARDNESS_TESTNET {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_BETA_TESTNET {
                     ConsensusRuleSet::TvmProofVersion1
                 } else {
-                    ConsensusRuleSet::NoMemoryHardness
+                    ConsensusRuleSet::HardforkBeta
                 }
             }
-            Network::Testnet(_) => ConsensusRuleSet::NoMemoryHardness,
+            Network::Testnet(_) => ConsensusRuleSet::HardforkBeta,
         }
     }
 
@@ -101,7 +132,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::Reboot => true,
             ConsensusRuleSet::HardforkAlpha => true,
             ConsensusRuleSet::TvmProofVersion1 => true,
-            ConsensusRuleSet::NoMemoryHardness => false,
+            ConsensusRuleSet::HardforkBeta => false,
         }
     }
 
@@ -115,7 +146,7 @@ impl ConsensusRuleSet {
                 ConsensusRuleSet::Reboot => TritonProofVersion::V0,
                 ConsensusRuleSet::HardforkAlpha => TritonProofVersion::V0,
                 ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
-                ConsensusRuleSet::NoMemoryHardness => TritonProofVersion::V1,
+                ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
             }
         }
     }
@@ -126,7 +157,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
-            | ConsensusRuleSet::NoMemoryHardness => {
+            | ConsensusRuleSet::HardforkBeta => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -139,7 +170,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
-            | ConsensusRuleSet::NoMemoryHardness => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkBeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_outputs(&self) -> usize {
@@ -147,7 +178,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
-            | ConsensusRuleSet::NoMemoryHardness => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkBeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub(crate) fn max_num_announcements(&self) -> usize {
@@ -155,7 +186,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
-            | ConsensusRuleSet::NoMemoryHardness => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkBeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 
@@ -164,6 +195,74 @@ impl ConsensusRuleSet {
             Network::Main => BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET,
             Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET,
             _ => BlockHeight::genesis(),
+        }
+    }
+
+    pub(crate) fn first_lustration_block(network: Network) -> BlockHeight {
+        match network {
+            Network::Main => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
+            Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
+            Network::TestnetMock => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
+            _ => BlockHeight::genesis().next(),
+        }
+    }
+
+    pub(crate) fn lustration_counter_rule(
+        network: Network,
+        block_height: BlockHeight,
+        last_aocl_leaf_index: u64,
+    ) -> Option<LustrationCounterRule> {
+        let premine = PREMINE_MAX_SIZE;
+        let claims_pool = INITIAL_BLOCK_SUBSIDY
+            .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
+        match network {
+            Network::Main => {
+                let mined_at_hardfork = INITIAL_BLOCK_SUBSIDY.scalar_mul(
+                    u32::try_from(BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET.value()).unwrap(),
+                );
+                let initial_counter = premine + claims_pool + mined_at_hardfork;
+                if block_height < BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET {
+                    None
+                } else if block_height == BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET {
+                    assert!(
+                        block_height.get_generation().is_zero(),
+                        "Assumes transparency gateway starts at generation zero."
+                    );
+
+                    Some(LustrationCounterRule::Initial(LustrationStatus {
+                        counter: initial_counter,
+                        max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
+                    }))
+                } else {
+                    Some(LustrationCounterRule::Updated { initial_counter })
+                }
+            }
+            Network::Testnet(0) => {
+                let mined_at_hardfork = INITIAL_BLOCK_SUBSIDY
+                    .scalar_mul(u32::try_from(BLOCK_HEIGHT_HARDFORK_BETA_TESTNET.value()).unwrap());
+                let initial_counter = premine + claims_pool + mined_at_hardfork;
+                if block_height < BLOCK_HEIGHT_HARDFORK_BETA_TESTNET {
+                    None
+                } else if block_height == BLOCK_HEIGHT_HARDFORK_BETA_TESTNET {
+                    assert!(
+                        block_height.get_generation().is_zero(),
+                        "Assumes transparency gateway starts at generation zero."
+                    );
+
+                    Some(LustrationCounterRule::Initial(LustrationStatus {
+                        counter: initial_counter,
+                        max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
+                    }))
+                } else {
+                    Some(LustrationCounterRule::Updated { initial_counter })
+                }
+            }
+            // TODO: Fix values on these alternative networks!
+            Network::Testnet(_) | Network::TestnetMock | Network::RegTest => {
+                Some(LustrationCounterRule::Updated {
+                    initial_counter: premine + claims_pool,
+                })
+            }
         }
     }
 }
