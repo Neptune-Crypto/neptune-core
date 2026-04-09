@@ -307,7 +307,7 @@ impl ProofCollection {
                 [self.salted_inputs_hash, self.salted_outputs_hash]
                     .into_iter()
                     .flat_map(|d| d.reversed().values())
-                    .collect_vec(),
+                    .collect::<Vec<BFieldElement>>(),
             )
             .with_output(
                 self.type_script_hashes
@@ -333,7 +333,7 @@ impl ProofCollection {
                     ]
                     .into_iter()
                     .flat_map(|d| d.reversed().values())
-                    .collect_vec(),
+                    .collect::<Vec<BFieldElement>>(),
                 )
             })
             .collect_vec();
@@ -486,7 +486,7 @@ pub mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::NeptuneProof;
     use crate::application::triton_vm_job_queue::vm_job_queue;
-    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::tests::shared_tokio_runtime;
 
     impl ProofCollection {

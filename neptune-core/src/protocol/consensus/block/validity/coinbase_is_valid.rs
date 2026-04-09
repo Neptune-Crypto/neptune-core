@@ -52,7 +52,7 @@ impl TritonProgram for CoinbaseIsValid {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
 
     impl TritonProgramSpecification for CoinbaseIsValid {
         fn source(&self) {
