@@ -68,6 +68,7 @@ use systemstat::Platform;
 use systemstat::System;
 use tarpc::context;
 use tasm_lib::prelude::Tip5;
+use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -79,6 +80,7 @@ use super::auth;
 use crate::api;
 use crate::api::export::AnnouncementFlag;
 use crate::api::export::ConsolidationError;
+use crate::api::export::NeptuneProof;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
@@ -136,6 +138,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ResponseMsMembershipProofPrivacyPreserving;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use crate::util_types::proof_of_transfer;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -2130,6 +2133,66 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     async fn shutdown(token: auth::Token) -> RpcResult<bool>;
+
+    /// A wrapper around [`proof_of_transfer::helper`] (see the docs on it).
+    ///
+    /// For verification see `triton_verify` in this API.
+    ///
+    /// On a failure expect `Auth` or `CreateProofError` variants of [`RpcError`],
+    /// or `Failed` with the details.
+    ///
+    /// # example
+    /// ```no_run
+    /// # use anyhow::Result;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
+    /// # use tarpc::tokio_serde::formats::Json;
+    /// # use tarpc::serde_transport::tcp;
+    /// # use tarpc::client;
+    /// # use tarpc::context;
+    /// # use tasm_lib::twenty_first::tip5::digest::Digest;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<()>{
+    /// #
+    /// # // create a serde/json transport over tcp.
+    /// # let transport = tcp::connect("127.0.0.1:9799", Json::default).await?;
+    /// #
+    /// # // Create an RPC-client using the transport.
+    /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
+    /// #
+    /// # // defines cookie hint
+    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
+    /// #
+    /// # // load the cookie file from disk and assign it to a token
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// #
+    /// // from the current wallet
+    /// // the index of the sent tx containing the transfer to prove
+    /// let tx_ix: u64 = 0xAAAAAAA;
+    /// // the index of the UTXO with that transfer inside this tx
+    /// let utxo_ix = 0xAA;
+    /// /* The digest of a block after spending (verifiers must check this block as canonical). For better privacy a recent block can be chosen, if the need is to show
+    /// when it was already took place --- choose a block by its timestamp accordingly, up to the block which first confirmed the tx (including). */
+    /// let block: Digest = Digest::try_from_hex("AAAAAAAA")?;
+    /// // get the claim and a proof
+    /// let (claim, proof) = client.prove_transfer(context::current(), token, tx_ix, utxo_ix, block).await??;
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn prove_transfer(
+        token: auth::Token,
+        tx_ix: u64,
+        utxo_ix: usize,
+        block: Digest,
+    ) -> RpcResult<(Claim, NeptuneProof)>;
+
+    /// Triton VM `verify`.
+    async fn triton_verify(
+        token: auth::Token,
+        claim: Claim,
+        proof: NeptuneProof,
+    ) -> RpcResult<bool>;
 }
 
 #[derive(Clone)]
@@ -4566,6 +4629,56 @@ impl RPC for NeptuneRPCServer {
             .get(tx_kernel_id)
             .map(|tx| &tx.kernel)
             .cloned())
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn prove_transfer(
+        self,
+        _context: ::tarpc::context::Context,
+        token: auth::Token,
+        tx_ix: u64,
+        utxo_ix: usize,
+        block: Digest,
+    ) -> RpcResult<(Claim, NeptuneProof)> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let gs_lock = self.state.lock_guard().await;
+        let l = gs_lock
+            .wallet_state
+            .wallet_db
+            .sent_transactions()
+            .len()
+            .await;
+        drop(gs_lock);
+
+        if l > tx_ix {
+            proof_of_transfer::helper(self.state, tx_ix, utxo_ix, block)
+                .await
+                .map_err(RpcError::from)
+        } else {
+            Err(RpcError::Failed(
+                "sent *tx* index is out of bounds".to_string(),
+            ))
+        }
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn triton_verify(
+        self,
+        _context: ::tarpc::context::Context,
+        token: auth::Token,
+        claim: Claim,
+        proof: NeptuneProof,
+    ) -> RpcResult<bool> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(tasm_lib::triton_vm::verify(
+            Default::default(),
+            &claim,
+            &proof,
+        ))
     }
 }
 
