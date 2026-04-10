@@ -138,6 +138,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ResponseMsMembershipProofPrivacyPreserving;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use crate::util_types::proof_of_transfer;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -4652,7 +4653,7 @@ impl RPC for NeptuneRPCServer {
         drop(gs_lock);
 
         if l > tx_ix {
-            crate::util_types::proof_of_transfer::helper(self.state, tx_ix, utxo_ix, block)
+            proof_of_transfer::helper(self.state, tx_ix, utxo_ix, block)
                 .await
                 .map_err(RpcError::from)
         } else {
