@@ -341,7 +341,7 @@ impl TritonProgram for ProofOfTransfer {
 /// During verification from the same block the same data will be pulled.
 ///
 /// # Panics.
-/// When `tx_ix` is out of its bound. https://github.com/Neptune-Crypto/neptune-core/issues/816#issuecomment-4161003883
+/// When `tx_ix` is out of its bound. <https://github.com/Neptune-Crypto/neptune-core/issues/816#issuecomment-4161003883>
 ///
 /// # details
 /// the addresses are disclosed as the components constraining the address
