@@ -8,6 +8,7 @@ use tracing::info;
 use crate::application::rpc::server::NativeCurrencyAmount;
 use crate::protocol::consensus::block::block_header::BlockPow;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::BFieldElement;
@@ -18,6 +19,7 @@ use crate::Block;
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct ProofOfWorkPuzzle {
     // All fields public since used downstream by mining pool software.
+    /// The MAST paths that allow for fast guessing
     pub pow_mast_paths: PowMastPaths,
 
     /// The threshold digest that defines when a PoW solution is valid. The
@@ -36,6 +38,11 @@ pub struct ProofOfWorkPuzzle {
     /// Can be used to reset templates in pools that perform local checks before
     /// submitting a solution to the node.
     pub prev_block: Digest,
+
+    /// The lustration status that must be set in the PoW field for the block
+    /// to be valid. Must be set prior to calculating the block's hash.
+    /// Only to be used after hard-fork beta.
+    pub lustration_status: Option<LustrationStatus>,
 }
 
 impl ProofOfWorkPuzzle {
@@ -52,12 +59,15 @@ impl ProofOfWorkPuzzle {
 
         let id = Tip5::hash(&auth_paths);
 
+        let lustration_status = block_proposal.header().pow.lustration_status().ok();
+
         Self {
             pow_mast_paths: auth_paths,
             threshold,
             total_guesser_reward: guesser_reward,
             id,
             prev_block,
+            lustration_status,
         }
     }
 
@@ -86,6 +96,7 @@ impl ProofOfWorkPuzzle {
                     index_picker_preimage,
                     nonce,
                     self.threshold,
+                    self.lustration_status,
                 )
             })
             .find_map(|x| x)

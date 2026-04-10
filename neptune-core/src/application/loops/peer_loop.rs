@@ -46,6 +46,7 @@ use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionLustrationError;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerConnectionInfo;
@@ -1660,6 +1661,46 @@ impl PeerLoopHandler {
                     // TODO: Consider punishing here
                     warn!("Received tx too far into the future. Got timestamp: {tx_timestamp:?}");
                     return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // 8. If transaction is missing lustrations, punish.
+                if current_block_height > ConsensusRuleSet::first_lustration_block(network) {
+                    let lustration_status = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .tip()
+                        .header()
+                        .pow
+                        .lustration_status()
+                        .expect("Lustration status of tip must be parseable after hardfork");
+                    match transaction.kernel.verified_lustration_amount(
+                        lustration_status.max_lustrating_aocl_leaf_index,
+                    ) {
+                        Ok(amt) => {
+                            if amt > lustration_status.counter {
+                                warn!("Rejecting transaction that would make lustration counter negative");
+                                self.punish(
+                                    NegativePeerSanction::LustrationsWouldMakeCounterNegative,
+                                )
+                                .await?;
+                                return Ok(KEEP_CONNECTION_ALIVE);
+                            }
+                        }
+                        Err(TransactionLustrationError::MissingLustrationAnnouncement) => {
+                            warn!("Missing lustration announcement in incoming transaction");
+                            self.punish(NegativePeerSanction::MissingLustrationAnnouncement)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                        Err(_) => {
+                            warn!("Invalid transaction");
+                            self.punish(NegativePeerSanction::InvalidTransaction)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                    };
                 }
 
                 // Otherwise, relay to main
@@ -4238,17 +4279,17 @@ mod tests {
             // notification of first block after hardfork. Must accept all
             // blocks from peer, not punish peer, and send blocks to main
             // loop. Can be expanded for new hardforks when they are planned.
-            let alpha_fh = (
+            let hf_alpha = (
                 BlockHeight::from(14999u64),
                 ConsensusRuleSet::Reboot,
                 ConsensusRuleSet::HardforkAlpha,
             );
-            let mem_hardness_hf = (
+            let hf_beta = (
                 BlockHeight::from(39999u64),
                 ConsensusRuleSet::TvmProofVersion1,
                 ConsensusRuleSet::HardforkBeta,
             );
-            for (init_block_height, start_rules, end_rules) in [alpha_fh, mem_hardness_hf] {
+            for (init_block_height, start_rules, end_rules) in [hf_alpha, hf_beta] {
                 let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
                     init_block_height,
                     Difficulty::MINIMUM,

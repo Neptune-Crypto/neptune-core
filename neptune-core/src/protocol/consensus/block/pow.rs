@@ -20,14 +20,37 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::twenty_first::bfe_array;
 
+use crate::api::export::NativeCurrencyAmount;
 use crate::application::loops::channel::Cancelable;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::consensus_rule_set::LustrationStatus;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Serialize, Deserialize)]
+pub struct LustrationStatus {
+    /// Remaining number of coins that can pass through the lustration barrier.
+    pub counter: NativeCurrencyAmount,
+
+    /// An upper limit of which AOCL leafs that need to lustrate.
+    ///
+    /// All AOCL leaf indices at or below this threshold must lustrate.
+    ///
+    /// All indices above this value do not have to lustrate.
+    pub max_lustrating_aocl_leaf_index: u64,
+}
+
+impl std::fmt::Display for LustrationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "counter: {}; AOCL threshold: {}",
+            self.counter, self.max_lustrating_aocl_leaf_index,
+        )
+    }
+}
 
 /// Determines the number of leafs in the Merkle tree in the guesser buffer.
 #[cfg(not(test))]
@@ -526,6 +549,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         index_picker_preimage: Digest,
         nonce: Digest,
         target: Digest,
+        lustration_status: Option<LustrationStatus>,
     ) -> Option<Self> {
         let pow = if buffer.is_memory_hard() {
             let root = buffer.merkle_tree.root();
@@ -551,12 +575,18 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                 path_b,
             }
         } else {
-            Pow {
+            let mut pow = Pow {
                 nonce,
                 root: Default::default(),
                 path_a: [Digest::default(); MERKLE_TREE_HEIGHT],
                 path_b: [Digest::default(); MERKLE_TREE_HEIGHT],
+            };
+
+            if let Some(lustration) = lustration_status {
+                pow.set_lustration_status(lustration);
             }
+
+            pow
         };
 
         let pow_digest = mast_auth_paths.fast_mast_hash(pow);
@@ -861,7 +891,7 @@ pub(crate) mod tests {
 
             for difficulty in [2_u32, 8] {
                 let difficulty = Difficulty::from(difficulty);
-                let successful_guess = solve(&buffer, &auth_paths, difficulty);
+                let successful_guess = solve(&buffer, &auth_paths, difficulty, None);
                 assert!(successful_guess
                     .validate(
                         auth_paths,
@@ -955,7 +985,7 @@ pub(crate) mod tests {
 
         // Verify that 1st block proposal can be solved
         let difficulty = Difficulty::from(2u32);
-        let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty);
+        let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty, None);
         assert!(correct_guess_1
             .validate(
                 auth_paths_1,
@@ -983,7 +1013,7 @@ pub(crate) mod tests {
         // Verify that a 2nd proposal can use the same `buffer` value to create
         // a successful guess, and that only the `auth_paths` value needs to
         // change.
-        let correct_guess_2 = solve(&buffer, &auth_paths_2, difficulty);
+        let correct_guess_2 = solve(&buffer, &auth_paths_2, difficulty, None);
         assert!(correct_guess_2
             .validate(
                 auth_paths_2,
@@ -998,6 +1028,7 @@ pub(crate) mod tests {
         buffer: &GuesserBuffer<N>,
         auth_paths: &PowMastPaths,
         difficulty: Difficulty,
+        lustration_status: Option<LustrationStatus>,
     ) -> Pow<N> {
         assert!(
             difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
@@ -1011,9 +1042,14 @@ pub(crate) mod tests {
         let index_picker_preimage = buffer.index_picker_preimage(auth_paths);
         loop {
             let nonce = rng.random();
-            if let Some(solution) =
-                Pow::guess(buffer, auth_paths, index_picker_preimage, nonce, target)
-            {
+            if let Some(solution) = Pow::guess(
+                buffer,
+                auth_paths,
+                index_picker_preimage,
+                nonce,
+                target,
+                lustration_status,
+            ) {
                 break solution;
             }
         }

@@ -85,6 +85,11 @@ pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block
     .await
     .unwrap();
 
+    let height = child_no_pow.header().height;
+    if let Ok(status) = child_no_pow.header().pow.lustration_status() {
+        println!("Before guess: Lustration status, height {height}: {status}");
+    }
+
     let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
 
     let guesser_address = global_state_lock
@@ -111,6 +116,10 @@ pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block
     )
     .await;
     let child = *guesser_rx.await.unwrap().block;
+
+    if let Ok(status) = child.header().pow.lustration_status() {
+        println!("After guess: Lustration status, height {height}: {status}");
+    }
 
     child
 }

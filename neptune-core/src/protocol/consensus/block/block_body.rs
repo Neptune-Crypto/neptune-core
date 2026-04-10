@@ -24,6 +24,8 @@ use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
+pub(crate) const NUM_GUESSER_FEE_OUTPUTS: u64 = 2;
+
 #[derive(Debug, Copy, Clone, EnumCount)]
 pub enum BlockBodyField {
     TransactionKernel,
@@ -159,7 +161,6 @@ impl BlockBody {
     /// Return the highest AOCL leaf index of outputs defined by this block.
     /// Includes the guesser reward outputs in this number.
     pub(crate) fn max_aocl_leaf_index(&self) -> u64 {
-        const NUM_GUESSER_FEE_OUTPUTS: u64 = 2;
         const NUMBER_TO_INDEX_OFFSET: u64 = 1;
         self.mutator_set_accumulator.aocl.num_leafs() + NUM_GUESSER_FEE_OUTPUTS
             - NUMBER_TO_INDEX_OFFSET

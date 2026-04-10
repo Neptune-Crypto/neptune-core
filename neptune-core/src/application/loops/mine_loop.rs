@@ -45,6 +45,7 @@ use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransact
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::difficulty_control::difficulty_control;
 use crate::protocol::consensus::block::pow::GuesserBuffer;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::block::*;
@@ -236,8 +237,9 @@ fn guess_worker(
 
     block.set_header_guesser_address(guesser_address);
 
-    info!("Start: guess preprocessing.");
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block_height);
+    info!("Start: guess preprocessing, consensus ruleset: {consensus_rule_set}.");
+
     let guesser_buffer =
         block.guess_preprocess(Some(&sender), Some(threads_to_use), consensus_rule_set);
     if sender.is_canceled() {
@@ -253,6 +255,18 @@ fn guess_worker(
         .unwrap();
 
     let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
+    let lustration_status = if consensus_rule_set.requires_lustration_status_in_block_header() {
+        Some(
+            block
+                .header()
+                .pow
+                .lustration_status()
+                .expect("Must have lustration status set once required"),
+        )
+    } else {
+        None
+    };
+
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(
@@ -263,6 +277,7 @@ fn guess_worker(
                         &mast_auth_paths,
                         index_picker_preimage,
                         threshold,
+                        lustration_status,
                         rng,
                         &sender,
                     )
@@ -332,6 +347,7 @@ fn guess_nonce_iteration(
     mast_auth_paths: &PowMastPaths,
     index_picker_preimage: Digest,
     threshold: Digest,
+    lustration_status: Option<LustrationStatus>,
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
@@ -349,6 +365,7 @@ fn guess_nonce_iteration(
         index_picker_preimage,
         nonce,
         threshold,
+        lustration_status,
     );
 
     match result {
@@ -1133,6 +1150,7 @@ pub(crate) mod tests {
         let guesser_buffer =
             block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
         let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
+        let lustration_status = block.header().pow.lustration_status().ok();
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(std_rng_from_thread_rng, |prng, _i| {
@@ -1141,6 +1159,7 @@ pub(crate) mod tests {
                         &mast_auth_paths,
                         index_picker_preimage,
                         threshold,
+                        lustration_status,
                         prng,
                         &worker_task_tx,
                     );
@@ -2224,7 +2243,7 @@ pub(crate) mod tests {
         );
 
         let guesser_buffer =
-            successor_block.guess_preprocess(None, None, ConsensusRuleSet::default());
+            successor_block.guess_preprocess(None, None, ConsensusRuleSet::TvmProofVersion1);
         let mast_auth_paths = successor_block.pow_mast_paths();
         let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
         let target = predecessor_block.header().difficulty.target();
@@ -2235,6 +2254,7 @@ pub(crate) mod tests {
                 index_picker_preimage,
                 rng.random(),
                 target,
+                None,
             )
             .is_some()
             {

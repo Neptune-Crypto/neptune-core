@@ -1,11 +1,10 @@
 use num_traits::Zero;
-use tasm_lib::prelude::TasmObject;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
 use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
 use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
@@ -68,21 +67,8 @@ pub enum TritonProofVersion {
     V1,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject)]
-pub struct LustrationStatus {
-    /// Remaining number of coins that can pass through the lustration barrier.
-    pub counter: NativeCurrencyAmount,
-
-    /// An upper limit of which AOCL leafs that need to lustrate.
-    ///
-    /// All AOCL leaf indices at or below this threshold must lustrate.
-    ///
-    /// All indices above this value do not have to lustrate.
-    pub max_lustrating_aocl_leaf_index: u64,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LustrationCounterRule {
+pub enum LustrationRule {
     Initial(LustrationStatus),
     Updated {
         // This data is actually redundant but allows for an security-in-depth
@@ -133,6 +119,15 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkAlpha => true,
             ConsensusRuleSet::TvmProofVersion1 => true,
             ConsensusRuleSet::HardforkBeta => false,
+        }
+    }
+
+    pub(crate) fn requires_lustration_status_in_block_header(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1 => false,
+            ConsensusRuleSet::HardforkBeta => true,
         }
     }
 
@@ -207,11 +202,11 @@ impl ConsensusRuleSet {
         }
     }
 
-    pub(crate) fn lustration_counter_rule(
+    pub(crate) fn lustration_rule(
         network: Network,
         block_height: BlockHeight,
         last_aocl_leaf_index: u64,
-    ) -> Option<LustrationCounterRule> {
+    ) -> Option<LustrationRule> {
         let premine = PREMINE_MAX_SIZE;
         let claims_pool = INITIAL_BLOCK_SUBSIDY
             .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
@@ -229,12 +224,12 @@ impl ConsensusRuleSet {
                         "Assumes transparency gateway starts at generation zero."
                     );
 
-                    Some(LustrationCounterRule::Initial(LustrationStatus {
+                    Some(LustrationRule::Initial(LustrationStatus {
                         counter: initial_counter,
                         max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
                     }))
                 } else {
-                    Some(LustrationCounterRule::Updated { initial_counter })
+                    Some(LustrationRule::Updated { initial_counter })
                 }
             }
             Network::Testnet(0) => {
@@ -249,17 +244,17 @@ impl ConsensusRuleSet {
                         "Assumes transparency gateway starts at generation zero."
                     );
 
-                    Some(LustrationCounterRule::Initial(LustrationStatus {
+                    Some(LustrationRule::Initial(LustrationStatus {
                         counter: initial_counter,
                         max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
                     }))
                 } else {
-                    Some(LustrationCounterRule::Updated { initial_counter })
+                    Some(LustrationRule::Updated { initial_counter })
                 }
             }
             // TODO: Fix values on these alternative networks!
             Network::Testnet(_) | Network::TestnetMock | Network::RegTest => {
-                Some(LustrationCounterRule::Updated {
+                Some(LustrationRule::Updated {
                     initial_counter: premine + claims_pool,
                 })
             }
@@ -536,6 +531,25 @@ pub(crate) mod tests {
             bob.set_new_tip(next_block.clone()).await.unwrap();
             predecessor = next_block;
         }
+    }
+
+    #[test]
+    fn lustration_counter_has_expected_initial_value() {
+        let first_lustration_rule = ConsensusRuleSet::lustration_rule(
+            Network::Main,
+            BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
+            100_000,
+        )
+        .unwrap();
+        let LustrationRule::Initial(lustration_status) = first_lustration_rule else {
+            panic!("First lustration rule must be of type 'initial'");
+        };
+
+        assert_eq!(
+            NativeCurrencyAmount::coins(8679168),
+            lustration_status.counter
+        );
+        assert_eq!(100_000, lustration_status.max_lustrating_aocl_leaf_index);
     }
 
     #[test]

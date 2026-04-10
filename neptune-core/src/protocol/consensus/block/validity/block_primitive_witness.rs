@@ -1,13 +1,18 @@
 use std::sync::OnceLock;
 
+use num_traits::CheckedSub;
 use tasm_lib::twenty_first::prelude::Mmr;
 
 use crate::api::export::Network;
 use crate::protocol::consensus::block::block_body::BlockBody;
+use crate::protocol::consensus::block::block_body::NUM_GUESSER_FEE_OUTPUTS;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::consensus_rule_set::LustrationRule;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
@@ -68,6 +73,12 @@ impl BlockPrimitiveWitness {
         &self.transaction
     }
 
+    fn max_aocl_leaf_index(&self) -> u64 {
+        let num_own_outputs =
+            self.transaction.kernel.outputs.len() as u64 + NUM_GUESSER_FEE_OUTPUTS;
+        self.predecessor_block.body().max_aocl_leaf_index() + num_own_outputs
+    }
+
     pub(crate) fn header(
         &self,
         timestamp: Timestamp,
@@ -75,12 +86,37 @@ impl BlockPrimitiveWitness {
     ) -> BlockHeader {
         let parent_header = self.predecessor_block.header();
         let parent_digest = self.predecessor_block.hash();
-        BlockHeader::template_header(
+        let mut header = BlockHeader::template_header(
             parent_header,
             parent_digest,
             timestamp,
             target_block_interval,
-        )
+        );
+
+        let max_aocl_leaf_index = self.max_aocl_leaf_index();
+        match ConsensusRuleSet::lustration_rule(self.network, header.height, max_aocl_leaf_index) {
+            Some(LustrationRule::Initial(lustration_status)) => {
+                header.pow.set_lustration_status(lustration_status)
+            }
+            Some(LustrationRule::Updated { .. }) => {
+                let parent_lustration_status = parent_header.pow.lustration_status().expect("Parent lustration status must be parseable when lustration status must be updated");
+                let parent_aocl_threshold = parent_lustration_status.max_lustrating_aocl_leaf_index;
+                let lustrated_in_this_block = self
+                    .transaction
+                    .kernel
+                    .verified_lustration_amount(parent_aocl_threshold)
+                    .expect("Transaction used for block proposal must lustrate correctly");
+                let new_counter = parent_lustration_status.counter.checked_sub(&lustrated_in_this_block).expect("Transaction used for block proposal may not generate a negative lustration counter");
+                let new_lustration_status = LustrationStatus {
+                    counter: new_counter,
+                    max_lustrating_aocl_leaf_index: parent_aocl_threshold,
+                };
+                header.pow.set_lustration_status(new_lustration_status)
+            }
+            None => (),
+        };
+
+        header
     }
 
     /// Builds the block body from its witness.
