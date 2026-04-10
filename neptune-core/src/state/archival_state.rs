@@ -1427,24 +1427,6 @@ impl ArchivalState {
         ])
     }
 
-    /// Return the largest AOCL leaf index of all outputs in the canonical block
-    /// of the given height.
-    ///
-    /// Returns `None` if no block with that height is known.
-    pub(crate) async fn max_aocl_leaf_index_of_block(
-        &self,
-        block_height: BlockHeight,
-    ) -> Option<u64> {
-        self.addition_record_indices_for_block_by_height(block_height.value())
-            .await
-            .map(|(res, _)| {
-                *res.values()
-                    .flatten()
-                    .max()
-                    .expect("All blocks have at least two outputs")
-            })
-    }
-
     /// Returns a [`HashMap`] of [`AdditionRecord`] to  AOCL leaf indices for
     /// all outputs in a given block, including guesser rewards.  Also returns
     /// the block hash. Returns `None` if no block at the specified height is

@@ -5,6 +5,7 @@ use tasm_lib::prelude::Digest;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::block::Block;
 
@@ -29,6 +30,11 @@ pub struct RpcBlockTemplateMetadata {
 
     // All fields public since used downstream by mining pool software.
     pub pow_mast_paths: PowMastPaths,
+
+    /// The lustration status that must be set in the pow field of the header
+    /// for the block to be valid. Should only be used once hardfork-beta is
+    /// active. Otherwise, ignore.
+    pub lustration_status: Option<LustrationStatus>,
 }
 
 impl RpcBlockTemplateMetadata {
@@ -44,12 +50,15 @@ impl RpcBlockTemplateMetadata {
             .expect("Block proposal must have well-defined guesser reward");
         let auth_paths = block_proposal.pow_mast_paths();
 
+        let lustration_status = block_proposal.header().pow.lustration_status().ok();
+
         Self {
             digest,
             prev_block,
             threshold,
             total_guesser_reward: guesser_reward.into(),
             pow_mast_paths: auth_paths,
+            lustration_status,
         }
     }
 }
@@ -91,6 +100,7 @@ mod tests {
                         index_picker_preimage,
                         nonce,
                         self.threshold,
+                        self.lustration_status,
                     )
                 })
                 .find_map(|x| x)

@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
@@ -13,6 +14,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::announcement::Announcement;
+use crate::api::export::TransparentInput;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
@@ -21,6 +23,8 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+pub(crate) const LUSTRATION_FLAG: BFieldElement = BFieldElement::new(51022176260u64);
 
 /// TransactionKernel is immutable and its hash never changes.
 ///
@@ -103,6 +107,12 @@ pub(crate) enum TransactionConfirmabilityError {
     DuplicateInputs,
     AlreadySpentInput(usize),
     RemovalRecordUnpackFailure,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum TransactionLustrationError {
+    InvalidAoclRangeForIndexSet,
+    MissingLustrationAnnouncement,
 }
 
 impl From<RemovalRecordListUnpackError> for TransactionConfirmabilityError {
@@ -217,6 +227,61 @@ impl TransactionKernel {
         }
 
         true
+    }
+
+    /// Check if a transaction lustrates (reveals) all the required amounts, and
+    /// if it does, return the lustrated amount.
+    ///
+    /// Returns None if the lustration rule defined by the AOCL leaf index
+    /// threshold is not followed. The threshold defines the *last* AOCL leaf
+    /// that must lustrate.
+    ///
+    /// None means that the transaction must be rejected.
+    pub(crate) fn verified_lustration_amount(
+        &self,
+        max_lustrating_aocl_leaf_index: u64,
+    ) -> Result<NativeCurrencyAmount, TransactionLustrationError> {
+        let mut required_lustrations = vec![];
+        for input in &self.inputs {
+            let input_index_lower_end = match input.absolute_indices.aocl_range() {
+                Ok((min_leaf_index, _)) => min_leaf_index,
+                Err(_) => return Err(TransactionLustrationError::InvalidAoclRangeForIndexSet),
+            };
+
+            if input_index_lower_end <= max_lustrating_aocl_leaf_index {
+                required_lustrations.push(input.absolute_indices);
+            }
+        }
+
+        let mut required_lustrations: HashSet<_> = required_lustrations.into_iter().collect();
+
+        let all_lustrations = self
+            .announcements
+            .iter()
+            .filter(|ann| {
+                ann.message
+                    .first()
+                    .is_some_and(|elem0| *elem0 == LUSTRATION_FLAG)
+            })
+            .collect_vec();
+
+        let mut acc_amount = NativeCurrencyAmount::zero();
+        for lustration in all_lustrations {
+            let Ok(lustration) = TransparentInput::decode(&lustration.message[1..]) else {
+                continue;
+            };
+            let implied_index_set = lustration.absolute_index_set();
+            let was_present = required_lustrations.remove(&implied_index_set);
+            if was_present {
+                acc_amount += lustration.utxo.get_native_currency_amount();
+            }
+        }
+
+        if !required_lustrations.is_empty() {
+            return Err(TransactionLustrationError::MissingLustrationAnnouncement);
+        }
+
+        Ok(acc_amount)
     }
 }
 

@@ -6436,6 +6436,7 @@ mod tests {
                         index_picker_preimage,
                         random(),
                         target,
+                        None,
                     ) {
                         break valid_pow;
                     }

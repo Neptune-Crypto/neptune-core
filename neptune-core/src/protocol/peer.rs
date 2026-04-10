@@ -112,6 +112,13 @@ pub enum NegativePeerSanction {
     /// bandwidth) to respond to.
     ReceivedSyncChallenge,
     UnrelayableTransaction,
+
+    /// A transaction was missing lustration announcements
+    MissingLustrationAnnouncement,
+
+    /// A transaction was received that would make the lustration counter
+    /// negative.
+    LustrationsWouldMakeCounterNegative,
 }
 
 /// The reason for improving a peer's standing
@@ -171,6 +178,8 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::FishyDifficultiesChallengeResponse => -21,
             NegativePeerSanction::ReceivedSyncChallenge => -30,
             NegativePeerSanction::UnrelayableTransaction => -10,
+            NegativePeerSanction::MissingLustrationAnnouncement => -1,
+            NegativePeerSanction::LustrationsWouldMakeCounterNegative => -1,
         }
     }
 }
@@ -944,6 +953,9 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
             36 => NegativePeerSanction::OversizedBlock,
             37 => NegativePeerSanction::RequestForUnknownBlock,
             38 => NegativePeerSanction::RequestForGenesisBlock,
+
+            39 => NegativePeerSanction::MissingLustrationAnnouncement,
+            40 => NegativePeerSanction::LustrationsWouldMakeCounterNegative,
 
             _ => unreachable!(),
         }

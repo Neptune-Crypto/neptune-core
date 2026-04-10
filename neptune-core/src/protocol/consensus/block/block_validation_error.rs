@@ -117,6 +117,9 @@ pub enum BlockValidationError {
         got: NativeCurrencyAmount,
         initial: NativeCurrencyAmount,
     },
+    /// xxx -- unknown lustration error -- hopefully dead code
+    #[error("Unknown lustration problem. This should not happen.")]
+    UnknownLustrationProblem,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {
