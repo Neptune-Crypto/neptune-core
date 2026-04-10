@@ -1790,6 +1790,7 @@ pub mod tests {
     use crate::api::export::AnnouncementFlag;
     use crate::api::export::KeyType;
     use crate::api::export::NativeCurrencyAmount;
+    use crate::api::export::NeptuneProof;
     use crate::api::export::Network;
     use crate::api::export::OutputFormat;
     use crate::api::export::Timestamp;
@@ -3105,7 +3106,7 @@ pub mod tests {
                 input: vec![],
                 output: vec![],
             },
-            proof: crate::api::export::NeptuneProof::invalid().into(),
+            proof: NeptuneProof::invalid(),
         };
 
         let serialized_response = serde_json::to_string(&response).unwrap();
@@ -3186,7 +3187,7 @@ pub mod tests {
         let response = rpc_server
             .triton_verify_call(TritonVerifyRequest {
                 claim: invalid_claim.clone(),
-                proof: invalid_proof.into(),
+                proof: invalid_proof,
             })
             .await;
 
@@ -3196,7 +3197,7 @@ pub mod tests {
         // Test serialization/deserialization
         let request = TritonVerifyRequest {
             claim: invalid_claim,
-            proof: crate::api::export::NeptuneProof::invalid().into(),
+            proof: crate::api::export::NeptuneProof::invalid(),
         };
 
         let serialized = serde_json::to_string(&request).unwrap();
@@ -3208,12 +3209,12 @@ pub mod tests {
         );
         assert_eq!(request.claim.version, deserialized.claim.version);
 
-        let response = TritonVerifyResponse { is_valid: true };
-        let serialized_response = serde_json::to_string(&response).unwrap();
+        let response_ = TritonVerifyResponse { is_valid: true };
+        let serialized_response = serde_json::to_string(&response_).unwrap();
         let deserialized_response: TritonVerifyResponse =
             serde_json::from_str(&serialized_response).unwrap();
 
-        assert_eq!(response.is_valid, deserialized_response.is_valid);
+        assert_eq!(response_.is_valid, deserialized_response.is_valid);
     }
 
     #[apply(shared_tokio_runtime)]
@@ -3256,7 +3257,7 @@ pub mod tests {
         let genesis_hash = state.chain.tip().kernel.header.prev_block_digest;
         drop(state);
 
-        let result = rpc_server
+        let result_ = rpc_server
             .prove_an_transfer_call(ProveAnTransferRequest {
                 tx_ix: 0,
                 utxo_ix: 999,
@@ -3264,6 +3265,6 @@ pub mod tests {
             })
             .await;
 
-        assert!(result.is_err());
+        assert!(result_.is_err());
     }
 }
