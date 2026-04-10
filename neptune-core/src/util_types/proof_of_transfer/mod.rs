@@ -698,8 +698,7 @@ mod tests {
 
             // Verify the proof is valid (NeptuneProof should have content).
             let proof_data = proof.encode();
-            assert!(!proof_data.is_empty(), "proof should not be empty");
-            assert!(proof_data.len() > 0, "proof should have elements");
+            assert!(!proof_data.is_empty(), "proof should have elements");
 
             println!("🎉 SUCCESS! Helper function works perfectly!");
             println!("   - Canonical block digest: {:?}", block_after_digest);
