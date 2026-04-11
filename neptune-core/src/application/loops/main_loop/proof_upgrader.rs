@@ -255,7 +255,17 @@ impl UpgradeJob {
             TxProvingCapability::PrimitiveWitness => {
                 panic!("Client cannot have primitive witness capability only")
             }
-            TxProvingCapability::LockScript => todo!("TODO: Add support for this"),
+            TxProvingCapability::LockScript if network.use_mock_proof() => {
+                UpgradeJob::PrimitiveWitnessToSingleProof(PrimitiveWitnessToSingleProof {
+                    primitive_witness,
+                })
+            }
+            TxProvingCapability::LockScript => {
+                panic!(
+                    "Client cannot upgrade primitive witness with lock-script-only proving capability; use \
+                     --tx-proving-capability=proofcollection or singleproof to broadcast transactions"
+                )
+            }
         }
     }
 
