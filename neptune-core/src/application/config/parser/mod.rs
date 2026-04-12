@@ -5,7 +5,7 @@ use sysinfo::System;
 
 use super::cli_args::Args;
 use crate::api::export::TxProvingCapability;
-use crate::application::config::auto_consolidation::AutoConsolidationSetting;
+use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub(crate) enum CliArgsParseError {
@@ -23,8 +23,9 @@ impl Args {
     ///
     /// Sets cache.
     pub(crate) fn second_parse(&mut self) -> Result<(), CliArgsParseError> {
-        let auto_consolidate = AutoConsolidationSetting::parse(
+        let auto_consolidate = AutoConsolidationSettings::parse(
             &self.auto_consolidate,
+            self.num_consolidation_inputs,
             self.network,
             self.accept_consolidation_lustrations,
         )

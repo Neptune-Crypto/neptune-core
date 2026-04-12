@@ -20,7 +20,7 @@ use tracing::error;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
-use crate::application::config::auto_consolidation::AutoConsolidationSetting;
+use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
@@ -167,7 +167,7 @@ pub struct Args {
     ///
     /// If this flag is set, whenever there are four or more UTXOs managed by
     /// the wallet, the client will initiate and broadcast a transaction that
-    /// spends them to either the next unused symmetric key, or else the given
+    /// sends UTXOs to either the next unused symmetric key, or else the given
     /// address.
     ///
     /// Examples:
@@ -191,7 +191,14 @@ pub struct Args {
     pub(crate) accept_consolidation_lustrations: bool,
 
     #[clap(skip)]
-    pub(crate) auto_consolidate_cache: OnceLock<AutoConsolidationSetting>,
+    pub(crate) auto_consolidate_cache: OnceLock<AutoConsolidationSettings>,
+
+    /// Upper number of inputs per consolidation transaction.
+    ///
+    /// Sets the number of inputs that each consolidation transaction will
+    /// contain.
+    #[clap(long, default_value = "8", value_name = "NUM_INPUTS")]
+    pub(crate) num_consolidation_inputs: u8,
 
     /// Specify environment variables for Triton VM for a given (log2 of) the
     /// padded height. Can be used to control the environment variables
@@ -990,11 +997,12 @@ impl Args {
     /// # Panics
     /// - If cache is not set, and an invalid address is given as consolidation
     ///   address.
-    pub(crate) fn auto_consolidate(&self) -> AutoConsolidationSetting {
+    pub(crate) fn auto_consolidate(&self) -> AutoConsolidationSettings {
         self.auto_consolidate_cache
             .get_or_init(|| {
-                AutoConsolidationSetting::parse(
+                AutoConsolidationSettings::parse(
                     &self.auto_consolidate,
+                    self.num_consolidation_inputs,
                     self.network,
                     self.accept_consolidation_lustrations,
                 )

@@ -39,8 +39,8 @@ impl TransactionInitiator {
         timestamp: Timestamp,
         accept_lustrations: bool,
     ) -> Result<usize, ConsolidationError> {
-        const CONSOLIDATION_INPUT_COUNT: usize = 4;
-        let num_inputs = num_inputs.unwrap_or(CONSOLIDATION_INPUT_COUNT);
+        const MIN_CONSOLIDATION_INPUT_COUNT: usize = 16;
+        let num_inputs = num_inputs.unwrap_or(MIN_CONSOLIDATION_INPUT_COUNT);
 
         debug!("consolidate: Attempting to consolidate {num_inputs} UTXOs in wallet");
         let input_candidates = self.input_candidates(timestamp).await;
