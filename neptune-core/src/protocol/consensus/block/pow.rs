@@ -410,9 +410,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         let [e0, e1, e2, e3, e4] = self.path_a[MERKLE_TREE_HEIGHT - 2].values();
         let e5 = self.path_a[MERKLE_TREE_HEIGHT - 1].values()[0];
 
-        let lustration_status = match LustrationStatus::decode(&[e0, e1, e2, e3, e4, e5]) {
-            Ok(status) => status,
-            Err(_) => return Err(PowValidationError::CannotParseLustrationCounter),
+        let Ok(lustration_status) = LustrationStatus::decode(&[e0, e1, e2, e3, e4, e5]) else {
+            return Err(PowValidationError::CannotParseLustrationCounter);
         };
 
         Ok(*lustration_status)
@@ -689,7 +688,6 @@ impl<const MERKLE_TREE_HEIGHT: usize> Distribution<Pow<MERKLE_TREE_HEIGHT>> for 
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::i128;
     use std::time::Instant;
 
     use num_traits::Zero;
