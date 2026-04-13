@@ -778,10 +778,9 @@ pub mod tests {
     }
 
     mod lustrations {
-        use std::u64;
-
         use super::*;
         use crate::api::export::GenerationSpendingKey;
+        use crate::api::export::UnlockedUtxo;
         use crate::api::export::Utxo;
 
         #[proptest(cases = 5)]
@@ -841,10 +840,10 @@ pub mod tests {
             let fee = NativeCurrencyAmount::zero();
             let coinbase = None;
             let primitive_witness = PrimitiveWitness::arbitrary_primitive_witness_with(
-                &vec![input_utxo.clone()],
-                &vec![lock_script_and_witness],
-                &vec![],
-                &vec![],
+                std::slice::from_ref(&input_utxo),
+                std::slice::from_ref(&lock_script_and_witness),
+                &[],
+                &[],
                 fee,
                 coinbase,
             )
@@ -860,20 +859,14 @@ pub mod tests {
 
             // Then add lustration, and verify that Ok(amount) is returned.
             let mut with_lustration = primitive_witness.kernel;
-
-            let input_msmp = &primitive_witness.input_membership_proofs[0];
-            let transparent_input = TransparentInput {
-                utxo: input_utxo,
-                aocl_leaf_index: input_msmp.aocl_leaf_index,
-                sender_randomness: input_msmp.sender_randomness,
-                receiver_preimage: input_msmp.receiver_preimage,
-            };
-
-            let lustration = [vec![LUSTRATION_FLAG], transparent_input.encode()].concat();
-            let lustration = Announcement::new(lustration);
-
-            with_lustration.announcements.push(lustration);
-
+            let unlocked_utxo = UnlockedUtxo::unlock(
+                input_utxo,
+                lock_script_and_witness,
+                primitive_witness.input_membership_proofs[0].clone(),
+            );
+            with_lustration
+                .announcements
+                .push(unlocked_utxo.lustration());
             assert_eq!(
                 Ok(NativeCurrencyAmount::coins(12)),
                 with_lustration.verified_lustration_amount(u64::MAX)
