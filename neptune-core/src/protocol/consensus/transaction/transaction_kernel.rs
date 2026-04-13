@@ -243,9 +243,8 @@ impl TransactionKernel {
     ) -> Result<NativeCurrencyAmount, TransactionLustrationError> {
         let mut required_lustrations = vec![];
         for input in &self.inputs {
-            let input_index_lower_end = match input.absolute_indices.aocl_range() {
-                Ok((min_leaf_index, _)) => min_leaf_index,
-                Err(_) => return Err(TransactionLustrationError::InvalidAoclRangeForIndexSet),
+            let Ok((input_index_lower_end, _)) = input.absolute_indices.aocl_range() else {
+                return Err(TransactionLustrationError::InvalidAoclRangeForIndexSet);
             };
 
             if input_index_lower_end <= max_lustrating_aocl_leaf_index {

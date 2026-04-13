@@ -882,9 +882,8 @@ impl Block {
                     .expect("Must have transparency rule if height exceeds first such block");
 
             // 2.m)
-            let read = match self.header().pow.lustration_status() {
-                Ok(value) => value,
-                Err(_) => return Err(BlockValidationError::BadLustrationCounterEncoding),
+            let Ok(read) = self.header().pow.lustration_status() else {
+                return Err(BlockValidationError::BadLustrationCounterEncoding);
             };
 
             match transparency_rule {
@@ -909,9 +908,8 @@ impl Block {
                 }
                 LustrationRule::Updated { initial_counter } => {
                     // 2.m) (parent)
-                    let parent = match previous_block.header().pow.lustration_status() {
-                        Ok(value) => value,
-                        Err(_) => return Err(BlockValidationError::BadLustrationCounterEncoding),
+                    let Ok(parent) = previous_block.header().pow.lustration_status() else {
+                        return Err(BlockValidationError::BadLustrationCounterEncoding);
                     };
 
                     // 2.p
