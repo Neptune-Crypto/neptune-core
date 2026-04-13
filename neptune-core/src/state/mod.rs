@@ -751,7 +751,7 @@ impl GlobalState {
 
         let net = NetworkingState::new(peer_map, peer_databases);
 
-        let light_state: LightState = LightState::new(latest_block);
+        let light_state: LightState = LightState::new(latest_block, cli.network);
         let chain = BlockchainArchivalState {
             light_state,
             archival_state,
