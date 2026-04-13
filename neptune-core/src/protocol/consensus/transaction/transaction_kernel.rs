@@ -232,11 +232,14 @@ impl TransactionKernel {
     /// Check if a transaction lustrates (reveals) all the required amounts, and
     /// if it does, return the lustrated amount.
     ///
-    /// Returns None if the lustration rule defined by the AOCL leaf index
+    /// Returns an error if the lustration rule defined by the AOCL leaf index
     /// threshold is not followed. The threshold defines the *last* AOCL leaf
     /// that must lustrate.
     ///
-    /// None means that the transaction must be rejected.
+    /// An means that the transaction or block containing this transaction
+    /// kernel does not follow the rules specified by the function parameter.
+    /// Conversely, if this function returns Ok, then it does *not* guarantee
+    /// that the block or transaction is valid.
     pub(crate) fn verified_lustration_amount(
         &self,
         max_lustrating_aocl_leaf_index: u64,
@@ -624,6 +627,16 @@ pub mod tests {
                 })
                 .boxed()
         }
+
+        fn lowest_aocl_leaf_index(&self) -> Option<u64> {
+            self.inputs
+                .iter()
+                .map(|input| {
+                    let (min_leaf, _) = input.absolute_indices.aocl_range().unwrap();
+                    min_leaf
+                })
+                .min()
+        }
     }
 
     #[test]
@@ -761,6 +774,110 @@ pub mod tests {
             );
             let decoded = *TransactionKernel::decode(&encoded).unwrap();
             assert_eq!(kernel, decoded);
+        }
+    }
+
+    mod lustrations {
+        use std::u64;
+
+        use super::*;
+        use crate::api::export::GenerationSpendingKey;
+        use crate::api::export::Utxo;
+
+        #[proptest(cases = 5)]
+        fn no_lustration_required_on_new_aocl_leafs(
+            #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+            primitive_witness: PrimitiveWitness,
+        ) {
+            let kernel = &primitive_witness.kernel;
+            assert_eq!(
+                Ok(NativeCurrencyAmount::zero()),
+                kernel.verified_lustration_amount(kernel.lowest_aocl_leaf_index().unwrap() - 1)
+            );
+        }
+
+        #[proptest(cases = 5)]
+        fn returns_error_on_missing_lustration(
+            #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+            primitive_witness: PrimitiveWitness,
+        ) {
+            let kernel = &primitive_witness.kernel;
+
+            let min_aocl_leaf_index = kernel.lowest_aocl_leaf_index().unwrap();
+            assert_eq!(
+                Err(TransactionLustrationError::MissingLustrationAnnouncement),
+                kernel.verified_lustration_amount(min_aocl_leaf_index)
+            );
+            assert_eq!(
+                Err(TransactionLustrationError::MissingLustrationAnnouncement),
+                kernel.verified_lustration_amount(min_aocl_leaf_index + 1)
+            );
+        }
+
+        #[proptest(cases = 5)]
+        fn tx_without_inputs_requires_no_lustration(
+            #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 2, 2))]
+            primitive_witness: PrimitiveWitness,
+        ) {
+            let kernel = &primitive_witness.kernel;
+            assert_eq!(
+                Ok(NativeCurrencyAmount::zero()),
+                kernel.verified_lustration_amount(u64::MAX)
+            );
+        }
+
+        #[test]
+        fn lustration_check_one_input() {
+            let mut test_runner = TestRunner::deterministic();
+
+            let a_key = GenerationSpendingKey::derive_from_seed(Digest::default());
+            let lock_script_and_witness = a_key.lock_script_and_witness();
+
+            let input_utxo = Utxo::new_native_currency(
+                a_key.to_address().lock_script().hash(),
+                NativeCurrencyAmount::coins(12),
+            );
+
+            let fee = NativeCurrencyAmount::zero();
+            let coinbase = None;
+            let primitive_witness = PrimitiveWitness::arbitrary_primitive_witness_with(
+                &vec![input_utxo.clone()],
+                &vec![lock_script_and_witness],
+                &vec![],
+                &vec![],
+                fee,
+                coinbase,
+            )
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+            let no_lustration = primitive_witness.kernel.clone();
+            assert_eq!(
+                Err(TransactionLustrationError::MissingLustrationAnnouncement),
+                no_lustration.verified_lustration_amount(u64::MAX)
+            );
+
+            // Then add lustration, and verify that Ok(amount) is returned.
+            let mut with_lustration = primitive_witness.kernel;
+
+            let input_msmp = &primitive_witness.input_membership_proofs[0];
+            let transparent_input = TransparentInput {
+                utxo: input_utxo,
+                aocl_leaf_index: input_msmp.aocl_leaf_index,
+                sender_randomness: input_msmp.sender_randomness,
+                receiver_preimage: input_msmp.receiver_preimage,
+            };
+
+            let lustration = [vec![LUSTRATION_FLAG], transparent_input.encode()].concat();
+            let lustration = Announcement::new(lustration);
+
+            with_lustration.announcements.push(lustration);
+
+            assert_eq!(
+                Ok(NativeCurrencyAmount::coins(12)),
+                with_lustration.verified_lustration_amount(u64::MAX)
+            );
         }
     }
 }
