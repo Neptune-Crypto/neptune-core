@@ -253,9 +253,13 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use futures::channel::oneshot;
+    use itertools::Itertools;
+    use num_traits::CheckedSub;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use tasm_lib::prelude::Digest;
+    use tasm_lib::twenty_first::prelude::Mmr;
     use tracing_test::traced_test;
 
     use super::*;
@@ -290,6 +294,8 @@ pub(crate) mod tests {
     use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use crate::state::mempool::upgrade_priority::UpgradePriority;
+    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::next_block;
@@ -300,6 +306,7 @@ pub(crate) mod tests {
         mut state: GlobalStateLock,
         num_outputs: usize,
         timestamp: Timestamp,
+        input_selection_policy: Option<InputSelectionPolicy>,
     ) -> TxCreationArtifacts {
         let mut addresses_and_amts = vec![];
         let same_address = state
@@ -333,14 +340,21 @@ pub(crate) mod tests {
                 .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
                 .collect();
 
-            let policy = InputSelectionPolicy::default()
-                .prioritize(InputSelectionPriority::ByUtxoSize(SortOrder::Ascending));
+            let policy = input_selection_policy.unwrap_or(
+                InputSelectionPolicy::default()
+                    .prioritize(InputSelectionPriority::ByUtxoSize(SortOrder::Ascending)),
+            );
             let selected_inputs = InputSelector::new()
                 .input_candidates(input_candidates)
                 .policy(policy)
                 .spend_amount(tx_outputs.total_native_coins() + fee)
                 .build()
                 .unwrap();
+
+            println!(
+                "Selected inputs: [{}]",
+                selected_inputs.iter().map(|x| x.aocl_leaf_index).join(", ")
+            );
 
             state_lock.unlock_inputs(selected_inputs).await
         };
@@ -391,7 +405,7 @@ pub(crate) mod tests {
         timestamp: Timestamp,
     ) -> Block {
         let current_tip = me.lock_guard().await.chain.archival_state().get_tip().await;
-        let tx_many_outputs = tx_with_n_outputs(me.clone(), num_outputs, timestamp).await;
+        let tx_many_outputs = tx_with_n_outputs(me.clone(), num_outputs, timestamp, None).await;
         let (block_tx, _) = create_block_transaction_from(
             &current_tip,
             me,
@@ -597,6 +611,8 @@ pub(crate) mod tests {
                 compose: true,
                 guess: true,
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
+
+                // Must be non-zero since no archival mutator set is known
                 number_of_mps_per_utxo: 3,
                 ..Default::default()
             };
@@ -752,7 +768,7 @@ pub(crate) mod tests {
 
             // 4th block after hard fork, with a transaction.
             let tx_timestamp = block_f.header().timestamp + Timestamp::minutes(6);
-            let tx_artifacts = tx_with_n_outputs(bob.clone(), 2, tx_timestamp).await;
+            let tx_artifacts = tx_with_n_outputs(bob.clone(), 2, tx_timestamp, None).await;
             bob.api_mut()
                 .tx_initiator_mut()
                 .record_and_broadcast_transaction(&tx_artifacts)
@@ -779,6 +795,313 @@ pub(crate) mod tests {
             assert_eq!(
                 15003u64,
                 bob.lock_guard().await.chain.tip().header().height.value()
+            );
+        }
+    }
+
+    #[traced_test]
+    #[test]
+    fn hard_fork_beta() {
+        // Start at hard fork block height minus 2
+        let init_block_heigth = BlockHeight::from(39998u64);
+        let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
+            init_block_heigth,
+            Difficulty::MINIMUM,
+        );
+
+        tokio_runtime().block_on(new_blocks_hardfork_beta(bpw));
+
+        async fn new_blocks_hardfork_beta(block_primitive_witness: BlockPrimitiveWitness) {
+            // 1. generate state synced to height
+            let mut rng = StdRng::seed_from_u64(5551234665);
+            let network = Network::Main;
+            let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
+            let cli = cli_args::Args {
+                network,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+
+                // Must be non-zero since no archival mutator set is known
+                number_of_mps_per_utxo: 3,
+                ..Default::default()
+            };
+
+            let (minus3, minus2_no_pow) =
+                Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
+                    .await;
+
+            assert!(
+                minus2_no_pow
+                    .is_valid(&minus3, minus2_no_pow.header().timestamp, network)
+                    .await
+            );
+            let mut bob =
+                mock_genesis_global_state_with_block(2, bob_wallet, cli.clone(), minus3.clone())
+                    .await;
+
+            let (guesser_tx_b, guesser_rx_b) = oneshot::channel::<NewBlockFound>();
+            let guesser_timestamp_b = minus2_no_pow.header().timestamp;
+            guess_nonce(
+                network,
+                minus2_no_pow,
+                *minus3.header(),
+                guesser_tx_b,
+                GuessingConfiguration {
+                    num_guesser_threads: cli.guesser_threads,
+                    address: GenerationReceivingAddress::derive_from_seed(Digest::default()).into(),
+                    // For deterministic pow-guessing, both RNG and timestamp
+                    // must be deterministic.
+                    override_rng: Some(rng),
+                    override_timestamp: Some(guesser_timestamp_b),
+                },
+            )
+            .await;
+            let minus2 = *guesser_rx_b.await.unwrap().block;
+            assert!(
+                minus2
+                    .is_valid(&minus3, minus2.header().timestamp, network)
+                    .await
+            );
+            assert!(minus2.has_proof_of_work(network, minus3.header()));
+            assert!(minus2.pow_verify(
+                minus3.header().difficulty.target(),
+                ConsensusRuleSet::TvmProofVersion1
+            ));
+            assert!(minus2.pow_verify(
+                minus3.header().difficulty.target(),
+                ConsensusRuleSet::HardforkBeta
+            ));
+
+            bob.set_new_tip(minus2.clone()).await.unwrap();
+            assert_eq!(
+                39998u64,
+                bob.lock_guard().await.chain.tip().header().height.value()
+            );
+
+            // hard fork minus 1
+            let minus1 = next_block(bob.clone(), minus2.clone()).await;
+            assert!(
+                minus1
+                    .is_valid(&minus2, minus1.header().timestamp, network)
+                    .await
+            );
+            assert!(minus1.has_proof_of_work(network, minus2.header()));
+            assert!(minus1.pow_verify(
+                minus2.header().difficulty.target(),
+                ConsensusRuleSet::TvmProofVersion1
+            ));
+            assert!(minus1.pow_verify(
+                minus2.header().difficulty.target(),
+                ConsensusRuleSet::HardforkBeta
+            ));
+            bob.set_new_tip(minus1.clone()).await.unwrap();
+            assert_eq!(
+                39999u64,
+                bob.lock_guard().await.chain.tip().header().height.value()
+            );
+
+            // Verify non-zero balance, since we must make a transaction later.
+            let bob_balance_minus1 = bob
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .confirmed_total_balance(bob.lock_guard().await.chain.tip_height());
+            println!("bob_balance_minus1: {bob_balance_minus1}");
+            assert!(!bob_balance_minus1.is_zero());
+
+            assert!(bob.lock_guard().await.chain.lustration_status().is_none());
+
+            // Next: Mine a block that activates hardfork beta
+            let hf = next_block(bob.clone(), minus1.clone()).await;
+            assert!(hf.is_valid(&minus1, hf.header().timestamp, network).await);
+            assert!(hf.has_proof_of_work(network, minus1.header()));
+            assert!(!hf.pow_verify(
+                minus1.header().difficulty.target(),
+                ConsensusRuleSet::TvmProofVersion1
+            ));
+            assert!(hf.pow_verify(
+                minus1.header().difficulty.target(),
+                ConsensusRuleSet::HardforkBeta
+            ));
+            let hf_lustration_status = hf.header().pow.lustration_status().unwrap();
+            assert_eq!(
+                hf_lustration_status.max_lustrating_aocl_leaf_index + 1,
+                hf.mutator_set_accumulator_after().unwrap().aocl.num_leafs()
+            );
+            assert_eq!(
+                hf_lustration_status.counter,
+                NativeCurrencyAmount::coins(8679168),
+                "Lustration status must have expected value"
+            );
+
+            assert!(bob.lock_guard().await.chain.lustration_status().is_none());
+            bob.set_new_tip(hf.clone()).await.unwrap();
+            assert!(bob.lock_guard().await.chain.lustration_status().is_some());
+
+            // Now build a transaction that *must* lustrate.
+            let prefer_old_inputs = InputSelectionPolicy::default()
+                .prioritize(InputSelectionPriority::ByAge(SortOrder::Descending));
+            let tx0 = tx_with_n_outputs(
+                bob.clone(),
+                3,
+                hf.header().timestamp,
+                Some(prefer_old_inputs),
+            )
+            .await;
+            assert!(tx0.is_valid(network, ConsensusRuleSet::HardforkBeta).await);
+            assert!(tx0.details.contains_lustrations());
+            let input_amt0 = tx0.details.tx_inputs.total_native_coins();
+            assert!(
+                input_amt0 < bob_balance_minus1,
+                "Not all UTXOs may be carried over lustration barrier by this transaction, because
+                 of later asserts in this test"
+            );
+            assert_eq!(
+                input_amt0,
+                tx0.transaction()
+                    .kernel
+                    .verified_lustration_amount(hf_lustration_status.max_lustrating_aocl_leaf_index)
+                    .unwrap()
+            );
+
+            // Mine the above trasaction to produce block one after activation
+            // the hardfork.
+            bob.lock_guard_mut()
+                .await
+                .mempool_insert(tx0.transaction().to_owned(), UpgradePriority::Critical)
+                .await;
+            let plus1 = next_block(bob.clone(), hf.clone()).await;
+            assert!(plus1.is_valid(&hf, plus1.header().timestamp, network).await);
+            assert!(plus1.has_proof_of_work(network, hf.header()));
+            assert!(!plus1.pow_verify(
+                hf.header().difficulty.target(),
+                ConsensusRuleSet::TvmProofVersion1
+            ));
+            assert!(plus1.pow_verify(
+                hf.header().difficulty.target(),
+                ConsensusRuleSet::HardforkBeta
+            ));
+            let plus1_lustration_status = plus1.header().pow.lustration_status().unwrap();
+            assert_eq!(
+                hf_lustration_status.max_lustrating_aocl_leaf_index,
+                plus1_lustration_status.max_lustrating_aocl_leaf_index,
+                "AOCL threshold must be unchanged after first HF-beta block"
+            );
+            assert_eq!(
+                hf_lustration_status
+                    .counter
+                    .checked_sub(&input_amt0)
+                    .unwrap(),
+                plus1_lustration_status.counter,
+                "Lustration counter must be less since plus1 mined lustrating inputs"
+            );
+            bob.set_new_tip(plus1.clone()).await.unwrap();
+
+            // Build a 2nd transaction that must also lustrate since not all
+            // old inputs were mined yet.
+            // Give it many outputs to move the AOCL index so far that later
+            // transactions don't have to lustrate.
+            let tx1 = tx_with_n_outputs(
+                bob.clone(),
+                65,
+                plus1.header().timestamp,
+                Some(prefer_old_inputs),
+            )
+            .await;
+            assert!(tx1.is_valid(network, ConsensusRuleSet::HardforkBeta).await);
+            assert!(tx1.details.contains_lustrations());
+            let input_amt1 = tx1.details.tx_inputs.total_native_coins();
+            assert_eq!(
+                input_amt1,
+                tx1.transaction()
+                    .kernel
+                    .verified_lustration_amount(hf_lustration_status.max_lustrating_aocl_leaf_index)
+                    .unwrap()
+            );
+            bob.lock_guard_mut()
+                .await
+                .mempool_insert(tx1.transaction().to_owned(), UpgradePriority::Critical)
+                .await;
+            let plus2 = next_block(bob.clone(), plus1.clone()).await;
+            assert!(
+                plus2
+                    .is_valid(&plus1, plus2.header().timestamp, network)
+                    .await
+            );
+            assert!(plus2.has_proof_of_work(network, plus1.header()));
+            assert!(!plus2.pow_verify(
+                plus1.header().difficulty.target(),
+                ConsensusRuleSet::TvmProofVersion1
+            ));
+            assert!(plus2.pow_verify(
+                plus1.header().difficulty.target(),
+                ConsensusRuleSet::HardforkBeta
+            ));
+            let plus2_lustration_status = plus2.header().pow.lustration_status().unwrap();
+            assert_eq!(
+                hf_lustration_status.max_lustrating_aocl_leaf_index,
+                plus2_lustration_status.max_lustrating_aocl_leaf_index,
+                "AOCL threshold must be unchanged once HF-beta is activated"
+            );
+            assert_eq!(
+                plus1_lustration_status
+                    .counter
+                    .checked_sub(&input_amt1)
+                    .unwrap(),
+                plus2_lustration_status.counter,
+                "Lustration counter must be less since plus2 mined lustrating inputs"
+            );
+            bob.set_new_tip(plus2.clone()).await.unwrap();
+
+            // Build a new transaction that doesn't have to lustrate, since
+            // it's being built from new inputs. Verify no lustration.
+            println!(
+                "Lustration threshold: {}",
+                hf_lustration_status.max_lustrating_aocl_leaf_index
+            );
+            let prefer_new_inputs = InputSelectionPolicy::default()
+                .prioritize(InputSelectionPriority::ByAge(SortOrder::Ascending));
+            let tx2 = tx_with_n_outputs(
+                bob.clone(),
+                1,
+                plus2.header().timestamp,
+                Some(prefer_new_inputs),
+            )
+            .await;
+            assert!(tx2.is_valid(network, ConsensusRuleSet::HardforkBeta).await);
+            assert!(!tx2.details.contains_lustrations());
+            assert_eq!(
+                Ok(NativeCurrencyAmount::zero()),
+                tx2.transaction().kernel.verified_lustration_amount(
+                    hf_lustration_status.max_lustrating_aocl_leaf_index
+                )
+            );
+
+            // When a transaction without lustrations is mined, the lustration
+            // status must remain unchanged.
+            bob.lock_guard_mut()
+                .await
+                .mempool_insert(tx2.transaction().to_owned(), UpgradePriority::Critical)
+                .await;
+            let plus3 = next_block(bob.clone(), plus2.clone()).await;
+            assert!(
+                plus3
+                    .is_valid(&plus2, plus3.header().timestamp, network)
+                    .await
+            );
+            assert!(plus3.has_proof_of_work(network, plus2.header()));
+            assert!(!plus3.pow_verify(
+                plus2.header().difficulty.target(),
+                ConsensusRuleSet::TvmProofVersion1
+            ));
+            assert!(plus3.pow_verify(
+                plus2.header().difficulty.target(),
+                ConsensusRuleSet::HardforkBeta
+            ));
+            let plus3_lustration_status = plus3.header().pow.lustration_status().unwrap();
+            assert_eq!(
+                plus2_lustration_status, plus3_lustration_status,
+                "Lustration status must be unchanged when no lustrating inputs were mined"
             );
         }
     }
