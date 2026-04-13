@@ -284,6 +284,14 @@ impl TransactionDetails {
         self
     }
 
+    /// Returns true if the (presumably locally produced) transaction contains
+    /// lustration announcements.
+    pub(crate) fn contains_lustrations(&self) -> bool {
+        self.announcements()
+            .iter()
+            .any(|x| x.looks_like_lustration())
+    }
+
     /// amount spent (excludes change and fee)
     ///
     /// ie: sum(inputs) - (change + fee)

@@ -11,6 +11,7 @@
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
+use tracing::debug;
 
 use crate::api::export::TransparentInput;
 use crate::api::export::TransparentTransactionInfo;
@@ -324,6 +325,12 @@ impl TransactionDetailsBuilder {
 
         // If transaction needs to lustrate, do so here.
         if let Some(lustration_status) = lustration_status {
+            debug!(
+                "Lustration rules activated. Checking all inputs for lustration requirements.
+                AOCL leaf threshold: {}
+            ",
+                lustration_status.max_lustrating_aocl_leaf_index
+            );
             for input in tx_inputs.iter() {
                 // Match consensus rule that defines when inputs need to be
                 // lustrated.
@@ -333,6 +340,10 @@ impl TransactionDetailsBuilder {
                     .expect("Must be able to calculate AOCL range of own input");
 
                 if input_index_lower_end <= lustration_status.max_lustrating_aocl_leaf_index {
+                    debug!(
+                        "Found input in need of lustration. Lustrating now. Input index min
+                     range was: {input_index_lower_end}"
+                    );
                     // We need to lustrate!
                     custom_announcements.push(input.lustration());
                 }
