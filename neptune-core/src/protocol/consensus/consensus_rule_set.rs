@@ -84,32 +84,37 @@ impl ConsensusRuleSet {
     /// argument is necessary because the forks can activate at different
     /// heights based on the network.
     pub(crate) fn infer_from(network: Network, block_height: BlockHeight) -> Self {
+        let first_lustration_block = Self::first_lustration_block(network);
         match network {
             Network::Main => {
                 if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET {
                     ConsensusRuleSet::Reboot
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET {
                     ConsensusRuleSet::HardforkAlpha
-                } else if block_height < BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET {
+                } else if block_height < first_lustration_block {
                     ConsensusRuleSet::TvmProofVersion1
                 } else {
                     ConsensusRuleSet::HardforkBeta
                 }
             }
-            Network::TestnetMock => ConsensusRuleSet::TvmProofVersion1,
-            Network::RegTest => ConsensusRuleSet::TvmProofVersion1,
             Network::Testnet(0) => {
                 if block_height < BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET {
                     ConsensusRuleSet::Reboot
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET {
                     ConsensusRuleSet::HardforkAlpha
-                } else if block_height < BLOCK_HEIGHT_HARDFORK_BETA_TESTNET {
+                } else if block_height < first_lustration_block {
                     ConsensusRuleSet::TvmProofVersion1
                 } else {
                     ConsensusRuleSet::HardforkBeta
                 }
             }
-            Network::Testnet(_) => ConsensusRuleSet::HardforkBeta,
+            _ => {
+                if block_height < first_lustration_block {
+                    ConsensusRuleSet::TvmProofVersion1
+                } else {
+                    ConsensusRuleSet::HardforkBeta
+                }
+            }
         }
     }
 
@@ -197,8 +202,14 @@ impl ConsensusRuleSet {
         match network {
             Network::Main => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
             Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
-            Network::TestnetMock => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
-            _ => BlockHeight::genesis().next(),
+            _ => {
+                // Activating the lustration rule at block 20 on these test
+                // networks means that existing tests that generate blocks and
+                // transactions without lustrations keep working. This value
+                // isn't set in stone though, and can be changed if anyone has
+                // a good reason for it.
+                20u64.into()
+            }
         }
     }
 
@@ -210,54 +221,27 @@ impl ConsensusRuleSet {
         let premine = PREMINE_MAX_SIZE;
         let claims_pool = INITIAL_BLOCK_SUBSIDY
             .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
-        match network {
-            Network::Main => {
-                let mined_at_hardfork = INITIAL_BLOCK_SUBSIDY.scalar_mul(
-                    u32::try_from(BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET.value()).unwrap(),
-                );
-                let initial_counter = premine + claims_pool + mined_at_hardfork;
-                if block_height < BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET {
-                    None
-                } else if block_height == BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET {
-                    assert!(
-                        block_height.get_generation().is_zero(),
-                        "Assumes transparency gateway starts at generation zero."
-                    );
 
-                    Some(LustrationRule::Initial(LustrationStatus {
-                        counter: initial_counter,
-                        max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
-                    }))
-                } else {
-                    Some(LustrationRule::Updated { initial_counter })
-                }
-            }
-            Network::Testnet(0) => {
-                let mined_at_hardfork = INITIAL_BLOCK_SUBSIDY
-                    .scalar_mul(u32::try_from(BLOCK_HEIGHT_HARDFORK_BETA_TESTNET.value()).unwrap());
-                let initial_counter = premine + claims_pool + mined_at_hardfork;
-                if block_height < BLOCK_HEIGHT_HARDFORK_BETA_TESTNET {
-                    None
-                } else if block_height == BLOCK_HEIGHT_HARDFORK_BETA_TESTNET {
-                    assert!(
-                        block_height.get_generation().is_zero(),
-                        "Assumes transparency gateway starts at generation zero."
-                    );
+        let first_hf_beta_block = Self::first_lustration_block(network);
 
-                    Some(LustrationRule::Initial(LustrationStatus {
-                        counter: initial_counter,
-                        max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
-                    }))
-                } else {
-                    Some(LustrationRule::Updated { initial_counter })
-                }
-            }
-            // TODO: Fix values on these alternative networks!
-            Network::Testnet(_) | Network::TestnetMock | Network::RegTest => {
-                Some(LustrationRule::Updated {
-                    initial_counter: premine + claims_pool,
-                })
-            }
+        assert!(
+            first_hf_beta_block.get_generation().is_zero(),
+            "This calculation assumes transparency gateway starts at generation zero."
+        );
+
+        let mined_at_hardfork_activation =
+            INITIAL_BLOCK_SUBSIDY.scalar_mul(u32::try_from(first_hf_beta_block.value()).unwrap());
+        let initial_counter = premine + claims_pool + mined_at_hardfork_activation;
+
+        if block_height < first_hf_beta_block {
+            None
+        } else if block_height == first_hf_beta_block {
+            Some(LustrationRule::Initial(LustrationStatus {
+                counter: initial_counter,
+                max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
+            }))
+        } else {
+            Some(LustrationRule::Updated { initial_counter })
         }
     }
 }
@@ -265,6 +249,7 @@ impl ConsensusRuleSet {
 #[cfg(test)]
 pub(crate) mod tests {
 
+    use std::assert_matches;
     use std::sync::Arc;
 
     use futures::channel::oneshot;
@@ -556,6 +541,36 @@ pub(crate) mod tests {
     fn future_and_past_memory_hardness() {
         assert!(ConsensusRuleSet::infer_from(Network::Main, 1_000u64.into()).memory_hard_pow());
         assert!(!ConsensusRuleSet::infer_from(Network::Main, 100_000u64.into()).memory_hard_pow());
+    }
+
+    #[test]
+    fn tvm_v1_preceeds_hf_beta() {
+        let network = Network::Main;
+        let first_lustration_block = ConsensusRuleSet::first_lustration_block(network);
+        assert_eq!(
+            ConsensusRuleSet::TvmProofVersion1,
+            ConsensusRuleSet::infer_from(network, first_lustration_block.previous().unwrap())
+        );
+        assert_eq!(
+            ConsensusRuleSet::HardforkBeta,
+            ConsensusRuleSet::infer_from(network, first_lustration_block)
+        );
+
+        let dummy_count = 55647;
+        assert!(ConsensusRuleSet::lustration_rule(
+            network,
+            first_lustration_block.previous().unwrap(),
+            dummy_count
+        )
+        .is_none(),);
+        assert_matches!(
+            ConsensusRuleSet::lustration_rule(network, first_lustration_block, dummy_count),
+            Some(LustrationRule::Initial(_)),
+        );
+        assert_matches!(
+            ConsensusRuleSet::lustration_rule(network, first_lustration_block.next(), dummy_count),
+            Some(LustrationRule::Updated { .. }),
+        );
     }
 
     #[traced_test]

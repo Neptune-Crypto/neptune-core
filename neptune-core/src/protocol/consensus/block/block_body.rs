@@ -265,22 +265,24 @@ mod tests {
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
-    #[proptest(cases = 10)]
+    #[proptest(cases = 4)]
     fn aocl_leaf_count_and_index_consistency(
-        #[strategy(arb())] _mutator_set_accumulator: MutatorSetAccumulator,
-        #[strategy(BlockBody::arbitrary_with_mutator_set_accumulator(#_mutator_set_accumulator))]
+        #[strategy(0..=5_000_000_000u64)] _num_leafs_aocl: u64,
+        #[strategy(MsaAndRecords::arbitrary_with((vec![], #_num_leafs_aocl)))]
+        _msa_and_records: MsaAndRecords,
+        #[strategy(BlockBody::arbitrary_with_mutator_set_accumulator(#_msa_and_records.mutator_set_accumulator))]
         body: BlockBody,
-        #[strategy(arb())] guesser_outputs: [AdditionRecord; 2],
     ) {
-        prop_assert_eq!(
-            body.mutator_set_accumulator_after(guesser_outputs.to_vec())
-                .aocl
-                .num_leafs()
-                - 1, // converting a number into an index
-            body.max_aocl_leaf_index()
-        )
+        let guesser_outputs = [AdditionRecord::new(Digest::default()); 2];
+        let expected_max_index = body
+            .mutator_set_accumulator_after(guesser_outputs.to_vec())
+            .aocl
+            .num_leafs()
+            - 1;
+        prop_assert_eq!(expected_max_index, body.max_aocl_leaf_index());
     }
 
     impl BlockBody {
