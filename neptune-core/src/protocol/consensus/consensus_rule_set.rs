@@ -129,6 +129,17 @@ impl ConsensusRuleSet {
         }
     }
 
+    /// Returns true if PoW threshold is defined relative to parent difficulty,
+    /// and false if it is defined relative to own difficulty value.
+    pub(crate) fn use_parent_difficulty(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot => true,
+            ConsensusRuleSet::HardforkAlpha => true,
+            ConsensusRuleSet::TvmProofVersion1 => true,
+            ConsensusRuleSet::HardforkBeta => false,
+        }
+    }
+
     pub(crate) fn requires_lustration_status_in_block_header(&self) -> bool {
         match self {
             ConsensusRuleSet::Reboot
@@ -560,6 +571,14 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn expected_use_parent_difficulty() {
+        assert!(ConsensusRuleSet::Reboot.use_parent_difficulty());
+        assert!(ConsensusRuleSet::HardforkAlpha.use_parent_difficulty());
+        assert!(ConsensusRuleSet::TvmProofVersion1.use_parent_difficulty());
+        assert!(!ConsensusRuleSet::HardforkBeta.use_parent_difficulty());
+    }
+
+    #[test]
     fn tvm_v1_preceeds_hf_beta() {
         let network = Network::Main;
         let first_lustration_block = ConsensusRuleSet::first_lustration_block(network);
@@ -665,11 +684,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(block_b.has_proof_of_work(network, block_a.header()));
-            assert!(block_b.pow_verify(
+            assert!(block_b.pow_verify_for_tests(
                 block_a.header().difficulty.target(),
                 ConsensusRuleSet::Reboot
             ));
-            assert!(!block_b.pow_verify(
+            assert!(!block_b.pow_verify_for_tests(
                 block_a.header().difficulty.target(),
                 ConsensusRuleSet::HardforkAlpha
             ));
@@ -688,11 +707,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(block_c.has_proof_of_work(network, block_b.header()));
-            assert!(block_c.pow_verify(
+            assert!(block_c.pow_verify_for_tests(
                 block_b.header().difficulty.target(),
                 ConsensusRuleSet::Reboot
             ));
-            assert!(!block_c.pow_verify(
+            assert!(!block_c.pow_verify_for_tests(
                 block_b.header().difficulty.target(),
                 ConsensusRuleSet::HardforkAlpha
             ));
@@ -710,11 +729,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(block_d.has_proof_of_work(network, block_c.header()));
-            assert!(!block_d.pow_verify(
+            assert!(!block_d.pow_verify_for_tests(
                 block_c.header().difficulty.target(),
                 ConsensusRuleSet::Reboot
             ));
-            assert!(block_d.pow_verify(
+            assert!(block_d.pow_verify_for_tests(
                 block_c.header().difficulty.target(),
                 ConsensusRuleSet::HardforkAlpha
             ));
@@ -732,11 +751,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(block_e.has_proof_of_work(network, block_d.header()));
-            assert!(!block_e.pow_verify(
+            assert!(!block_e.pow_verify_for_tests(
                 block_d.header().difficulty.target(),
                 ConsensusRuleSet::Reboot
             ));
-            assert!(block_e.pow_verify(
+            assert!(block_e.pow_verify_for_tests(
                 block_d.header().difficulty.target(),
                 ConsensusRuleSet::HardforkAlpha
             ));
@@ -754,11 +773,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(block_f.has_proof_of_work(network, block_e.header()));
-            assert!(!block_f.pow_verify(
+            assert!(!block_f.pow_verify_for_tests(
                 block_e.header().difficulty.target(),
                 ConsensusRuleSet::Reboot
             ));
-            assert!(block_f.pow_verify(
+            assert!(block_f.pow_verify_for_tests(
                 block_e.header().difficulty.target(),
                 ConsensusRuleSet::HardforkAlpha
             ));
@@ -785,11 +804,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(block_g.has_proof_of_work(network, block_f.header()));
-            assert!(!block_g.pow_verify(
+            assert!(!block_g.pow_verify_for_tests(
                 block_f.header().difficulty.target(),
                 ConsensusRuleSet::Reboot
             ));
-            assert!(block_g.pow_verify(
+            assert!(block_g.pow_verify_for_tests(
                 block_f.header().difficulty.target(),
                 ConsensusRuleSet::HardforkAlpha
             ));
@@ -864,11 +883,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(minus2.has_proof_of_work(network, minus3.header()));
-            assert!(minus2.pow_verify(
+            assert!(minus2.pow_verify_for_tests(
                 minus3.header().difficulty.target(),
                 ConsensusRuleSet::TvmProofVersion1
             ));
-            assert!(minus2.pow_verify(
+            assert!(minus2.pow_verify_for_tests(
                 minus3.header().difficulty.target(),
                 ConsensusRuleSet::HardforkBeta
             ));
@@ -887,11 +906,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(minus1.has_proof_of_work(network, minus2.header()));
-            assert!(minus1.pow_verify(
+            assert!(minus1.pow_verify_for_tests(
                 minus2.header().difficulty.target(),
                 ConsensusRuleSet::TvmProofVersion1
             ));
-            assert!(minus1.pow_verify(
+            assert!(minus1.pow_verify_for_tests(
                 minus2.header().difficulty.target(),
                 ConsensusRuleSet::HardforkBeta
             ));
@@ -930,11 +949,11 @@ pub(crate) mod tests {
             let hf = next_block(bob.clone(), minus1.clone()).await;
             assert!(hf.is_valid(&minus1, hf.header().timestamp, network).await);
             assert!(hf.has_proof_of_work(network, minus1.header()));
-            assert!(!hf.pow_verify(
+            assert!(!hf.pow_verify_for_tests(
                 minus1.header().difficulty.target(),
                 ConsensusRuleSet::TvmProofVersion1
             ));
-            assert!(hf.pow_verify(
+            assert!(hf.pow_verify_for_tests(
                 minus1.header().difficulty.target(),
                 ConsensusRuleSet::HardforkBeta
             ));
@@ -997,11 +1016,11 @@ pub(crate) mod tests {
             let plus1 = next_block(bob.clone(), hf.clone()).await;
             assert!(plus1.is_valid(&hf, plus1.header().timestamp, network).await);
             assert!(plus1.has_proof_of_work(network, hf.header()));
-            assert!(!plus1.pow_verify(
+            assert!(!plus1.pow_verify_for_tests(
                 hf.header().difficulty.target(),
                 ConsensusRuleSet::TvmProofVersion1
             ));
-            assert!(plus1.pow_verify(
+            assert!(plus1.pow_verify_for_tests(
                 hf.header().difficulty.target(),
                 ConsensusRuleSet::HardforkBeta
             ));
@@ -1053,11 +1072,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(plus2.has_proof_of_work(network, plus1.header()));
-            assert!(!plus2.pow_verify(
+            assert!(!plus2.pow_verify_for_tests(
                 plus1.header().difficulty.target(),
                 ConsensusRuleSet::TvmProofVersion1
             ));
-            assert!(plus2.pow_verify(
+            assert!(plus2.pow_verify_for_tests(
                 plus1.header().difficulty.target(),
                 ConsensusRuleSet::HardforkBeta
             ));
@@ -1114,11 +1133,11 @@ pub(crate) mod tests {
                     .await
             );
             assert!(plus3.has_proof_of_work(network, plus2.header()));
-            assert!(!plus3.pow_verify(
+            assert!(!plus3.pow_verify_for_tests(
                 plus2.header().difficulty.target(),
                 ConsensusRuleSet::TvmProofVersion1
             ));
-            assert!(plus3.pow_verify(
+            assert!(plus3.pow_verify_for_tests(
                 plus2.header().difficulty.target(),
                 ConsensusRuleSet::HardforkBeta
             ));

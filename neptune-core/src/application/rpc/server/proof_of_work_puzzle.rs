@@ -48,13 +48,18 @@ pub struct ProofOfWorkPuzzle {
 impl ProofOfWorkPuzzle {
     /// Return a PoW puzzle assuming that the caller has already set the correct
     /// guesser digest.
-    pub fn new(block_proposal: Block, parent_difficulty: Difficulty) -> Self {
+    ///
+    /// # Warning
+    /// - The provided difficulty will be used, regardless of the consensus
+    ///   rule set. So it must be correct.
+    // TODO: Remove 2nd argument when hardfork-beta is activated
+    pub fn new(block_proposal: Block, difficulty: Difficulty) -> Self {
         let guesser_reward = block_proposal
             .body()
             .total_guesser_reward()
             .expect("Block proposal must have well-defined guesser reward");
         let auth_paths = block_proposal.pow_mast_paths();
-        let threshold = parent_difficulty.target();
+        let threshold = difficulty.target();
         let prev_block = block_proposal.header().prev_block_digest;
 
         let id = Tip5::hash(&auth_paths);

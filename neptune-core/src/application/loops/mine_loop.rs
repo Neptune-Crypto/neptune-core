@@ -270,17 +270,23 @@ fn guess_worker(
         )
     };
 
-    let prev_difficulty = previous_block_header.difficulty;
-    let threshold = prev_difficulty.target();
-    let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     let new_block_height = block.header().height;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block_height);
+    let difficulty = if consensus_rule_set.use_parent_difficulty() {
+        previous_block_header.difficulty
+    } else {
+        new_difficulty
+    };
+
+    let threshold = difficulty.target();
+    let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     info!(
         "Guessing with {} threads on block {:x} of height {} with {} outputs and difficulty {}. Target: {threshold:x}",
         threads_to_use,
         block.hash(),
         new_block_height,
         block.body().transaction_kernel.outputs.len(),
-        previous_block_header.difficulty,
+        difficulty,
     );
 
     // note: this article discusses rayon strategies for mining.
@@ -292,7 +298,6 @@ fn guess_worker(
 
     block.set_header_guesser_address(guesser_address);
 
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block_height);
     info!("Start: guess preprocessing, consensus ruleset: {consensus_rule_set}.");
 
     let guesser_buffer =
@@ -369,7 +374,7 @@ fn guess_worker(
 Since previous block: {elapsed_human}
               Digest: {hash:x}
 Difficulty threshold: {threshold}
-          Difficulty: {prev_difficulty}
+          Difficulty: {difficulty}
            #inputs  : {num_inputs}
            #outputs : {num_outputs}
 "#
@@ -2254,28 +2259,22 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn block_hash_relates_to_predecessor_difficulty() {
-        let difficulty = 100u32;
-
-        // Difficulty X means we expect X trials before success.
-        // Modeling the process as a geometric distribution gives the
-        // probability of success in a single trial, p = 1/X.
-        // Then the probability of seeing k failures is (1-1/X)^k.
-        // We want this to be five nines certain that we do get a success
-        // after k trials, so this quantity must be less than 0.0001.
-        // So: log_10 0.0001 = -4 > log_10 (1-1/X)^k = k * log_10 (1 - 1/X).
-        // Difficulty 100 sets k = 917.
-        let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
-        let k = (-4.0 / cofactor).ceil() as usize;
-
+    /// Return two blocks: Parent and successor. One of them will have the
+    /// defined difficulty, the other will have a random difficulty. Which one
+    /// has the defined difficulty is determined by the 2nd argument.
+    fn mock_blocks_for_difficulty_check(
+        difficulty: Difficulty,
+        set_parent_difficulty: bool,
+    ) -> (Block, Block) {
         let mut rng = rand::rng();
         let mut unstructured_source = vec![0u8; TransactionKernelProxy::size_hint(2).0];
         rng.fill_bytes(&mut unstructured_source);
         let mut unstructured = arbitrary::Unstructured::new(&unstructured_source);
 
         let mut predecessor_header = rng.random::<BlockHeader>();
-        predecessor_header.difficulty = Difficulty::from(difficulty);
+        if set_parent_difficulty {
+            predecessor_header.difficulty = difficulty;
+        }
         let predecessor_body = BlockBody::new(
             TransactionKernelProxy::arbitrary(&mut unstructured)
                 .unwrap()
@@ -2293,8 +2292,11 @@ pub(crate) mod tests {
         );
 
         let mut successor_header = rng.random::<BlockHeader>();
+        if !set_parent_difficulty {
+            successor_header.difficulty = difficulty;
+        }
+
         successor_header.prev_block_digest = predecessor_block.hash();
-        // note that successor's difficulty is random
         let successor_body = BlockBody::new(
             TransactionKernelProxy::arbitrary(&mut unstructured)
                 .unwrap()
@@ -2304,7 +2306,6 @@ pub(crate) mod tests {
             random_mmra(),
         );
 
-        let mut counter = 0;
         let successor_block = Block::new(
             successor_header,
             successor_body.clone(),
@@ -2312,32 +2313,70 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let guesser_buffer =
-            successor_block.guess_preprocess(None, None, ConsensusRuleSet::TvmProofVersion1);
-        let mast_auth_paths = successor_block.pow_mast_paths();
-        let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
-        let target = predecessor_block.header().difficulty.target();
-        loop {
-            if BlockPow::guess(
-                &guesser_buffer,
-                &mast_auth_paths,
-                index_picker_preimage,
-                rng.random(),
-                target,
-                None,
-            )
-            .is_some()
-            {
-                println!("found solution after {counter} guesses.");
-                break;
+        (predecessor_block, successor_block)
+    }
+
+    #[traced_test]
+    #[test]
+    fn hash_relates_to_predecessor_difficulty_prior_to_hf_beta_and_own_after() {
+        let difficulty = 100u32;
+
+        // Difficulty X means we expect X trials before success.
+        // Modeling the process as a geometric distribution gives the
+        // probability of success in a single trial, p = 1/X.
+        // Then the probability of seeing k failures is (1-1/X)^k.
+        // We want this to be five nines certain that we do get a success
+        // after k trials, so this quantity must be less than 0.0001.
+        // So: log_10 0.0001 = -4 > log_10 (1-1/X)^k = k * log_10 (1 - 1/X).
+        // Difficulty 100 sets k = 917.
+        let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
+        let k = (-4.0 / cofactor).ceil() as usize;
+        let difficulty: Difficulty = difficulty.into();
+
+        for consensus_rule_set in [
+            ConsensusRuleSet::TvmProofVersion1,
+            ConsensusRuleSet::HardforkBeta,
+        ] {
+            let use_parent_difficulty = consensus_rule_set.use_parent_difficulty();
+            let (predecessor, mut sucessor) =
+                mock_blocks_for_difficulty_check(difficulty, use_parent_difficulty);
+
+            let target = if use_parent_difficulty {
+                predecessor.header().difficulty.target()
+            } else {
+                sucessor.header().difficulty.target()
+            };
+            let guesser_buffer = sucessor.guess_preprocess(None, None, consensus_rule_set);
+            let mast_auth_paths = sucessor.pow_mast_paths();
+            let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
+            let mut rng = rand::rng();
+            let mut counter = 0;
+            loop {
+                if let Some(pow) = BlockPow::guess(
+                    &guesser_buffer,
+                    &mast_auth_paths,
+                    index_picker_preimage,
+                    rng.random(),
+                    target,
+                    None,
+                ) {
+                    println!("found solution after {counter} guesses.");
+                    let parent_target = predecessor.header().difficulty.target();
+                    sucessor.set_header_pow(pow);
+                    assert!(
+                        sucessor.pow_verify_for_tests(parent_target, consensus_rule_set),
+                        "Found PoW must be valid for {consensus_rule_set} rules"
+                    );
+                    break;
+                }
+
+                counter += 1;
+
+                assert!(
+                    counter < k,
+                    "number of hash trials before finding valid pow exceeds statistical limit"
+                )
             }
-
-            counter += 1;
-
-            assert!(
-                counter < k,
-                "number of hash trials before finding valid pow exceeds statistical limit"
-            )
         }
     }
 

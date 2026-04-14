@@ -40,10 +40,14 @@ pub struct RpcBlockTemplateMetadata {
 impl RpcBlockTemplateMetadata {
     /// Extracts template metadata assuming that the caller has already set the
     /// correct guesser digest.
-    pub fn new(block_proposal: &Block, parent_difficulty: Difficulty) -> Self {
+    /// # Warning
+    /// - The provided difficulty will be used, regardless of the consensus
+    ///   rule set. So it must be correct.
+    // TODO: Remove 2nd argument when hardfork-beta is activated
+    pub fn new(block_proposal: &Block, difficulty: Difficulty) -> Self {
         let digest = block_proposal.hash();
         let prev_block = block_proposal.header().prev_block_digest;
-        let threshold = parent_difficulty.target();
+        let threshold = difficulty.target();
         let guesser_reward = block_proposal
             .body()
             .total_guesser_reward()
