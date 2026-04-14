@@ -131,11 +131,6 @@ pub async fn initialize(
     cli_args.second_parse()?;
     let cli_args = cli_args;
 
-    // see comment for Network::performs_automated_mining()
-    if cli_args.mine() && !cli_args.network.performs_automated_mining() {
-        anyhow::bail!("Automatic mining is not supported for network {}.  Try again without --compose or --guess flags.", cli_args.network);
-    }
-
     info!("Starting neptune-core node on {}.", cli_args.network);
 
     // Get data directory (wallet, block database), create one if none exists

@@ -125,22 +125,6 @@ impl Network {
             Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(588000),
         }
     }
-
-    /// indicates if automated mining should be performed by this network
-    ///
-    /// note: we disable auto-mining in regtest mode because it generates blocks
-    /// very quickly and that is not a good fit when mining is enabled for
-    /// duration of the neptune-core process as blockchain grows very quickly.
-    ///
-    /// instead developers are encouraged to use [crate::api::regtest] module to
-    /// generate any number of blocks in a controlled, deterministic fashion.
-    //
-    // bitcoin-core does not use cli flags, but rather RPC commands to
-    // enable/disable mining in controlled fashion. We might consider moving to
-    // that model before enabling automated mining for RegTest.
-    pub fn performs_automated_mining(&self) -> bool {
-        !self.is_reg_test()
-    }
 }
 
 impl fmt::Display for Network {

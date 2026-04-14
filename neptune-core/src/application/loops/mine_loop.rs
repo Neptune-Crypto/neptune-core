@@ -44,6 +44,7 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::difficulty_control::difficulty_control;
+use crate::protocol::consensus::block::mock_block_generator::MockBlockGenerator;
 use crate::protocol::consensus::block::pow::GuesserBuffer;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
@@ -80,6 +81,12 @@ pub(crate) async fn compose_block_helper(
     coinbase_timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Block, Vec<ExpectedUtxo>)> {
+    // Mock?
+    if global_state_lock.cli().network.use_mock_proof() {
+        return Ok(mock_compose_block(latest_block, global_state_lock, coinbase_timestamp).await);
+    }
+
+    // Real STARK composition path.
     let (transaction, composer_utxos) = create_block_transaction(
         &latest_block,
         global_state_lock,
@@ -126,6 +133,54 @@ async fn compose_block(
         Ok(_) => Ok(()),
         Err(_) => bail!("Composer task failed to send to miner master"),
     }
+}
+
+/// Compose a block rapidly using mock proofs.
+///
+/// Some networks, such as TestnetMock or Regtest, use mock proofs to bypass the
+/// expensive proof-generating step. This function may only be used in a testing
+/// context.
+///
+/// No STARK proofs are generated; blocks are accepted by nodes on the same
+/// network because use_mock_proof() gates proof verification.
+pub(crate) async fn mock_compose_block(
+    latest_block: Block,
+    global_state_lock: GlobalStateLock,
+    coinbase_timestamp: Timestamp,
+) -> (Block, Vec<ExpectedUtxo>) {
+    let gs = global_state_lock.lock_guard().await;
+    let composer_parameters = gs.wallet_state.composer_parameters(
+        latest_block.header().height.next(),
+        gs.cli().guesser_fraction,
+        Default::default(),
+        gs.mining_state.overridden_coinbase_distribution(),
+    );
+    let guesser_address = gs
+        .wallet_state
+        .wallet_entropy
+        .guesser_fee_key()
+        .to_address()
+        .into();
+    let txs = gs.mempool.get_transactions_for_block_composition(
+        SIZE_20MB_IN_BYTES,
+        Some(gs.cli().max_num_compose_mergers.get()),
+    );
+    drop(gs);
+
+    let (block, composer_txos) = MockBlockGenerator::mock_successor_no_pow(
+        latest_block,
+        composer_parameters.clone(),
+        guesser_address,
+        coinbase_timestamp,
+        rand::random(),
+        txs,
+        global_state_lock.cli().network,
+    );
+
+    (
+        block,
+        composer_parameters.extract_expected_utxos(composer_txos),
+    )
 }
 
 /// Attempt to mine a valid block for the network.
@@ -676,13 +731,17 @@ pub(crate) async fn mine(
         // Wait before starting mining task to ensure that peers have sent us
         // information about their latest blocks. This should prevent the client
         // from finding blocks that will later be orphaned.
-        const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
-
+        // RegTest has no real peers to sync from, so a short sleep suffices.
+        let initial_sleep_secs = if global_state_lock.cli().network.is_reg_test() {
+            1
+        } else {
+            60
+        };
         tracing::info!(
             "sleeping for {} seconds while node initializes",
-            INITIAL_MINING_SLEEP_IN_SECONDS
+            initial_sleep_secs
         );
-        tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+        tokio::time::sleep(Duration::from_secs(initial_sleep_secs)).await;
     }
 
     let cli_args = global_state_lock.cli().clone();
