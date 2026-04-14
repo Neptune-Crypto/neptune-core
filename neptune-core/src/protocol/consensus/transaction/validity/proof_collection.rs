@@ -307,7 +307,7 @@ impl ProofCollection {
                 [self.salted_inputs_hash, self.salted_outputs_hash]
                     .into_iter()
                     .flat_map(|d| d.reversed().values())
-                    .collect::<Vec<BFieldElement>>(),
+                    .collect::<Vec<_>>(),
             )
             .with_output(
                 self.type_script_hashes
@@ -333,7 +333,7 @@ impl ProofCollection {
                     ]
                     .into_iter()
                     .flat_map(|d| d.reversed().values())
-                    .collect::<Vec<BFieldElement>>(),
+                    .collect::<Vec<_>>(),
                 )
             })
             .collect_vec();

@@ -165,6 +165,10 @@ libp2p = { version = "0.56.0", features = [
 whoami = "2.0.0"
 
 [dev-dependencies]
+# Integration test `can_prove_out_of_process_kernel_to_outputs` needs both
+# arbitrary implementations and specfications. The next line says, for
+# integration tests we want to rely on whatever is public in crate neptune cash
+# *when feature flags "arbitrary-impls" and "spec" are enabled*.
 neptune-cash = { path = "../neptune-core", features = ["arbitrary-impls", "spec"] }
 
 # note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]
