@@ -911,6 +911,19 @@ pub(crate) mod tests {
 
             assert!(bob.lock_guard().await.chain.lustration_status().is_none());
 
+            // Insert a tx in mempool to verify it gets deleted when the
+            // hardfork happens. And that the composer doesn't attempt to pick
+            // up this incompatible transaction.
+            let never_mined_tx =
+                tx_with_n_outputs(bob.clone(), 1, minus1.header().timestamp, None).await;
+            bob.lock_guard_mut()
+                .await
+                .mempool_insert(
+                    never_mined_tx.transaction().to_owned(),
+                    UpgradePriority::Critical,
+                )
+                .await;
+
             // Next: Mine a block that activates hardfork beta
             let hf = next_block(bob.clone(), minus1.clone()).await;
             assert!(hf.is_valid(&minus1, hf.header().timestamp, network).await);
@@ -933,9 +946,18 @@ pub(crate) mod tests {
                 NativeCurrencyAmount::coins(8679168),
                 "Lustration status must have expected value"
             );
+            assert!(
+                hf.body().transaction_kernel().inputs.is_empty(),
+                "Transaction from mempool must not be mined since this block activates the hardfork"
+            );
 
+            assert!(!bob.lock_guard().await.mempool.is_empty());
             assert!(bob.lock_guard().await.chain.lustration_status().is_none());
             bob.set_new_tip(hf.clone()).await.unwrap();
+            assert!(
+                bob.lock_guard().await.mempool.is_empty(),
+                "Activating hardfork must clear mempool."
+            );
             assert!(bob.lock_guard().await.chain.lustration_status().is_some());
 
             // Now build a transaction that *must* lustrate.
