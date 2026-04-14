@@ -27,7 +27,7 @@ pub enum BlockValidationError {
     /// 0.f) Cumulative PoW was updated correctly
     #[error("block cumulative proof-of-work must be updated correctly")]
     CumulativeProofOfWork,
-    ///   0.g) Block timestamp is less than host-time (utc) + 5 minutes
+    ///   0.g) Block timestamp is less than host-time (utc) + 1 minute + 1ms
     #[error("block must not be from the future")]
     FutureDating,
 
@@ -319,6 +319,23 @@ mod tests {
         prop_assert_eq!(
             BlockValidationError::FutureDating,
             b_new.validate(&b_prev, ts, network).await.err().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn block_with_future_dating_fails_0g_unit_test() {
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let now = Timestamp::now();
+        let too_far_in_future = now + Timestamp::seconds(60) + Timestamp::millis(1);
+
+        assert_eq!(
+            BlockValidationError::FutureDating,
+            invalid_empty_block_with_timestamp(&genesis, too_far_in_future, network)
+                .validate(&genesis, now, network)
+                .await
+                .err()
+                .unwrap()
         );
     }
 

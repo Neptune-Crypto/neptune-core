@@ -106,7 +106,7 @@ pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmo
 
 /// Blocks with timestamps too far into the future are invalid. Reject blocks
 /// whose timestamp exceeds now with this value or more.
-pub(crate) const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
+pub(crate) const FUTUREDATING_LIMIT: Timestamp = Timestamp::millis(60001);
 
 /// The size of the premine, 831488 coins.
 pub const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
@@ -2254,25 +2254,25 @@ pub(crate) mod tests {
             let mut block1 =
                 fake_valid_successor_for_tests(&genesis_block, now, rng.random(), network).await;
 
-            // Set block timestamp 4 minutes in the future.  (is valid)
-            let future_time1 = now + Timestamp::minutes(4);
+            // Set block timestamp 30 seconds in the future.  (is valid)
+            let future_time1 = now + Timestamp::seconds(30);
             block1.kernel.header.timestamp = future_time1;
             assert!(block1.is_valid(&genesis_block, now, network).await);
 
             now = block1.kernel.header.timestamp;
 
-            // Set block timestamp 5 minutes - 1 sec in the future.  (is valid)
-            let future_time2 = now + Timestamp::minutes(5) - Timestamp::seconds(1);
+            // Set block timestamp 1 minute in the future.  (is valid)
+            let future_time2 = now + Timestamp::minutes(1);
             block1.kernel.header.timestamp = future_time2;
             assert!(block1.is_valid(&genesis_block, now, network).await);
 
-            // Set block timestamp 5 minutes in the future. (not valid)
-            let future_time3 = now + Timestamp::minutes(5);
+            // Set block timestamp 1 minute + 1ms in the future. (not valid)
+            let future_time3 = now + Timestamp::minutes(1) + Timestamp::millis(1);
             block1.kernel.header.timestamp = future_time3;
             assert!(!block1.is_valid(&genesis_block, now, network).await);
 
-            // Set block timestamp 5 minutes + 1 sec in the future. (not valid)
-            let future_time4 = now + Timestamp::minutes(5) + Timestamp::seconds(1);
+            // Set block timestamp 1 minute + 1 sec in the future. (not valid)
+            let future_time4 = now + Timestamp::minutes(1) + Timestamp::seconds(1);
             block1.kernel.header.timestamp = future_time4;
             assert!(!block1.is_valid(&genesis_block, now, network).await);
 

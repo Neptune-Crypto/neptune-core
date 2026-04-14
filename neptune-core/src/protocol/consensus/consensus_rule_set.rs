@@ -57,7 +57,9 @@ pub enum ConsensusRuleSet {
     #[default]
     TvmProofVersion1,
 
-    /// Remove memory hardness from PoW algorithm
+    /// Remove memory hardness from PoW algorithm, add lustration barrier for
+    /// old inputs, compare difficulty to own block header instead of parent's
+    /// block header.
     HardforkBeta,
 }
 
