@@ -125,7 +125,6 @@ impl Network {
             Self::Main | Self::Testnet(_) | Self::TestnetMock => Timestamp::millis(588000),
         }
     }
-
 }
 
 impl fmt::Display for Network {

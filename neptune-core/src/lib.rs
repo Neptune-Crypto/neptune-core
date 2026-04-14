@@ -131,8 +131,6 @@ pub async fn initialize(
     cli_args.second_parse()?;
     let cli_args = cli_args;
 
-
-
     info!("Starting neptune-core node on {}.", cli_args.network);
 
     // Get data directory (wallet, block database), create one if none exists
