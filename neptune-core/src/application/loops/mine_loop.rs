@@ -564,13 +564,14 @@ pub(crate) async fn create_block_transaction_from(
     let mut rng: StdRng =
         SeedableRng::from_seed(global_state_lock.lock_guard().await.shuffle_seed());
 
+    let old_height = predecessor_block.header().height;
+    let new_height = old_height.next();
     let composer_parameters = global_state_lock
         .lock_guard()
         .await
-        .composer_parameters(predecessor_block.header().height.next());
-    let next_block_height = predecessor_block.header().height.next();
+        .composer_parameters(new_height);
     let network = global_state_lock.cli().network;
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
+    let new_rules = ConsensusRuleSet::infer_from(network, new_height);
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
@@ -581,7 +582,7 @@ pub(crate) async fn create_block_transaction_from(
         timestamp,
         vm_job_queue.clone(),
         job_options.clone(),
-        consensus_rule_set,
+        new_rules,
     )
     .await?;
 
@@ -600,6 +601,8 @@ pub(crate) async fn create_block_transaction_from(
         TxMergeOrigin::ExplicitList(transactions) => transactions.to_owned(),
     };
 
+    let old_rules = ConsensusRuleSet::infer_from(network, old_height);
+
     // If no updated single-proof transaction were found in the mempool, try
     // to find one that's not updated, since updating this is faster than
     // producing a new single proof-backed transaction.
@@ -607,7 +610,10 @@ pub(crate) async fn create_block_transaction_from(
         .template(&job_options)
         .proof_type(TransactionProofType::SingleProof)
         .build();
-    if transactions_to_merge.is_empty() && tx_merge_origin == TxMergeOrigin::Mempool {
+    if transactions_to_merge.is_empty()
+        && tx_merge_origin == TxMergeOrigin::Mempool
+        && new_rules == old_rules
+    {
         info!("No synced single-proof tx found for merge. Looking for one to update.");
         let min_gobbling_fee = NativeCurrencyAmount::zero();
         let update_job = global_state_lock
@@ -631,7 +637,7 @@ pub(crate) async fn create_block_transaction_from(
                     vm_job_queue.clone(),
                     proof_job_options.clone(),
                     &wallet_entropy,
-                    next_block_height,
+                    new_height,
                     notification_policy,
                 )
                 .await
@@ -653,6 +659,11 @@ pub(crate) async fn create_block_transaction_from(
         }
     }
 
+    // Ensure we don't mine incompatible transactions from mempool
+    if old_rules != new_rules {
+        transactions_to_merge.clear();
+    }
+
     // If necessary, populate list with nop-tx.
     // Guarantees that some merge happens in below loop, which sets merge-bit.
     if transactions_to_merge.is_empty() {
@@ -665,7 +676,7 @@ pub(crate) async fn create_block_transaction_from(
         let nop = PrimitiveWitness::from_transaction_details(&nop);
 
         let proof = TransactionProofBuilder::new()
-            .consensus_rule_set(consensus_rule_set)
+            .consensus_rule_set(new_rules)
             .primitive_witness_ref(&nop)
             .job_queue(vm_job_queue.clone())
             .proof_job_options(proof_job_options)
@@ -703,7 +714,7 @@ pub(crate) async fn create_block_transaction_from(
             rng.random(),
             vm_job_queue.clone(),
             job_options.clone(),
-            consensus_rule_set,
+            new_rules,
         )
         .await?
         .into(); // fix #579.  propagate error up.

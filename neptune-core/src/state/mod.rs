@@ -2804,6 +2804,8 @@ impl GlobalState {
                     })
             };
 
+        let previous_height = self.chain.light_state().tip().header().height;
+
         debug!("Updating light state.");
         self.chain.light_state_mut().update(new_tip);
         let tip: &Block = self.chain.tip();
@@ -2813,7 +2815,21 @@ impl GlobalState {
         // block. Also returns the list of update-jobs that should be
         // performed by this client.
         debug!("Applying block to mempool.");
-        let (mempool_events, update_jobs) = self.mempool.update_with_block(tip)?;
+        let (mut mempool_events, mut update_jobs) = self.mempool.update_with_block(tip)?;
+
+        // Do not attempt to maintain the mempool across a fork
+        let network = self.cli().network;
+        let previous_rules = ConsensusRuleSet::infer_from(network, previous_height);
+        let new_rules = ConsensusRuleSet::infer_from(network, tip.header().height);
+        if previous_rules != new_rules {
+            info!(
+                "Blockchain rules changed! From {previous_rules} to {new_rules}. Clearing mempool."
+            );
+
+            let clear_events = self.mempool.clear();
+            mempool_events.extend(clear_events);
+            update_jobs.clear();
+        }
 
         // Sanity check: If no parent is known, new block must be the genesis
         // block.
