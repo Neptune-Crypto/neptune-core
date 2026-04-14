@@ -1026,8 +1026,9 @@ impl Block {
     /// Determine whether the proof-of-work puzzle was solved correctly.
     ///
     /// Specifically, compare the hash of the current block against the
-    /// target corresponding to the previous block's difficulty and return true
-    /// if the former is smaller.
+    /// required target. Depending on the consensus rule set that applies, this
+    /// may be either the parent block's difficulty, or the block's own
+    /// difficulty. Returns true if the target is met.
     pub fn has_proof_of_work(&self, network: Network, previous_block_header: &BlockHeader) -> bool {
         // enforce network difficulty-reset-interval if present. Note that *no*
         // pow checks are enforced in this case, not even Merkle authentication
@@ -1042,14 +1043,13 @@ impl Block {
             return true;
         }
 
-        let threshold = previous_block_header.difficulty.target();
-        if network.allows_mock_pow() && self.is_valid_mock_pow(threshold) {
+        let parent_threshold = previous_block_header.difficulty.target();
+        if network.allows_mock_pow() && self.is_valid_mock_pow(parent_threshold) {
             return true;
         }
 
-        let consensus_rule_set =
-            ConsensusRuleSet::infer_from(network, previous_block_header.height.next());
-        self.pow_verify(threshold, consensus_rule_set)
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+        self.pow_verify(parent_threshold, consensus_rule_set)
     }
 
     /// Produce the MAST authentication paths for the `pow` field on
@@ -1120,8 +1120,21 @@ impl Block {
         }
     }
 
-    /// Verify that block digest is less than threshold and integral.
-    pub(crate) fn pow_verify(&self, target: Digest, consensus_rule_set: ConsensusRuleSet) -> bool {
+    /// Verify that block digest is less than the required threshold, and follow
+    /// any other proof-of-work rules defined by the consensus rule set.
+    ///
+    /// Parent target is only used if the consensus rules dicate that.
+    /// Otherwise, the block's own difficulty is used.
+    ///
+    /// Internal function. For checking if a block has sufficient proof of work,
+    /// you should use [`Self::has_proof_of_work`] instead since that function
+    /// automatically uses the correct consensus rule set.
+    fn pow_verify(&self, parent_target: Digest, consensus_rule_set: ConsensusRuleSet) -> bool {
+        let target = if consensus_rule_set.use_parent_difficulty() {
+            parent_target
+        } else {
+            self.header().difficulty.target()
+        };
         let auth_paths = self.pow_mast_paths();
         self.header()
             .pow
@@ -1492,16 +1505,32 @@ pub(crate) mod tests {
             parent_difficulty: Difficulty,
             consensus_rule_set: ConsensusRuleSet,
         ) {
-            println!("Trying to guess for difficulty: {parent_difficulty}");
+            let difficulty = if consensus_rule_set.use_parent_difficulty() {
+                parent_difficulty
+            } else {
+                self.header().difficulty
+            };
+
+            println!("Trying to guess for difficulty: {difficulty}");
             assert!(
-                parent_difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
+                difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
                 "Don't use high difficulty in test"
             );
 
-            let puzzle = ProofOfWorkPuzzle::new(self.clone(), parent_difficulty);
+            let puzzle = ProofOfWorkPuzzle::new(self.clone(), difficulty);
             let valid_pow = puzzle.solve(consensus_rule_set);
 
             self.set_header_pow(valid_pow);
+        }
+
+        /// Check if PoW requirement has been fulfilled, allowing for the
+        /// overriding of the consensus rule set.
+        pub(crate) fn pow_verify_for_tests(
+            &self,
+            parent_target: Digest,
+            consensus_rule_set: ConsensusRuleSet,
+        ) -> bool {
+            self.pow_verify(parent_target, consensus_rule_set)
         }
 
         #[inline]
@@ -1567,12 +1596,17 @@ pub(crate) mod tests {
     fn guess_nonce_happy_path() {
         let network = Network::Main;
         let genesis = Block::genesis(network);
+        let parent_target = genesis.header().difficulty.target();
 
         for consensus_rule_set in ConsensusRuleSet::iter() {
             let mut invalid_block = invalid_empty_block(&genesis, network);
             let mast_auth_paths = invalid_block.pow_mast_paths();
             let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);
-            let target = Difficulty::from(50u32).target();
+            let target = if consensus_rule_set.use_parent_difficulty() {
+                parent_target
+            } else {
+                invalid_block.header().difficulty.target()
+            };
             let mut rng = rng();
             let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
 
@@ -1590,11 +1624,14 @@ pub(crate) mod tests {
             };
 
             assert!(
-                !invalid_block.pow_verify(target, consensus_rule_set),
+                !invalid_block.pow_verify(parent_target, consensus_rule_set),
                 "Pow verification must fail prior to setting PoW"
             );
             invalid_block.set_header_pow(valid_pow);
-            assert!(invalid_block.pow_verify(target, consensus_rule_set));
+            assert!(
+                invalid_block.pow_verify(parent_target, consensus_rule_set,),
+                "pow for {consensus_rule_set} rules must be satisfied after correct guess"
+            );
         }
     }
 

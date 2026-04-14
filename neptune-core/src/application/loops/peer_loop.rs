@@ -2900,19 +2900,19 @@ mod tests {
             block_with_valid_reboot_pow.satisfy_pow(difficulty, ConsensusRuleSet::Reboot);
             assert!(block_with_valid_reboot_pow.is_valid_mock_pow(difficulty.target()));
             assert!(block_with_valid_reboot_pow
-                .pow_verify(difficulty.target(), ConsensusRuleSet::Reboot));
+                .pow_verify_for_tests(difficulty.target(), ConsensusRuleSet::Reboot));
 
             let mut block_with_valid_alpha_pow = block.clone();
             block_with_valid_alpha_pow.satisfy_pow(difficulty, ConsensusRuleSet::HardforkAlpha);
             assert!(block_with_valid_alpha_pow.is_valid_mock_pow(difficulty.target()));
             assert!(block_with_valid_alpha_pow
-                .pow_verify(difficulty.target(), ConsensusRuleSet::HardforkAlpha));
+                .pow_verify_for_tests(difficulty.target(), ConsensusRuleSet::HardforkAlpha));
 
             let mut block_with_valid_tvmv1_pow = block.clone();
             block_with_valid_tvmv1_pow.satisfy_pow(difficulty, ConsensusRuleSet::TvmProofVersion1);
             assert!(block_with_valid_tvmv1_pow.is_valid_mock_pow(difficulty.target()));
             assert!(block_with_valid_tvmv1_pow
-                .pow_verify(difficulty.target(), ConsensusRuleSet::TvmProofVersion1));
+                .pow_verify_for_tests(difficulty.target(), ConsensusRuleSet::TvmProofVersion1));
 
             (
                 invalid_pow,
@@ -4358,15 +4358,15 @@ mod tests {
                     next_block(state_lock.clone(), hard_fork_minus_1.clone()).await;
 
                 // Verify assumption about block height of hardfork
-                assert!(hard_fork_minus_1.pow_verify(
+                assert!(hard_fork_minus_1.pow_verify_for_tests(
                     hard_fork_minus_2.header().difficulty.target(),
                     start_consensus_rule_set
                 ));
-                assert!(first_block_after_hardfork.pow_verify(
+                assert!(first_block_after_hardfork.pow_verify_for_tests(
                     hard_fork_minus_2.header().difficulty.target(),
                     end_consensus_rule_set
                 ));
-                assert!(!first_block_after_hardfork.pow_verify(
+                assert!(!first_block_after_hardfork.pow_verify_for_tests(
                     hard_fork_minus_1.header().difficulty.target(),
                     start_consensus_rule_set
                 ));

@@ -43,6 +43,7 @@ use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_output::TxOutput;
@@ -1303,16 +1304,24 @@ impl RpcApi for RpcServer {
         &self,
         request: GetBlockTemplateRequest,
     ) -> RpcResult<GetBlockTemplateResponse> {
-        let (maybe_proposal, tip) = {
+        let (maybe_proposal, tip_header) = {
             let global_state = self.state.lock_guard().await;
             let proposal = global_state.mining_state.block_proposal.map(|p| p.clone());
-            let tip = *global_state.chain.tip().header();
+            let tip_header = *global_state.chain.tip().header();
 
-            (proposal, tip)
+            (proposal, tip_header)
         };
 
         let Some(mut proposal) = maybe_proposal else {
             return Ok(GetBlockTemplateResponse { template: None });
+        };
+
+        let network = self.state.cli().network;
+        let consensus_rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
+        let difficulty = if consensus_rules.use_parent_difficulty() {
+            tip_header.difficulty
+        } else {
+            proposal.header().difficulty
         };
 
         let address =
@@ -1322,7 +1331,7 @@ impl RpcApi for RpcServer {
 
         let template = RpcBlockTemplate {
             block: RpcBlock::from(&proposal),
-            metadata: RpcBlockTemplateMetadata::new(&proposal, tip.difficulty),
+            metadata: RpcBlockTemplateMetadata::new(&proposal, difficulty),
         };
 
         Ok(GetBlockTemplateResponse {
