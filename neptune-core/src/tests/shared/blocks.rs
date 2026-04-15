@@ -611,7 +611,8 @@ async fn fake_valid_block_from_block_tx_for_tests(
     network: Network,
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, network).await;
-    let block_height = predecessor.header().height;
+
+    let block_height = block.header().height;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
     block.satisfy_pow(predecessor.header().difficulty, consensus_rule_set);
 

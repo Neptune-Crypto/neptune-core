@@ -30,6 +30,7 @@ use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
 pub struct LustrationStatus {
     /// Remaining number of coins that can pass through the lustration barrier.
     pub counter: NativeCurrencyAmount,
@@ -417,19 +418,26 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         Ok(*lustration_status)
     }
 
-    pub(crate) fn set_lustration_status(&mut self, value: LustrationStatus) {
+    fn set_lustration_status_raw(&mut self, raw_values: [BFieldElement; 6]) {
+        let [e0, e1, e2, e3, e4, e5] = raw_values;
+
         // This encoding leaves nine free B field elements free after the
         // the lustration encoding. Those **nine** elements can be used to
         // encode other data, without negatively affecting optimized mining
         // hardware or software.
-        let encoding = value.encode();
-        let [e0, e1, e2, e3, e4, e5] = encoding
-            .try_into()
-            .expect("Lustration status encoding must have size six");
         self.path_a[MERKLE_TREE_HEIGHT - 2] = Digest([e0, e1, e2, e3, e4]);
         let [_prev_e0, prev_e1, prev_e2, prev_e3, prev_e4] =
             self.path_a[MERKLE_TREE_HEIGHT - 1].values();
         self.path_a[MERKLE_TREE_HEIGHT - 1] = Digest([e5, prev_e1, prev_e2, prev_e3, prev_e4]);
+    }
+
+    /// Set the lustration status to the specified value in the PoW field.
+    pub(super) fn set_lustration_status(&mut self, value: LustrationStatus) {
+        let encoding = value.encode();
+        let encoding: [BFieldElement; 6] = encoding
+            .try_into()
+            .expect("Lustration status encoding must have size six elements");
+        self.set_lustration_status_raw(encoding);
     }
 
     pub(crate) fn preprocess(
@@ -716,6 +724,20 @@ pub(crate) mod tests {
 
         fn leaf(&self, index: usize) -> Digest {
             self.leafs[index]
+        }
+    }
+
+    impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
+        pub(in super::super) fn set_unparseable_lustration_status(&mut self) {
+            let elements = bfe_array![
+                1u64 << 32,
+                1u64 << 33,
+                1u64 << 34,
+                1u64 << 35,
+                1u64 << 36,
+                1u64 << 37
+            ];
+            self.set_lustration_status_raw(elements);
         }
     }
 
