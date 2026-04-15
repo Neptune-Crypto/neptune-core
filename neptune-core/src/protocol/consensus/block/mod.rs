@@ -64,6 +64,7 @@ use crate::protocol::consensus::block::block_kernel::BlockKernelField;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::difficulty_control::difficulty_control;
 use crate::protocol::consensus::block::pow::GuesserBuffer;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
@@ -333,6 +334,23 @@ impl Block {
     pub fn set_header_guesser_address(&mut self, address: ReceivingAddress) {
         self.kernel.header.guesser_receiver_data.receiver_digest = address.privacy_digest();
         self.kernel.header.guesser_receiver_data.lock_script_hash = address.lock_script_hash();
+        self.unset_digest();
+    }
+
+    /// Set the lustration status found in the block's header.
+    ///
+    /// Note: this causes the block digest to change.
+    pub fn set_lustration_status(&mut self, lustration_status: LustrationStatus) {
+        self.kernel
+            .header
+            .pow
+            .set_lustration_status(lustration_status);
+        self.unset_digest();
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_unparseable_lustration_status(&mut self) {
+        self.kernel.header.pow.set_unparseable_lustration_status();
         self.unset_digest();
     }
 
@@ -888,7 +906,7 @@ impl Block {
 
             match transparency_rule {
                 LustrationRule::Initial(expected) => {
-                    // 2.o
+                    // 2.p
                     if read.counter != expected.counter {
                         return Err(BlockValidationError::BadLustrationCounter {
                             got: read.counter,
@@ -896,7 +914,7 @@ impl Block {
                         });
                     }
 
-                    // 2.p
+                    // 2.q
                     if read.max_lustrating_aocl_leaf_index
                         != expected.max_lustrating_aocl_leaf_index
                     {
@@ -907,12 +925,12 @@ impl Block {
                     }
                 }
                 LustrationRule::Updated { initial_counter } => {
-                    // 2.m) (parent)
+                    // 2.n)
                     let Ok(parent) = previous_block.header().pow.lustration_status() else {
-                        return Err(BlockValidationError::BadLustrationCounterEncoding);
+                        return Err(BlockValidationError::BadLustrationCounterEncodingOfParent);
                     };
 
-                    // 2.p
+                    // 2.q
                     if read.max_lustrating_aocl_leaf_index != parent.max_lustrating_aocl_leaf_index
                     {
                         return Err(BlockValidationError::BadLustrationAoclThreshold {
@@ -928,7 +946,7 @@ impl Block {
                         .verified_lustration_amount(aocl_threshold);
                     let verified_lustrated_amt = match lustration_result {
                         Ok(amount) => amount,
-                        // 2.n
+                        // 2.o
                         Err(TransactionLustrationError::MissingLustrationAnnouncement) => {
                             return Err(BlockValidationError::MissingLustrationAnnouncement);
                         }
@@ -936,7 +954,7 @@ impl Block {
                         Err(_) => return Err(BlockValidationError::UnknownLustrationProblem),
                     };
 
-                    // 2.q
+                    // 2.r
                     let Some(expected_counter) =
                         parent.counter.checked_sub(&verified_lustrated_amt)
                     else {
@@ -949,7 +967,7 @@ impl Block {
 
                     // I don't think this error *can* be hit without the next
                     // error also being hit. But security-in-depth!
-                    // 2.r
+                    // 2.s
                     if read.counter > initial_counter {
                         return Err(BlockValidationError::LustrationCounterExceedsInitialValue {
                             got: read.counter,
@@ -957,7 +975,7 @@ impl Block {
                         });
                     }
 
-                    // 2.o
+                    // 2.p
                     if expected_counter != read.counter {
                         return Err(BlockValidationError::BadLustrationCounter {
                             got: read.counter,
@@ -1439,6 +1457,18 @@ pub(crate) mod tests {
 
         pub(crate) fn set_proof(&mut self, proof: BlockProof) {
             self.proof = proof;
+            self.unset_digest();
+        }
+
+        pub(super) fn fix_mutator_set_field(&mut self, prev_block: &Block) {
+            let mut msa = prev_block.mutator_set_accumulator_after().unwrap();
+            let ms_update = MutatorSetUpdate::new(
+                self.body().transaction_kernel.inputs.clone(),
+                self.body().transaction_kernel.outputs.clone(),
+            );
+
+            ms_update.apply_to_accumulator(&mut msa).unwrap();
+            self.kernel.body.mutator_set_accumulator = msa;
             self.unset_digest();
         }
 
