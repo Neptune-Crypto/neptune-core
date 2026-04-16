@@ -91,6 +91,7 @@ impl BlockPrimitiveWitness {
             parent_digest,
             timestamp,
             target_block_interval,
+            self.network,
         );
 
         let max_aocl_leaf_index = self.max_aocl_leaf_index();

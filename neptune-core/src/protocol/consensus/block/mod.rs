@@ -63,6 +63,7 @@ use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_
 use crate::protocol::consensus::block::block_kernel::BlockKernelField;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::difficulty_control::difficulty_control;
+use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::pow::GuesserBuffer;
 use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::pow::Pow;
@@ -259,9 +260,9 @@ impl Block {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
-        let next_block_height = predecessor.header().height.next();
+        let new_height = predecessor.header().height.next();
         let network = proof_job_options.job_settings.network;
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_height);
         let tx_claim = BlockAppendix::transaction_validity_claim(
             transaction.kernel.mast_hash(),
             consensus_rule_set,
@@ -354,20 +355,26 @@ impl Block {
         self.unset_digest();
     }
 
-    /// sets header timestamp and difficulty.
+    /// sets header timestamp, difficulty and, optionally, cumulative proof of
+    /// work.
     ///
     /// These must be set as a pair because the difficulty depends
-    /// on the timestamp, and may change with it.
+    /// on the timestamp, and may change with it. Depending on the consensus
+    /// rules, the cumulative proof of work must also be updated.
     ///
     /// note: this causes block digest to change.
     #[inline]
-    pub(crate) fn set_header_timestamp_and_difficulty(
+    pub(crate) fn set_difficulty_related_fields(
         &mut self,
         timestamp: Timestamp,
         difficulty: Difficulty,
+        cumulative_proof_of_work: Option<ProofOfWork>,
     ) {
         self.kernel.header.timestamp = timestamp;
         self.kernel.header.difficulty = difficulty;
+        if let Some(cumulative_proof_of_work) = cumulative_proof_of_work {
+            self.kernel.header.cumulative_proof_of_work = cumulative_proof_of_work;
+        }
 
         self.unset_digest();
     }
@@ -785,13 +792,19 @@ impl Block {
             )
         };
 
-        if self.kernel.header.difficulty != expected_difficulty {
+        let new_difficulty = self.kernel.header.difficulty;
+        if new_difficulty != expected_difficulty {
             return Err(BlockValidationError::Difficulty);
         }
 
         // 0.f)
+        let delta_difficulty = if consensus_rule_set.use_parent_difficulty() {
+            previous_block.header().difficulty
+        } else {
+            new_difficulty
+        };
         let expected_cumulative_proof_of_work =
-            previous_block.header().cumulative_proof_of_work + previous_block.header().difficulty;
+            previous_block.header().cumulative_proof_of_work + delta_difficulty;
         if self.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
             return Err(BlockValidationError::CumulativeProofOfWork);
         }
