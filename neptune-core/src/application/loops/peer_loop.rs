@@ -840,7 +840,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::SyncChallengeResponse(challenge_response) => {
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(90);
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(200);
 
                 log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallengeResponse");
                 info!("Got sync challenge response from {}", self.peer_id);
@@ -881,9 +881,8 @@ impl PeerLoopHandler {
                 peer_state_info.sync_challenge = None;
 
                 // Does response match issued challenge?
-                if !challenge_response
-                    .matches(self.global_state_lock.cli().network, issued_challenge)
-                {
+                let network = self.global_state_lock.cli().network;
+                if !challenge_response.matches(network, issued_challenge) {
                     self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -900,10 +899,7 @@ impl PeerLoopHandler {
                 // Does response verify?
                 let claimed_tip_height = challenge_response.tip.header.height;
                 let now = self.now();
-                if !challenge_response
-                    .is_valid(now, self.global_state_lock.cli().network)
-                    .await
-                {
+                if !challenge_response.is_valid(now, network).await {
                     self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -932,16 +928,16 @@ impl PeerLoopHandler {
                     .chain
                     .tip()
                     .header();
-                if !challenge_response
-                    .check_pow(self.global_state_lock.cli().network, own_tip_header.height)
-                {
+                if !challenge_response.check_pow(network, own_tip_header.height) {
                     self.punish(NegativePeerSanction::FishyPowEvolutionChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Is there some specific (*i.e.*, not aggregate) proof of work?
-                if !challenge_response.check_difficulty(own_tip_header.difficulty) {
+                if network.is_main()
+                    && !challenge_response.check_difficulty(own_tip_header.difficulty)
+                {
                     self.punish(NegativePeerSanction::FishyDifficultiesChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
