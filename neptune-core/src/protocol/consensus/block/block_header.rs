@@ -24,6 +24,7 @@ use crate::api::export::ReceivingAddress;
 use crate::application::config::network::Network;
 use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 use crate::protocol::consensus::block::pow::Pow;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
@@ -146,6 +147,7 @@ impl BlockHeader {
         predecessor_digest: Digest,
         timestamp: Timestamp,
         target_block_interval: Timestamp,
+        network: Network,
     ) -> BlockHeader {
         let difficulty = difficulty_control(
             timestamp,
@@ -155,11 +157,18 @@ impl BlockHeader {
             predecessor_header.height,
         );
 
+        let new_height = predecessor_header.height.next();
+        let consensus_rules = ConsensusRuleSet::infer_from(network, new_height);
+        let delta_cum_pow = if consensus_rules.use_parent_difficulty() {
+            predecessor_header.difficulty
+        } else {
+            difficulty
+        };
         let new_cumulative_proof_of_work: ProofOfWork =
-            predecessor_header.cumulative_proof_of_work + predecessor_header.difficulty;
+            predecessor_header.cumulative_proof_of_work + delta_cum_pow;
         Self {
             version: BLOCK_HEADER_VERSION,
-            height: predecessor_header.height.next(),
+            height: new_height,
             prev_block_digest: predecessor_digest,
             timestamp,
             pow: Pow::default(),

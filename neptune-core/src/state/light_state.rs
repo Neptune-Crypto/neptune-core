@@ -118,6 +118,7 @@ pub(crate) mod tests {
                 previous_block_hash,
                 new_timestamp,
                 Timestamp::minutes(10),
+                network,
             ),
             previous_block.body().clone(),
             BlockAppendix::default(),
@@ -149,7 +150,7 @@ pub(crate) mod tests {
 
         let mut new_block: Block = rng.random();
 
-        new_block.set_header_timestamp_and_difficulty(new_timestamp, new_block.header().difficulty);
+        new_block.set_difficulty_related_fields(new_timestamp, new_block.header().difficulty, None);
 
         light_state.update(new_block);
         assert_eq!(light_state.time_to_mine(), None);

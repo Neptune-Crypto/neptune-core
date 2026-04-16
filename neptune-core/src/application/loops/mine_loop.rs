@@ -272,13 +272,16 @@ fn guess_worker(
 
     let new_block_height = block.header().height;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block_height);
-    let difficulty = if consensus_rule_set.use_parent_difficulty() {
-        previous_block_header.difficulty
+    let (target_difficulty, new_cum_pow) = if consensus_rule_set.use_parent_difficulty() {
+        (previous_block_header.difficulty, None)
     } else {
-        new_difficulty
+        (
+            new_difficulty,
+            Some(previous_block_header.cumulative_proof_of_work + new_difficulty),
+        )
     };
 
-    let threshold = difficulty.target();
+    let threshold = target_difficulty.target();
     let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     info!(
         "Guessing with {} threads on block {:x} of height {} with {} outputs and difficulty {}. Target: {threshold:x}",
@@ -286,7 +289,7 @@ fn guess_worker(
         block.hash(),
         new_block_height,
         block.body().transaction_kernel.outputs.len(),
-        difficulty,
+        target_difficulty,
     );
 
     // note: this article discusses rayon strategies for mining.
@@ -294,7 +297,7 @@ fn guess_worker(
     //
     // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
-    block.set_header_timestamp_and_difficulty(now, new_difficulty);
+    block.set_difficulty_related_fields(now, new_difficulty, new_cum_pow);
 
     block.set_header_guesser_address(guesser_address);
 
@@ -374,7 +377,7 @@ fn guess_worker(
 Since previous block: {elapsed_human}
               Digest: {hash:x}
 Difficulty threshold: {threshold}
-          Difficulty: {difficulty}
+          Difficulty: {target_difficulty}
            #inputs  : {num_inputs}
            #outputs : {num_outputs}
 "#
@@ -1916,12 +1919,11 @@ pub(crate) mod tests {
         println!("initial difficulty: {}", initial_difficulty);
 
         let prev_timestamp = prev_light_state.tip().header().timestamp;
-        prev_light_state
-            .tip_mut()
-            .set_header_timestamp_and_difficulty(
-                prev_timestamp,
-                Difficulty::from_biguint(initial_difficulty).unwrap(),
-            );
+        prev_light_state.tip_mut().set_difficulty_related_fields(
+            prev_timestamp,
+            Difficulty::from_biguint(initial_difficulty).unwrap(),
+            None,
+        );
         let prev_block = prev_light_state.tip();
 
         let expected_duration = target_block_interval * NUM_BLOCKS;
