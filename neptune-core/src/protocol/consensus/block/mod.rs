@@ -6,7 +6,7 @@ pub mod block_info;
 pub mod block_kernel;
 pub mod block_selector;
 pub(crate) mod block_transaction;
-mod block_validation_error;
+pub(crate) mod block_validation_error;
 pub mod difficulty_control;
 pub(crate) mod guesser_receiver_data;
 pub mod mock_block_generator;
@@ -1469,6 +1469,11 @@ pub(crate) mod tests {
 
             ms_update.apply_to_accumulator(&mut msa).unwrap();
             self.kernel.body.mutator_set_accumulator = msa;
+            self.unset_digest();
+        }
+
+        pub(crate) fn set_appendix(&mut self, appendix: BlockAppendix) {
+            self.kernel.appendix = appendix;
             self.unset_digest();
         }
 

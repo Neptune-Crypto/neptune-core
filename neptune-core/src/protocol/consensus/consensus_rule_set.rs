@@ -272,15 +272,18 @@ pub(crate) mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tasm_lib::prelude::Digest;
+    use tasm_lib::triton_vm::proof::Claim;
     use tasm_lib::twenty_first::prelude::Mmr;
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::ChangePolicy;
     use crate::api::export::GlobalStateLock;
     use crate::api::export::InputCandidate;
     use crate::api::export::InputSelectionPriority;
     use crate::api::export::KeyType;
     use crate::api::export::NativeCurrencyAmount;
+    use crate::api::export::NeptuneProof;
     use crate::api::export::OutputFormat;
     use crate::api::export::ReceivingAddress;
     use crate::api::export::StateLock;
@@ -303,15 +306,22 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::GuessingConfiguration;
     use crate::application::loops::mine_loop::TxMergeOrigin;
     use crate::application::triton_vm_job_queue::vm_job_queue;
+    use crate::protocol::consensus::block::block_appendix::BlockAppendix;
+    use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::protocol::consensus::block::Block;
+    use crate::protocol::consensus::block::BlockProof;
+    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::invalid_block_with_tx_kernel;
+    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::next_block;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
     use crate::tests::tokio_runtime;
 
@@ -818,6 +828,91 @@ pub(crate) mod tests {
                 bob.lock_guard().await.chain.tip().header().height.value()
             );
         }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn lustration_counter_errors() {
+        async fn assert_error(
+            mut block: Block,
+            parent: &Block,
+            expected_error: BlockValidationError,
+        ) {
+            let network = Network::RegTest;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
+            assert!(consensus_rule_set.requires_lustration_status_in_block_header());
+
+            let appendix = BlockAppendix::consensus_claims(&block.body(), consensus_rule_set);
+            block.set_appendix(BlockAppendix::new(appendix));
+            block.set_proof(BlockProof::SingleProof(NeptuneProof::valid_mock(
+                Claim::new(Digest::default()),
+            )));
+            block.set_lustration_status(parent.header().pow.lustration_status().unwrap());
+
+            let now = block.header().timestamp;
+            assert_eq!(
+                expected_error,
+                block.validate(parent, now, network).await.unwrap_err()
+            );
+        }
+
+        let network = Network::RegTest;
+        let genesis = Block::genesis(network);
+        let cli = cli_args::Args::default_with_network(network);
+        let mut premine_receiver =
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
+        let mut parent = genesis;
+        for _ in 0..30 {
+            let block = invalid_empty_block(&parent, network);
+            premine_receiver.set_new_tip(block.clone()).await.unwrap();
+            parent = block;
+        }
+
+        parent.set_lustration_status(LustrationStatus {
+            counter: NativeCurrencyAmount::zero(),
+            max_lustrating_aocl_leaf_index: 0,
+        });
+
+        // Now make a non-lustrating transaction
+        let outputs = vec![OutputFormat::AddressAndAmount(
+            GenerationReceivingAddress::derive_from_seed(Digest::default()).into(),
+            NativeCurrencyAmount::coins(3),
+        )];
+        let fee = NativeCurrencyAmount::coins(1);
+        let timestamp = parent.header().timestamp + Timestamp::months(6);
+        let tx = premine_receiver
+            .api_mut()
+            .tx_sender_mut()
+            .send(outputs, ChangePolicy::Burn, fee, timestamp)
+            .await
+            .unwrap();
+        let kernel_with_lustration = tx.transaction.kernel.clone();
+        let kernel_without_lustration = TransactionKernelModifier::default()
+            .announcements(vec![])
+            .modify(tx.transaction.kernel.clone());
+        assert!(kernel_without_lustration.announcements.is_empty());
+        assert!(!kernel_with_lustration.announcements.is_empty());
+
+        let missing_lustrations: Block =
+            invalid_block_with_tx_kernel(&parent, kernel_without_lustration);
+        assert_error(
+            missing_lustrations,
+            &parent,
+            BlockValidationError::MissingLustrationAnnouncement,
+        )
+        .await;
+        let makes_counter_negative: Block =
+            invalid_block_with_tx_kernel(&parent, kernel_with_lustration);
+        assert_error(
+            makes_counter_negative,
+            &parent,
+            BlockValidationError::NegativeLustrationCounter {
+                // Input to above tx is 20, since premine receiver has only
+                // 1 UTXO in their wallet.
+                got: -NativeCurrencyAmount::coins(20),
+            },
+        )
+        .await;
     }
 
     #[traced_test]
