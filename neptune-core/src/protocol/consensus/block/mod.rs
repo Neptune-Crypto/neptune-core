@@ -358,7 +358,7 @@ impl Block {
     /// sets header timestamp, difficulty and, optionally, cumulative proof of
     /// work.
     ///
-    /// These must be set as a pair because the difficulty depends
+    /// These must be set as a pair or triplet because the difficulty depends
     /// on the timestamp, and may change with it. Depending on the consensus
     /// rules, the cumulative proof of work must also be updated.
     ///
