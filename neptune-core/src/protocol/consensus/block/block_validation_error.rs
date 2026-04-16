@@ -335,14 +335,23 @@ mod tests {
         let (b_prev, ts, _) = s;
 
         let mut b_new = invalid_empty_block_with_timestamp(&b_prev, ts, network);
-        b_new.kernel.header.timestamp = Timestamp(bfe![ts_f]);
-        b_new.kernel.header.difficulty = difficulty_control::difficulty_control(
-            b_new.header().timestamp,
+
+        let new_timestamp = Timestamp(bfe![ts_f]);
+        let new_difficulty = difficulty_control::difficulty_control(
+            new_timestamp,
             b_prev.header().timestamp,
             b_prev.header().difficulty,
             network.target_block_interval(),
             b_prev.header().height,
         );
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+        let new_cum_pow = if consensus_rule_set.use_parent_difficulty() {
+            None
+        } else {
+            Some(b_prev.header().cumulative_proof_of_work + new_difficulty)
+        };
+
+        b_new.set_difficulty_related_fields(new_timestamp, new_difficulty, new_cum_pow);
         prop_assert_eq!(
             BlockValidationError::FutureDating,
             b_new.validate(&b_prev, ts, network).await.err().unwrap()
