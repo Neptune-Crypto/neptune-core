@@ -34,6 +34,14 @@ pub enum SortOrder {
     Descending,
 }
 
+#[cfg(test)]
+impl Default for SortOrder {
+    // Needed for `strum::EnumIter` derivation in downstream type
+    fn default() -> Self {
+        Self::Descending
+    }
+}
+
 impl Display for SortOrder {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let s = match self {
@@ -52,6 +60,7 @@ impl Display for SortOrder {
 
 /// Defines a strategy for prioritizing some inputs over others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 pub enum InputSelectionPriority {
     /// choose inputs at random
     #[default]
@@ -277,34 +286,42 @@ impl InputSelector {
         match self.policy.priority {
             InputSelectionPriority::Random => {
                 let mut rng = rng();
-                inputs.into_iter().sorted_by_key(|_| rng.next_u64())
+                let mut decorated: Vec<_> = inputs
+                    .into_iter()
+                    .map(|item| (rng.next_u64(), item))
+                    .collect();
+
+                decorated.sort_by_key(|(key, _)| *key);
+
+                decorated
+                    .into_iter()
+                    .map(|(_, item)| item)
+                    .collect::<Vec<_>>()
             }
-            InputSelectionPriority::ByProvidedOrder => {
-                // leave input order unchanged.
-                let mut i = 0;
-                inputs.into_iter().sorted_by_key(|_| {
-                    i += 1;
-                    i
-                })
-            }
-            InputSelectionPriority::ByNativeCoinAmount(order) => {
-                inputs.into_iter().sorted_by(|a, b| {
+            InputSelectionPriority::ByProvidedOrder => inputs.into_iter().collect::<Vec<_>>(),
+            InputSelectionPriority::ByNativeCoinAmount(order) => inputs
+                .into_iter()
+                .sorted_by(|a, b| {
                     sort(
                         order,
                         &a.utxo.get_native_currency_amount(),
                         &b.utxo.get_native_currency_amount(),
                     )
                 })
-            }
+                .collect::<Vec<_>>(),
             InputSelectionPriority::ByUtxoSize(order) => inputs
                 .into_iter()
-                .sorted_by(|a, b| sort(order, &a.utxo.get_heap_size(), &b.utxo.get_heap_size())),
+                .sorted_by(|a, b| sort(order, &a.utxo.get_heap_size(), &b.utxo.get_heap_size()))
+                .collect::<Vec<_>>(),
 
             InputSelectionPriority::ByAge(order) => {
-                inputs.into_iter().sorted_by(|a, b| {
-                    sort(order, &a.aocl_leaf_index(), &b.aocl_leaf_index()).reverse()
-                    // higher index means smaller age
-                })
+                inputs
+                    .into_iter()
+                    .sorted_by(|a, b| {
+                        sort(order, &a.aocl_leaf_index(), &b.aocl_leaf_index()).reverse()
+                        // higher index means smaller age
+                    })
+                    .collect::<Vec<_>>()
             }
         }
     }
@@ -353,5 +370,40 @@ fn sort<O: Ord>(order: SortOrder, a: &O, b: &O) -> std::cmp::Ordering {
     match order {
         SortOrder::Ascending => Ord::cmp(a, b),
         SortOrder::Descending => Ord::cmp(b, a),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use strum::IntoEnumIterator;
+
+    use super::*;
+    use crate::state::wallet::wallet_status::SyncedUtxo;
+
+    #[test]
+    fn no_panic_in_prioritize() {
+        let dummy_input = |aocl_leaf_index: u64| InputCandidate {
+            synced_utxo: SyncedUtxo::empty_dummy(aocl_leaf_index),
+            number_of_confirmations: 14,
+        };
+        let dummy_inputs = (0..100)
+            .map(|aocl_index| dummy_input(aocl_index))
+            .collect_vec();
+
+        for priority in InputSelectionPriority::iter() {
+            let policy = InputSelectionPolicy {
+                priority,
+                required_number_of_confirmations: 13,
+                max_num_inputs: None,
+            };
+            let input_selector = InputSelector {
+                input_candidates_inputs: dummy_inputs.clone(),
+                policy,
+                spend_amount: NativeCurrencyAmount::coins(100),
+            };
+
+            // Ensure no panic when calling `prioritize`
+            let _inputs = input_selector.prioritize(&dummy_inputs);
+        }
     }
 }
