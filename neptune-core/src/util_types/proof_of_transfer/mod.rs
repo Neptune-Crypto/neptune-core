@@ -46,7 +46,9 @@ pub fn claim_inputs(
 }
 /// add the outputs to the claim
 ///
-/// `aocl_digest` part of `Claim` is not mandatory for proving per se, but a comfort facility so that if the prover have not communicated which AOCL instance (i.e. the block) had he used to make the argument, then a verifier
+/// `aocl_digest` part of `Claim` is not needed for proving per se, but a comfort facility
+/// so that if the prover have not communicated which AOCL instance (i.e. the block) had he
+/// used to make the argument, then a verifier
 /// could search the block by this `Digest` instead of trying all canonical blocks
 pub fn claim_outputs(
     c: Claim,
@@ -357,8 +359,8 @@ pub async fn helper(
         .ok_or(anyhow!("no canonical block with the given digest"))?;
 
     let block_aocl = block
-        .body()
-        .mutator_set_accumulator_without_guesser_fees()
+        .mutator_set_accumulator_after()
+        .expect("only a mined block")
         .aocl;
     let block_aocl_numleafs = block_aocl.num_leafs();
 
