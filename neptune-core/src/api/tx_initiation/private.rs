@@ -78,6 +78,10 @@ impl TransactionInitiatorPrivate {
 
     // check if send would exceed the send rate-limit (per block)
     pub(super) async fn check_rate_limit(&self) -> Result<(), error::SendError> {
+        if !self.global_state_lock.cli().network.is_main() {
+            return Ok(());
+        }
+
         // send rate limiting only applies below height 25000
         // which is approx 5.6 months after launch.
         // after that, the training wheel come off.
