@@ -33,7 +33,7 @@ pub const BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET: BlockHeight =
 /// Height of 1st block changing PoW algorithm to drop memory hardness, for test
 /// net.
 pub const BLOCK_HEIGHT_HARDFORK_BETA_TESTNET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(3_700u64));
+    BlockHeight::new(BFieldElement::new(3_669));
 
 /// Enumerates all possible sets of consensus rules.
 ///
