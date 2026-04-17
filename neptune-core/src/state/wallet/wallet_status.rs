@@ -597,6 +597,19 @@ impl WalletStatusExportFormat {
 mod tests {
     use super::*;
 
+    impl SyncedUtxo {
+        pub(crate) fn empty_dummy(aocl_leaf_index: u64) -> Self {
+            Self {
+                utxo: Utxo::empty_dummy(),
+                sender_randomness: Digest::default(),
+                receiver_preimage: Digest::default(),
+                aocl_leaf_index,
+                confirmed_in_block: BlockHeight::genesis(),
+                spent_in_block: None,
+            }
+        }
+    }
+
     impl WalletStatus {
         pub(crate) fn num_elements(&self) -> usize {
             self.mempool.len() + self.synced.len() + self.unsynced.len()
