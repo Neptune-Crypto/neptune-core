@@ -257,14 +257,15 @@ pub(crate) async fn send_coins(
         .await;
 
     let amount = outputs.total_native_coins();
+    let accept_lustrations = true;
+    let input_policy = InputSelectionPolicy::default()
+        .prioritize(InputSelectionPriority::ByProvidedOrder)
+        .set_lustration_acceptance(accept_lustrations);
+    let lustration_threshold = sender.lock_guard().await.chain.lustration_threshold();
     let selected_inputs = sender
         .api()
         .tx_initiator()
-        .select_inputs(
-            InputSelectionPolicy::from(InputSelectionPriority::ByProvidedOrder),
-            amount,
-            timestamp,
-        )
+        .select_inputs(input_policy, amount, timestamp, lustration_threshold)
         .await
         .unwrap();
     let unlocked_inputs = sender
