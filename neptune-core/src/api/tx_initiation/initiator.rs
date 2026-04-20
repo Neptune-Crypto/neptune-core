@@ -81,8 +81,9 @@ impl TransactionInitiator {
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
         timestamp: Timestamp,
+        lustration_threshold: Option<u64>,
     ) -> Result<Vec<InputCandidate>, error::CreateTxError> {
-        InputSelector::new()
+        InputSelector::new(lustration_threshold)
             .input_candidates(self.input_candidates(timestamp).await)
             .policy(policy)
             .spend_amount(spend_amount)
@@ -297,7 +298,8 @@ impl TransactionInitiator {
     ) -> Result<TxCreationArtifacts, error::SendError> {
         tracing::info!("send: recording tx");
 
-        let input_policy = InputSelectionPolicy::default();
+        let input_policy =
+            InputSelectionPolicy::default().set_lustration_acceptance(accept_lustrations);
         let tx_creation_artifacts = self
             .construct_transaction_mutable_state(
                 outputs,
@@ -358,6 +360,7 @@ impl TransactionInitiator {
 
         let current_height = state_lock.gs().chain.tip().header().height;
         let validator = state_lock.gs().utxo_validator();
+        let lustration_threshold = state_lock.gs().chain.lustration_threshold();
         let wallet_status = state_lock
             .gs()
             .wallet_state
@@ -368,7 +371,7 @@ impl TransactionInitiator {
             .into_iter()
             .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
             .collect();
-        let selected_inputs = InputSelector::new()
+        let selected_inputs = InputSelector::new(lustration_threshold)
             .input_candidates(input_candidates)
             .policy(input_selection_policy)
             .spend_amount(spend_amount)

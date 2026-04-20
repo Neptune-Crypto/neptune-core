@@ -9,6 +9,7 @@ use strum::EnumIter;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 
+use crate::api::export::AbsoluteIndexSet;
 use crate::api::export::AdditionRecord;
 use crate::api::export::BlockHeight;
 use crate::protocol::consensus::transaction::utxo::Utxo;
@@ -134,6 +135,16 @@ impl SyncedUtxo {
     fn addition_record(&self) -> AdditionRecord {
         let item = Tip5::hash(&self.utxo);
         commit(item, self.sender_randomness, self.receiver_preimage.hash())
+    }
+
+    pub(crate) fn index_set(&self) -> AbsoluteIndexSet {
+        let item = Tip5::hash(&self.utxo);
+        AbsoluteIndexSet::compute(
+            item,
+            self.sender_randomness,
+            self.receiver_preimage,
+            self.aocl_leaf_index,
+        )
     }
 
     pub(crate) fn strong_utxo_key(&self) -> StrongUtxoKey {

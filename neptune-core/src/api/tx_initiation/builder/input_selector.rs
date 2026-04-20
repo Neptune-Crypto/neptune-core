@@ -137,6 +137,9 @@ pub struct InputSelectionPolicy {
 
     /// If set, number of selected inputs will exceed this number.
     max_num_inputs: Option<usize>,
+
+    /// Whether or not the user tolerates lustrations of the inputs.
+    accept_lustrations: bool,
 }
 
 impl From<InputSelectionPriority> for InputSelectionPolicy {
@@ -145,6 +148,7 @@ impl From<InputSelectionPriority> for InputSelectionPolicy {
             priority,
             required_number_of_confirmations: 1,
             max_num_inputs: None,
+            accept_lustrations: false,
         }
     }
 }
@@ -162,6 +166,11 @@ impl InputSelectionPolicy {
 
     pub fn cap_num_inputs(mut self, max_num_inputs: usize) -> Self {
         self.max_num_inputs = Some(max_num_inputs);
+        self
+    }
+
+    pub fn set_lustration_acceptance(mut self, accept_lustrations: bool) -> Self {
+        self.accept_lustrations = accept_lustrations;
         self
     }
 }
@@ -225,12 +234,18 @@ pub struct InputSelector {
 
     // ##multicoin## : maybe this should be Coin or Vec<Coin> instead of NativeCurrencyAmount?
     spend_amount: NativeCurrencyAmount,
+
+    /// The highest last AOCL leaf that requires lustration.
+    lustration_threshold: Option<u64>,
 }
 
 impl InputSelector {
     /// instantiate
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(lustration_threshold: Option<u64>) -> Self {
+        Self {
+            lustration_threshold,
+            ..Default::default()
+        }
     }
 
     /// set input candidates
@@ -338,12 +353,29 @@ impl InputSelector {
         let iter = self.filter_by_confirmation_count(iter);
         let iter = self.prioritize(iter);
 
+        let reject_lustrations = !self.policy.accept_lustrations;
+        let mut lustration_rejects_acc = NativeCurrencyAmount::zero();
+
         let mut selected_inputs = vec![];
         let mut current_amount = NativeCurrencyAmount::zero();
         let max_num_inputs = self.policy.max_num_inputs.unwrap_or(usize::MAX);
         for input in iter {
+            let value = input.utxo.get_native_currency_amount();
+            let aocl_range_min = match input.index_set().aocl_range() {
+                Ok((min, _max)) => min,
+                Err(err) => return Err(error::CreateTxError::MutatorSetError(err)),
+            };
+            if reject_lustrations
+                && self
+                    .lustration_threshold
+                    .is_some_and(|threshold| threshold >= aocl_range_min)
+            {
+                lustration_rejects_acc += value;
+                continue;
+            }
+
             if current_amount < spend_amount && max_num_inputs > selected_inputs.len() {
-                current_amount += input.utxo.get_native_currency_amount();
+                current_amount += value;
                 selected_inputs.push(input.clone());
             } else if max_num_inputs <= selected_inputs.len() {
                 // The input priority is incompatible with the maximum number
@@ -352,6 +384,10 @@ impl InputSelector {
             } else {
                 break;
             }
+        }
+
+        if current_amount < spend_amount && !lustration_rejects_acc.is_zero() {
+            return Err(error::CreateTxError::RequiresLustration);
         }
 
         Ok(selected_inputs)
@@ -394,11 +430,13 @@ mod tests {
                 priority,
                 required_number_of_confirmations: 13,
                 max_num_inputs: None,
+                accept_lustrations: false,
             };
             let input_selector = InputSelector {
                 input_candidates_inputs: dummy_inputs.clone(),
                 policy,
                 spend_amount: NativeCurrencyAmount::coins(100),
+                lustration_threshold: None,
             };
 
             // Ensure no panic when calling `prioritize`

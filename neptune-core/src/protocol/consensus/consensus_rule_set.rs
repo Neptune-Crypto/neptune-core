@@ -298,6 +298,7 @@ pub(crate) mod tests {
     use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
     use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
+    use crate::api::tx_initiation::error;
     use crate::application::config::cli_args;
     use crate::application::loops::channel::NewBlockFound;
     use crate::application::loops::mine_loop::compose_block_helper;
@@ -330,7 +331,7 @@ pub(crate) mod tests {
         num_outputs: usize,
         timestamp: Timestamp,
         input_selection_policy: Option<InputSelectionPolicy>,
-    ) -> TxCreationArtifacts {
+    ) -> Result<TxCreationArtifacts, error::CreateTxError> {
         let mut addresses_and_amts = vec![];
         let same_address = state
             .api()
@@ -346,6 +347,7 @@ pub(crate) mod tests {
             addresses_and_amts.push(value);
         }
 
+        let lustration_threshold = state.lock_guard().await.chain.lustration_threshold();
         let initiator = state.api().tx_initiator();
         let tx_outputs = initiator.generate_tx_outputs(addresses_and_amts).await;
         drop(initiator);
@@ -367,12 +369,11 @@ pub(crate) mod tests {
                 InputSelectionPolicy::default()
                     .prioritize(InputSelectionPriority::ByUtxoSize(SortOrder::Ascending)),
             );
-            let selected_inputs = InputSelector::new()
+            let selected_inputs = InputSelector::new(lustration_threshold)
                 .input_candidates(input_candidates)
                 .policy(policy)
                 .spend_amount(tx_outputs.total_native_coins() + fee)
-                .build()
-                .unwrap();
+                .build()?;
 
             println!(
                 "Selected inputs: [{}]",
@@ -416,10 +417,10 @@ pub(crate) mod tests {
             .build()
             .unwrap();
 
-        TxCreationArtifacts {
+        Ok(TxCreationArtifacts {
             transaction: Arc::new(transaction),
             details: Arc::new(tx_details),
-        }
+        })
     }
 
     async fn block_with_n_outputs(
@@ -428,7 +429,9 @@ pub(crate) mod tests {
         timestamp: Timestamp,
     ) -> Block {
         let current_tip = me.lock_guard().await.chain.archival_state().get_tip().await;
-        let tx_many_outputs = tx_with_n_outputs(me.clone(), num_outputs, timestamp, None).await;
+        let tx_many_outputs = tx_with_n_outputs(me.clone(), num_outputs, timestamp, None)
+            .await
+            .unwrap();
         let (block_tx, _) = create_block_transaction_from(
             &current_tip,
             me,
@@ -799,7 +802,9 @@ pub(crate) mod tests {
 
             // 4th block after hard fork, with a transaction.
             let tx_timestamp = block_f.header().timestamp + Timestamp::minutes(6);
-            let tx_artifacts = tx_with_n_outputs(bob.clone(), 2, tx_timestamp, None).await;
+            let tx_artifacts = tx_with_n_outputs(bob.clone(), 2, tx_timestamp, None)
+                .await
+                .unwrap();
             bob.api_mut()
                 .tx_initiator_mut()
                 .record_and_broadcast_transaction(&tx_artifacts)
@@ -1037,8 +1042,9 @@ pub(crate) mod tests {
             // Insert a tx in mempool to verify it gets deleted when the
             // hardfork happens. And that the composer doesn't attempt to pick
             // up this incompatible transaction.
-            let never_mined_tx =
-                tx_with_n_outputs(bob.clone(), 1, minus1.header().timestamp, None).await;
+            let never_mined_tx = tx_with_n_outputs(bob.clone(), 1, minus1.header().timestamp, None)
+                .await
+                .unwrap();
             bob.lock_guard_mut()
                 .await
                 .mempool_insert(
@@ -1082,17 +1088,37 @@ pub(crate) mod tests {
                 "Activating hardfork must clear mempool."
             );
             assert!(bob.lock_guard().await.chain.lustration_status().is_some());
+            assert_eq!(
+                hf_lustration_status.max_lustrating_aocl_leaf_index,
+                bob.lock_guard().await.chain.lustration_threshold().unwrap()
+            );
 
-            // Now build a transaction that *must* lustrate.
+            // Now build a transaction that *must* lustrate but user did not
+            // allow for lustration.
             let prefer_old_inputs = InputSelectionPolicy::default()
                 .prioritize(InputSelectionPriority::ByAge(SortOrder::Descending));
+            assert_eq!(
+                error::CreateTxError::RequiresLustration,
+                tx_with_n_outputs(
+                    bob.clone(),
+                    200,
+                    hf.header().timestamp,
+                    Some(prefer_old_inputs),
+                )
+                .await
+                .unwrap_err()
+            );
+
+            // Allow for lustration and verify that tx goes through
             let tx0 = tx_with_n_outputs(
                 bob.clone(),
                 3,
                 hf.header().timestamp,
-                Some(prefer_old_inputs),
+                Some(prefer_old_inputs.set_lustration_acceptance(true)),
             )
-            .await;
+            .await
+            .unwrap();
+
             assert!(tx0.is_valid(network, ConsensusRuleSet::HardforkBeta).await);
             assert!(tx0.details.contains_lustrations());
             let input_amt0 = tx0.details.tx_inputs.total_native_coins();
@@ -1150,9 +1176,10 @@ pub(crate) mod tests {
                 bob.clone(),
                 65,
                 plus1.header().timestamp,
-                Some(prefer_old_inputs),
+                Some(prefer_old_inputs.set_lustration_acceptance(true)),
             )
-            .await;
+            .await
+            .unwrap();
             assert!(tx1.is_valid(network, ConsensusRuleSet::HardforkBeta).await);
             assert!(tx1.details.contains_lustrations());
             let input_amt1 = tx1.details.tx_inputs.total_native_coins();
@@ -1212,7 +1239,8 @@ pub(crate) mod tests {
                 plus2.header().timestamp,
                 Some(prefer_new_inputs),
             )
-            .await;
+            .await
+            .unwrap();
             assert!(tx2.is_valid(network, ConsensusRuleSet::HardforkBeta).await);
             assert!(!tx2.details.contains_lustrations());
             assert_eq!(

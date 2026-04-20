@@ -144,6 +144,27 @@ impl BlockchainState {
 
         Some(lustration_status)
     }
+
+    /// Return the threshold that dictates which inputs must lustrate.
+    ///
+    /// If the lustration rule is not yet active, returns None, otherwise
+    /// returns the AOCL leaf index for the last input that must lustrate. All
+    /// AOCL leafs after the threshold do not need to lustrate.
+    ///
+    /// # Warning
+    /// - The consensus rule is defined in terms of the absolute index set's
+    ///   AOCL range, not in terms of the actual AOCL leaf index of the input
+    ///   being spent, since the latter is only known to the transaction
+    ///   initiator.
+    ///
+    /// # Panics
+    /// - If lustration rules have been activated, but no lustration status can
+    ///   be parsed from the tip. This would mean that the tip is not a valid
+    ///   block.
+    pub(crate) fn lustration_threshold(&self) -> Option<u64> {
+        self.lustration_status()
+            .map(|status| status.max_lustrating_aocl_leaf_index)
+    }
 }
 
 /// The `BlockchainArchivalState` contains database access to block headers.

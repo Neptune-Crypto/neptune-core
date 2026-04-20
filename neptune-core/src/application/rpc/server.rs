@@ -4238,11 +4238,13 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        let lustration_threshold = self.state.lock_guard().await.chain.lustration_threshold();
+
         let selected_inputs = self
             .state
             .api()
             .tx_initiator()
-            .select_inputs(policy, spend_amount, Timestamp::now())
+            .select_inputs(policy, spend_amount, Timestamp::now(), lustration_threshold)
             .await?;
 
         let unlocked_inputs = self
