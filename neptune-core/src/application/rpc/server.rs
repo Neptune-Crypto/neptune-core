@@ -1800,12 +1800,16 @@ pub trait RPC {
     /// // change policy.
     /// // default is recover to next unused key, via onchain notification
     /// let change_policy = ChangePolicy::default();
+    ///
+    /// // Whether or not to accept that the transaction generates lustrations,
+    /// // which reveals, publicly, the UTXOs of all inputs.
+    /// let accept_lustrations = false;
     /// #
     /// // Max fee
     /// let fee : NativeCurrencyAmount = NativeCurrencyAmount::coins(10);
     /// #
     /// // neptune-core server sends token to a single recipient
-    /// let send_result = client.send(context::current(), token, outputs, change_policy, fee).await??;
+    /// let send_result = client.send(context::current(), token, outputs, change_policy, fee, accept_lustrations).await??;
     /// # Ok(())
     /// # }
     /// ```

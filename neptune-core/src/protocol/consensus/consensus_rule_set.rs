@@ -842,7 +842,7 @@ pub(crate) mod tests {
             let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
             assert!(consensus_rule_set.requires_lustration_status_in_block_header());
 
-            let appendix = BlockAppendix::consensus_claims(&block.body(), consensus_rule_set);
+            let appendix = BlockAppendix::consensus_claims(block.body(), consensus_rule_set);
             block.set_appendix(BlockAppendix::new(appendix));
             block.set_proof(BlockProof::SingleProof(NeptuneProof::valid_mock(
                 Claim::new(Digest::default()),
