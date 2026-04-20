@@ -212,9 +212,9 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::ForkResolutionError((_height, count, _digest)) => {
                 i32::from(count).saturating_mul(-1)
             }
-            NegativePeerSanction::SynchronizationTimeout => -5,
+            NegativePeerSanction::SynchronizationTimeout => -2,
             NegativePeerSanction::FloodPeerListResponse => -2,
-            NegativePeerSanction::InvalidMessage => -2,
+            NegativePeerSanction::InvalidMessage => -1,
             NegativePeerSanction::TooShortBlockBatch => -2,
             NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync => -2,
             NegativePeerSanction::BatchBlocksInvalidStartHeight => -2,
@@ -230,7 +230,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
             NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
             NegativePeerSanction::BlockProposalNotFound => -1,
-            NegativePeerSanction::InvalidBlockProposal => -10,
+            NegativePeerSanction::InvalidBlockProposal => -3,
             NegativePeerSanction::RequestForUnknownBlock => -5,
             NegativePeerSanction::RequestForGenesisBlock => -100,
             NegativePeerSanction::UnwantedMessage => -1,
@@ -238,15 +238,15 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::BlockProposalFromBlockedPeer => -10,
             NegativePeerSanction::BatchBlocksRequestEmpty => -10,
             NegativePeerSanction::InvalidSyncChallenge => -50,
-            NegativePeerSanction::InvalidSyncChallengeResponse => -500,
+            NegativePeerSanction::InvalidSyncChallengeResponse => -300,
             NegativePeerSanction::UnexpectedSyncChallengeResponse => -1,
             NegativePeerSanction::InvalidTransferBlock => -50,
-            NegativePeerSanction::TimedOutSyncChallengeResponse => -50,
+            NegativePeerSanction::TimedOutSyncChallengeResponse => -10,
             NegativePeerSanction::InvalidBlockMmrAuthentication => -4,
             NegativePeerSanction::BatchBlocksRequestTooManyDigests => -50,
-            NegativePeerSanction::FishyPowEvolutionChallengeResponse => -51,
-            NegativePeerSanction::FishyDifficultiesChallengeResponse => -51,
-            NegativePeerSanction::ReceivedSyncChallenge => -50,
+            NegativePeerSanction::FishyPowEvolutionChallengeResponse => -21,
+            NegativePeerSanction::FishyDifficultiesChallengeResponse => -21,
+            NegativePeerSanction::ReceivedSyncChallenge => -30,
             NegativePeerSanction::UnrelayableTransaction => -10,
         }
     }
