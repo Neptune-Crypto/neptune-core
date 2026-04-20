@@ -55,7 +55,7 @@ pub(crate) trait Sanction {
 }
 
 /// The reason for degrading a peer's standing
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, strum::Display)]
 #[cfg_attr(any(test, feature = "mock-rpc"), derive(strum::EnumCount))]
 pub enum NegativePeerSanction {
     InvalidBlock((BlockHeight, Digest)),
@@ -115,7 +115,7 @@ pub enum NegativePeerSanction {
 }
 
 /// The reason for improving a peer's standing
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, strum::Display)]
 #[cfg_attr(any(test, feature = "mock-rpc"), derive(strum::EnumCount))]
 pub enum PositivePeerSanction {
     // positive sanctions (standing-improving)
@@ -125,83 +125,6 @@ pub enum PositivePeerSanction {
     // the global tip.
     ValidBlocks(usize),
     NewBlockProposal,
-}
-
-impl Display for NegativePeerSanction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let string = match self {
-            NegativePeerSanction::InvalidBlock(_) => "invalid block",
-            NegativePeerSanction::DifferentGenesis => "different genesis",
-            NegativePeerSanction::ForkResolutionError(_) => "fork resolution error",
-            NegativePeerSanction::SynchronizationTimeout => "synchronization timeout",
-            NegativePeerSanction::FloodPeerListResponse => "flood peer list response",
-            NegativePeerSanction::BlockRequestUnknownHeight => "block request unknown height",
-            NegativePeerSanction::InvalidMessage => "invalid message",
-            NegativePeerSanction::TooShortBlockBatch => "too short block batch",
-            NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync => {
-                "received block batch outside of sync"
-            }
-            NegativePeerSanction::BatchBlocksInvalidStartHeight => {
-                "invalid start height of batch blocks"
-            }
-            NegativePeerSanction::RequestForUnknownBlock => "request for unknown block",
-            NegativePeerSanction::RequestForGenesisBlock => "request for genesis block",
-            NegativePeerSanction::BatchBlocksUnknownRequest => "batch blocks unknown request",
-            NegativePeerSanction::InvalidTransaction => "invalid transaction",
-            NegativePeerSanction::UnconfirmableTransaction => "unconfirmable transaction",
-            NegativePeerSanction::TransactionWithNegativeFee => "negative-fee transaction",
-            NegativePeerSanction::DoubleSpendingTransaction => "double-spending transaction",
-            NegativePeerSanction::CannotApplyTransactionToMutatorSet => {
-                "cannot apply tx to mutator set"
-            }
-            NegativePeerSanction::OversizedAnnouncement => "oversized announcement",
-            NegativePeerSanction::OversizedBlock => "oversized block",
-            NegativePeerSanction::NonMinedTransactionHasCoinbase => {
-                "non-mined transaction has coinbase"
-            }
-            NegativePeerSanction::NoStandingFoundMaybeCrash => {
-                "No standing found in map. Did peer task crash?"
-            }
-            NegativePeerSanction::BlockProposalNotFound => "Block proposal not found",
-            NegativePeerSanction::InvalidBlockProposal => "Invalid block proposal",
-            NegativePeerSanction::UnwantedMessage => "unwanted message",
-            NegativePeerSanction::NonFavorableBlockProposal => "non-favorable block proposal",
-            NegativePeerSanction::BlockProposalFromBlockedPeer => {
-                "got block proposal from non-whitelisted peer"
-            }
-            NegativePeerSanction::BatchBlocksRequestEmpty => "batch block request empty",
-            NegativePeerSanction::InvalidSyncChallenge => "invalid sync challenge",
-            NegativePeerSanction::InvalidSyncChallengeResponse => "invalid sync challenge response",
-            NegativePeerSanction::UnexpectedSyncChallengeResponse => {
-                "unexpected sync challenge response"
-            }
-            NegativePeerSanction::InvalidTransferBlock => "invalid transfer block",
-            NegativePeerSanction::TimedOutSyncChallengeResponse => {
-                "timed-out sync challenge response"
-            }
-            NegativePeerSanction::InvalidBlockMmrAuthentication => {
-                "invalid block mmr authentication"
-            }
-            NegativePeerSanction::BatchBlocksRequestTooManyDigests => {
-                "too many digests in batch block request"
-            }
-            NegativePeerSanction::FishyPowEvolutionChallengeResponse => "fishy pow evolution",
-            NegativePeerSanction::FishyDifficultiesChallengeResponse => "fishy difficulties",
-            NegativePeerSanction::ReceivedSyncChallenge => "received sync challenge",
-            NegativePeerSanction::UnrelayableTransaction => "unrelayable transaction",
-        };
-        write!(f, "{string}")
-    }
-}
-
-impl Display for PositivePeerSanction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let string = match self {
-            PositivePeerSanction::ValidBlocks(_) => "valid blocks",
-            PositivePeerSanction::NewBlockProposal => "new block proposal",
-        };
-        write!(f, "{string}")
-    }
 }
 
 impl Sanction for NegativePeerSanction {
