@@ -236,10 +236,11 @@ impl TransactionKernel {
     /// threshold is not followed. The threshold defines the *last* AOCL leaf
     /// that must lustrate.
     ///
-    /// An means that the transaction or block containing this transaction
-    /// kernel does not follow the rules specified by the function parameter.
-    /// Conversely, if this function returns Ok, then it does *not* guarantee
-    /// that the block or transaction is valid.
+    /// Returns an error if the transaction or block violates the rules
+    /// specified by the function parameter.
+    ///
+    /// Note that an `Ok` result only confirms these specific rules are met;
+    /// it does not guarantee the overall validity of the block or transaction.
     pub(crate) fn verified_lustration_amount(
         &self,
         max_lustrating_aocl_leaf_index: u64,
@@ -778,6 +779,8 @@ pub mod tests {
     }
 
     mod lustrations {
+        use tasm_lib::twenty_first::bfe;
+
         use super::*;
         use crate::api::export::GenerationSpendingKey;
         use crate::api::export::UnlockedUtxo;
@@ -825,10 +828,10 @@ pub mod tests {
             );
         }
 
-        #[test]
-        fn lustration_check_one_input() {
-            let mut test_runner = TestRunner::deterministic();
-
+        fn one_input_kernel(
+            test_runner: &mut TestRunner,
+            include_lustration: bool,
+        ) -> TransactionKernel {
             let a_key = GenerationSpendingKey::derive_from_seed(Digest::default());
             let lock_script_and_witness = a_key.lock_script_and_witness();
 
@@ -847,28 +850,51 @@ pub mod tests {
                 fee,
                 coinbase,
             )
-            .new_tree(&mut test_runner)
+            .new_tree(test_runner)
             .unwrap()
             .current();
 
-            let no_lustration = primitive_witness.kernel.clone();
+            let mut kernel = primitive_witness.kernel.clone();
+
+            if include_lustration {
+                let unlocked_utxo = UnlockedUtxo::unlock(
+                    input_utxo,
+                    lock_script_and_witness,
+                    primitive_witness.input_membership_proofs[0].clone(),
+                );
+                kernel.announcements.push(unlocked_utxo.lustration());
+            }
+
+            kernel
+        }
+
+        #[test]
+        fn lustration_check_one_input() {
+            let mut test_runner = TestRunner::deterministic();
+
+            let no_lustration = one_input_kernel(&mut test_runner, false);
             assert_eq!(
                 Err(TransactionLustrationError::MissingLustrationAnnouncement),
                 no_lustration.verified_lustration_amount(u64::MAX)
             );
 
             // Then add lustration, and verify that Ok(amount) is returned.
-            let mut with_lustration = primitive_witness.kernel;
-            let unlocked_utxo = UnlockedUtxo::unlock(
-                input_utxo,
-                lock_script_and_witness,
-                primitive_witness.input_membership_proofs[0].clone(),
+            let mut with_lustration = one_input_kernel(&mut test_runner, true);
+            assert_eq!(
+                1,
+                with_lustration.announcements.len(),
+                "Lustrating kernel must contain exactly one announcement"
             );
-            with_lustration
-                .announcements
-                .push(unlocked_utxo.lustration());
             assert_eq!(
                 Ok(NativeCurrencyAmount::coins(12)),
+                with_lustration.verified_lustration_amount(u64::MAX)
+            );
+
+            // Modify the announcement such that it no longer correctly
+            // lustrates.
+            with_lustration.announcements[0].message[15] = bfe!(u64::MAX);
+            assert_eq!(
+                Err(TransactionLustrationError::MissingLustrationAnnouncement),
                 with_lustration.verified_lustration_amount(u64::MAX)
             );
         }
