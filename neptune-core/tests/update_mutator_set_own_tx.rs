@@ -67,6 +67,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
             .unwrap();
 
         // Create transaction to self
+        let accept_lustrations = true;
         let tx_artifacts = alice
             .gsl
             .api_mut()
@@ -79,6 +80,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
                 Default::default(),
                 NativeCurrencyAmount::coins(1),
                 Timestamp::now(),
+                accept_lustrations,
             )
             .await
             .unwrap();

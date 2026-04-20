@@ -53,6 +53,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
     );
 
     // alice sends a payment to herself
+    let accept_lustrations = true;
     let tx_artifacts = alice
         .gsl
         .api_mut()
@@ -62,6 +63,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
             Default::default(),
             NativeCurrencyAmount::zero(),
             Timestamp::now(),
+            accept_lustrations,
         )
         .await?;
 
@@ -177,6 +179,7 @@ pub async fn alice_sends_to_bob(
     // alice sends a payment to bob
     let payment_amount = NativeCurrencyAmount::coins_from_str("2.45")?;
     let fee_amount = NativeCurrencyAmount::coins_from_str("0.01")?;
+    let accept_lustrations = true;
     let alice_spend_amount = payment_amount + fee_amount;
     let tx_artifacts = alice
         .gsl
@@ -187,6 +190,7 @@ pub async fn alice_sends_to_bob(
             Default::default(),
             fee_amount,
             Timestamp::now(),
+            accept_lustrations,
         )
         .await?;
 
@@ -300,6 +304,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
     let payment_amount = NativeCurrencyAmount::coins_from_str("2.45")?;
     let fee_amount = NativeCurrencyAmount::coins_from_str("0.01")?;
     let alice_spend_amount = payment_amount + fee_amount;
+    let accept_lustrations = true;
     let tx_artifacts = alice
         .gsl
         .api_mut()
@@ -309,6 +314,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
             Default::default(),
             fee_amount,
             Timestamp::now(),
+            accept_lustrations,
         )
         .await?;
 
@@ -579,6 +585,7 @@ pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
     let payment_amount_timelocked = NativeCurrencyAmount::coins_from_str("2")?;
     let fee_amount = NativeCurrencyAmount::coins_from_str("0.01")?;
     let alice_spend_amount = payment_amount_liquid + payment_amount_timelocked + fee_amount;
+    let accept_lustrations = true;
     let tx_artifacts = alice
         .gsl
         .api_mut()
@@ -595,6 +602,7 @@ pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
             Default::default(),
             fee_amount,
             Timestamp::now(),
+            accept_lustrations,
         )
         .await?;
 
@@ -675,6 +683,7 @@ pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
         .wallet_mut()
         .next_receiving_address(KeyType::Generation)
         .await?;
+    let accept_lustrations = true;
     let tx_initiation_result_immediate = bob
         .gsl
         .api_mut()
@@ -687,6 +696,7 @@ pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
             Default::default(),
             fee_amount,
             Timestamp::now(),
+            accept_lustrations,
         )
         .await;
     assert!(matches!(
@@ -725,6 +735,7 @@ pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
             Default::default(),
             fee_amount,
             one_year_later,
+            accept_lustrations,
         )
         .await;
     assert!(

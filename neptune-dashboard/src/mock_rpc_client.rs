@@ -239,10 +239,14 @@ impl MockRpcClient {
         _token: auth::Token,
         _outputs: Vec<OutputFormat>,
         _change_policy: ChangePolicy,
-        _fee: NativeCurrencyAmount,
+        fee: NativeCurrencyAmount,
+        accept_lustrations: bool,
     ) -> ::core::result::Result<RpcResult<TxCreationArtifacts>, ::tarpc::client::RpcError> {
         tokio::task::yield_now().await;
-        Ok(Err(RpcError::Failed("cannot send; mocking".to_string())))
+        let params = format!("fee: {fee}; accept_lustrations: {accept_lustrations}.");
+        Ok(Err(RpcError::Failed(format!(
+            "cannot send; mocking. Got: {params}",
+        ))))
     }
 
     pub async fn list_utxos(

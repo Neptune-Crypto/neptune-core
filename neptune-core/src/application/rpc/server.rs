@@ -1814,6 +1814,7 @@ pub trait RPC {
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        accept_lustrations: bool,
     ) -> RpcResult<TxCreationArtifacts>;
 
     /// Like `send` but the resulting transaction is *transparent*. No privacy.
@@ -1839,10 +1840,13 @@ pub trait RPC {
     ///    be consolidated.
     ///  - `to_address` -- set to consolidate the UTXOs to the given address as
     ///    opposed to the next symmetric address of the node's own wallet.
+    ///  - `accept_lustration` -- Whether or not it is acceptable to lustrate
+    ///    the inputs, i.e. reveal the input UTXOs used in the transaction.
     async fn consolidate(
         token: auth::Token,
         num_inputs: Option<usize>,
         to_address: Option<ReceivingAddress>,
+        accept_lustration: bool,
     ) -> RpcResult<usize>;
 
     /// Upgrade a proof for a transaction found in the mempool. If the
@@ -3491,6 +3495,7 @@ impl RPC for NeptuneRPCServer {
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        accept_lustrations: bool,
     ) -> RpcResult<TxCreationArtifacts> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3499,7 +3504,13 @@ impl RPC for NeptuneRPCServer {
             .state
             .api_mut()
             .tx_sender_mut()
-            .send(outputs, change_policy, fee, Timestamp::now())
+            .send(
+                outputs,
+                change_policy,
+                fee,
+                Timestamp::now(),
+                accept_lustrations,
+            )
             .await?)
     }
 
@@ -3530,6 +3541,7 @@ impl RPC for NeptuneRPCServer {
         token: auth::Token,
         num_inputs: Option<usize>,
         to_address: Option<ReceivingAddress>,
+        accept_lustration: bool,
     ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3538,7 +3550,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api_mut()
             .tx_initiator_mut()
-            .consolidate(num_inputs, to_address, Timestamp::now())
+            .consolidate(num_inputs, to_address, Timestamp::now(), accept_lustration)
             .await?)
     }
 
@@ -5029,6 +5041,7 @@ mod tests {
                 vec![output],
                 ChangePolicy::ExactChange,
                 NativeCurrencyAmount::one_nau(),
+                true,
             )
             .await;
         let _ = rpc_server
@@ -5047,6 +5060,7 @@ mod tests {
                 vec![my_output],
                 ChangePolicy::ExactChange,
                 NativeCurrencyAmount::one_nau(),
+                true,
             )
             .await;
 
@@ -6008,6 +6022,7 @@ mod tests {
         let token = cookie_token(&rpc_server).await;
 
         let output: OutputFormat = (address.into(), amount).into();
+        let accept_lustrations = true;
         assert!(rpc_server
             .clone()
             .send(
@@ -6015,7 +6030,8 @@ mod tests {
                 token,
                 vec![output],
                 ChangePolicy::ExactChange,
-                NativeCurrencyAmount::zero()
+                NativeCurrencyAmount::zero(),
+                accept_lustrations,
             )
             .await
             .is_err());
@@ -6602,6 +6618,7 @@ mod tests {
                         .await
                         .unwrap();
 
+                    let accept_lustrations = true;
                     let tx_artifacts = rpc_server
                         .clone()
                         .send(
@@ -6613,6 +6630,7 @@ mod tests {
                                 UtxoNotificationMedium::OffChain,
                             ),
                             fee,
+                            accept_lustrations,
                         )
                         .await
                         .unwrap();
@@ -6773,6 +6791,7 @@ mod tests {
                 .collect();
 
                 let fee = NativeCurrencyAmount::coins(2);
+                let accept_lustrations = true;
                 let tx_artifacts = bob
                     .clone()
                     .send(
@@ -6784,6 +6803,7 @@ mod tests {
                             UtxoNotificationMedium::OffChain,
                         ),
                         fee,
+                        accept_lustrations,
                     )
                     .await
                     .unwrap();
@@ -6819,6 +6839,7 @@ mod tests {
                                 vec![output],
                                 ChangePolicy::exact_change(),
                                 NativeCurrencyAmount::zero(),
+                                accept_lustrations,
                             )
                             .await
                             .unwrap();
@@ -6937,6 +6958,7 @@ mod tests {
             let fee = NativeCurrencyAmount::zero();
 
             // note: we can only perform 2 iters, else we bump into send rate-limit (per block)
+            let accept_lustrations = true;
             for i in 5..7 {
                 let result = rpc_server
                     .clone()
@@ -6946,6 +6968,7 @@ mod tests {
                         outputs.clone().take(i).collect(),
                         ChangePolicy::ExactChange,
                         fee,
+                        accept_lustrations,
                     )
                     .await;
                 assert!(result.is_ok());
@@ -6993,11 +7016,19 @@ mod tests {
 
             let output: OutputFormat = (address, amount, UtxoNotificationMedium::OnChain).into();
             let outputs = vec![output];
+            let accept_lustrations = true;
 
             for i in 0..10 {
                 let result = rpc_server
                     .clone()
-                    .send(ctx, token, outputs.clone(), ChangePolicy::Burn, fee)
+                    .send(
+                        ctx,
+                        token,
+                        outputs.clone(),
+                        ChangePolicy::Burn,
+                        fee,
+                        accept_lustrations,
+                    )
                     .await;
 
                 // any attempts after the 2nd send should result in RateLimit error.
@@ -7154,6 +7185,7 @@ mod tests {
                 // timestamp. Otherwise, proofs cannot be reused, and CI will
                 // fail. CI might also fail if you don't set an explicit proving
                 // capability.
+                let accept_lustrations = true;
                 let result = rpc_server
                     .clone()
                     .send(
@@ -7165,6 +7197,7 @@ mod tests {
                             UtxoNotificationMedium::OffChain,
                         ),
                         fee,
+                        accept_lustrations,
                     )
                     .await;
 

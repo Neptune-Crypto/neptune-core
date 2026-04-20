@@ -111,6 +111,11 @@ pub enum RpcError {
 
     #[error("The UTXO that you try to claim cannot be registered by the wallet. Error: {0}")]
     CannotClaimUtxo(String),
+
+    #[error(
+        "The consensus rules require lustration of the input, but the lustration flag was not set."
+    )]
+    TransactionRequiresLustration,
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -654,6 +659,7 @@ pub trait RpcApi: Sync + Send {
         notify_self: Option<String>,
         notify_other: Option<String>,
         utxo_priority: Option<String>,
+        accept_lustrations: bool,
     ) -> RpcResult<SendResponse> {
         self.send_call(SendRequest {
             amount,
@@ -664,6 +670,7 @@ pub trait RpcApi: Sync + Send {
             notify_self,
             notify_other,
             utxo_priority,
+            accept_lustrations,
         })
         .await
     }

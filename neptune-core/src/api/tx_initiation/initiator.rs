@@ -244,9 +244,18 @@ impl TransactionInitiator {
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
+        accept_lustrations: bool,
     ) -> Result<TxCreationArtifacts, error::SendError> {
-        self.send_inner(outputs, change_policy, fee, timestamp, false)
-            .await
+        let transparent = false;
+        self.send_inner(
+            outputs,
+            change_policy,
+            fee,
+            timestamp,
+            transparent,
+            accept_lustrations,
+        )
+        .await
     }
 
     /// Build and broadcast a *transparent* transaction.
@@ -262,8 +271,18 @@ impl TransactionInitiator {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
     ) -> Result<TxCreationArtifacts, error::SendError> {
-        self.send_inner(outputs, change_policy, fee, timestamp, true)
-            .await
+        // Lustrations are always accepted on transparent transactions, since
+        // all inputs are public anyway.
+        let accept_lustrations = true;
+        self.send_inner(
+            outputs,
+            change_policy,
+            fee,
+            timestamp,
+            true,
+            accept_lustrations,
+        )
+        .await
     }
 
     /// Build a transaction and broadcast it.
@@ -274,10 +293,11 @@ impl TransactionInitiator {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         transparent: bool,
+        accept_lustrations: bool,
     ) -> Result<TxCreationArtifacts, error::SendError> {
         tracing::info!("send: recording tx");
 
-        let policy = InputSelectionPolicy::default();
+        let input_policy = InputSelectionPolicy::default();
         let tx_creation_artifacts = self
             .construct_transaction_mutable_state(
                 outputs,
@@ -285,9 +305,15 @@ impl TransactionInitiator {
                 fee,
                 timestamp,
                 transparent,
-                policy,
+                input_policy,
             )
             .await?;
+
+        if tx_creation_artifacts.details.contains_lustrations() && !accept_lustrations {
+            return Err(error::SendError::Tx(
+                error::CreateTxError::RequiresLustration,
+            ));
+        }
 
         self.record_and_broadcast_transaction(&tx_creation_artifacts)
             .await?;

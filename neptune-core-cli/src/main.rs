@@ -848,6 +848,7 @@ async fn main() -> Result<()> {
             receiver_tag,
             notify_self,
             notify_other,
+            accept_lustrations,
         }) => {
             // Parse on client
             let receiving_address = ReceivingAddress::from_bech32m(&address, network)?;
@@ -869,6 +870,7 @@ async fn main() -> Result<()> {
                     )],
                     ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, notify_self),
                     fee,
+                    accept_lustrations,
                 )
                 .await?;
             let tx_artifacts = match resp {
@@ -891,7 +893,12 @@ async fn main() -> Result<()> {
                 Some(receiver_tag),
             )?
         }
-        Command::Payment(PaymentCommand::SendToMany { file, outputs, fee }) => {
+        Command::Payment(PaymentCommand::SendToMany {
+            file,
+            outputs,
+            fee,
+            accept_lustrations,
+        }) => {
             let parsed_outputs = if let Some(filename) = file {
                 if !outputs.is_empty() {
                     bail!("specify raw outputs or a file to read them from but not both");
@@ -927,6 +934,7 @@ async fn main() -> Result<()> {
                         UtxoNotificationMedium::OnChain,
                     ),
                     fee,
+                    accept_lustrations,
                 )
                 .await?;
             match res {
@@ -997,14 +1005,18 @@ async fn main() -> Result<()> {
                 Err(e) => eprintln!("{e}"),
             }
         }
-        Command::Payment(PaymentCommand::Consolidate { batch, address }) => {
+        Command::Payment(PaymentCommand::Consolidate {
+            batch,
+            address,
+            accept_lustrations,
+        }) => {
             let network = client.network(ctx).await??;
             let address = match address {
                 None => None,
                 Some(string) => Some(ReceivingAddress::from_bech32m(&string, network)?),
             };
             let num_utxos_consolidated = client
-                .consolidate(ctx, token, Some(batch), address)
+                .consolidate(ctx, token, Some(batch), address, accept_lustrations)
                 .await??;
 
             println!("Initiating transaction to consolidate {num_utxos_consolidated} UTXOs.");

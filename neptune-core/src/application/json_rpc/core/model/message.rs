@@ -516,6 +516,7 @@ pub struct SendRequest {
     pub notify_self: Option<String>,
     pub notify_other: Option<String>,
     pub utxo_priority: Option<String>,
+    pub accept_lustrations: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -537,6 +538,9 @@ pub struct SendResponse {
     /// Does not include notifications pertaning to UTXOs that the transaction
     /// initiator node can unlock.
     pub unowned_offchain_notifications: Vec<RpcPrivateNotificationData>,
+
+    /// Whether or not the generated transaction contains lustrations
+    pub contains_lustrations: bool,
 }
 
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
