@@ -20,13 +20,15 @@
 //!
 //! async fn my_send_transaction(gsl: GlobalStateLock, recipient: ReceivingAddress, amount: NativeCurrencyAmount, change_policy: ChangePolicy, fee: NativeCurrencyAmount) -> Result<TxCreationArtifacts, tx_initiation::error::SendError> {
 //!     let outputs = vec![(recipient, amount)];
+//!     let accept_lustrations = false;
 //!
 //!     send::TransactionSender::from(gsl)
 //!         .send(
 //!             outputs,
 //!             change_policy,
 //!             fee,
-//!             Timestamp::now()
+//!             Timestamp::now(),
+//!             accept_lustrations,
 //!         ).await
 //! }
 //! ```

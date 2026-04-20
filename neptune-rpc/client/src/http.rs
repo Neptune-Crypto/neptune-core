@@ -363,6 +363,7 @@ mod tests {
             .await
             .unwrap()
             .derivation_index;
+        let accept_lustrations = false;
         let resp = client
             .send(
                 send_amt,
@@ -373,6 +374,7 @@ mod tests {
                 Some("on-chain".to_string()),
                 Some("on-chain".to_string()),
                 None,
+                accept_lustrations,
             )
             .await
             .unwrap();
@@ -445,6 +447,7 @@ mod tests {
             .unwrap()
             .address;
 
+        let accept_lustrations = false;
         let send_resp = alice_client
             .send(
                 send_amt.into(),
@@ -455,6 +458,7 @@ mod tests {
                 Some("off-chain".to_owned()),
                 Some("off-chain".to_owned()),
                 None,
+                accept_lustrations,
             )
             .await
             .unwrap();

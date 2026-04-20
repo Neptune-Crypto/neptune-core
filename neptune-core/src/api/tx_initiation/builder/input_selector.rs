@@ -34,14 +34,6 @@ pub enum SortOrder {
     Descending,
 }
 
-#[cfg(test)]
-impl Default for SortOrder {
-    // Needed for `strum::EnumIter` derivation in downstream type
-    fn default() -> Self {
-        Self::Descending
-    }
-}
-
 impl Display for SortOrder {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let s = match self {
@@ -380,15 +372,22 @@ mod tests {
     use super::*;
     use crate::state::wallet::wallet_status::SyncedUtxo;
 
+    #[expect(clippy::derivable_impls)]
+    impl Default for SortOrder {
+        // Needed for `strum::EnumIter` derivation in downstream type
+        // `InputSelectionPriority`.
+        fn default() -> Self {
+            Self::Descending
+        }
+    }
+
     #[test]
     fn no_panic_in_prioritize() {
         let dummy_input = |aocl_leaf_index: u64| InputCandidate {
             synced_utxo: SyncedUtxo::empty_dummy(aocl_leaf_index),
             number_of_confirmations: 14,
         };
-        let dummy_inputs = (0..100)
-            .map(|aocl_index| dummy_input(aocl_index))
-            .collect_vec();
+        let dummy_inputs = (0..100).map(dummy_input).collect_vec();
 
         for priority in InputSelectionPriority::iter() {
             let policy = InputSelectionPolicy {
