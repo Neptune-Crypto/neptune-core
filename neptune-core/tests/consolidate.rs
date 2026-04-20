@@ -84,11 +84,17 @@ pub async fn consolidation_basic() {
     );
 
     // Alice consolidates 3 of her UTXOs
+    let accept_lustrations = true;
     let num_consolidations = alice
         .gsl
         .api_mut()
         .tx_initiator_mut()
-        .consolidate(Some(3), Some(bob_address), Timestamp::now())
+        .consolidate(
+            Some(3),
+            Some(bob_address),
+            Timestamp::now(),
+            accept_lustrations,
+        )
         .await
         .unwrap();
 

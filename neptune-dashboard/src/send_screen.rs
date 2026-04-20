@@ -41,6 +41,7 @@ pub enum SendScreenWidget {
     Address,
     Amount,
     Fee,
+    AcceptLustrations,
     Ok,
     Notice,
 }
@@ -64,6 +65,7 @@ pub struct SendScreen {
     focus: Arc<Mutex<SendScreenWidget>>,
     amount: String,
     fee: String,
+    accept_lustrations: bool,
     notice: Arc<Mutex<String>>,
     reset_me: Arc<Mutex<ResetType>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
@@ -83,6 +85,7 @@ impl SendScreen {
             focus: Arc::new(Mutex::new(SendScreenWidget::Address)),
             amount: "".to_string(),
             fee: "".to_string(),
+            accept_lustrations: false,
             notice: Arc::new(Mutex::new("".to_string())),
             reset_me: Arc::new(Mutex::new(Default::default())),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
@@ -98,6 +101,7 @@ impl SendScreen {
         address: String,
         amount: String,
         fee: String,
+        accept_lustrations: bool,
         notice_arc: Arc<Mutex<String>>,
         reset_me: Arc<Mutex<ResetType>>,
         network: Network,
@@ -157,6 +161,7 @@ impl SendScreen {
                     UtxoNotificationMedium::OnChain,
                 ),
                 valid_fee,
+                accept_lustrations,
             )
             .await
             .unwrap();
@@ -220,7 +225,11 @@ impl SendScreen {
                                         escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
                                     SendScreenWidget::Fee => {
-                                        *own_focus = SendScreenWidget::Ok;
+                                        *own_focus = SendScreenWidget::AcceptLustrations;
+                                        escalate_event = Some(DashboardEvent::RefreshScreen);
+                                    }
+                                    SendScreenWidget::AcceptLustrations => {
+                                        self.accept_lustrations = !self.accept_lustrations;
                                         escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
                                     SendScreenWidget::Ok => {
@@ -233,10 +242,19 @@ impl SendScreen {
                                         let reset_me = self.reset_me.clone();
                                         let network = self.network;
                                         let token = self.token;
+                                        let accept_lustrations = self.accept_lustrations;
 
                                         tokio::spawn(Self::check_and_pay_sequence(
-                                            rpc_client, token, address, amount, fee, notice,
-                                            reset_me, network, refresh_tx,
+                                            rpc_client,
+                                            token,
+                                            address,
+                                            amount,
+                                            fee,
+                                            accept_lustrations,
+                                            notice,
+                                            reset_me,
+                                            network,
+                                            refresh_tx,
                                         ));
                                     }
                                     SendScreenWidget::Notice => {
@@ -251,7 +269,8 @@ impl SendScreen {
                                     SendScreenWidget::Address => SendScreenWidget::Ok,
                                     SendScreenWidget::Amount => SendScreenWidget::Address,
                                     SendScreenWidget::Fee => SendScreenWidget::Amount,
-                                    SendScreenWidget::Ok => SendScreenWidget::Fee,
+                                    SendScreenWidget::AcceptLustrations => SendScreenWidget::Fee,
+                                    SendScreenWidget::Ok => SendScreenWidget::AcceptLustrations,
                                     SendScreenWidget::Notice => SendScreenWidget::Notice,
                                 };
                                 escalate_event = Some(DashboardEvent::RefreshScreen);
@@ -264,7 +283,8 @@ impl SendScreen {
                                 *own_focus = match own_focus.to_owned() {
                                     SendScreenWidget::Address => SendScreenWidget::Amount,
                                     SendScreenWidget::Amount => SendScreenWidget::Fee,
-                                    SendScreenWidget::Fee => SendScreenWidget::Ok,
+                                    SendScreenWidget::Fee => SendScreenWidget::AcceptLustrations,
+                                    SendScreenWidget::AcceptLustrations => SendScreenWidget::Ok,
                                     SendScreenWidget::Ok => SendScreenWidget::Address,
                                     SendScreenWidget::Notice => SendScreenWidget::Notice,
                                 };
@@ -494,6 +514,30 @@ impl Widget for SendScreen {
                 },
             ));
             fee_widget.render(fee_rect, buf);
+
+            // display the lustration widget
+            let accept_lustration = self.accept_lustrations;
+            let lustration_rect = vrecter.next(1);
+            let lustration_icon = if accept_lustration { "[X]" } else { "[ ]" };
+            let lustration_text = Line::from(vec![
+                Span::styled(
+                    format!(" {} ", lustration_icon),
+                    if own_focus == SendScreenWidget::AcceptLustrations && self.in_focus {
+                        focus_style
+                    } else {
+                        style
+                    },
+                ),
+                Span::from("Accept lustration"),
+            ]);
+            let lustration_widget = Paragraph::new(lustration_text).style(
+                if own_focus == SendScreenWidget::AcceptLustrations && self.in_focus {
+                    focus_style
+                } else {
+                    style
+                },
+            );
+            lustration_widget.render(lustration_rect, buf);
 
             // send button
             let mut button_rect = vrecter.next(3);

@@ -61,11 +61,12 @@ impl TransactionSender {
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
+        accept_lustrations: bool,
     ) -> Result<TxCreationArtifacts, error::SendError> {
         TransactionInitiator {
             global_state_lock: self.global_state_lock.clone(),
         }
-        .send(outputs, change_policy, fee, timestamp)
+        .send(outputs, change_policy, fee, timestamp, accept_lustrations)
         .await
     }
 }

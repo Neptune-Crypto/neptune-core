@@ -52,6 +52,12 @@ pub enum CreateTxError {
       allowed for this transaction, or choose another input priority."
     )]
     TooManyInputs,
+
+    #[error(
+        "Transaction requires lustration, i.e. revealing the values of the \
+     inputs. But the flag to accept lustrations was not set."
+    )]
+    RequiresLustration,
 }
 
 #[derive(Debug, Clone, thiserror::Error, strum::Display)]

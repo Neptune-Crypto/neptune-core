@@ -181,6 +181,15 @@ pub struct Args {
     #[clap(long, default_value = None)]
     pub(crate) auto_consolidate: Option<Option<String>>,
 
+    /// Whether or not to accept that the consolidation transactions generate
+    /// lustrations, which is the public revelation of the input UTXOs.
+    ///
+    /// The consensus rules may require the inputs to be lustrated, since this
+    /// acts as a transparency gateway ensuring that the historically printed
+    /// amount has not exceeded the intended limit.
+    #[clap(long)]
+    pub(crate) accept_consolidation_lustrations: bool,
+
     #[clap(skip)]
     pub(crate) auto_consolidate_cache: OnceLock<AutoConsolidationSetting>,
 
@@ -984,8 +993,12 @@ impl Args {
     pub(crate) fn auto_consolidate(&self) -> AutoConsolidationSetting {
         self.auto_consolidate_cache
             .get_or_init(|| {
-                AutoConsolidationSetting::parse(&self.auto_consolidate, self.network)
-                    .expect("Must be able to parse auto consolidation setting")
+                AutoConsolidationSetting::parse(
+                    &self.auto_consolidate,
+                    self.network,
+                    self.accept_consolidation_lustrations,
+                )
+                .expect("Must be able to parse auto consolidation setting")
             })
             .to_owned()
     }

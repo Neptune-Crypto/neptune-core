@@ -880,10 +880,17 @@ pub(crate) mod tests {
         )];
         let fee = NativeCurrencyAmount::coins(1);
         let timestamp = parent.header().timestamp + Timestamp::months(6);
+        let accept_lustrations = true;
         let tx = premine_receiver
             .api_mut()
             .tx_sender_mut()
-            .send(outputs, ChangePolicy::Burn, fee, timestamp)
+            .send(
+                outputs,
+                ChangePolicy::Burn,
+                fee,
+                timestamp,
+                accept_lustrations,
+            )
             .await
             .unwrap();
         let kernel_with_lustration = tx.transaction.kernel.clone();
