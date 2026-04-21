@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
@@ -35,6 +36,9 @@ pub struct RpcBlockTemplateMetadata {
     /// for the block to be valid. Should only be used once hardfork-beta is
     /// active. Otherwise, ignore.
     pub lustration_status: Option<LustrationStatus>,
+
+    /// The version field in the header.
+    pub version: BFieldElement,
 }
 
 impl RpcBlockTemplateMetadata {
@@ -63,6 +67,7 @@ impl RpcBlockTemplateMetadata {
             total_guesser_reward: guesser_reward.into(),
             pow_mast_paths: auth_paths,
             lustration_status,
+            version: block_proposal.header().version,
         }
     }
 }
@@ -105,6 +110,7 @@ mod tests {
                         nonce,
                         self.threshold,
                         self.lustration_status,
+                        Some(self.version),
                     )
                 })
                 .find_map(|x| x)

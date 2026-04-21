@@ -6467,6 +6467,7 @@ mod tests {
                 let consensus_rule_set = ConsensusRuleSet::Reboot;
                 let guesser_buffer = block1.guess_preprocess(None, None, consensus_rule_set);
                 let mast_auth_paths = block1.pow_mast_paths();
+                let version = block1.header().version;
                 let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
@@ -6477,6 +6478,7 @@ mod tests {
                         random(),
                         target,
                         None,
+                        Some(version),
                     ) {
                         break valid_pow;
                     }

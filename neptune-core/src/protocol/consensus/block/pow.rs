@@ -440,6 +440,18 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         self.set_lustration_status_raw(encoding);
     }
 
+    pub(super) fn version_in_pow(&self) -> BFieldElement {
+        let [_, _, _, _, version] = self.path_a[MERKLE_TREE_HEIGHT - 3].values();
+
+        version
+    }
+
+    pub(super) fn set_version_in_pow(&mut self, value: BFieldElement) {
+        let [prev_e0, prev_e1, prev_e2, prev_e3, _prev_e4] =
+            self.path_a[MERKLE_TREE_HEIGHT - 3].values();
+        self.path_a[MERKLE_TREE_HEIGHT - 3] = Digest([prev_e0, prev_e1, prev_e2, prev_e3, value]);
+    }
+
     pub(crate) fn preprocess(
         mast_auth_paths: PowMastPaths,
         cancel_channel: Option<&dyn Cancelable>,
@@ -557,6 +569,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         nonce: Digest,
         target: Digest,
         lustration_status: Option<LustrationStatus>,
+        version: Option<BFieldElement>,
     ) -> Option<Self> {
         let pow = if buffer.is_memory_hard() {
             let root = buffer.merkle_tree.root();
@@ -591,6 +604,10 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
 
             if let Some(lustration) = lustration_status {
                 pow.set_lustration_status(lustration);
+            }
+
+            if let Some(version) = version {
+                pow.set_version_in_pow(version);
             }
 
             pow
@@ -911,7 +928,7 @@ pub(crate) mod tests {
 
             for difficulty in [2_u32, 8] {
                 let difficulty = Difficulty::from(difficulty);
-                let successful_guess = solve(&buffer, &auth_paths, difficulty, None);
+                let successful_guess = solve(&buffer, &auth_paths, difficulty, None, None);
                 assert!(successful_guess
                     .validate(
                         auth_paths,
@@ -953,6 +970,14 @@ pub(crate) mod tests {
             counter: amount,
             max_lustrating_aocl_leaf_index: aocl_leaf_index.into(),
         })?;
+    }
+
+    #[proptest(cases = 20)]
+    fn version_encoding_consistency(#[strategy(arb())] version: BFieldElement) {
+        let mut pow = Pow::<29>::default();
+        pow.set_version_in_pow(version);
+        let read = pow.version_in_pow();
+        prop_assert_eq!(version, read);
     }
 
     /// Ensure that indices cannot be reused over two proposals that share the
@@ -1005,7 +1030,7 @@ pub(crate) mod tests {
 
         // Verify that 1st block proposal can be solved
         let difficulty = Difficulty::from(2u32);
-        let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty, None);
+        let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty, None, None);
         assert!(correct_guess_1
             .validate(
                 auth_paths_1,
@@ -1033,7 +1058,7 @@ pub(crate) mod tests {
         // Verify that a 2nd proposal can use the same `buffer` value to create
         // a successful guess, and that only the `auth_paths` value needs to
         // change.
-        let correct_guess_2 = solve(&buffer, &auth_paths_2, difficulty, None);
+        let correct_guess_2 = solve(&buffer, &auth_paths_2, difficulty, None, None);
         assert!(correct_guess_2
             .validate(
                 auth_paths_2,
@@ -1049,6 +1074,7 @@ pub(crate) mod tests {
         auth_paths: &PowMastPaths,
         difficulty: Difficulty,
         lustration_status: Option<LustrationStatus>,
+        version: Option<BFieldElement>,
     ) -> Pow<N> {
         assert!(
             difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
@@ -1069,6 +1095,7 @@ pub(crate) mod tests {
                 nonce,
                 target,
                 lustration_status,
+                version,
             ) {
                 break solution;
             }

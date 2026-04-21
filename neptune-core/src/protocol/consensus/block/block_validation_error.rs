@@ -47,6 +47,9 @@ pub enum BlockValidationError {
     ///   1.e) Max block size is not exceeded
     #[error("block must not exceed max size")]
     MaxSize,
+    ///   1.f) Version field consistent
+    #[error("Version in pow field and in header must match")]
+    VersionMismatch,
 
     // 2. The transaction is valid.
     ///   2.a) Unpack the transaction's inputs (removal records). This operation
@@ -737,5 +740,29 @@ mod tests {
             b_new.validate(&b_prev, ts, network).await.err().unwrap(),
             BlockValidationError::BadLustrationAoclThreshold { .. }
         ));
+    }
+
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+    async fn version_mismatch(
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+        #[strategy(arb())] version: BFieldElement,
+    ) {
+        let network = Network::Main;
+        let (b_prev, ts, rness) = s;
+        prop_assume!(b_prev.header().height.next() >= BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET);
+        prop_assume!(b_prev.header().version != version);
+
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        assert!(b_new.validate(&b_prev, ts, network).await.is_ok());
+
+        b_new.set_header_version_in_pow_only(version);
+        assert_eq!(
+            b_new.validate(&b_prev, ts, network).await.err().unwrap(),
+            BlockValidationError::VersionMismatch
+        );
+
+        b_new.set_version_in_header_only(version);
+        assert_eq!(Ok(()), b_new.validate(&b_prev, ts, network).await);
     }
 }

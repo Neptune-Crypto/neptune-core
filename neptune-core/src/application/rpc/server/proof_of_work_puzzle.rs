@@ -43,6 +43,9 @@ pub struct ProofOfWorkPuzzle {
     /// to be valid. Must be set prior to calculating the block's hash.
     /// Only to be used after hard-fork beta.
     pub lustration_status: Option<LustrationStatus>,
+
+    /// The version field in the header.
+    pub version: BFieldElement,
 }
 
 impl ProofOfWorkPuzzle {
@@ -73,6 +76,7 @@ impl ProofOfWorkPuzzle {
             id,
             prev_block,
             lustration_status,
+            version: block_proposal.header().version,
         }
     }
 
@@ -102,6 +106,7 @@ impl ProofOfWorkPuzzle {
                     nonce,
                     self.threshold,
                     self.lustration_status,
+                    Some(self.version),
                 )
             })
             .find_map(|x| x)

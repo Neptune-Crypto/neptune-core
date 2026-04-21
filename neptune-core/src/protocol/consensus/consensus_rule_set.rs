@@ -149,6 +149,15 @@ impl ConsensusRuleSet {
         }
     }
 
+    pub(crate) fn requires_version_in_pow(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1 => false,
+            ConsensusRuleSet::HardforkBeta => true,
+        }
+    }
+
     pub(crate) fn triton_proof_version(&self) -> TritonProofVersion {
         if cfg!(test) {
             // Only test with v1 since we would otherwise need to depend on two
@@ -271,6 +280,7 @@ pub(crate) mod tests {
     use rand::SeedableRng;
     use tasm_lib::prelude::Digest;
     use tasm_lib::triton_vm::proof::Claim;
+    use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::prelude::Mmr;
     use tracing_test::traced_test;
 
@@ -923,6 +933,53 @@ pub(crate) mod tests {
             },
         )
         .await;
+    }
+
+    #[traced_test]
+    #[test]
+    fn allow_non_zero_version() {
+        // Start well into hardfork beta
+        let init_block_heigth = BlockHeight::from(59998u64);
+        let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
+            init_block_heigth,
+            Difficulty::MINIMUM,
+        );
+
+        tokio_runtime().block_on(new_block_allow_non_zero_version(bpw));
+
+        async fn new_block_allow_non_zero_version(block_primitive_witness: BlockPrimitiveWitness) {
+            let network = Network::Main;
+            let (invalid_block, mut valid_successor) =
+                Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
+                    .await;
+
+            assert!(
+                valid_successor
+                    .is_valid(&invalid_block, valid_successor.header().timestamp, network)
+                    .await
+            );
+
+            valid_successor.set_version_consistently(bfe!(5550001));
+            assert!(
+                valid_successor
+                    .is_valid(&invalid_block, valid_successor.header().timestamp, network)
+                    .await
+            );
+
+            let consensus_rule_set = ConsensusRuleSet::HardforkBeta;
+            assert_eq!(
+                consensus_rule_set,
+                ConsensusRuleSet::infer_from(network, valid_successor.header().height)
+            );
+
+            valid_successor.satisfy_pow(invalid_block.header().difficulty, consensus_rule_set);
+            assert!(
+                valid_successor
+                    .is_valid(&invalid_block, valid_successor.header().timestamp, network)
+                    .await
+            );
+            assert!(valid_successor.has_proof_of_work(network, invalid_block.header()));
+        }
     }
 
     #[traced_test]

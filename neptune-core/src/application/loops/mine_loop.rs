@@ -17,6 +17,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rayon::iter::ParallelIterator;
 use rayon::ThreadPoolBuilder;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -330,6 +331,8 @@ fn guess_worker(
         None
     };
 
+    let version = block.header().version;
+
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(
@@ -343,6 +346,7 @@ fn guess_worker(
                         lustration_status,
                         rng,
                         &sender,
+                        Some(version),
                     )
                 },
             )
@@ -404,6 +408,12 @@ impl GuessNonceResult {
 }
 
 /// Run a single iteration of the mining loop.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "After hard fork beta is activated we can factor out the arguments \
+    that are no longer necessary; until then we support both before and after \
+    hard fork beta, which means many arguments."
+)]
 #[inline]
 fn guess_nonce_iteration(
     guesser_buffer: &GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }>,
@@ -413,6 +423,7 @@ fn guess_nonce_iteration(
     lustration_status: Option<LustrationStatus>,
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
+    version: Option<BFieldElement>,
 ) -> GuessNonceResult {
     let nonce: Digest = rng.random();
 
@@ -429,6 +440,7 @@ fn guess_nonce_iteration(
         nonce,
         threshold,
         lustration_status,
+        version,
     );
 
     match result {
@@ -1229,6 +1241,7 @@ pub(crate) mod tests {
             block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
         let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
         let lustration_status = block.header().pow.lustration_status().ok();
+        let version = block.header().version;
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(std_rng_from_thread_rng, |prng, _i| {
@@ -1240,6 +1253,7 @@ pub(crate) mod tests {
                         lustration_status,
                         prng,
                         &worker_task_tx,
+                        Some(version),
                     );
                 })
                 .count();
@@ -2351,6 +2365,7 @@ pub(crate) mod tests {
             let guesser_buffer = sucessor.guess_preprocess(None, None, consensus_rule_set);
             let mast_auth_paths = sucessor.pow_mast_paths();
             let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
+            let version = sucessor.header().version;
             let mut rng = rand::rng();
             let mut counter = 0;
             loop {
@@ -2361,6 +2376,7 @@ pub(crate) mod tests {
                     rng.random(),
                     target,
                     None,
+                    Some(version),
                 ) {
                     println!("found solution after {counter} guesses.");
                     let parent_target = predecessor.header().difficulty.target();

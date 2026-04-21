@@ -823,6 +823,13 @@ impl Block {
             return Err(BlockValidationError::MaxSize);
         }
 
+        // 1.f)
+        if consensus_rule_set.requires_version_in_pow()
+            && self.header().version != self.header().pow.version_in_pow()
+        {
+            return Err(BlockValidationError::VersionMismatch);
+        }
+
         // 2.a)
         let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
             .map_err(BlockValidationError::from)?;
@@ -1587,6 +1594,25 @@ pub(crate) mod tests {
 
             self.unset_digest();
         }
+
+        pub(crate) fn set_header_version_in_pow_only(&mut self, value: BFieldElement) {
+            self.kernel.header.pow.set_version_in_pow(value);
+
+            self.unset_digest();
+        }
+
+        pub(crate) fn set_version_in_header_only(&mut self, value: BFieldElement) {
+            self.kernel.header.version = value;
+
+            self.unset_digest();
+        }
+
+        pub(crate) fn set_version_consistently(&mut self, value: BFieldElement) {
+            self.kernel.header.version = value;
+            self.kernel.header.pow.set_version_in_pow(value);
+
+            self.unset_digest();
+        }
     }
 
     prop_compose! {
@@ -1658,6 +1684,8 @@ pub(crate) mod tests {
             let mut rng = rng();
             let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
 
+            let version = invalid_block.header().version;
+
             let valid_pow = loop {
                 if let Some(valid_pow) = Pow::guess(
                     &guesser_buffer,
@@ -1666,6 +1694,7 @@ pub(crate) mod tests {
                     rng.random(),
                     target,
                     None,
+                    Some(version),
                 ) {
                     break valid_pow;
                 }
