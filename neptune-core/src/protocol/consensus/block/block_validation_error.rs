@@ -133,7 +133,6 @@ impl From<RemovalRecordListUnpackError> for BlockValidationError {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches;
 
     use num_traits::CheckedSub;
     use proptest::prelude::Just;
@@ -645,10 +644,10 @@ mod tests {
 
         cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
-        assert_matches!(
+        assert!(matches!(
             b_new.validate(&b_prev, ts, network).await.err().unwrap(),
             BlockValidationError::BadLustrationAoclThreshold { .. }
-        );
+        ));
     }
 
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
@@ -673,10 +672,10 @@ mod tests {
 
         cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
-        assert_matches!(
+        assert!(matches!(
             b_new.validate(&b_prev, ts, network).await.err().unwrap(),
             BlockValidationError::BadLustrationCounter { .. }
-        );
+        ));
     }
 
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
@@ -707,10 +706,10 @@ mod tests {
 
         cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
-        assert_matches!(
+        assert!(matches!(
             b_new.validate(&b_prev, ts, network).await.err().unwrap(),
             BlockValidationError::BadLustrationCounter { .. }
-        );
+        ));
     }
 
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
@@ -735,9 +734,9 @@ mod tests {
 
         cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
-        assert_matches!(
+        assert!(matches!(
             b_new.validate(&b_prev, ts, network).await.err().unwrap(),
             BlockValidationError::BadLustrationAoclThreshold { .. }
-        );
+        ));
     }
 }

@@ -262,7 +262,6 @@ impl ConsensusRuleSet {
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use std::assert_matches;
     use std::sync::Arc;
 
     use futures::channel::oneshot;
@@ -611,14 +610,14 @@ pub(crate) mod tests {
             dummy_count
         )
         .is_none(),);
-        assert_matches!(
+        assert!(matches!(
             ConsensusRuleSet::lustration_rule(network, first_lustration_block, dummy_count),
             Some(LustrationRule::Initial(_)),
-        );
-        assert_matches!(
+        ));
+        assert!(matches!(
             ConsensusRuleSet::lustration_rule(network, first_lustration_block.next(), dummy_count),
             Some(LustrationRule::Updated { .. }),
-        );
+        ));
     }
 
     #[traced_test]
