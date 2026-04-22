@@ -874,7 +874,7 @@ impl MainLoopHandler {
                     tokio::task::spawn(async move {
                         let _ = tx_initiator
                             .consolidate(
-                                Some(max_num_inputs as usize),
+                                max_num_inputs as usize,
                                 maybe_consolidation_address,
                                 timestamp,
                                 accept_lustrations,

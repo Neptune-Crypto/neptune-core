@@ -3552,6 +3552,8 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        let num_inputs = num_inputs.unwrap_or(7);
+
         Ok(self
             .state
             .api_mut()

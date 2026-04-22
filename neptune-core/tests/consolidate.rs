@@ -85,12 +85,13 @@ pub async fn consolidation_basic() {
 
     // Alice consolidates 3 of her UTXOs
     let accept_lustrations = true;
+    let max_num_inputs = 3;
     let num_consolidations = alice
         .gsl
         .api_mut()
         .tx_initiator_mut()
         .consolidate(
-            Some(3),
+            max_num_inputs,
             Some(bob_address),
             Timestamp::now(),
             accept_lustrations,

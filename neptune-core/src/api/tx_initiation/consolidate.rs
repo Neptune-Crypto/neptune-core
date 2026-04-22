@@ -34,33 +34,42 @@ impl TransactionInitiator {
     /// wallet, thereby reducing the total number of UTXOs under management.
     pub async fn consolidate(
         &mut self,
-        num_inputs: Option<usize>,
+        max_num_inputs: usize,
         consolidation_address: Option<ReceivingAddress>,
         timestamp: Timestamp,
         accept_lustrations: bool,
     ) -> Result<usize, ConsolidationError> {
-        const MIN_CONSOLIDATION_INPUT_COUNT: usize = 16;
-        let num_inputs = num_inputs.unwrap_or(MIN_CONSOLIDATION_INPUT_COUNT);
+        const MIN_NUM_INPUTS: usize = 2;
 
-        debug!("consolidate: Attempting to consolidate {num_inputs} UTXOs in wallet");
+        debug!("consolidate: Attempting to consolidate {max_num_inputs} UTXOs in wallet");
         let input_candidates = self.input_candidates(timestamp).await;
-        if input_candidates.len() < num_inputs {
-            debug!("Nothing to consolidate as wallet has less than {num_inputs} spendable inputs.");
-            return Err(ConsolidationError::NotEnoughUtxos {
-                requested: num_inputs,
-                present: input_candidates.len(),
-            });
-        }
-
+        let lustration_threshold = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .lustration_threshold();
         let policy =
             InputSelectionPolicy::from(InputSelectionPriority::ByAge(SortOrder::Descending))
-                .require_confirmations(NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION);
-        let selected_inputs = InputSelector::default()
+                .require_confirmations(NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION)
+                .set_lustration_acceptance(accept_lustrations);
+        let selected_inputs = InputSelector::new(lustration_threshold)
             .input_candidates(input_candidates)
             .policy(policy)
-            .take(num_inputs)
+            .take(max_num_inputs)
             .into_iter()
             .collect_vec();
+
+        // Ensure we never attempt to consolidate zero or one input
+        if selected_inputs.len() < MIN_NUM_INPUTS {
+            debug!(
+                "Nothing to consolidate as wallet has less than {MIN_NUM_INPUTS} spendable inputs that meet the consolidation criteria."
+            );
+            return Err(ConsolidationError::NotEnoughUtxos {
+                requested: max_num_inputs,
+                present: selected_inputs.len(),
+            });
+        }
 
         let unlocked_inputs = self
             .global_state_lock
@@ -69,10 +78,11 @@ impl TransactionInitiator {
             .unlock_inputs(selected_inputs)
             .await;
 
+        let num_used_inputs = unlocked_inputs.len();
+        let unlocked_amount = unlocked_inputs.total_native_coins();
         debug!(
             "Selected {} inputs for consolidation, in total amount {}.",
-            unlocked_inputs.len(),
-            unlocked_inputs.total_native_coins()
+            num_used_inputs, unlocked_amount
         );
 
         let receiving_address = match consolidation_address {
@@ -93,7 +103,6 @@ impl TransactionInitiator {
             TxProvingCapability::SingleProof => CONSOLIDATION_FEE_SP,
         };
 
-        let unlocked_amount = unlocked_inputs.total_native_coins();
         let Some(output_amount) = unlocked_amount.checked_sub(&fee) else {
             return Err(ConsolidationError::Dust {
                 amount: unlocked_amount,
@@ -152,7 +161,7 @@ impl TransactionInitiator {
 
         tracing::info!("done");
 
-        Ok(num_inputs)
+        Ok(num_used_inputs)
     }
 }
 
