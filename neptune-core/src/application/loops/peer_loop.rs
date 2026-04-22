@@ -2768,6 +2768,7 @@ mod tests {
         use crate::application::loops::mine_loop::GuessingConfiguration;
         use crate::protocol::consensus::block::difficulty_control::Difficulty;
         use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+        use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
         use crate::tests::shared::blocks::next_block;
@@ -4281,7 +4282,7 @@ mod tests {
                 ConsensusRuleSet::HardforkAlpha,
             );
             let hf_beta = (
-                BlockHeight::from(39999u64),
+                BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET.previous().unwrap(),
                 ConsensusRuleSet::TvmProofVersion1,
                 ConsensusRuleSet::HardforkBeta,
             );

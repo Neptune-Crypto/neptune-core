@@ -28,7 +28,7 @@ pub const BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET: BlockHeight =
 
 /// Height of 1st block changing PoW algorithm to drop memory hardness
 pub const BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(40_000u64));
+    BlockHeight::new(BFieldElement::new(38_000u64));
 
 /// Height of 1st block changing PoW algorithm to drop memory hardness, for test
 /// net.
@@ -578,10 +578,9 @@ pub(crate) mod tests {
             panic!("First lustration rule must be of type 'initial'");
         };
 
-        assert_eq!(
-            NativeCurrencyAmount::coins(8679168),
-            lustration_status.counter
-        );
+        // premine + redemption pool + miner rewards up to hard fork activation
+        let expected = NativeCurrencyAmount::coins(8423168);
+        assert_eq!(expected, lustration_status.counter);
         assert_eq!(100_000, lustration_status.max_lustrating_aocl_leaf_index);
     }
 
@@ -986,7 +985,11 @@ pub(crate) mod tests {
     #[test]
     fn hard_fork_beta() {
         // Start at hard fork block height minus 2
-        let init_block_heigth = BlockHeight::from(39998u64);
+        let init_block_heigth = BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET
+            .previous()
+            .unwrap()
+            .previous()
+            .unwrap();
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
             init_block_heigth,
             Difficulty::MINIMUM,
@@ -1056,7 +1059,7 @@ pub(crate) mod tests {
 
             bob.set_new_tip(minus2.clone()).await.unwrap();
             assert_eq!(
-                39998u64,
+                37998u64,
                 bob.lock_guard().await.chain.tip().header().height.value()
             );
 
@@ -1078,7 +1081,7 @@ pub(crate) mod tests {
             ));
             bob.set_new_tip(minus1.clone()).await.unwrap();
             assert_eq!(
-                39999u64,
+                37999u64,
                 bob.lock_guard().await.chain.tip().header().height.value()
             );
 
@@ -1125,9 +1128,11 @@ pub(crate) mod tests {
                 hf_lustration_status.max_lustrating_aocl_leaf_index + 1,
                 hf.mutator_set_accumulator_after().unwrap().aocl.num_leafs()
             );
+
+            // premine + redemption pool + miner rewards up to hard fork activation
+            let expected_counter_after_activation = NativeCurrencyAmount::coins(8423168);
             assert_eq!(
-                hf_lustration_status.counter,
-                NativeCurrencyAmount::coins(8679168),
+                hf_lustration_status.counter, expected_counter_after_activation,
                 "Lustration status must have expected value"
             );
             assert!(
