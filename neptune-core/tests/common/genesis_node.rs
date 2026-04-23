@@ -329,6 +329,8 @@ impl GenesisNode {
         txid: TransactionKernelId,
         timeout_secs: u16,
     ) -> anyhow::Result<()> {
+        // Function may not hold a keep holding a read lock since the node needs
+        // a write lock to update the mempool transaction with a new proof.
         let start = std::time::Instant::now();
         while self.gsl.lock_guard().await.mempool.get(txid).is_none() {
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
@@ -348,6 +350,8 @@ impl GenesisNode {
         txid: TransactionKernelId,
         timeout_secs: u16,
     ) -> anyhow::Result<()> {
+        // Function may not hold a keep holding a read lock since the node needs
+        // a write lock to update the mempool transaction with a new proof.
         let start = std::time::Instant::now();
         loop {
             if let Some(tx) = self.gsl.lock_guard().await.mempool.get(txid) {
