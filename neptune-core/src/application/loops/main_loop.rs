@@ -2440,7 +2440,7 @@ impl MainLoopHandler {
                 return None;
             }
             SyncToMain::TipSuccessor(block) => {
-                log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::TipSuccessor");
                 let height = block.header().height;
 
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
