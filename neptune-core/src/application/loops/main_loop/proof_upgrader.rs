@@ -1100,7 +1100,7 @@ mod tests {
             // Alice is premine recipient, so she can make a transaction (after
             // expiry of timelock).
             let (main_to_peer_tx, mut main_to_peer_rx, _bob_peer_to_main_tx, _, _, _, mut alice, _) =
-                get_test_genesis_setup(network, 2, cli).await.unwrap();
+                get_test_genesis_setup(2, cli).await.unwrap();
             let pwtx = transaction_from_state(
                 alice.clone(),
                 512777439428,
@@ -1180,7 +1180,7 @@ mod tests {
             // Alice is premine recipient, so she can make a transaction (after
             // expiry of timelock).
             let (main_to_peer_tx, mut main_to_peer_rx, _, _, _, _, mut alice, _) =
-                get_test_genesis_setup(network, 2, cli).await.unwrap();
+                get_test_genesis_setup(2, cli).await.unwrap();
             let pwtx = transaction_from_state(
                 alice.clone(),
                 512777439429,

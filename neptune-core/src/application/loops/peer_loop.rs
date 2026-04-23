@@ -2408,6 +2408,7 @@ mod tests {
         // software which has new variants of `PeerMessage`. The intended
         // behavior is that a small punishment is applied but that the
         // connection stays open.
+        let network = Network::Main;
         let mock = Mock::new(vec![Action::ReadError, Action::Read(PeerMessage::Bye)]);
 
         let (
@@ -2419,7 +2420,7 @@ mod tests {
             _,
             state_lock,
             hsd,
-        ) = get_test_genesis_setup(Network::Main, 1, cli_args::Args::default())
+        ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
             .await
             .unwrap();
 
@@ -2470,7 +2471,7 @@ mod tests {
             _,
             state_lock,
             hsd,
-        ) = get_test_genesis_setup(Network::Main, 2, cli_args::Args::default()).await?;
+        ) = get_test_genesis_setup(2, cli_args::Args::default()).await?;
 
         let peer_address_sa = get_dummy_socket_address(2);
         let peer_address = socketaddr_to_multiaddr(peer_address_sa);
@@ -2504,7 +2505,7 @@ mod tests {
         let args = cli_args::Args::default();
         let network = args.network;
         let (from_main_tx, from_main_rx, to_main_tx, to_main_rx, _, _, state_lock, _) =
-            get_test_genesis_setup(network, 0, args).await?;
+            get_test_genesis_setup(0, args).await?;
 
         let peer_address_sa = get_dummy_socket_address(0);
         let peer_address = socketaddr_to_multiaddr(peer_address_sa);
@@ -2558,9 +2559,8 @@ mod tests {
                 mut state_lock,
                 hsd,
             ) = get_test_genesis_setup(
-                network,
                 num_already_connected_peers,
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await
             .unwrap();
@@ -2625,9 +2625,8 @@ mod tests {
                 state_lock,
                 hsd,
             ) = get_test_genesis_setup(
-                network,
                 num_already_connected_peers,
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await
             .unwrap();
@@ -2697,9 +2696,8 @@ mod tests {
                 state_lock,
                 _hsd,
             ) = get_test_genesis_setup(
-                network,
                 num_already_connected_peers,
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await
             .unwrap();
@@ -2792,7 +2790,7 @@ mod tests {
                 _,
                 state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             assert_eq!(1000, state_lock.cli().peer_tolerance);
             let peer_address_sa = get_dummy_socket_address(0);
 
@@ -2933,7 +2931,7 @@ mod tests {
                 _,
                 state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 1, cli_args::Args::default_with_network(network))
+            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let (peer_id, peer_info) = state_lock
@@ -3008,7 +3006,7 @@ mod tests {
                 _,
                 state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let peer_address = get_dummy_socket_address(0);
 
             let (no_pow, mock_pow, _, alpha_pow, tvmv1_pow) =
@@ -3097,7 +3095,7 @@ mod tests {
                 _,
                 mut alice,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let peer_address = get_dummy_socket_address(0);
             let genesis_block: Block = Block::genesis(network);
 
@@ -3162,7 +3160,7 @@ mod tests {
                 _,
                 mut state_lock,
                 handshake,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let genesis_block: Block = Block::genesis(network);
@@ -3247,7 +3245,7 @@ mod tests {
                 _,
                 mut state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let genesis_block: Block = Block::genesis(network);
             let peer_address = get_dummy_socket_address(0);
             let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
@@ -3375,7 +3373,7 @@ mod tests {
                 _,
                 mut state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let genesis_block = Block::genesis(network);
             let peer_address = get_dummy_socket_address(0);
             let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
@@ -3472,7 +3470,7 @@ mod tests {
                 _,
                 state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let peer_address = get_dummy_socket_address(0);
@@ -3527,7 +3525,7 @@ mod tests {
                 _,
                 mut state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let genesis_block = Block::genesis(network);
             let peer_address = get_dummy_socket_address(0);
 
@@ -3599,7 +3597,7 @@ mod tests {
                 _,
                 state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
@@ -3645,7 +3643,7 @@ mod tests {
                 _,
                 mut state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let genesis_block = Block::genesis(network);
@@ -3705,7 +3703,7 @@ mod tests {
                 _,
                 state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let peer_address = get_dummy_socket_address(0);
 
             let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
@@ -3759,7 +3757,7 @@ mod tests {
                 _,
                 state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let peer_address = get_dummy_socket_address(0);
             let genesis_block: Block = state_lock
                 .lock_guard()
@@ -3838,7 +3836,7 @@ mod tests {
                 _,
                 mut state_lock,
                 _hsd,
-            ) = get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network)).await?;
             let genesis_block = Block::genesis(network);
 
             // Restrict max number of blocks held in memory to 2.
@@ -3918,7 +3916,7 @@ mod tests {
                 _,
                 mut state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let peer_address: SocketAddr = get_dummy_socket_address(0);
@@ -3991,7 +3989,7 @@ mod tests {
                 _,
                 state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let peer_address = get_dummy_socket_address(0);
             let genesis_block = Block::genesis(network);
 
@@ -4072,7 +4070,7 @@ mod tests {
                 _,
                 mut state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
             let genesis_block: Block = state_lock
                 .lock_guard()
@@ -4176,7 +4174,7 @@ mod tests {
                 _,
                 mut state_lock,
                 _hsd,
-            ) = get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network)).await?;
             let genesis_block = Block::genesis(network);
             let peer_infos: Vec<PeerInfo> = state_lock
                 .lock_guard()
@@ -4320,9 +4318,8 @@ mod tests {
                     state_lock,
                     hsd,
                 ) = test_setup_custom_genesis_block(
-                    network,
                     1,
-                    cli_args::Args::default(),
+                    cli_args::Args::default_with_network(network),
                     hard_fork_minus_2.clone(),
                 )
                 .await
@@ -4451,7 +4448,7 @@ mod tests {
 
             for transaction_is_known in [false, true] {
                 let (_peer_broadcast_tx, from_main_rx, to_main_tx, _, _, _, mut state_lock, _hsd) =
-                    get_test_genesis_setup(network, 1, cli_args::Args::default())
+                    get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                         .await
                         .unwrap();
                 if transaction_is_known {
@@ -4513,7 +4510,7 @@ mod tests {
                 _,
                 state_lock,
                 _hsd,
-            ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
+            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
 
@@ -4604,7 +4601,7 @@ mod tests {
                 _,
                 mut state_lock,
                 _hsd,
-            ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
+            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let spending_key = state_lock
@@ -4726,7 +4723,7 @@ mod tests {
                     _,
                     mut state_lock,
                     _hsd,
-                ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
+                ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                     .await
                     .unwrap();
                 let consensus_rule_set =
@@ -4816,7 +4813,7 @@ mod tests {
                 _,
                 state_lock,
                 hsd,
-            ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
+            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let fee = NativeCurrencyAmount::from_nau(500);
@@ -4865,7 +4862,7 @@ mod tests {
                 _,
                 state_lock,
                 _,
-            ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
+            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let fee = NativeCurrencyAmount::from_nau(500);
@@ -4945,9 +4942,7 @@ mod tests {
             let network = cli.network;
             let peer_count = 1;
             let (peer_broadcast_tx, from_main_rx, to_main_tx, to_main_rx, _, _, alice, _hsd) =
-                get_test_genesis_setup(network, peer_count, cli)
-                    .await
-                    .unwrap();
+                get_test_genesis_setup(peer_count, cli).await.unwrap();
             let peer_hsd = get_dummy_handshake_data_for_genesis(network);
             let peer_ma = alice
                 .lock_guard()
@@ -5227,7 +5222,7 @@ mod tests {
                     _,
                     mut alice,
                     handshake,
-                ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
+                ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                     .await
                     .unwrap();
 
@@ -5329,7 +5324,7 @@ mod tests {
                 _,
                 mut alice,
                 alice_hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
             let genesis_block: Block = Block::genesis(network);
@@ -5396,7 +5391,6 @@ mod tests {
             let network = Network::Main;
             let genesis_block: Block = Block::genesis(network);
 
-            let alice_cli = cli_args::Args::default();
             let (
                 _alice_main_to_peer_tx,
                 alice_main_to_peer_rx,
@@ -5406,7 +5400,9 @@ mod tests {
                 _,
                 alice,
                 alice_hsd,
-            ) = get_test_genesis_setup(network, 0, alice_cli).await.unwrap();
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
 
             let sync_challenge = SyncChallenge {
                 tip_digest: genesis_block.hash(),
@@ -5465,6 +5461,7 @@ mod tests {
             const ALICE_SYNC_MODE_THRESHOLD: usize = 10;
             let alice_cli = cli_args::Args {
                 sync_mode_threshold: ALICE_SYNC_MODE_THRESHOLD,
+                network,
                 ..Default::default()
             };
             let (
@@ -5476,7 +5473,7 @@ mod tests {
                 _,
                 mut alice,
                 alice_hsd,
-            ) = get_test_genesis_setup(network, 0, alice_cli).await?;
+            ) = get_test_genesis_setup(0, alice_cli).await?;
             let _alice_socket_address = get_dummy_socket_address(0);
 
             let (
@@ -5488,7 +5485,7 @@ mod tests {
                 _,
                 mut bob,
                 _bob_hsd,
-            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let bob_socket_address = get_dummy_socket_address(0);
 
             let now = genesis_block.header().timestamp + Timestamp::hours(1);

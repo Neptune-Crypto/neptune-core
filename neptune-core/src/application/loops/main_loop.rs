@@ -2608,6 +2608,7 @@ mod tests {
         main_to_miner_rx: mpsc::Receiver<MainToMiner>,
     }
 
+    /// Return a state synced to the genesis block, with the devnet wallet.
     async fn setup(
         num_init_peers_outgoing: u8,
         num_peers_incoming: u8,
@@ -2615,7 +2616,6 @@ mod tests {
     ) -> TestSetup {
         const CHANNEL_CAPACITY_MINER_TO_MAIN: usize = 10;
 
-        let network = Network::Main;
         let (
             main_to_peer_tx,
             main_to_peer_rx,
@@ -2625,7 +2625,7 @@ mod tests {
             network_event_rx,
             mut state,
             _own_handshake_data,
-        ) = get_test_genesis_setup(network, num_init_peers_outgoing, cli)
+        ) = get_test_genesis_setup(num_init_peers_outgoing, cli)
             .await
             .unwrap();
         assert!(

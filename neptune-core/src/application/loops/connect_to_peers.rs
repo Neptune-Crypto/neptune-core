@@ -769,7 +769,7 @@ mod tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
-            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
         call_peer_inner(
             mock,
             state.clone(),
@@ -831,7 +831,7 @@ mod tests {
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Main;
         let (_, _, _, _, _, _, mut state_lock, own_handshake) =
-            get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
+            get_test_genesis_setup(1, cli_args::Args::default_with_network(network)).await?;
 
         // Get an address for a peer that's not already connected
         let (other_handshake, peer_sa) = get_dummy_peer_connection_data_genesis(network, 1);
@@ -965,7 +965,7 @@ mod tests {
     async fn refuse_connection_bad_timestamp() {
         let network = Network::Main;
         let (_, _, _, _, _, _, state_lock, own_handshake) =
-            get_test_genesis_setup(network, 1, cli_args::Args::default())
+            get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
 
@@ -1014,7 +1014,7 @@ mod tests {
         };
 
         let (broadcast_tx, _broadcast_rx, to_main_tx, _to_main_rx, _, _, mut state_lock, handshake) =
-            get_test_genesis_setup(network, 0, args).await?;
+            get_test_genesis_setup(0, args).await?;
 
         // fake a graceful disconnect
         let node_0_address = get_dummy_socket_address(0);
@@ -1114,7 +1114,7 @@ mod tests {
             _,
             state_lock,
             _hsd,
-        ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+        ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
         answer_peer_inner(
             mock,
             state_lock.clone(),
@@ -1149,7 +1149,7 @@ mod tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
-            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
 
         let answer = answer_peer_inner(
             mock,
@@ -1183,7 +1183,8 @@ mod tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
-            get_test_genesis_setup(Network::Testnet(1), 0, cli_args::Args::default()).await?;
+            get_test_genesis_setup(0, cli_args::Args::default_with_network(Network::Testnet(1)))
+                .await?;
 
         let answer = answer_peer_inner(
             mock,
@@ -1213,7 +1214,7 @@ mod tests {
             _,
             state_lock,
             _hsd,
-        ) = get_test_genesis_setup(Network::Main, 0, cli_args::Args::default())
+        ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(Network::Main))
             .await
             .unwrap();
         let state = state_lock.lock_guard().await;
@@ -1308,7 +1309,7 @@ mod tests {
             _,
             mut state_lock,
             _hsd,
-        ) = get_test_genesis_setup(network, 2, cli_args::Args::default()).await?;
+        ) = get_test_genesis_setup(2, cli_args::Args::default_with_network(network)).await?;
 
         // set max_peers to 2 to ensure failure on next connection attempt
         let mut cli = state_lock.cli().clone();
@@ -1332,8 +1333,10 @@ mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn allow_capping_number_of_peers_per_ip() {
+        let network = Network::Main;
         let allow_5_connections_from_same_ip = cli_args::Args {
             max_connections_per_ip: Some(5),
+            network,
             ..Default::default()
         };
         let (
@@ -1345,7 +1348,7 @@ mod tests {
             _,
             mut state_lock,
             _hsd,
-        ) = get_test_genesis_setup(Network::Main, 0, allow_5_connections_from_same_ip)
+        ) = get_test_genesis_setup(0, allow_5_connections_from_same_ip)
             .await
             .unwrap();
 
@@ -1447,9 +1450,8 @@ mod tests {
             mut state_lock,
             _hsd,
         ) = get_test_genesis_setup(
-            network,
             peer_count_before_incoming_connection_request,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await?;
         let bad_standing: PeerStanding = PeerStanding::init(
