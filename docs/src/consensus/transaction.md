@@ -13,6 +13,17 @@ A transaction kernel consists of the following fields:
 
 Note that while addition records and removal records are both commitments to UTXOs, they are different types of commitments. The removal record is an index set into the SWBF (with supporting chunk dictionary) whereas the addition record is a hash digest.
 
+## Nomenclature
+For a transaction to be mineable, it has to be "valid", "confirmable" and follow the lustration rules.
+
+Validity means that the transaction satisfies cryptographic verifications that can be performed without knowledge of the state of the blockchain.
+
+Confirmable means that the transaction is not double spending an already-mined input, and that it proves this in a manner that's verifiable for nodes that only see the most recent block. To check confirmability, knowledge of the current blockchain state is required.
+
+Lustration rules may require transaction outputs that were confirmed prior to a certain fork to publicly reveal the value of their inputs, through announcements.
+These announcements must be included in the transaction's kernel. The purpose of such a lustration rule is to verify that no unintentional inflation has occurred
+because of soundness bugs in previous consensus rules. Such a lustration rule is added with the activation of [HardforkBeta](./consensus_rule_sets.md).
+
 ## Validity
 
 Transaction validity is designed to check four conditions:
