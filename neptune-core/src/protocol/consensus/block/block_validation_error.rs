@@ -1,3 +1,4 @@
+use crate::api::export::NativeCurrencyAmount;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 
 /// The reasons why a [`Block`](crate::protocol::consensus::block::Block) can be
@@ -26,7 +27,7 @@ pub enum BlockValidationError {
     /// 0.f) Cumulative PoW was updated correctly
     #[error("block cumulative proof-of-work must be updated correctly")]
     CumulativeProofOfWork,
-    ///   0.g) Block timestamp is less than host-time (utc) + 5 minutes
+    ///   0.g) Block timestamp is less than host-time (utc) + 1 minute + 1ms
     #[error("block must not be from the future")]
     FutureDating,
 
@@ -46,6 +47,9 @@ pub enum BlockValidationError {
     ///   1.e) Max block size is not exceeded
     #[error("block must not exceed max size")]
     MaxSize,
+    ///   1.f) Version field consistent
+    #[error("Version in pow field and in header must match")]
+    VersionMismatch,
 
     // 2. The transaction is valid.
     ///   2.a) Unpack the transaction's inputs (removal records). This operation
@@ -88,6 +92,40 @@ pub enum BlockValidationError {
     ///   2.l) restrict number of announcements.
     #[error("number of announcements may not be too large")]
     TooManyAnnouncements,
+
+    ///   2.m) Lustration status can be parsed
+    #[error("Could not parse lustration counter")]
+    BadLustrationCounterEncoding,
+    ///   2.n) Lustration status of parent can be parsed
+    #[error("Could not parse lustration counter of parent")]
+    BadLustrationCounterEncodingOfParent,
+    ///   2.o) Missing lustration announcement
+    #[error("Missing lustration announcement in transaction kernel")]
+    MissingLustrationAnnouncement,
+    ///   2.p) Lustration counter is updated correctly
+    #[error("Lustration barrier must be correctly updated. Got {got}, expected: {expected}")]
+    BadLustrationCounter {
+        got: NativeCurrencyAmount,
+        expected: NativeCurrencyAmount,
+    },
+    ///   2.q Value for which AOCL leaf indices must lustrate is correct. Once
+    ///       set, all descendents of that block must have the same value.
+    #[error(
+        "Lustration AOCL leaf index threshold must set correctly. Got {got}, expected: {expected}."
+    )]
+    BadLustrationAoclThreshold { got: u64, expected: u64 },
+    ///  2.r
+    #[error("Negative lustration counter: {got}")]
+    NegativeLustrationCounter { got: NativeCurrencyAmount },
+    /// 2.s
+    #[error("Lustration counter exceeds initial value. Got: {got}, initial: {initial}")]
+    LustrationCounterExceedsInitialValue {
+        got: NativeCurrencyAmount,
+        initial: NativeCurrencyAmount,
+    },
+    /// xxx -- unknown lustration error -- hopefully dead code
+    #[error("Unknown lustration problem. This should not happen.")]
+    UnknownLustrationProblem,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {
@@ -98,6 +136,7 @@ impl From<RemovalRecordListUnpackError> for BlockValidationError {
 
 #[cfg(test)]
 mod tests {
+    use num_traits::CheckedSub;
     use proptest::prelude::Just;
     use proptest::prop_assert_eq;
     use proptest::prop_assume;
@@ -106,9 +145,11 @@ mod tests {
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::proof::Claim;
     use tasm_lib::twenty_first::bfe;
+    use tasm_lib::twenty_first::prelude::Mmr;
     use test_strategy::proptest;
 
     use super::*;
+    use crate::api::export::BlockHeight;
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::NeptuneProof;
     use crate::api::export::Network;
@@ -117,11 +158,13 @@ mod tests {
     use crate::protocol::consensus::block::block_appendix::MAX_NUM_CLAIMS;
     use crate::protocol::consensus::block::difficulty_control;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
+    use crate::protocol::consensus::block::pow::LustrationStatus;
     use crate::protocol::consensus::block::tests::DIFFICULTY_LIMIT_FOR_TESTS;
     use crate::protocol::consensus::block::validity::block_program::BlockProgram;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::BlockProof;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::proof_abstractions::verifier::cache_true_claims;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
@@ -147,6 +190,23 @@ mod tests {
         }
     }
 
+    proptest::prop_compose! {
+     fn setup_with_height(height: BlockHeight) (
+            rness in arb::<Randomness<2, 2>>(),
+            d in 1..DIFFICULTY_LIMIT_FOR_TESTS,
+            b in block_with_arbkernel()
+        ) (
+            ts in (
+                Timestamp::hours(1) + b.kernel.header.timestamp
+            ).0.value()..=BFieldElement::MAX,
+            rness in Just(rness), mut b in Just(b), difficulty in Just(d)
+        ) -> (crate::protocol::consensus::block::Block, Timestamp, Randomness<2, 2>) {
+            b.kernel.header.difficulty = Difficulty::from(difficulty);
+            b.set_header_height(height);
+            (b, Timestamp(bfe![ts]), rness)
+        }
+    }
+
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_block_height_error_fails_0a(
         #[strategy(block_with_arbkernel())] b_prev: Block,
@@ -160,7 +220,7 @@ mod tests {
                 .validate(
                     &b_prev,
                     b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
-                    Network::Main
+                    Network::Main,
                 )
                 .await
                 .err()
@@ -180,7 +240,7 @@ mod tests {
                 .validate(
                     &b_prev,
                     b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
-                    Network::Main
+                    Network::Main,
                 )
                 .await
                 .err()
@@ -201,7 +261,7 @@ mod tests {
                 .validate(
                     &b_prev,
                     b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
-                    Network::Main
+                    Network::Main,
                 )
                 .await
                 .err()
@@ -276,17 +336,43 @@ mod tests {
         let (b_prev, ts, _) = s;
 
         let mut b_new = invalid_empty_block_with_timestamp(&b_prev, ts, network);
-        b_new.kernel.header.timestamp = Timestamp(bfe![ts_f]);
-        b_new.kernel.header.difficulty = difficulty_control::difficulty_control(
-            b_new.header().timestamp,
+
+        let new_timestamp = Timestamp(bfe![ts_f]);
+        let new_difficulty = difficulty_control::difficulty_control(
+            new_timestamp,
             b_prev.header().timestamp,
             b_prev.header().difficulty,
             network.target_block_interval(),
             b_prev.header().height,
         );
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+        let new_cum_pow = if consensus_rule_set.use_parent_difficulty() {
+            None
+        } else {
+            Some(b_prev.header().cumulative_proof_of_work + new_difficulty)
+        };
+
+        b_new.set_difficulty_related_fields(new_timestamp, new_difficulty, new_cum_pow);
         prop_assert_eq!(
             BlockValidationError::FutureDating,
             b_new.validate(&b_prev, ts, network).await.err().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn block_with_future_dating_fails_0g_unit_test() {
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let now = Timestamp::now();
+        let too_far_in_future = now + Timestamp::seconds(60) + Timestamp::millis(1);
+
+        assert_eq!(
+            BlockValidationError::FutureDating,
+            invalid_empty_block_with_timestamp(&genesis, too_far_in_future, network)
+                .validate(&genesis, now, network)
+                .await
+                .err()
+                .unwrap()
         );
     }
 
@@ -490,5 +576,193 @@ mod tests {
             BlockValidationError::NegativeFee,
             b_new.validate(&b_prev, ts, network).await.err().unwrap()
         );
+    }
+
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+    async fn bad_lustration_status_encoding_fails_2m(
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+    ) {
+        let network = Network::Main;
+        let (b_prev, ts, rness) = s;
+
+        prop_assume!(b_prev.header().height > ConsensusRuleSet::first_lustration_block(network));
+
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+        b_new.set_unparseable_lustration_status();
+
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+
+        prop_assert_eq!(
+            BlockValidationError::BadLustrationCounterEncoding,
+            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+        );
+    }
+
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+    async fn bad_lustration_status_encoding_fails_parent_2n(
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+    ) {
+        let network = Network::Main;
+        let (mut b_prev, ts, rness) = s;
+
+        prop_assume!(b_prev.header().height > ConsensusRuleSet::first_lustration_block(network));
+
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+        b_prev.set_unparseable_lustration_status();
+        b_new.kernel.header.prev_block_digest = b_prev.hash();
+        b_new.kernel.body.block_mmr_accumulator = b_prev.kernel.body.block_mmr_accumulator.clone();
+        b_new
+            .kernel
+            .body
+            .block_mmr_accumulator
+            .append(b_prev.hash());
+        b_new.fix_mutator_set_field(&b_prev);
+        b_new.set_lustration_status(LustrationStatus::default());
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+
+        prop_assert_eq!(
+            BlockValidationError::BadLustrationCounterEncodingOfParent,
+            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+        );
+    }
+
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+    async fn bad_lustration_status_aocl_threshold_2q(
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+    ) {
+        let network = Network::Main;
+        let (mut b_prev, ts, rness) = s;
+
+        prop_assume!(b_prev.header().height > ConsensusRuleSet::first_lustration_block(network));
+        let parent_lustration_status = LustrationStatus::default();
+        b_prev.set_lustration_status(parent_lustration_status);
+
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+        b_new.set_lustration_status(LustrationStatus {
+            counter: parent_lustration_status.counter,
+            max_lustrating_aocl_leaf_index: parent_lustration_status.max_lustrating_aocl_leaf_index
+                + 3,
+        });
+
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+
+        assert!(matches!(
+            b_new.validate(&b_prev, ts, network).await.err().unwrap(),
+            BlockValidationError::BadLustrationAoclThreshold { .. }
+        ));
+    }
+
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+    async fn bad_lustration_status_counter_2p(
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+    ) {
+        let network = Network::Main;
+        let (mut b_prev, ts, rness) = s;
+
+        prop_assume!(b_prev.header().height > ConsensusRuleSet::first_lustration_block(network));
+        let parent_lustration_status = LustrationStatus {
+            max_lustrating_aocl_leaf_index: 101,
+            counter: NativeCurrencyAmount::coins(600),
+        };
+        b_prev.set_lustration_status(parent_lustration_status);
+
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+        b_new.set_lustration_status(LustrationStatus {
+            counter: parent_lustration_status.counter + NativeCurrencyAmount::one_nau(),
+            max_lustrating_aocl_leaf_index: parent_lustration_status.max_lustrating_aocl_leaf_index,
+        });
+
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+
+        assert!(matches!(
+            b_new.validate(&b_prev, ts, network).await.err().unwrap(),
+            BlockValidationError::BadLustrationCounter { .. }
+        ));
+    }
+
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+    async fn bad_lustration_status_counter_exceeds_initial_value_2p(
+        #[strategy(setup_with_height(BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET.previous().unwrap()))] s: (
+            Block,
+            Timestamp,
+            Randomness<2, 2>,
+        ),
+    ) {
+        let network = Network::Main;
+        let (b_prev, ts, rness) = s;
+
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        assert!(b_new.validate(&b_prev, ts, network).await.is_ok());
+
+        let good_lustration_status = b_new.header().pow.lustration_status().unwrap();
+        let one_nau = NativeCurrencyAmount::one_nau();
+        let bad_counter = good_lustration_status
+            .counter
+            .checked_sub(&one_nau)
+            .unwrap();
+        b_new.set_lustration_status(LustrationStatus {
+            counter: bad_counter,
+            max_lustrating_aocl_leaf_index: good_lustration_status.max_lustrating_aocl_leaf_index,
+        });
+
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+
+        assert!(matches!(
+            b_new.validate(&b_prev, ts, network).await.err().unwrap(),
+            BlockValidationError::BadLustrationCounter { .. }
+        ));
+    }
+
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+    async fn bad_lustration_status_counter_bad_initial_threshold_2q(
+        #[strategy(setup_with_height(BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET.previous().unwrap()))] s: (
+            Block,
+            Timestamp,
+            Randomness<2, 2>,
+        ),
+    ) {
+        let network = Network::Main;
+        let (b_prev, ts, rness) = s;
+
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+
+        let good_lustration_status = b_new.header().pow.lustration_status().unwrap();
+        b_new.set_lustration_status(LustrationStatus {
+            counter: good_lustration_status.counter,
+            max_lustrating_aocl_leaf_index: good_lustration_status.max_lustrating_aocl_leaf_index
+                - 1,
+        });
+
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+
+        assert!(matches!(
+            b_new.validate(&b_prev, ts, network).await.err().unwrap(),
+            BlockValidationError::BadLustrationAoclThreshold { .. }
+        ));
+    }
+
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+    async fn version_mismatch(
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+        #[strategy(arb())] version: BFieldElement,
+    ) {
+        let network = Network::Main;
+        let (b_prev, ts, rness) = s;
+        prop_assume!(b_prev.header().height.next() >= BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET);
+        prop_assume!(b_prev.header().version != version);
+
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        assert!(b_new.validate(&b_prev, ts, network).await.is_ok());
+
+        b_new.set_header_version_in_pow_only(version);
+        assert_eq!(
+            b_new.validate(&b_prev, ts, network).await.err().unwrap(),
+            BlockValidationError::VersionMismatch
+        );
+
+        b_new.set_version_in_header_only(version);
+        assert_eq!(Ok(()), b_new.validate(&b_prev, ts, network).await);
     }
 }

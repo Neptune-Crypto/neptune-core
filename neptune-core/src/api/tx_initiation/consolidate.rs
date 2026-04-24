@@ -37,6 +37,7 @@ impl TransactionInitiator {
         num_inputs: Option<usize>,
         consolidation_address: Option<ReceivingAddress>,
         timestamp: Timestamp,
+        accept_lustrations: bool,
     ) -> Result<usize, ConsolidationError> {
         const CONSOLIDATION_INPUT_COUNT: usize = 4;
         let num_inputs = num_inputs.unwrap_or(CONSOLIDATION_INPUT_COUNT);
@@ -109,6 +110,12 @@ impl TransactionInitiator {
         let tx_details = self
             .generate_tx_details(unlocked_inputs, outputs, ChangePolicy::ExactChange, fee)
             .await?;
+
+        if tx_details.contains_lustrations() && !accept_lustrations {
+            return Err(ConsolidationError::CreateTxError(
+                CreateTxError::RequiresLustration,
+            ));
+        };
 
         let pw = self.generate_witness_proof(Arc::new(tx_details.clone()));
         let artifacts = self.assemble_transaction_artifacts(tx_details, pw)?;

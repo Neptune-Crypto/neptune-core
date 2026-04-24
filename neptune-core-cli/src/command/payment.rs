@@ -22,6 +22,9 @@ pub(crate) enum PaymentCommand {
         #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
 
+        #[clap(long, default_value = "false")]
+        accept_lustrations: bool,
+
         /// local tag for identifying a receiver
         receiver_tag: String,
         notify_self: UtxoNotificationMedium,
@@ -37,6 +40,8 @@ pub(crate) enum PaymentCommand {
         outputs: Vec<Beneficiary>,
         #[clap(long, value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
+        #[clap(long, default_value = "false")]
+        accept_lustrations: bool,
     },
 
     /// Like `SendToMany` but the resulting transaction will be *transparent*.
@@ -60,7 +65,7 @@ pub(crate) enum PaymentCommand {
     /// Initiate and broadcast a transaction for consolidating UTXOs.
     ///
     /// Specifically, spend `batch`-many UTXOs to the node's own wallet,
-    /// resulting in 3 fewer UTXOs to manage in total. This operation has no
+    /// resulting in n - 1 fewer UTXOs to manage in total. This operation has no
     /// effect if the number of liquid UTXOs under management is less than
     /// `batch`, of if the node is configured to not initiate transactions.
     /// If omitted, `batch = 4`.
@@ -70,5 +75,8 @@ pub(crate) enum PaymentCommand {
 
         #[clap(long, required = false)]
         address: Option<String>,
+
+        #[clap(long, required = false)]
+        accept_lustrations: bool,
     },
 }

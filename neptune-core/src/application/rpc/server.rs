@@ -105,6 +105,7 @@ use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
 use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
@@ -1799,12 +1800,16 @@ pub trait RPC {
     /// // change policy.
     /// // default is recover to next unused key, via onchain notification
     /// let change_policy = ChangePolicy::default();
+    ///
+    /// // Whether or not to accept that the transaction generates lustrations,
+    /// // which reveals, publicly, the UTXOs of all inputs.
+    /// let accept_lustrations = false;
     /// #
     /// // Max fee
     /// let fee : NativeCurrencyAmount = NativeCurrencyAmount::coins(10);
     /// #
     /// // neptune-core server sends token to a single recipient
-    /// let send_result = client.send(context::current(), token, outputs, change_policy, fee).await??;
+    /// let send_result = client.send(context::current(), token, outputs, change_policy, fee, accept_lustrations).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1813,6 +1818,7 @@ pub trait RPC {
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        accept_lustrations: bool,
     ) -> RpcResult<TxCreationArtifacts>;
 
     /// Like `send` but the resulting transaction is *transparent*. No privacy.
@@ -1838,10 +1844,13 @@ pub trait RPC {
     ///    be consolidated.
     ///  - `to_address` -- set to consolidate the UTXOs to the given address as
     ///    opposed to the next symmetric address of the node's own wallet.
+    ///  - `accept_lustration` -- Whether or not it is acceptable to lustrate
+    ///    the inputs, i.e. reveal the input UTXOs used in the transaction.
     async fn consolidate(
         token: auth::Token,
         num_inputs: Option<usize>,
         to_address: Option<ReceivingAddress>,
+        accept_lustration: bool,
     ) -> RpcResult<usize>;
 
     /// Upgrade a proof for a transaction found in the mempool. If the
@@ -2196,14 +2205,22 @@ impl NeptuneRPCServer {
         guesser_address: ReceivingAddress,
         mut proposal: Block,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>> {
-        let latest_block_header = *self.state.lock_guard().await.chain.tip().header();
+        let network = self.state.cli().network;
+
+        let mut state = self.state.lock_guard_mut().await;
+        let next_rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
+        let difficulty = if next_rules.use_parent_difficulty() {
+            let latest_block_header = *state.chain.tip().header();
+            latest_block_header.difficulty
+        } else {
+            proposal.header().difficulty
+        };
 
         proposal.set_header_guesser_address(guesser_address);
-        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
+        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty);
 
         // Record block proposal in case of guesser-success, for later
         // retrieval. But limit number of blocks stored this way.
-        let mut state = self.state.lock_guard_mut().await;
         if state.mining_state.exported_block_proposals.len()
             >= MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED
         {
@@ -2219,13 +2236,15 @@ impl NeptuneRPCServer {
     }
 
     /// Verify a pow solution and send it to main loop if it is valid.
-    async fn pow_solution_inner(&self, mut proposal: Block, pow: BlockPow) -> RpcResult<bool> {
-        // Check if solution works.
-        let latest_block_header = *self.state.lock_guard().await.chain.tip().header();
-
+    async fn pow_solution_inner(
+        &self,
+        mut proposal: Block,
+        pow: BlockPow,
+        tip_header: BlockHeader,
+    ) -> RpcResult<bool> {
         proposal.set_header_pow(pow);
 
-        if !proposal.has_proof_of_work(self.state.cli().network, &latest_block_header) {
+        if !proposal.has_proof_of_work(self.state.cli().network, &tip_header) {
             warn!("Got claimed PoW solution but PoW solution is not valid.");
             return Ok(false);
         }
@@ -3480,6 +3499,7 @@ impl RPC for NeptuneRPCServer {
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        accept_lustrations: bool,
     ) -> RpcResult<TxCreationArtifacts> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3488,7 +3508,13 @@ impl RPC for NeptuneRPCServer {
             .state
             .api_mut()
             .tx_sender_mut()
-            .send(outputs, change_policy, fee, Timestamp::now())
+            .send(
+                outputs,
+                change_policy,
+                fee,
+                Timestamp::now(),
+                accept_lustrations,
+            )
             .await?)
     }
 
@@ -3519,6 +3545,7 @@ impl RPC for NeptuneRPCServer {
         token: auth::Token,
         num_inputs: Option<usize>,
         to_address: Option<ReceivingAddress>,
+        accept_lustration: bool,
     ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3527,7 +3554,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api_mut()
             .tx_initiator_mut()
-            .consolidate(num_inputs, to_address, Timestamp::now())
+            .consolidate(num_inputs, to_address, Timestamp::now(), accept_lustration)
             .await?)
     }
 
@@ -3838,23 +3865,25 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // Find proposal from list of exported proposals.
-        let Some(proposal) = self
-            .state
-            .lock_guard()
-            .await
-            .mining_state
-            .exported_block_proposals
-            .get(&proposal_id)
-            .map(|x| x.to_owned())
-        else {
-            warn!(
-                "Got claimed PoW solution but no challenge was known. \
-                Did solution come in too late?"
-            );
-            return Ok(false);
+        let (proposal, tip_header) = {
+            let state = self.state.lock_guard().await;
+            let Some(proposal) = state
+                .mining_state
+                .exported_block_proposals
+                .get(&proposal_id)
+                .map(|x| x.to_owned())
+            else {
+                warn!(
+                    "Got claimed PoW solution but no challenge was known. \
+                    Did solution come in too late?"
+                );
+                return Ok(false);
+            };
+
+            (proposal, *state.chain.tip().header())
         };
 
-        self.pow_solution_inner(proposal, pow).await
+        self.pow_solution_inner(proposal, pow, tip_header).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -3869,20 +3898,20 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // Since block comes from external source, we need to check validity.
-        let current_tip = self.state.lock_guard().await.chain.light_state_clone();
-        if !proposal
-            .is_valid(
-                current_tip.tip(),
-                Timestamp::now(),
-                self.state.cli().network,
-            )
-            .await
-        {
-            warn!("Got claimed new block that was not valid");
-            return Ok(false);
-        }
+        let tip_header = {
+            let network = self.state.cli().network;
+            let state = self.state.lock_guard().await;
+            let tip = state.chain.tip();
+            if !proposal.is_valid(tip, Timestamp::now(), network).await {
+                warn!("Got claimed new block that was not valid");
+                return Ok(false);
+            }
 
-        self.pow_solution_inner(proposal, pow).await
+            *state.chain.tip().header()
+        };
+
+        // No locks may be held here
+        self.pow_solution_inner(proposal, pow, tip_header).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -4140,7 +4169,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        let (mut proposal, latest_block_header) = {
+        let (mut proposal, difficulty) = {
             let global_state = self.state.lock_guard().await;
             let Some(proposal) = global_state
                 .mining_state
@@ -4151,11 +4180,20 @@ impl RPC for NeptuneRPCServer {
             };
 
             let latest_block_header = *global_state.chain.tip().header();
-            (proposal, latest_block_header)
+
+            let network = self.state.cli().network;
+            let next_rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
+            let difficulty = if next_rules.use_parent_difficulty() {
+                latest_block_header.difficulty
+            } else {
+                proposal.header().difficulty
+            };
+            (proposal, difficulty)
         };
 
         proposal.set_header_guesser_address(guesser_fee_address);
-        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
+
+        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty);
 
         Ok(Some((proposal, puzzle)))
     }
@@ -4200,11 +4238,13 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        let lustration_threshold = self.state.lock_guard().await.chain.lustration_threshold();
+
         let selected_inputs = self
             .state
             .api()
             .tx_initiator()
-            .select_inputs(policy, spend_amount, Timestamp::now())
+            .select_inputs(policy, spend_amount, Timestamp::now(), lustration_threshold)
             .await?;
 
         let unlocked_inputs = self
@@ -5007,6 +5047,7 @@ mod tests {
                 vec![output],
                 ChangePolicy::ExactChange,
                 NativeCurrencyAmount::one_nau(),
+                true,
             )
             .await;
         let _ = rpc_server
@@ -5025,6 +5066,7 @@ mod tests {
                 vec![my_output],
                 ChangePolicy::ExactChange,
                 NativeCurrencyAmount::one_nau(),
+                true,
             )
             .await;
 
@@ -5986,6 +6028,7 @@ mod tests {
         let token = cookie_token(&rpc_server).await;
 
         let output: OutputFormat = (address.into(), amount).into();
+        let accept_lustrations = true;
         assert!(rpc_server
             .clone()
             .send(
@@ -5993,7 +6036,8 @@ mod tests {
                 token,
                 vec![output],
                 ChangePolicy::ExactChange,
-                NativeCurrencyAmount::zero()
+                NativeCurrencyAmount::zero(),
+                accept_lustrations,
             )
             .await
             .is_err());
@@ -6423,6 +6467,7 @@ mod tests {
                 let consensus_rule_set = ConsensusRuleSet::Reboot;
                 let guesser_buffer = block1.guess_preprocess(None, None, consensus_rule_set);
                 let mast_auth_paths = block1.pow_mast_paths();
+                let version = block1.header().version;
                 let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
@@ -6432,6 +6477,8 @@ mod tests {
                         index_picker_preimage,
                         random(),
                         target,
+                        None,
+                        Some(version),
                     ) {
                         break valid_pow;
                     }
@@ -6579,6 +6626,7 @@ mod tests {
                         .await
                         .unwrap();
 
+                    let accept_lustrations = true;
                     let tx_artifacts = rpc_server
                         .clone()
                         .send(
@@ -6590,6 +6638,7 @@ mod tests {
                                 UtxoNotificationMedium::OffChain,
                             ),
                             fee,
+                            accept_lustrations,
                         )
                         .await
                         .unwrap();
@@ -6750,6 +6799,7 @@ mod tests {
                 .collect();
 
                 let fee = NativeCurrencyAmount::coins(2);
+                let accept_lustrations = true;
                 let tx_artifacts = bob
                     .clone()
                     .send(
@@ -6761,6 +6811,7 @@ mod tests {
                             UtxoNotificationMedium::OffChain,
                         ),
                         fee,
+                        accept_lustrations,
                     )
                     .await
                     .unwrap();
@@ -6796,6 +6847,7 @@ mod tests {
                                 vec![output],
                                 ChangePolicy::exact_change(),
                                 NativeCurrencyAmount::zero(),
+                                accept_lustrations,
                             )
                             .await
                             .unwrap();
@@ -6914,6 +6966,7 @@ mod tests {
             let fee = NativeCurrencyAmount::zero();
 
             // note: we can only perform 2 iters, else we bump into send rate-limit (per block)
+            let accept_lustrations = true;
             for i in 5..7 {
                 let result = rpc_server
                     .clone()
@@ -6923,6 +6976,7 @@ mod tests {
                         outputs.clone().take(i).collect(),
                         ChangePolicy::ExactChange,
                         fee,
+                        accept_lustrations,
                     )
                     .await;
                 assert!(result.is_ok());
@@ -6970,11 +7024,19 @@ mod tests {
 
             let output: OutputFormat = (address, amount, UtxoNotificationMedium::OnChain).into();
             let outputs = vec![output];
+            let accept_lustrations = true;
 
             for i in 0..10 {
                 let result = rpc_server
                     .clone()
-                    .send(ctx, token, outputs.clone(), ChangePolicy::Burn, fee)
+                    .send(
+                        ctx,
+                        token,
+                        outputs.clone(),
+                        ChangePolicy::Burn,
+                        fee,
+                        accept_lustrations,
+                    )
                     .await;
 
                 // any attempts after the 2nd send should result in RateLimit error.
@@ -7131,6 +7193,7 @@ mod tests {
                 // timestamp. Otherwise, proofs cannot be reused, and CI will
                 // fail. CI might also fail if you don't set an explicit proving
                 // capability.
+                let accept_lustrations = true;
                 let result = rpc_server
                     .clone()
                     .send(
@@ -7142,6 +7205,7 @@ mod tests {
                             UtxoNotificationMedium::OffChain,
                         ),
                         fee,
+                        accept_lustrations,
                     )
                     .await;
 

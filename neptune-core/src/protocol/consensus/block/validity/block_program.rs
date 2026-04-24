@@ -544,7 +544,7 @@ pub(crate) mod tests {
         let block2 = mine_tx(&alice, tx, later).await;
         assert_eq!(
             BlockValidationError::RemovalRecordsValidity,
-            block2.validate(&block1, later, network).await.unwrap_err(),
+            block2.validate(&block1, later, network,).await.unwrap_err(),
             "Block doing a double-spend must be invalid."
         );
     }

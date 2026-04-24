@@ -10,9 +10,10 @@ use crate::application::job_queue::errors::JobHandleError;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+use crate::util_types::mutator_set::MutatorSetError;
 
 /// enumerates possible transaction send errors
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CreateTxError {
     #[error("missing required data to build transaction")]
@@ -52,6 +53,15 @@ pub enum CreateTxError {
       allowed for this transaction, or choose another input priority."
     )]
     TooManyInputs,
+
+    #[error(
+        "Transaction requires lustration, i.e. revealing the values of the \
+     inputs. But the flag to accept lustrations was not set."
+    )]
+    RequiresLustration,
+
+    #[error("Mutator set error: {0}")]
+    MutatorSetError(MutatorSetError),
 }
 
 #[derive(Debug, Clone, thiserror::Error, strum::Display)]

@@ -17,6 +17,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rayon::iter::ParallelIterator;
 use rayon::ThreadPoolBuilder;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -46,6 +47,7 @@ use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::difficulty_control::difficulty_control;
 use crate::protocol::consensus::block::mock_block_generator::MockBlockGenerator;
 use crate::protocol::consensus::block::pow::GuesserBuffer;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::block::*;
@@ -247,10 +249,6 @@ fn guess_worker(
     );
 
     // Following code must match the rules in `[Block::has_proof_of_work]`.
-    // a difficulty reset (to min difficulty) occurs on testnet(s)
-    // when the elapsed time between two blocks is greater than a
-    // max interval, defined by the network.  It never occurs for
-    // mainnet.
     let should_reset_difficulty =
         Block::should_reset_difficulty(network, now, previous_block_header.timestamp);
     let new_difficulty = if should_reset_difficulty {
@@ -273,17 +271,26 @@ fn guess_worker(
         )
     };
 
-    let prev_difficulty = previous_block_header.difficulty;
-    let threshold = prev_difficulty.target();
-    let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     let new_block_height = block.header().height;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block_height);
+    let (target_difficulty, new_cum_pow) = if consensus_rule_set.use_parent_difficulty() {
+        (previous_block_header.difficulty, None)
+    } else {
+        (
+            new_difficulty,
+            Some(previous_block_header.cumulative_proof_of_work + new_difficulty),
+        )
+    };
+
+    let threshold = target_difficulty.target();
+    let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     info!(
         "Guessing with {} threads on block {:x} of height {} with {} outputs and difficulty {}. Target: {threshold:x}",
         threads_to_use,
         block.hash(),
         new_block_height,
         block.body().transaction_kernel.outputs.len(),
-        previous_block_header.difficulty,
+        target_difficulty,
     );
 
     // note: this article discusses rayon strategies for mining.
@@ -291,12 +298,12 @@ fn guess_worker(
     //
     // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
-    block.set_header_timestamp_and_difficulty(now, new_difficulty);
+    block.set_difficulty_related_fields(now, new_difficulty, new_cum_pow);
 
     block.set_header_guesser_address(guesser_address);
 
-    info!("Start: guess preprocessing.");
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block_height);
+    info!("Start: guess preprocessing, consensus ruleset: {consensus_rule_set}.");
+
     let guesser_buffer =
         block.guess_preprocess(Some(&sender), Some(threads_to_use), consensus_rule_set);
     if sender.is_canceled() {
@@ -312,6 +319,20 @@ fn guess_worker(
         .unwrap();
 
     let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
+    let lustration_status = if consensus_rule_set.requires_lustration_status_in_block_header() {
+        Some(
+            block
+                .header()
+                .pow
+                .lustration_status()
+                .expect("Must have lustration status set once required"),
+        )
+    } else {
+        None
+    };
+
+    let version = block.header().version;
+
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(
@@ -322,8 +343,10 @@ fn guess_worker(
                         &mast_auth_paths,
                         index_picker_preimage,
                         threshold,
+                        lustration_status,
                         rng,
                         &sender,
+                        Some(version),
                     )
                 },
             )
@@ -358,7 +381,7 @@ fn guess_worker(
 Since previous block: {elapsed_human}
               Digest: {hash:x}
 Difficulty threshold: {threshold}
-          Difficulty: {prev_difficulty}
+          Difficulty: {target_difficulty}
            #inputs  : {num_inputs}
            #outputs : {num_outputs}
 "#
@@ -385,14 +408,22 @@ impl GuessNonceResult {
 }
 
 /// Run a single iteration of the mining loop.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "After hard fork beta is activated we can factor out the arguments \
+    that are no longer necessary; until then we support both before and after \
+    hard fork beta, which means many arguments."
+)]
 #[inline]
 fn guess_nonce_iteration(
     guesser_buffer: &GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }>,
     mast_auth_paths: &PowMastPaths,
     index_picker_preimage: Digest,
     threshold: Digest,
+    lustration_status: Option<LustrationStatus>,
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
+    version: Option<BFieldElement>,
 ) -> GuessNonceResult {
     let nonce: Digest = rng.random();
 
@@ -408,6 +439,8 @@ fn guess_nonce_iteration(
         index_picker_preimage,
         nonce,
         threshold,
+        lustration_status,
+        version,
     );
 
     match result {
@@ -551,13 +584,14 @@ pub(crate) async fn create_block_transaction_from(
     let mut rng: StdRng =
         SeedableRng::from_seed(global_state_lock.lock_guard().await.shuffle_seed());
 
+    let old_height = predecessor_block.header().height;
+    let new_height = old_height.next();
     let composer_parameters = global_state_lock
         .lock_guard()
         .await
-        .composer_parameters(predecessor_block.header().height.next());
-    let next_block_height = predecessor_block.header().height.next();
+        .composer_parameters(new_height);
     let network = global_state_lock.cli().network;
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
+    let new_rules = ConsensusRuleSet::infer_from(network, new_height);
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
@@ -568,7 +602,7 @@ pub(crate) async fn create_block_transaction_from(
         timestamp,
         vm_job_queue.clone(),
         job_options.clone(),
-        consensus_rule_set,
+        new_rules,
     )
     .await?;
 
@@ -587,6 +621,8 @@ pub(crate) async fn create_block_transaction_from(
         TxMergeOrigin::ExplicitList(transactions) => transactions.to_owned(),
     };
 
+    let old_rules = ConsensusRuleSet::infer_from(network, old_height);
+
     // If no updated single-proof transaction were found in the mempool, try
     // to find one that's not updated, since updating this is faster than
     // producing a new single proof-backed transaction.
@@ -594,7 +630,10 @@ pub(crate) async fn create_block_transaction_from(
         .template(&job_options)
         .proof_type(TransactionProofType::SingleProof)
         .build();
-    if transactions_to_merge.is_empty() && tx_merge_origin == TxMergeOrigin::Mempool {
+    if transactions_to_merge.is_empty()
+        && tx_merge_origin == TxMergeOrigin::Mempool
+        && new_rules == old_rules
+    {
         info!("No synced single-proof tx found for merge. Looking for one to update.");
         let min_gobbling_fee = NativeCurrencyAmount::zero();
         let update_job = global_state_lock
@@ -618,7 +657,7 @@ pub(crate) async fn create_block_transaction_from(
                     vm_job_queue.clone(),
                     proof_job_options.clone(),
                     &wallet_entropy,
-                    next_block_height,
+                    new_height,
                     notification_policy,
                 )
                 .await
@@ -640,6 +679,11 @@ pub(crate) async fn create_block_transaction_from(
         }
     }
 
+    // Ensure we don't mine incompatible transactions from mempool
+    if old_rules != new_rules {
+        transactions_to_merge.clear();
+    }
+
     // If necessary, populate list with nop-tx.
     // Guarantees that some merge happens in below loop, which sets merge-bit.
     if transactions_to_merge.is_empty() {
@@ -652,7 +696,7 @@ pub(crate) async fn create_block_transaction_from(
         let nop = PrimitiveWitness::from_transaction_details(&nop);
 
         let proof = TransactionProofBuilder::new()
-            .consensus_rule_set(consensus_rule_set)
+            .consensus_rule_set(new_rules)
             .primitive_witness_ref(&nop)
             .job_queue(vm_job_queue.clone())
             .proof_job_options(proof_job_options)
@@ -690,7 +734,7 @@ pub(crate) async fn create_block_transaction_from(
             rng.random(),
             vm_job_queue.clone(),
             job_options.clone(),
-            consensus_rule_set,
+            new_rules,
         )
         .await?
         .into(); // fix #579.  propagate error up.
@@ -1196,6 +1240,8 @@ pub(crate) mod tests {
         let guesser_buffer =
             block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
         let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
+        let lustration_status = block.header().pow.lustration_status().ok();
+        let version = block.header().version;
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(std_rng_from_thread_rng, |prng, _i| {
@@ -1204,8 +1250,10 @@ pub(crate) mod tests {
                         &mast_auth_paths,
                         index_picker_preimage,
                         threshold,
+                        lustration_status,
                         prng,
                         &worker_task_tx,
+                        Some(version),
                     );
                 })
                 .count();
@@ -1885,12 +1933,11 @@ pub(crate) mod tests {
         println!("initial difficulty: {}", initial_difficulty);
 
         let prev_timestamp = prev_light_state.tip().header().timestamp;
-        prev_light_state
-            .tip_mut()
-            .set_header_timestamp_and_difficulty(
-                prev_timestamp,
-                Difficulty::from_biguint(initial_difficulty).unwrap(),
-            );
+        prev_light_state.tip_mut().set_difficulty_related_fields(
+            prev_timestamp,
+            Difficulty::from_biguint(initial_difficulty).unwrap(),
+            None,
+        );
         let prev_block = prev_light_state.tip();
 
         let expected_duration = target_block_interval * NUM_BLOCKS;
@@ -2228,28 +2275,22 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn block_hash_relates_to_predecessor_difficulty() {
-        let difficulty = 100u32;
-
-        // Difficulty X means we expect X trials before success.
-        // Modeling the process as a geometric distribution gives the
-        // probability of success in a single trial, p = 1/X.
-        // Then the probability of seeing k failures is (1-1/X)^k.
-        // We want this to be five nines certain that we do get a success
-        // after k trials, so this quantity must be less than 0.0001.
-        // So: log_10 0.0001 = -4 > log_10 (1-1/X)^k = k * log_10 (1 - 1/X).
-        // Difficulty 100 sets k = 917.
-        let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
-        let k = (-4.0 / cofactor).ceil() as usize;
-
+    /// Return two blocks: Parent and successor. One of them will have the
+    /// defined difficulty, the other will have a random difficulty. Which one
+    /// has the defined difficulty is determined by the 2nd argument.
+    fn mock_blocks_for_difficulty_check(
+        difficulty: Difficulty,
+        set_parent_difficulty: bool,
+    ) -> (Block, Block) {
         let mut rng = rand::rng();
         let mut unstructured_source = vec![0u8; TransactionKernelProxy::size_hint(2).0];
         rng.fill_bytes(&mut unstructured_source);
         let mut unstructured = arbitrary::Unstructured::new(&unstructured_source);
 
         let mut predecessor_header = rng.random::<BlockHeader>();
-        predecessor_header.difficulty = Difficulty::from(difficulty);
+        if set_parent_difficulty {
+            predecessor_header.difficulty = difficulty;
+        }
         let predecessor_body = BlockBody::new(
             TransactionKernelProxy::arbitrary(&mut unstructured)
                 .unwrap()
@@ -2267,8 +2308,11 @@ pub(crate) mod tests {
         );
 
         let mut successor_header = rng.random::<BlockHeader>();
+        if !set_parent_difficulty {
+            successor_header.difficulty = difficulty;
+        }
+
         successor_header.prev_block_digest = predecessor_block.hash();
-        // note that successor's difficulty is random
         let successor_body = BlockBody::new(
             TransactionKernelProxy::arbitrary(&mut unstructured)
                 .unwrap()
@@ -2278,7 +2322,6 @@ pub(crate) mod tests {
             random_mmra(),
         );
 
-        let mut counter = 0;
         let successor_block = Block::new(
             successor_header,
             successor_body.clone(),
@@ -2286,31 +2329,72 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let guesser_buffer =
-            successor_block.guess_preprocess(None, None, ConsensusRuleSet::default());
-        let mast_auth_paths = successor_block.pow_mast_paths();
-        let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
-        let target = predecessor_block.header().difficulty.target();
-        loop {
-            if BlockPow::guess(
-                &guesser_buffer,
-                &mast_auth_paths,
-                index_picker_preimage,
-                rng.random(),
-                target,
-            )
-            .is_some()
-            {
-                println!("found solution after {counter} guesses.");
-                break;
+        (predecessor_block, successor_block)
+    }
+
+    #[traced_test]
+    #[test]
+    fn hash_relates_to_predecessor_difficulty_prior_to_hf_beta_and_own_after() {
+        let difficulty = 100u32;
+
+        // Difficulty X means we expect X trials before success.
+        // Modeling the process as a geometric distribution gives the
+        // probability of success in a single trial, p = 1/X.
+        // Then the probability of seeing k failures is (1-1/X)^k.
+        // We want this to be five nines certain that we do get a success
+        // after k trials, so this quantity must be less than 0.0001.
+        // So: log_10 0.0001 = -4 > log_10 (1-1/X)^k = k * log_10 (1 - 1/X).
+        // Difficulty 100 sets k = 917.
+        let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
+        let k = (-4.0 / cofactor).ceil() as usize;
+        let difficulty: Difficulty = difficulty.into();
+
+        for consensus_rule_set in [
+            ConsensusRuleSet::TvmProofVersion1,
+            ConsensusRuleSet::HardforkBeta,
+        ] {
+            let use_parent_difficulty = consensus_rule_set.use_parent_difficulty();
+            let (predecessor, mut sucessor) =
+                mock_blocks_for_difficulty_check(difficulty, use_parent_difficulty);
+
+            let target = if use_parent_difficulty {
+                predecessor.header().difficulty.target()
+            } else {
+                sucessor.header().difficulty.target()
+            };
+            let guesser_buffer = sucessor.guess_preprocess(None, None, consensus_rule_set);
+            let mast_auth_paths = sucessor.pow_mast_paths();
+            let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
+            let version = sucessor.header().version;
+            let mut rng = rand::rng();
+            let mut counter = 0;
+            loop {
+                if let Some(pow) = BlockPow::guess(
+                    &guesser_buffer,
+                    &mast_auth_paths,
+                    index_picker_preimage,
+                    rng.random(),
+                    target,
+                    None,
+                    Some(version),
+                ) {
+                    println!("found solution after {counter} guesses.");
+                    let parent_target = predecessor.header().difficulty.target();
+                    sucessor.set_header_pow(pow);
+                    assert!(
+                        sucessor.pow_verify_for_tests(parent_target, consensus_rule_set),
+                        "Found PoW must be valid for {consensus_rule_set} rules"
+                    );
+                    break;
+                }
+
+                counter += 1;
+
+                assert!(
+                    counter < k,
+                    "number of hash trials before finding valid pow exceeds statistical limit"
+                )
             }
-
-            counter += 1;
-
-            assert!(
-                counter < k,
-                "number of hash trials before finding valid pow exceeds statistical limit"
-            )
         }
     }
 

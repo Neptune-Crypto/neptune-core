@@ -20,13 +20,15 @@
 //!
 //! async fn my_send_transaction(gsl: GlobalStateLock, recipient: ReceivingAddress, amount: NativeCurrencyAmount, change_policy: ChangePolicy, fee: NativeCurrencyAmount) -> Result<TxCreationArtifacts, tx_initiation::error::SendError> {
 //!     let outputs = vec![(recipient, amount)];
+//!     let accept_lustrations = false;
 //!
 //!     send::TransactionSender::from(gsl)
 //!         .send(
 //!             outputs,
 //!             change_policy,
 //!             fee,
-//!             Timestamp::now()
+//!             Timestamp::now(),
+//!             accept_lustrations,
 //!         ).await
 //! }
 //! ```
@@ -61,11 +63,12 @@ impl TransactionSender {
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
+        accept_lustrations: bool,
     ) -> Result<TxCreationArtifacts, error::SendError> {
         TransactionInitiator {
             global_state_lock: self.global_state_lock.clone(),
         }
-        .send(outputs, change_policy, fee, timestamp)
+        .send(outputs, change_policy, fee, timestamp, accept_lustrations)
         .await
     }
 }

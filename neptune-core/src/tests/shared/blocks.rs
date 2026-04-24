@@ -85,6 +85,11 @@ pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block
     .await
     .unwrap();
 
+    let height = child_no_pow.header().height;
+    if let Ok(status) = child_no_pow.header().pow.lustration_status() {
+        println!("Before guess: Lustration status, height {height}: {status}");
+    }
+
     let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
 
     let guesser_address = global_state_lock
@@ -111,6 +116,10 @@ pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block
     )
     .await;
     let child = *guesser_rx.await.unwrap().block;
+
+    if let Ok(status) = child.header().pow.lustration_status() {
+        println!("After guess: Lustration status, height {height}: {status}");
+    }
 
     child
 }
@@ -180,20 +189,18 @@ pub(crate) fn invalid_block_with_kernel_and_mutator_set(
     Block::new(block_header, body, appendix, BlockProof::Invalid)
 }
 
-/// Create a block containing the supplied transaction.
-///
-/// The returned block has an invalid block proof.
-pub(crate) fn invalid_block_with_transaction(
+pub(crate) fn invalid_block_with_tx_kernel(
     previous_block: &Block,
-    transaction: Transaction,
+    tx_kernel: TransactionKernel,
 ) -> Block {
     // 60s min block time on main and testnet
     let minimum_block_time = Timestamp::seconds(60);
     let timestamp = Timestamp::max(
         previous_block.header().timestamp + minimum_block_time,
-        transaction.kernel.timestamp,
+        tx_kernel.timestamp,
     );
     let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
+    let difficulty = previous_block.header().difficulty;
     let block_header = BlockHeader {
         version: bfe!(0),
         height: new_block_height,
@@ -201,23 +208,20 @@ pub(crate) fn invalid_block_with_transaction(
         timestamp,
         pow: Pow::default(),
         guesser_receiver_data: GuesserReceiverData::default(),
-        cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work,
-        difficulty: previous_block.header().difficulty,
+        cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work + difficulty,
+        difficulty,
     };
 
     let mut next_mutator_set = previous_block.mutator_set_accumulator_after().unwrap();
     let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
     block_mmr.append(previous_block.hash());
 
-    let ms_update = MutatorSetUpdate::new(
-        transaction.kernel.inputs.clone(),
-        transaction.kernel.outputs.clone(),
-    );
+    let ms_update = MutatorSetUpdate::new(tx_kernel.inputs.clone(), tx_kernel.outputs.clone());
     ms_update
         .apply_to_accumulator(&mut next_mutator_set)
         .unwrap();
 
-    let transaction = BlockTransaction::upgrade(transaction);
+    let transaction = BlockTransaction::from_tx_kernel(tx_kernel);
     let body = BlockBody::new(
         transaction.kernel.into(),
         next_mutator_set,
@@ -227,6 +231,16 @@ pub(crate) fn invalid_block_with_transaction(
     let appendix = BlockAppendix::default();
 
     Block::new(block_header, body, appendix, BlockProof::Invalid)
+}
+
+/// Create a block containing the supplied transaction.
+///
+/// The returned block has an invalid block proof.
+pub(crate) fn invalid_block_with_transaction(
+    previous_block: &Block,
+    transaction: Transaction,
+) -> Block {
+    invalid_block_with_tx_kernel(previous_block, transaction.kernel)
 }
 
 /// Build a fake and invalid block where the caller can specify the
@@ -602,7 +616,8 @@ async fn fake_valid_block_from_block_tx_for_tests(
     network: Network,
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, network).await;
-    let block_height = predecessor.header().height;
+
+    let block_height = block.header().height;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
     block.satisfy_pow(predecessor.header().difficulty, consensus_rule_set);
 

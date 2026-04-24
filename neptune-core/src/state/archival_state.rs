@@ -1345,7 +1345,10 @@ impl ArchivalState {
 
     /// Return the canonical block with the given height. None if no height of
     /// this block is known yet.
-    async fn canonical_block_by_height(&self, block_height: BlockHeight) -> Option<Block> {
+    pub(crate) async fn canonical_block_by_height(
+        &self,
+        block_height: BlockHeight,
+    ) -> Option<Block> {
         let block_hash = self
             .archival_block_mmr
             .ammr()

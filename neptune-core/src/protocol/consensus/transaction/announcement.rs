@@ -10,6 +10,8 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
+use crate::protocol::consensus::transaction::transaction_kernel::LUSTRATION_FLAG;
+
 /// Represents arbitrary data that can be stored in a transaction on the public
 /// blockchain.
 ///
@@ -38,6 +40,19 @@ pub struct Announcement {
 impl Announcement {
     pub fn new(message: Vec<BFieldElement>) -> Self {
         Self { message }
+    }
+
+    /// Returns true iff the announcement carries the lustration flag.
+    ///
+    /// Does not attempt to check if the lustration can be decoded. Just checks
+    /// for the flag, so if the announcement is not generated locally, this
+    /// method cannot be trusted to correctly identify lustration announcements
+    /// which would be meaningless anyway without the context of the whole
+    /// transaction kernel.
+    pub(crate) fn looks_like_lustration(&self) -> bool {
+        self.message
+            .first()
+            .is_some_and(|elem0| *elem0 == LUSTRATION_FLAG)
     }
 }
 

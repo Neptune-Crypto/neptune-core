@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
@@ -13,6 +14,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::announcement::Announcement;
+use crate::api::export::TransparentInput;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
@@ -21,6 +23,8 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+pub(crate) const LUSTRATION_FLAG: BFieldElement = BFieldElement::new(51022176260u64);
 
 /// TransactionKernel is immutable and its hash never changes.
 ///
@@ -103,6 +107,12 @@ pub(crate) enum TransactionConfirmabilityError {
     DuplicateInputs,
     AlreadySpentInput(usize),
     RemovalRecordUnpackFailure,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum TransactionLustrationError {
+    InvalidAoclRangeForIndexSet,
+    MissingLustrationAnnouncement,
 }
 
 impl From<RemovalRecordListUnpackError> for TransactionConfirmabilityError {
@@ -217,6 +227,64 @@ impl TransactionKernel {
         }
 
         true
+    }
+
+    /// Check if a transaction lustrates (reveals) all the required amounts, and
+    /// if it does, return the lustrated amount.
+    ///
+    /// Returns an error if the lustration rule defined by the AOCL leaf index
+    /// threshold is not followed. The threshold defines the *last* AOCL leaf
+    /// that must lustrate.
+    ///
+    /// Returns an error if the transaction or block violates the rules
+    /// specified by the function parameter.
+    ///
+    /// Note that an `Ok` result only confirms these specific rules are met;
+    /// it does not guarantee the overall validity of the block or transaction.
+    pub(crate) fn verified_lustration_amount(
+        &self,
+        max_lustrating_aocl_leaf_index: u64,
+    ) -> Result<NativeCurrencyAmount, TransactionLustrationError> {
+        let mut required_lustrations = vec![];
+        for input in &self.inputs {
+            let Ok((input_index_lower_end, _)) = input.absolute_indices.aocl_range() else {
+                return Err(TransactionLustrationError::InvalidAoclRangeForIndexSet);
+            };
+
+            if input_index_lower_end <= max_lustrating_aocl_leaf_index {
+                required_lustrations.push(input.absolute_indices);
+            }
+        }
+
+        let mut required_lustrations: HashSet<_> = required_lustrations.into_iter().collect();
+
+        let all_lustrations = self
+            .announcements
+            .iter()
+            .filter(|ann| {
+                ann.message
+                    .first()
+                    .is_some_and(|elem0| *elem0 == LUSTRATION_FLAG)
+            })
+            .collect_vec();
+
+        let mut acc_amount = NativeCurrencyAmount::zero();
+        for lustration in all_lustrations {
+            let Ok(lustration) = TransparentInput::decode(&lustration.message[1..]) else {
+                continue;
+            };
+            let implied_index_set = lustration.absolute_index_set();
+            let was_present = required_lustrations.remove(&implied_index_set);
+            if was_present {
+                acc_amount += lustration.utxo.get_native_currency_amount();
+            }
+        }
+
+        if !required_lustrations.is_empty() {
+            return Err(TransactionLustrationError::MissingLustrationAnnouncement);
+        }
+
+        Ok(acc_amount)
     }
 }
 
@@ -560,6 +628,16 @@ pub mod tests {
                 })
                 .boxed()
         }
+
+        fn lowest_aocl_leaf_index(&self) -> Option<u64> {
+            self.inputs
+                .iter()
+                .map(|input| {
+                    let (min_leaf, _) = input.absolute_indices.aocl_range().unwrap();
+                    min_leaf
+                })
+                .min()
+        }
     }
 
     #[test]
@@ -697,6 +775,128 @@ pub mod tests {
             );
             let decoded = *TransactionKernel::decode(&encoded).unwrap();
             assert_eq!(kernel, decoded);
+        }
+    }
+
+    mod lustrations {
+        use tasm_lib::twenty_first::bfe;
+
+        use super::*;
+        use crate::api::export::GenerationSpendingKey;
+        use crate::api::export::UnlockedUtxo;
+        use crate::api::export::Utxo;
+
+        #[proptest(cases = 5)]
+        fn no_lustration_required_on_new_aocl_leafs(
+            #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+            primitive_witness: PrimitiveWitness,
+        ) {
+            let kernel = &primitive_witness.kernel;
+            assert_eq!(
+                Ok(NativeCurrencyAmount::zero()),
+                kernel.verified_lustration_amount(kernel.lowest_aocl_leaf_index().unwrap() - 1)
+            );
+        }
+
+        #[proptest(cases = 5)]
+        fn returns_error_on_missing_lustration(
+            #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+            primitive_witness: PrimitiveWitness,
+        ) {
+            let kernel = &primitive_witness.kernel;
+
+            let min_aocl_leaf_index = kernel.lowest_aocl_leaf_index().unwrap();
+            assert_eq!(
+                Err(TransactionLustrationError::MissingLustrationAnnouncement),
+                kernel.verified_lustration_amount(min_aocl_leaf_index)
+            );
+            assert_eq!(
+                Err(TransactionLustrationError::MissingLustrationAnnouncement),
+                kernel.verified_lustration_amount(min_aocl_leaf_index + 1)
+            );
+        }
+
+        #[proptest(cases = 5)]
+        fn tx_without_inputs_requires_no_lustration(
+            #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 2, 2))]
+            primitive_witness: PrimitiveWitness,
+        ) {
+            let kernel = &primitive_witness.kernel;
+            assert_eq!(
+                Ok(NativeCurrencyAmount::zero()),
+                kernel.verified_lustration_amount(u64::MAX)
+            );
+        }
+
+        fn one_input_kernel(
+            test_runner: &mut TestRunner,
+            include_lustration: bool,
+        ) -> TransactionKernel {
+            let a_key = GenerationSpendingKey::derive_from_seed(Digest::default());
+            let lock_script_and_witness = a_key.lock_script_and_witness();
+
+            let input_utxo = Utxo::new_native_currency(
+                a_key.to_address().lock_script().hash(),
+                NativeCurrencyAmount::coins(12),
+            );
+
+            let fee = NativeCurrencyAmount::zero();
+            let coinbase = None;
+            let primitive_witness = PrimitiveWitness::arbitrary_primitive_witness_with(
+                std::slice::from_ref(&input_utxo),
+                std::slice::from_ref(&lock_script_and_witness),
+                &[],
+                &[],
+                fee,
+                coinbase,
+            )
+            .new_tree(test_runner)
+            .unwrap()
+            .current();
+
+            let mut kernel = primitive_witness.kernel.clone();
+
+            if include_lustration {
+                let unlocked_utxo = UnlockedUtxo::unlock(
+                    input_utxo,
+                    lock_script_and_witness,
+                    primitive_witness.input_membership_proofs[0].clone(),
+                );
+                kernel.announcements.push(unlocked_utxo.lustration());
+            }
+
+            kernel
+        }
+
+        #[test]
+        fn lustration_check_one_input() {
+            let mut test_runner = TestRunner::deterministic();
+
+            let no_lustration = one_input_kernel(&mut test_runner, false);
+            assert_eq!(
+                Err(TransactionLustrationError::MissingLustrationAnnouncement),
+                no_lustration.verified_lustration_amount(u64::MAX)
+            );
+
+            // Then add lustration, and verify that Ok(amount) is returned.
+            let mut with_lustration = one_input_kernel(&mut test_runner, true);
+            assert_eq!(
+                1,
+                with_lustration.announcements.len(),
+                "Lustrating kernel must contain exactly one announcement"
+            );
+            assert_eq!(
+                Ok(NativeCurrencyAmount::coins(12)),
+                with_lustration.verified_lustration_amount(u64::MAX)
+            );
+
+            // Modify the announcement such that it no longer correctly
+            // lustrates.
+            with_lustration.announcements[0].message[15] = bfe!(u64::MAX);
+            assert_eq!(
+                Err(TransactionLustrationError::MissingLustrationAnnouncement),
+                with_lustration.verified_lustration_amount(u64::MAX)
+            );
         }
     }
 }

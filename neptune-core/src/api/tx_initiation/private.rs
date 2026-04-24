@@ -82,6 +82,11 @@ impl TransactionInitiatorPrivate {
         // which is approx 5.6 months after launch.
         // after that, the training wheel come off.
         const RATE_LIMIT_UNTIL_HEIGHT: u64 = 25000;
+
+        if !self.global_state_lock.cli().network.is_main() {
+            return Ok(());
+        }
+
         let state = self.global_state_lock.lock_guard().await;
 
         if state.chain.tip().header().height < RATE_LIMIT_UNTIL_HEIGHT.into() {

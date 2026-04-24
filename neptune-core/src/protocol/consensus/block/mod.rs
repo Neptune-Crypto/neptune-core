@@ -6,7 +6,7 @@ pub mod block_info;
 pub mod block_kernel;
 pub mod block_selector;
 pub(crate) mod block_transaction;
-mod block_validation_error;
+pub(crate) mod block_validation_error;
 pub mod difficulty_control;
 pub(crate) mod guesser_receiver_data;
 pub mod mock_block_generator;
@@ -63,10 +63,14 @@ use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_
 use crate::protocol::consensus::block::block_kernel::BlockKernelField;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::difficulty_control::difficulty_control;
+use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::pow::GuesserBuffer;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::consensus_rule_set::LustrationRule;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionLustrationError;
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
@@ -104,7 +108,7 @@ pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmo
 
 /// Blocks with timestamps too far into the future are invalid. Reject blocks
 /// whose timestamp exceeds now with this value or more.
-pub(crate) const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
+pub(crate) const FUTUREDATING_LIMIT: Timestamp = Timestamp::millis(60001);
 
 /// The size of the premine, 831488 coins.
 pub const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
@@ -256,9 +260,9 @@ impl Block {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
-        let next_block_height = predecessor.header().height.next();
+        let new_height = predecessor.header().height.next();
         let network = proof_job_options.job_settings.network;
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_height);
         let tx_claim = BlockAppendix::transaction_validity_claim(
             transaction.kernel.mast_hash(),
             consensus_rule_set,
@@ -334,20 +338,43 @@ impl Block {
         self.unset_digest();
     }
 
-    /// sets header timestamp and difficulty.
+    /// Set the lustration status found in the block's header.
     ///
-    /// These must be set as a pair because the difficulty depends
-    /// on the timestamp, and may change with it.
+    /// Note: this causes the block digest to change.
+    pub fn set_lustration_status(&mut self, lustration_status: LustrationStatus) {
+        self.kernel
+            .header
+            .pow
+            .set_lustration_status(lustration_status);
+        self.unset_digest();
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_unparseable_lustration_status(&mut self) {
+        self.kernel.header.pow.set_unparseable_lustration_status();
+        self.unset_digest();
+    }
+
+    /// sets header timestamp, difficulty and, optionally, cumulative proof of
+    /// work.
+    ///
+    /// These must be set as a pair or triplet because the difficulty depends
+    /// on the timestamp, and may change with it. Depending on the consensus
+    /// rules, the cumulative proof of work must also be updated.
     ///
     /// note: this causes block digest to change.
     #[inline]
-    pub(crate) fn set_header_timestamp_and_difficulty(
+    pub(crate) fn set_difficulty_related_fields(
         &mut self,
         timestamp: Timestamp,
         difficulty: Difficulty,
+        cumulative_proof_of_work: Option<ProofOfWork>,
     ) {
         self.kernel.header.timestamp = timestamp;
         self.kernel.header.difficulty = difficulty;
+        if let Some(cumulative_proof_of_work) = cumulative_proof_of_work {
+            self.kernel.header.cumulative_proof_of_work = cumulative_proof_of_work;
+        }
 
         self.unset_digest();
     }
@@ -721,10 +748,11 @@ impl Block {
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+        let new_height = self.header().height;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_height);
 
         // 0.a)
-        if previous_block.kernel.header.height.next() != self.kernel.header.height {
+        if previous_block.kernel.header.height.next() != new_height {
             return Err(BlockValidationError::BlockHeight);
         }
 
@@ -764,13 +792,19 @@ impl Block {
             )
         };
 
-        if self.kernel.header.difficulty != expected_difficulty {
+        let new_difficulty = self.kernel.header.difficulty;
+        if new_difficulty != expected_difficulty {
             return Err(BlockValidationError::Difficulty);
         }
 
         // 0.f)
+        let delta_difficulty = if consensus_rule_set.use_parent_difficulty() {
+            previous_block.header().difficulty
+        } else {
+            new_difficulty
+        };
         let expected_cumulative_proof_of_work =
-            previous_block.header().cumulative_proof_of_work + previous_block.header().difficulty;
+            previous_block.header().cumulative_proof_of_work + delta_difficulty;
         if self.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
             return Err(BlockValidationError::CumulativeProofOfWork);
         }
@@ -787,6 +821,13 @@ impl Block {
         // 1.e)
         if self.size() > consensus_rule_set.max_block_size() {
             return Err(BlockValidationError::MaxSize);
+        }
+
+        // 1.f)
+        if consensus_rule_set.requires_version_in_pow()
+            && self.header().version != self.header().pow.version_in_pow()
+        {
+            return Err(BlockValidationError::VersionMismatch);
         }
 
         // 2.a)
@@ -871,6 +912,100 @@ impl Block {
             return Err(BlockValidationError::TooManyAnnouncements);
         }
 
+        let first_lustration_block = ConsensusRuleSet::first_lustration_block(network);
+        if new_height >= first_lustration_block {
+            let last_aocl_leaf_index = self.body().max_aocl_leaf_index();
+            let transparency_rule =
+                ConsensusRuleSet::lustration_rule(network, new_height, last_aocl_leaf_index)
+                    .expect("Must have transparency rule if height exceeds first such block");
+
+            // 2.m)
+            let Ok(read) = self.header().pow.lustration_status() else {
+                return Err(BlockValidationError::BadLustrationCounterEncoding);
+            };
+
+            match transparency_rule {
+                LustrationRule::Initial(expected) => {
+                    // 2.p
+                    if read.counter != expected.counter {
+                        return Err(BlockValidationError::BadLustrationCounter {
+                            got: read.counter,
+                            expected: expected.counter,
+                        });
+                    }
+
+                    // 2.q
+                    if read.max_lustrating_aocl_leaf_index
+                        != expected.max_lustrating_aocl_leaf_index
+                    {
+                        return Err(BlockValidationError::BadLustrationAoclThreshold {
+                            got: read.max_lustrating_aocl_leaf_index,
+                            expected: expected.max_lustrating_aocl_leaf_index,
+                        });
+                    }
+                }
+                LustrationRule::Updated { initial_counter } => {
+                    // 2.n)
+                    let Ok(parent) = previous_block.header().pow.lustration_status() else {
+                        return Err(BlockValidationError::BadLustrationCounterEncodingOfParent);
+                    };
+
+                    // 2.q
+                    if read.max_lustrating_aocl_leaf_index != parent.max_lustrating_aocl_leaf_index
+                    {
+                        return Err(BlockValidationError::BadLustrationAoclThreshold {
+                            got: read.max_lustrating_aocl_leaf_index,
+                            expected: parent.max_lustrating_aocl_leaf_index,
+                        });
+                    }
+
+                    let aocl_threshold = parent.max_lustrating_aocl_leaf_index;
+                    let lustration_result = self
+                        .body()
+                        .transaction_kernel
+                        .verified_lustration_amount(aocl_threshold);
+                    let verified_lustrated_amt = match lustration_result {
+                        Ok(amount) => amount,
+                        // 2.o
+                        Err(TransactionLustrationError::MissingLustrationAnnouncement) => {
+                            return Err(BlockValidationError::MissingLustrationAnnouncement);
+                        }
+                        // xxx
+                        Err(_) => return Err(BlockValidationError::UnknownLustrationProblem),
+                    };
+
+                    // 2.r
+                    let Some(expected_counter) =
+                        parent.counter.checked_sub(&verified_lustrated_amt)
+                    else {
+                        return Err(BlockValidationError::NegativeLustrationCounter {
+                            got: -verified_lustrated_amt
+                                .checked_sub(&parent.counter)
+                                .expect("subtracting smaller amount from bigger amount"),
+                        });
+                    };
+
+                    // I don't think this error *can* be hit without the next
+                    // error also being hit. But security-in-depth!
+                    // 2.s
+                    if read.counter > initial_counter {
+                        return Err(BlockValidationError::LustrationCounterExceedsInitialValue {
+                            got: read.counter,
+                            initial: initial_counter,
+                        });
+                    }
+
+                    // 2.p
+                    if expected_counter != read.counter {
+                        return Err(BlockValidationError::BadLustrationCounter {
+                            got: read.counter,
+                            expected: expected_counter,
+                        });
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -929,8 +1064,9 @@ impl Block {
     /// Determine whether the proof-of-work puzzle was solved correctly.
     ///
     /// Specifically, compare the hash of the current block against the
-    /// target corresponding to the previous block's difficulty and return true
-    /// if the former is smaller.
+    /// required target. Depending on the consensus rule set that applies, this
+    /// may be either the parent block's difficulty, or the block's own
+    /// difficulty. Returns true if the target is met.
     pub fn has_proof_of_work(&self, network: Network, previous_block_header: &BlockHeader) -> bool {
         // enforce network difficulty-reset-interval if present. Note that *no*
         // pow checks are enforced in this case, not even Merkle authentication
@@ -945,14 +1081,13 @@ impl Block {
             return true;
         }
 
-        let threshold = previous_block_header.difficulty.target();
-        if network.allows_mock_pow() && self.is_valid_mock_pow(threshold) {
+        let parent_threshold = previous_block_header.difficulty.target();
+        if network.allows_mock_pow() && self.is_valid_mock_pow(parent_threshold) {
             return true;
         }
 
-        let consensus_rule_set =
-            ConsensusRuleSet::infer_from(network, previous_block_header.height.next());
-        self.pow_verify(threshold, consensus_rule_set)
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+        self.pow_verify(parent_threshold, consensus_rule_set)
     }
 
     /// Produce the MAST authentication paths for the `pow` field on
@@ -1023,8 +1158,21 @@ impl Block {
         }
     }
 
-    /// Verify that block digest is less than threshold and integral.
-    pub(crate) fn pow_verify(&self, target: Digest, consensus_rule_set: ConsensusRuleSet) -> bool {
+    /// Verify that block digest is less than the required threshold, and follow
+    /// any other proof-of-work rules defined by the consensus rule set.
+    ///
+    /// Parent target is only used if the consensus rules dicate that.
+    /// Otherwise, the block's own difficulty is used.
+    ///
+    /// Internal function. For checking if a block has sufficient proof of work,
+    /// you should use [`Self::has_proof_of_work`] instead since that function
+    /// automatically uses the correct consensus rule set.
+    fn pow_verify(&self, parent_target: Digest, consensus_rule_set: ConsensusRuleSet) -> bool {
+        let target = if consensus_rule_set.use_parent_difficulty() {
+            parent_target
+        } else {
+            self.header().difficulty.target()
+        };
         let auth_paths = self.pow_mast_paths();
         self.header()
             .pow
@@ -1332,6 +1480,23 @@ pub(crate) mod tests {
             self.unset_digest();
         }
 
+        pub(super) fn fix_mutator_set_field(&mut self, prev_block: &Block) {
+            let mut msa = prev_block.mutator_set_accumulator_after().unwrap();
+            let ms_update = MutatorSetUpdate::new(
+                self.body().transaction_kernel.inputs.clone(),
+                self.body().transaction_kernel.outputs.clone(),
+            );
+
+            ms_update.apply_to_accumulator(&mut msa).unwrap();
+            self.kernel.body.mutator_set_accumulator = msa;
+            self.unset_digest();
+        }
+
+        pub(crate) fn set_appendix(&mut self, appendix: BlockAppendix) {
+            self.kernel.appendix = appendix;
+            self.unset_digest();
+        }
+
         /// Create a block template with an invalid block proof.
         ///
         /// To be used in tests where you don't care about block validity.
@@ -1395,21 +1560,56 @@ pub(crate) mod tests {
             parent_difficulty: Difficulty,
             consensus_rule_set: ConsensusRuleSet,
         ) {
-            println!("Trying to guess for difficulty: {parent_difficulty}");
+            let difficulty = if consensus_rule_set.use_parent_difficulty() {
+                parent_difficulty
+            } else {
+                self.header().difficulty
+            };
+
+            println!("Trying to guess for difficulty: {difficulty}");
             assert!(
-                parent_difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
+                difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
                 "Don't use high difficulty in test"
             );
 
-            let puzzle = ProofOfWorkPuzzle::new(self.clone(), parent_difficulty);
+            let puzzle = ProofOfWorkPuzzle::new(self.clone(), difficulty);
             let valid_pow = puzzle.solve(consensus_rule_set);
 
             self.set_header_pow(valid_pow);
         }
 
+        /// Check if PoW requirement has been fulfilled, allowing for the
+        /// overriding of the consensus rule set.
+        pub(crate) fn pow_verify_for_tests(
+            &self,
+            parent_target: Digest,
+            consensus_rule_set: ConsensusRuleSet,
+        ) -> bool {
+            self.pow_verify(parent_target, consensus_rule_set)
+        }
+
         #[inline]
         pub(crate) fn set_header_height(&mut self, block_height: BlockHeight) {
             self.kernel.header.height = block_height;
+
+            self.unset_digest();
+        }
+
+        pub(crate) fn set_header_version_in_pow_only(&mut self, value: BFieldElement) {
+            self.kernel.header.pow.set_version_in_pow(value);
+
+            self.unset_digest();
+        }
+
+        pub(crate) fn set_version_in_header_only(&mut self, value: BFieldElement) {
+            self.kernel.header.version = value;
+
+            self.unset_digest();
+        }
+
+        pub(crate) fn set_version_consistently(&mut self, value: BFieldElement) {
+            self.kernel.header.version = value;
+            self.kernel.header.pow.set_version_in_pow(value);
 
             self.unset_digest();
         }
@@ -1470,14 +1670,21 @@ pub(crate) mod tests {
     fn guess_nonce_happy_path() {
         let network = Network::Main;
         let genesis = Block::genesis(network);
+        let parent_target = genesis.header().difficulty.target();
 
         for consensus_rule_set in ConsensusRuleSet::iter() {
             let mut invalid_block = invalid_empty_block(&genesis, network);
             let mast_auth_paths = invalid_block.pow_mast_paths();
             let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);
-            let target = Difficulty::from(50u32).target();
+            let target = if consensus_rule_set.use_parent_difficulty() {
+                parent_target
+            } else {
+                invalid_block.header().difficulty.target()
+            };
             let mut rng = rng();
             let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
+
+            let version = invalid_block.header().version;
 
             let valid_pow = loop {
                 if let Some(valid_pow) = Pow::guess(
@@ -1486,17 +1693,22 @@ pub(crate) mod tests {
                     index_picker_preimage,
                     rng.random(),
                     target,
+                    None,
+                    Some(version),
                 ) {
                     break valid_pow;
                 }
             };
 
             assert!(
-                !invalid_block.pow_verify(target, consensus_rule_set),
+                !invalid_block.pow_verify(parent_target, consensus_rule_set),
                 "Pow verification must fail prior to setting PoW"
             );
             invalid_block.set_header_pow(valid_pow);
-            assert!(invalid_block.pow_verify(target, consensus_rule_set));
+            assert!(
+                invalid_block.pow_verify(parent_target, consensus_rule_set,),
+                "pow for {consensus_rule_set} rules must be satisfied after correct guess"
+            );
         }
     }
 
@@ -1912,7 +2124,7 @@ pub(crate) mod tests {
         #[apply(shared_tokio_runtime)]
         async fn block_with_valid_proof_passes() {
             let (predecesor, time, network, block) = deterministic_empty_block1_proposal().await;
-            assert!(block.validate(&predecesor, time, network).await.is_ok());
+            assert!(block.validate(&predecesor, time, network,).await.is_ok());
         }
 
         #[traced_test]
@@ -1942,7 +2154,7 @@ pub(crate) mod tests {
             assert_eq!(
                 BlockValidationError::ProofValidity,
                 block
-                    .validate(&predecesor, time, network)
+                    .validate(&predecesor, time, network,)
                     .await
                     .unwrap_err()
             );
@@ -1961,7 +2173,7 @@ pub(crate) mod tests {
             assert_eq!(
                 BlockValidationError::ProofValidity,
                 block
-                    .validate(&predecesor, time, network)
+                    .validate(&predecesor, time, network,)
                     .await
                     .unwrap_err()
             );
@@ -2156,25 +2368,25 @@ pub(crate) mod tests {
             let mut block1 =
                 fake_valid_successor_for_tests(&genesis_block, now, rng.random(), network).await;
 
-            // Set block timestamp 4 minutes in the future.  (is valid)
-            let future_time1 = now + Timestamp::minutes(4);
+            // Set block timestamp 30 seconds in the future.  (is valid)
+            let future_time1 = now + Timestamp::seconds(30);
             block1.kernel.header.timestamp = future_time1;
             assert!(block1.is_valid(&genesis_block, now, network).await);
 
             now = block1.kernel.header.timestamp;
 
-            // Set block timestamp 5 minutes - 1 sec in the future.  (is valid)
-            let future_time2 = now + Timestamp::minutes(5) - Timestamp::seconds(1);
+            // Set block timestamp 1 minute in the future.  (is valid)
+            let future_time2 = now + Timestamp::minutes(1);
             block1.kernel.header.timestamp = future_time2;
             assert!(block1.is_valid(&genesis_block, now, network).await);
 
-            // Set block timestamp 5 minutes in the future. (not valid)
-            let future_time3 = now + Timestamp::minutes(5);
+            // Set block timestamp 1 minute + 1ms in the future. (not valid)
+            let future_time3 = now + Timestamp::minutes(1) + Timestamp::millis(1);
             block1.kernel.header.timestamp = future_time3;
             assert!(!block1.is_valid(&genesis_block, now, network).await);
 
-            // Set block timestamp 5 minutes + 1 sec in the future. (not valid)
-            let future_time4 = now + Timestamp::minutes(5) + Timestamp::seconds(1);
+            // Set block timestamp 1 minute + 1 sec in the future. (not valid)
+            let future_time4 = now + Timestamp::minutes(1) + Timestamp::seconds(1);
             block1.kernel.header.timestamp = future_time4;
             assert!(!block1.is_valid(&genesis_block, now, network).await);
 

@@ -46,6 +46,7 @@ use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionLustrationError;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerConnectionInfo;
@@ -320,18 +321,16 @@ impl PeerLoopHandler {
                 "blocks"
             }
         );
+        let network = self.global_state_lock.cli().network;
         let now = self.now();
         debug!("validating with respect to current timestamp {now}");
         let mut previous_block = &parent_of_first_block;
+
         for new_block in &received_blocks {
-            let new_block_has_proof_of_work = new_block.has_proof_of_work(
-                self.global_state_lock.cli().network,
-                previous_block.header(),
-            );
+            let new_block_has_proof_of_work =
+                new_block.has_proof_of_work(network, previous_block.header());
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
-            let new_block_is_valid = new_block
-                .is_valid(previous_block, now, self.global_state_lock.cli().network)
-                .await;
+            let new_block_is_valid = new_block.is_valid(previous_block, now, network).await;
             debug!("new block is valid? {new_block_is_valid}");
             if !new_block_has_proof_of_work {
                 warn!(
@@ -841,7 +840,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::SyncChallengeResponse(challenge_response) => {
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(90);
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(200);
 
                 log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallengeResponse");
                 info!("Got sync challenge response from {}", self.peer_id);
@@ -882,9 +881,8 @@ impl PeerLoopHandler {
                 peer_state_info.sync_challenge = None;
 
                 // Does response match issued challenge?
-                if !challenge_response
-                    .matches(self.global_state_lock.cli().network, issued_challenge)
-                {
+                let network = self.global_state_lock.cli().network;
+                if !challenge_response.matches(network, issued_challenge) {
                     self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -901,10 +899,7 @@ impl PeerLoopHandler {
                 // Does response verify?
                 let claimed_tip_height = challenge_response.tip.header.height;
                 let now = self.now();
-                if !challenge_response
-                    .is_valid(now, self.global_state_lock.cli().network)
-                    .await
-                {
+                if !challenge_response.is_valid(now, network).await {
                     self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -933,16 +928,16 @@ impl PeerLoopHandler {
                     .chain
                     .tip()
                     .header();
-                if !challenge_response
-                    .check_pow(self.global_state_lock.cli().network, own_tip_header.height)
-                {
+                if !challenge_response.check_pow(network, own_tip_header.height) {
                     self.punish(NegativePeerSanction::FishyPowEvolutionChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Is there some specific (*i.e.*, not aggregate) proof of work?
-                if !challenge_response.check_difficulty(own_tip_header.difficulty) {
+                if network.is_main()
+                    && !challenge_response.check_difficulty(own_tip_header.difficulty)
+                {
                     self.punish(NegativePeerSanction::FishyDifficultiesChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1664,6 +1659,46 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // 8. If transaction is missing lustrations, punish.
+                if current_block_height > ConsensusRuleSet::first_lustration_block(network) {
+                    let lustration_status = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .tip()
+                        .header()
+                        .pow
+                        .lustration_status()
+                        .expect("Lustration status of tip must be parseable after hardfork");
+                    match transaction.kernel.verified_lustration_amount(
+                        lustration_status.max_lustrating_aocl_leaf_index,
+                    ) {
+                        Ok(amt) => {
+                            if amt > lustration_status.counter {
+                                warn!("Rejecting transaction that would make lustration counter negative");
+                                self.punish(
+                                    NegativePeerSanction::LustrationsWouldMakeCounterNegative,
+                                )
+                                .await?;
+                                return Ok(KEEP_CONNECTION_ALIVE);
+                            }
+                        }
+                        Err(TransactionLustrationError::MissingLustrationAnnouncement) => {
+                            warn!("Missing lustration announcement in incoming transaction");
+                            self.punish(NegativePeerSanction::MissingLustrationAnnouncement)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                        Err(_) => {
+                            warn!("Invalid transaction");
+                            self.punish(NegativePeerSanction::InvalidTransaction)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                    };
+                }
+
                 // Otherwise, relay to main
                 let pt2m_transaction = PeerTaskToMainTransaction {
                     transaction,
@@ -1817,9 +1852,9 @@ impl PeerLoopHandler {
                 // the one whose favorability is being computed.
                 let state = self.global_state_lock.lock_guard().await;
                 let tip = state.chain.tip();
-                let proposal_is_valid = new_proposal
-                    .is_valid(tip, self.now(), self.global_state_lock.cli().network)
-                    .await;
+
+                let network = self.global_state_lock.cli().network;
+                let proposal_is_valid = new_proposal.is_valid(tip, self.now(), network).await;
                 if !proposal_is_valid {
                     drop(state);
                     self.punish(NegativePeerSanction::InvalidBlockProposal)
@@ -2733,6 +2768,7 @@ mod tests {
         use crate::application::loops::mine_loop::GuessingConfiguration;
         use crate::protocol::consensus::block::difficulty_control::Difficulty;
         use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+        use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
         use crate::tests::shared::blocks::next_block;
@@ -2861,19 +2897,19 @@ mod tests {
             block_with_valid_reboot_pow.satisfy_pow(difficulty, ConsensusRuleSet::Reboot);
             assert!(block_with_valid_reboot_pow.is_valid_mock_pow(difficulty.target()));
             assert!(block_with_valid_reboot_pow
-                .pow_verify(difficulty.target(), ConsensusRuleSet::Reboot));
+                .pow_verify_for_tests(difficulty.target(), ConsensusRuleSet::Reboot));
 
             let mut block_with_valid_alpha_pow = block.clone();
             block_with_valid_alpha_pow.satisfy_pow(difficulty, ConsensusRuleSet::HardforkAlpha);
             assert!(block_with_valid_alpha_pow.is_valid_mock_pow(difficulty.target()));
             assert!(block_with_valid_alpha_pow
-                .pow_verify(difficulty.target(), ConsensusRuleSet::HardforkAlpha));
+                .pow_verify_for_tests(difficulty.target(), ConsensusRuleSet::HardforkAlpha));
 
             let mut block_with_valid_tvmv1_pow = block.clone();
             block_with_valid_tvmv1_pow.satisfy_pow(difficulty, ConsensusRuleSet::TvmProofVersion1);
             assert!(block_with_valid_tvmv1_pow.is_valid_mock_pow(difficulty.target()));
             assert!(block_with_valid_tvmv1_pow
-                .pow_verify(difficulty.target(), ConsensusRuleSet::TvmProofVersion1));
+                .pow_verify_for_tests(difficulty.target(), ConsensusRuleSet::TvmProofVersion1));
 
             (
                 invalid_pow,
@@ -4234,20 +4270,41 @@ mod tests {
 
         #[traced_test]
         #[test]
-        fn hardfork_alpha_happy_case() {
-            // Ensure that valid blocks are all accepted across hardfork alpha.
+        fn hardforks_happy_cases() {
+            // Ensure that valid blocks are all accepted across hardforks
             // Scenario: Current height is hardfork minus 2. Then receives peer
             // notification of first block after hardfork. Must accept all
             // blocks from peer, not punish peer, and send blocks to main
-            // loop.
-            let init_block_heigth = BlockHeight::from(14999u64);
-            let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
-                init_block_heigth,
-                Difficulty::MINIMUM,
+            // loop. Can be expanded for new hardforks when they are planned.
+            let hf_alpha = (
+                BlockHeight::from(14999u64),
+                ConsensusRuleSet::Reboot,
+                ConsensusRuleSet::HardforkAlpha,
             );
+            let hf_beta = (
+                BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET.previous().unwrap(),
+                ConsensusRuleSet::TvmProofVersion1,
+                ConsensusRuleSet::HardforkBeta,
+            );
+            for (init_block_height, start_rules, end_rules) in [hf_alpha, hf_beta] {
+                let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
+                    init_block_height,
+                    Difficulty::MINIMUM,
+                );
+                tokio_runtime().block_on(runner(
+                    bpw,
+                    start_rules,
+                    end_rules,
+                    init_block_height.next(),
+                ));
+            }
 
-            tokio_runtime().block_on(runner(bpw));
-            async fn runner(block_primitive_witness: BlockPrimitiveWitness) {
+            async fn runner(
+                block_primitive_witness: BlockPrimitiveWitness,
+                start_consensus_rule_set: ConsensusRuleSet,
+                end_consensus_rule_set: ConsensusRuleSet,
+                first_block_height_after_hardfork: BlockHeight,
+            ) {
                 let network = Network::Main;
                 let (hard_fork_minus_2, hard_fork_minus_1_no_pow) =
                     Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
@@ -4298,21 +4355,17 @@ mod tests {
                     next_block(state_lock.clone(), hard_fork_minus_1.clone()).await;
 
                 // Verify assumption about block height of hardfork
-                assert!(hard_fork_minus_1.pow_verify(
+                assert!(hard_fork_minus_1.pow_verify_for_tests(
                     hard_fork_minus_2.header().difficulty.target(),
-                    ConsensusRuleSet::Reboot
+                    start_consensus_rule_set
                 ));
-                assert!(!hard_fork_minus_1.pow_verify(
+                assert!(first_block_after_hardfork.pow_verify_for_tests(
                     hard_fork_minus_2.header().difficulty.target(),
-                    ConsensusRuleSet::HardforkAlpha
+                    end_consensus_rule_set
                 ));
-                assert!(first_block_after_hardfork.pow_verify(
-                    hard_fork_minus_2.header().difficulty.target(),
-                    ConsensusRuleSet::HardforkAlpha
-                ));
-                assert!(!first_block_after_hardfork.pow_verify(
-                    hard_fork_minus_2.header().difficulty.target(),
-                    ConsensusRuleSet::Reboot
+                assert!(!first_block_after_hardfork.pow_verify_for_tests(
+                    hard_fork_minus_1.header().difficulty.target(),
+                    start_consensus_rule_set
                 ));
 
                 // Declare expected order of messages
@@ -4320,9 +4373,9 @@ mod tests {
                     Action::Read(PeerMessage::BlockNotification(
                         (&first_block_after_hardfork).into(),
                     )),
-                    Action::Write(PeerMessage::BlockRequestByHeight(BlockHeight::from(
-                        15000u64,
-                    ))),
+                    Action::Write(PeerMessage::BlockRequestByHeight(
+                        first_block_height_after_hardfork,
+                    )),
                     Action::Read(PeerMessage::Block(Box::new(
                         first_block_after_hardfork.clone().try_into().unwrap(),
                     ))),

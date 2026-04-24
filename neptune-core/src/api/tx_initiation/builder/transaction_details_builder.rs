@@ -11,11 +11,13 @@
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
+use tracing::debug;
 
 use crate::api::export::TransparentInput;
 use crate::api::export::TransparentTransactionInfo;
 use crate::api::tx_initiation::error::CreateTxError;
 use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::utxo::Utxo;
@@ -195,8 +197,8 @@ impl TransactionDetailsBuilder {
         let has_change_output = change_amount.is_positive();
 
         // Add change output, if required to balance transaction
-        let mutator_set = if has_change_output {
-            let (change_output, mutator_set) = match change_policy {
+        let (mutator_set, lustration_status) = if has_change_output {
+            let (change_output, mutator_set, lustration_status) = match change_policy {
                 ChangePolicy::ExactChange => {
                     return Err(CreateTxError::NotExactChange);
                 }
@@ -207,22 +209,25 @@ impl TransactionDetailsBuilder {
                         key_type: KeyType,
                         change_amount: NativeCurrencyAmount,
                         medium: UtxoNotificationMedium,
-                    ) -> Result<(TxOutput, MutatorSetAccumulator), CreateTxError>
-                    {
+                    ) -> Result<
+                        (TxOutput, MutatorSetAccumulator, Option<LustrationStatus>),
+                        CreateTxError,
+                    > {
                         let height = gsm.chain.tip_height();
                         let msa = gsm.chain.tip_mutator_set_after();
                         let key = gsm.wallet_state.next_unused_spending_key(key_type).await;
 
-                        Ok((
-                            TransactionDetailsBuilder::create_change_output(
-                                &gsm.wallet_state,
-                                height,
-                                change_amount,
-                                key,
-                                medium,
-                            ),
-                            msa,
-                        ))
+                        let change_output = TransactionDetailsBuilder::create_change_output(
+                            &gsm.wallet_state,
+                            height,
+                            change_amount,
+                            key,
+                            medium,
+                        );
+
+                        let lustration_status = gsm.chain.lustration_status();
+
+                        Ok((change_output, msa, lustration_status))
                     }
 
                     match state_lock {
@@ -248,16 +253,15 @@ impl TransactionDetailsBuilder {
                     let create_change = |gs: &GlobalState| -> Result<_, CreateTxError> {
                         let height = gs.chain.tip_height();
                         let msa = gs.chain.tip_mutator_set_after();
-                        Ok((
-                            Self::create_change_output(
-                                &gs.wallet_state,
-                                height,
-                                change_amount,
-                                *key,
-                                medium,
-                            ),
-                            msa,
-                        ))
+                        let lustration_status = gs.chain.lustration_status();
+                        let change_output = Self::create_change_output(
+                            &gs.wallet_state,
+                            height,
+                            change_amount,
+                            *key,
+                            medium,
+                        );
+                        Ok((change_output, msa, lustration_status))
                     };
 
                     match state_lock {
@@ -269,27 +273,35 @@ impl TransactionDetailsBuilder {
                     }
                 }
 
-                ChangePolicy::Burn => (
-                    TxOutput::no_notification_as_change(
+                ChangePolicy::Burn => {
+                    let burn = TxOutput::no_notification_as_change(
                         Utxo::new_native_currency(LockScript::burn().hash(), change_amount),
                         Digest::default(),
                         Digest::default(),
-                    ),
-                    state_lock
-                        .tip()
-                        .await
-                        .mutator_set_accumulator_after()
-                        .expect("Stored block must have valid mutator set after"),
-                ),
+                    );
+
+                    let (mutator_set, lustration_status) = state_lock
+                        .with(
+                            |x, _| (x.chain.tip_mutator_set_after(), x.chain.lustration_status()),
+                            (),
+                        )
+                        .await;
+
+                    (burn, mutator_set, lustration_status)
+                }
             };
             tx_outputs.push(change_output);
-            mutator_set
+
+            (mutator_set, lustration_status)
         } else {
-            state_lock
-                .tip()
-                .await
-                .mutator_set_accumulator_after()
-                .expect("Stored block must have valid mutator set after")
+            let (mutator_set, lustration_status) = state_lock
+                .with(
+                    |x, _| (x.chain.tip_mutator_set_after(), x.chain.lustration_status()),
+                    (),
+                )
+                .await;
+
+            (mutator_set, lustration_status)
         };
 
         let mut custom_announcements = self.custom_announcements;
@@ -310,6 +322,33 @@ impl TransactionDetailsBuilder {
                 TransparentTransactionInfo::new(transparent_inputs, transparent_outputs);
             custom_announcements.push(transparent_transaction_details.to_announcement());
         }
+
+        // If transaction needs to lustrate, do so here.
+        if let Some(lustration_status) = lustration_status {
+            debug!(
+                "Lustration rules activated. Checking all inputs for lustration requirements.
+                AOCL leaf threshold: {}
+            ",
+                lustration_status.max_lustrating_aocl_leaf_index
+            );
+            for input in tx_inputs.iter() {
+                // Match consensus rule that defines when inputs need to be
+                // lustrated.
+                let (input_index_lower_end, _) = input
+                    .absolute_indices()
+                    .aocl_range()
+                    .expect("Must be able to calculate AOCL range of own input");
+
+                if input_index_lower_end <= lustration_status.max_lustrating_aocl_leaf_index {
+                    debug!(
+                        "Found input in need of lustration. Lustrating now. Input index min
+                     range was: {input_index_lower_end}"
+                    );
+                    // We need to lustrate!
+                    custom_announcements.push(input.lustration());
+                }
+            }
+        };
 
         let transaction_details = TransactionDetails::new(
             tx_inputs,

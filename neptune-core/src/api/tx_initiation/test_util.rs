@@ -41,6 +41,7 @@ impl TransactionInitiatorInternal {
     /// it is now just a wrapper around [`InputSelector`],
     /// TransactionDetailsBuilder, TransactionProofBuilder and
     /// TransactionBuilder
+    #[cfg(test)]
     pub(crate) async fn create_transaction(
         &mut self,
         tx_outputs: TxOutputList,
@@ -62,17 +63,20 @@ impl TransactionInitiatorInternal {
         // select inputs
         let wallet_status = state_lock.gs().get_wallet_status_for_tip().await;
         let current_height = state_lock.gs().chain.tip().header().height;
+        let lustration_threshold = state_lock.gs().chain.lustration_threshold();
         let spendable_inputs = wallet_status.spendable_inputs(timestamp);
         let input_candidates = spendable_inputs
             .into_iter()
             .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
             .collect();
 
-        let selected_inputs = InputSelector::new()
+        let accept_lustrations = true;
+        let input_policy = InputSelectionPolicy::default()
+            .prioritize(InputSelectionPriority::ByProvidedOrder)
+            .set_lustration_acceptance(accept_lustrations);
+        let selected_inputs = InputSelector::new(lustration_threshold)
             .input_candidates(input_candidates)
-            .policy(InputSelectionPolicy::from(
-                InputSelectionPriority::ByProvidedOrder,
-            ))
+            .policy(input_policy)
             .spend_amount(tx_outputs.total_native_coins() + fee)
             .build()?;
 

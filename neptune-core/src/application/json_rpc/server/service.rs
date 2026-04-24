@@ -43,6 +43,7 @@ use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_output::TxOutput;
@@ -1244,6 +1245,11 @@ impl RpcApi for RpcServer {
             Err(err) => return Err(RpcError::SendError(format!("{err}"))),
         };
 
+        let contains_lustrations = transaction.details().contains_lustrations();
+        if contains_lustrations && !request.accept_lustrations {
+            return Err(RpcError::TransactionRequiresLustration);
+        }
+
         // Notice that transaction has *not* yet been inserted into the mempool.
         // So that must happen in the main loop.
         let kernel = &transaction.transaction().kernel;
@@ -1267,6 +1273,7 @@ impl RpcApi for RpcServer {
                 .into_iter()
                 .map(|x| RpcPrivateNotificationData::from_private_notification_data(x, network))
                 .collect(),
+            contains_lustrations,
         };
 
         Ok(resp)
@@ -1303,16 +1310,24 @@ impl RpcApi for RpcServer {
         &self,
         request: GetBlockTemplateRequest,
     ) -> RpcResult<GetBlockTemplateResponse> {
-        let (maybe_proposal, tip) = {
+        let (maybe_proposal, tip_header) = {
             let global_state = self.state.lock_guard().await;
             let proposal = global_state.mining_state.block_proposal.map(|p| p.clone());
-            let tip = *global_state.chain.tip().header();
+            let tip_header = *global_state.chain.tip().header();
 
-            (proposal, tip)
+            (proposal, tip_header)
         };
 
         let Some(mut proposal) = maybe_proposal else {
             return Ok(GetBlockTemplateResponse { template: None });
+        };
+
+        let network = self.state.cli().network;
+        let consensus_rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
+        let difficulty = if consensus_rules.use_parent_difficulty() {
+            tip_header.difficulty
+        } else {
+            proposal.header().difficulty
         };
 
         let address =
@@ -1322,7 +1337,7 @@ impl RpcApi for RpcServer {
 
         let template = RpcBlockTemplate {
             block: RpcBlock::from(&proposal),
-            metadata: RpcBlockTemplateMetadata::new(&proposal, tip.difficulty),
+            metadata: RpcBlockTemplateMetadata::new(&proposal, difficulty),
         };
 
         Ok(GetBlockTemplateResponse {
@@ -1337,11 +1352,9 @@ impl RpcApi for RpcServer {
         let mut template: Block = request.template.into();
 
         // Since block comes from external source, we need to check validity.
+        let network = self.state.cli().network;
         let tip = self.state.lock_guard().await.chain.tip().clone();
-        if !template
-            .is_valid(&tip, Timestamp::now(), self.state.cli().network)
-            .await
-        {
+        if !template.is_valid(&tip, Timestamp::now(), network).await {
             return Err(RpcError::SubmitBlock(SubmitBlockError::InvalidBlock));
         }
 
@@ -2048,6 +2061,7 @@ pub mod tests {
             .await
             .unwrap();
         let mock_amount = NativeCurrencyAmount::coins_from_str("1").unwrap();
+        let accept_lustrations = true;
         let devnet_artifacts = devnet_node
             .api_mut()
             .tx_sender_mut()
@@ -2056,6 +2070,7 @@ pub mod tests {
                 Default::default(),
                 mock_amount,
                 network.launch_date() + Timestamp::months(3),
+                accept_lustrations,
             )
             .await
             .unwrap();
@@ -2553,6 +2568,7 @@ pub mod tests {
             let send_amt = NativeCurrencyAmount::coins(2);
             let fee = NativeCurrencyAmount::coins(2);
             let recipient = GenerationReceivingAddress::derive_from_seed(Digest::default());
+            let accept_lustrations = false;
 
             let resp = rpc_server
                 .send(
@@ -2564,6 +2580,7 @@ pub mod tests {
                     Some("on-chain".to_string()),
                     Some("on-chain".to_string()),
                     None,
+                    accept_lustrations,
                 )
                 .await
                 .unwrap();
@@ -2920,6 +2937,7 @@ pub mod tests {
 
             // Create a lot of transactions in as many blocks.
             let mut previous_block = Block::genesis(network);
+            let accept_lustrations = true;
             for _ in 1..=num_blocks {
                 let devnet_artifacts = rpc_server
                     .state
@@ -2933,6 +2951,7 @@ pub mod tests {
                         Default::default(),
                         fee_per_tx,
                         previous_block.header().timestamp + Timestamp::months(7),
+                        accept_lustrations,
                     )
                     .await
                     .unwrap();

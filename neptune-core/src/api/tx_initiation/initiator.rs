@@ -81,8 +81,9 @@ impl TransactionInitiator {
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
         timestamp: Timestamp,
+        lustration_threshold: Option<u64>,
     ) -> Result<Vec<InputCandidate>, error::CreateTxError> {
-        InputSelector::new()
+        InputSelector::new(lustration_threshold)
             .input_candidates(self.input_candidates(timestamp).await)
             .policy(policy)
             .spend_amount(spend_amount)
@@ -244,9 +245,18 @@ impl TransactionInitiator {
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
+        accept_lustrations: bool,
     ) -> Result<TxCreationArtifacts, error::SendError> {
-        self.send_inner(outputs, change_policy, fee, timestamp, false)
-            .await
+        let transparent = false;
+        self.send_inner(
+            outputs,
+            change_policy,
+            fee,
+            timestamp,
+            transparent,
+            accept_lustrations,
+        )
+        .await
     }
 
     /// Build and broadcast a *transparent* transaction.
@@ -262,8 +272,18 @@ impl TransactionInitiator {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
     ) -> Result<TxCreationArtifacts, error::SendError> {
-        self.send_inner(outputs, change_policy, fee, timestamp, true)
-            .await
+        // Lustrations are always accepted on transparent transactions, since
+        // all inputs are public anyway.
+        let accept_lustrations = true;
+        self.send_inner(
+            outputs,
+            change_policy,
+            fee,
+            timestamp,
+            true,
+            accept_lustrations,
+        )
+        .await
     }
 
     /// Build a transaction and broadcast it.
@@ -274,10 +294,12 @@ impl TransactionInitiator {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         transparent: bool,
+        accept_lustrations: bool,
     ) -> Result<TxCreationArtifacts, error::SendError> {
         tracing::info!("send: recording tx");
 
-        let policy = InputSelectionPolicy::default();
+        let input_policy =
+            InputSelectionPolicy::default().set_lustration_acceptance(accept_lustrations);
         let tx_creation_artifacts = self
             .construct_transaction_mutable_state(
                 outputs,
@@ -285,9 +307,15 @@ impl TransactionInitiator {
                 fee,
                 timestamp,
                 transparent,
-                policy,
+                input_policy,
             )
             .await?;
+
+        if tx_creation_artifacts.details.contains_lustrations() && !accept_lustrations {
+            return Err(error::SendError::Tx(
+                error::CreateTxError::RequiresLustration,
+            ));
+        }
 
         self.record_and_broadcast_transaction(&tx_creation_artifacts)
             .await?;
@@ -332,6 +360,7 @@ impl TransactionInitiator {
 
         let current_height = state_lock.gs().chain.tip().header().height;
         let validator = state_lock.gs().utxo_validator();
+        let lustration_threshold = state_lock.gs().chain.lustration_threshold();
         let wallet_status = state_lock
             .gs()
             .wallet_state
@@ -342,7 +371,7 @@ impl TransactionInitiator {
             .into_iter()
             .map(|synced_utxo| InputCandidate::from_synced_utxo(synced_utxo, current_height))
             .collect();
-        let selected_inputs = InputSelector::new()
+        let selected_inputs = InputSelector::new(lustration_threshold)
             .input_candidates(input_candidates)
             .policy(input_selection_policy)
             .spend_amount(spend_amount)

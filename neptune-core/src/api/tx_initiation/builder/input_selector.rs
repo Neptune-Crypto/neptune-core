@@ -52,6 +52,7 @@ impl Display for SortOrder {
 
 /// Defines a strategy for prioritizing some inputs over others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 pub enum InputSelectionPriority {
     /// choose inputs at random
     #[default]
@@ -136,6 +137,9 @@ pub struct InputSelectionPolicy {
 
     /// If set, number of selected inputs will exceed this number.
     max_num_inputs: Option<usize>,
+
+    /// Whether or not the user tolerates lustrations of the inputs.
+    accept_lustrations: bool,
 }
 
 impl From<InputSelectionPriority> for InputSelectionPolicy {
@@ -144,6 +148,7 @@ impl From<InputSelectionPriority> for InputSelectionPolicy {
             priority,
             required_number_of_confirmations: 1,
             max_num_inputs: None,
+            accept_lustrations: false,
         }
     }
 }
@@ -161,6 +166,11 @@ impl InputSelectionPolicy {
 
     pub fn cap_num_inputs(mut self, max_num_inputs: usize) -> Self {
         self.max_num_inputs = Some(max_num_inputs);
+        self
+    }
+
+    pub fn set_lustration_acceptance(mut self, accept_lustrations: bool) -> Self {
+        self.accept_lustrations = accept_lustrations;
         self
     }
 }
@@ -224,12 +234,18 @@ pub struct InputSelector {
 
     // ##multicoin## : maybe this should be Coin or Vec<Coin> instead of NativeCurrencyAmount?
     spend_amount: NativeCurrencyAmount,
+
+    /// The highest last AOCL leaf that requires lustration.
+    lustration_threshold: Option<u64>,
 }
 
 impl InputSelector {
     /// instantiate
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(lustration_threshold: Option<u64>) -> Self {
+        Self {
+            lustration_threshold,
+            ..Default::default()
+        }
     }
 
     /// set input candidates
@@ -277,34 +293,42 @@ impl InputSelector {
         match self.policy.priority {
             InputSelectionPriority::Random => {
                 let mut rng = rng();
-                inputs.into_iter().sorted_by_key(|_| rng.next_u64())
+                let mut decorated: Vec<_> = inputs
+                    .into_iter()
+                    .map(|item| (rng.next_u64(), item))
+                    .collect();
+
+                decorated.sort_by_key(|(key, _)| *key);
+
+                decorated
+                    .into_iter()
+                    .map(|(_, item)| item)
+                    .collect::<Vec<_>>()
             }
-            InputSelectionPriority::ByProvidedOrder => {
-                // leave input order unchanged.
-                let mut i = 0;
-                inputs.into_iter().sorted_by_key(|_| {
-                    i += 1;
-                    i
-                })
-            }
-            InputSelectionPriority::ByNativeCoinAmount(order) => {
-                inputs.into_iter().sorted_by(|a, b| {
+            InputSelectionPriority::ByProvidedOrder => inputs.into_iter().collect::<Vec<_>>(),
+            InputSelectionPriority::ByNativeCoinAmount(order) => inputs
+                .into_iter()
+                .sorted_by(|a, b| {
                     sort(
                         order,
                         &a.utxo.get_native_currency_amount(),
                         &b.utxo.get_native_currency_amount(),
                     )
                 })
-            }
+                .collect::<Vec<_>>(),
             InputSelectionPriority::ByUtxoSize(order) => inputs
                 .into_iter()
-                .sorted_by(|a, b| sort(order, &a.utxo.get_heap_size(), &b.utxo.get_heap_size())),
+                .sorted_by(|a, b| sort(order, &a.utxo.get_heap_size(), &b.utxo.get_heap_size()))
+                .collect::<Vec<_>>(),
 
             InputSelectionPriority::ByAge(order) => {
-                inputs.into_iter().sorted_by(|a, b| {
-                    sort(order, &a.aocl_leaf_index(), &b.aocl_leaf_index()).reverse()
-                    // higher index means smaller age
-                })
+                inputs
+                    .into_iter()
+                    .sorted_by(|a, b| {
+                        sort(order, &a.aocl_leaf_index(), &b.aocl_leaf_index()).reverse()
+                        // higher index means smaller age
+                    })
+                    .collect::<Vec<_>>()
             }
         }
     }
@@ -329,12 +353,29 @@ impl InputSelector {
         let iter = self.filter_by_confirmation_count(iter);
         let iter = self.prioritize(iter);
 
+        let reject_lustrations = !self.policy.accept_lustrations;
+        let mut lustration_rejects_acc = NativeCurrencyAmount::zero();
+
         let mut selected_inputs = vec![];
         let mut current_amount = NativeCurrencyAmount::zero();
         let max_num_inputs = self.policy.max_num_inputs.unwrap_or(usize::MAX);
         for input in iter {
+            let value = input.utxo.get_native_currency_amount();
+            let aocl_range_min = match input.index_set().aocl_range() {
+                Ok((min, _max)) => min,
+                Err(err) => return Err(error::CreateTxError::MutatorSetError(err)),
+            };
+            if reject_lustrations
+                && self
+                    .lustration_threshold
+                    .is_some_and(|threshold| threshold >= aocl_range_min)
+            {
+                lustration_rejects_acc += value;
+                continue;
+            }
+
             if current_amount < spend_amount && max_num_inputs > selected_inputs.len() {
-                current_amount += input.utxo.get_native_currency_amount();
+                current_amount += value;
                 selected_inputs.push(input.clone());
             } else if max_num_inputs <= selected_inputs.len() {
                 // The input priority is incompatible with the maximum number
@@ -345,6 +386,10 @@ impl InputSelector {
             }
         }
 
+        if current_amount < spend_amount && !lustration_rejects_acc.is_zero() {
+            return Err(error::CreateTxError::RequiresLustration);
+        }
+
         Ok(selected_inputs)
     }
 }
@@ -353,5 +398,49 @@ fn sort<O: Ord>(order: SortOrder, a: &O, b: &O) -> std::cmp::Ordering {
     match order {
         SortOrder::Ascending => Ord::cmp(a, b),
         SortOrder::Descending => Ord::cmp(b, a),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use strum::IntoEnumIterator;
+
+    use super::*;
+    use crate::state::wallet::wallet_status::SyncedUtxo;
+
+    #[expect(clippy::derivable_impls)]
+    impl Default for SortOrder {
+        // Needed for `strum::EnumIter` derivation in downstream type
+        // `InputSelectionPriority`.
+        fn default() -> Self {
+            Self::Descending
+        }
+    }
+
+    #[test]
+    fn no_panic_in_prioritize() {
+        let dummy_input = |aocl_leaf_index: u64| InputCandidate {
+            synced_utxo: SyncedUtxo::empty_dummy(aocl_leaf_index),
+            number_of_confirmations: 14,
+        };
+        let dummy_inputs = (0..100).map(dummy_input).collect_vec();
+
+        for priority in InputSelectionPriority::iter() {
+            let policy = InputSelectionPolicy {
+                priority,
+                required_number_of_confirmations: 13,
+                max_num_inputs: None,
+                accept_lustrations: false,
+            };
+            let input_selector = InputSelector {
+                input_candidates_inputs: dummy_inputs.clone(),
+                policy,
+                spend_amount: NativeCurrencyAmount::coins(100),
+                lustration_threshold: None,
+            };
+
+            // Ensure no panic when calling `prioritize`
+            let _inputs = input_selector.prioritize(&dummy_inputs);
+        }
     }
 }

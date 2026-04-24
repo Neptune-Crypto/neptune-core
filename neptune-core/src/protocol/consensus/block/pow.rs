@@ -20,6 +20,7 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::twenty_first::bfe_array;
 
+use crate::api::export::NativeCurrencyAmount;
 use crate::application::loops::channel::Cancelable;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
@@ -27,6 +28,30 @@ use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
+pub struct LustrationStatus {
+    /// Remaining number of coins that can pass through the lustration barrier.
+    pub counter: NativeCurrencyAmount,
+
+    /// An upper limit of which AOCL leafs that need to lustrate.
+    ///
+    /// All AOCL leaf indices at or below this threshold must lustrate.
+    ///
+    /// All indices above this value do not have to lustrate.
+    pub max_lustrating_aocl_leaf_index: u64,
+}
+
+impl std::fmt::Display for LustrationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "counter: {}; AOCL threshold: {}",
+            self.counter, self.max_lustrating_aocl_leaf_index,
+        )
+    }
+}
 
 /// Determines the number of leafs in the Merkle tree in the guesser buffer.
 #[cfg(not(test))]
@@ -201,9 +226,9 @@ pub struct Pow<const MERKLE_TREE_HEIGHT: usize> {
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, BFieldCodec, Default, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct PowMastPaths {
-    pub(super) pow: [Digest; BlockHeader::MAST_HEIGHT],
-    pub(super) header: [Digest; BlockKernel::MAST_HEIGHT],
-    pub(super) kernel: [Digest; Block::MAST_HEIGHT],
+    pub pow: [Digest; BlockHeader::MAST_HEIGHT],
+    pub header: [Digest; BlockKernel::MAST_HEIGHT],
+    pub kernel: [Digest; Block::MAST_HEIGHT],
 }
 
 impl PowMastPaths {
@@ -282,6 +307,25 @@ pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
 }
 
 impl<const MERKLE_TREE_HEIGHT: usize> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+    /// Return a guesser buffer for non-memory hard guessing. Contains an empty
+    /// Merkle tree since a Merkle tree is not required when the PoW algorithm
+    /// is not memory-hard.
+    fn empty(prev_block_digest: Digest) -> Self {
+        Self {
+            merkle_tree: MTree::default(),
+            prev_block_digest,
+        }
+    }
+
+    /// Returns true if the [Self::merkle_tree] field is required for efficient
+    /// guessing.
+    ///
+    /// True indicates that the PoW algorithm is memory hard, false that it is
+    /// not.
+    fn is_memory_hard(&self) -> bool {
+        !self.merkle_tree.leafs.is_empty()
+    }
+
     /// A commitment that refers to both the Merkle tree of the guesser buffer
     /// and the current proposal being guessed on, designed in such a way that
     /// the Merkle tree root must be known before indices can be picked.
@@ -362,12 +406,62 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             .collect()
     }
 
+    /// Return the lustration status set in the PoW field of the block header.
+    pub(crate) fn lustration_status(&self) -> Result<LustrationStatus, PowValidationError> {
+        let [e0, e1, e2, e3, e4] = self.path_a[MERKLE_TREE_HEIGHT - 2].values();
+        let e5 = self.path_a[MERKLE_TREE_HEIGHT - 1].values()[0];
+
+        let Ok(lustration_status) = LustrationStatus::decode(&[e0, e1, e2, e3, e4, e5]) else {
+            return Err(PowValidationError::CannotParseLustrationCounter);
+        };
+
+        Ok(*lustration_status)
+    }
+
+    fn set_lustration_status_raw(&mut self, raw_values: [BFieldElement; 6]) {
+        let [e0, e1, e2, e3, e4, e5] = raw_values;
+
+        // This encoding leaves nine free B field elements free after the
+        // the lustration encoding. Those **nine** elements can be used to
+        // encode other data, without negatively affecting optimized mining
+        // hardware or software.
+        self.path_a[MERKLE_TREE_HEIGHT - 2] = Digest([e0, e1, e2, e3, e4]);
+        let [_prev_e0, prev_e1, prev_e2, prev_e3, prev_e4] =
+            self.path_a[MERKLE_TREE_HEIGHT - 1].values();
+        self.path_a[MERKLE_TREE_HEIGHT - 1] = Digest([e5, prev_e1, prev_e2, prev_e3, prev_e4]);
+    }
+
+    /// Set the lustration status to the specified value in the PoW field.
+    pub(super) fn set_lustration_status(&mut self, value: LustrationStatus) {
+        let encoding = value.encode();
+        let encoding: [BFieldElement; 6] = encoding
+            .try_into()
+            .expect("Lustration status encoding must have size six elements");
+        self.set_lustration_status_raw(encoding);
+    }
+
+    pub(super) fn version_in_pow(&self) -> BFieldElement {
+        let [_, _, _, _, version] = self.path_a[MERKLE_TREE_HEIGHT - 3].values();
+
+        version
+    }
+
+    pub(super) fn set_version_in_pow(&mut self, value: BFieldElement) {
+        let [prev_e0, prev_e1, prev_e2, prev_e3, _prev_e4] =
+            self.path_a[MERKLE_TREE_HEIGHT - 3].values();
+        self.path_a[MERKLE_TREE_HEIGHT - 3] = Digest([prev_e0, prev_e1, prev_e2, prev_e3, value]);
+    }
+
     pub(crate) fn preprocess(
         mast_auth_paths: PowMastPaths,
         cancel_channel: Option<&dyn Cancelable>,
         consensus_rule_set: ConsensusRuleSet,
         prev_block_digest: Digest,
     ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+        if !consensus_rule_set.memory_hard_pow() {
+            return GuesserBuffer::empty(prev_block_digest);
+        }
+
         let bud_prefix = if consensus_rule_set == ConsensusRuleSet::Reboot {
             // Commitment to all the fields in the block that are not pow
             mast_auth_paths.commit()
@@ -474,28 +568,49 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         index_picker_preimage: Digest,
         nonce: Digest,
         target: Digest,
+        lustration_status: Option<LustrationStatus>,
+        version: Option<BFieldElement>,
     ) -> Option<Self> {
-        let root = buffer.merkle_tree.root();
+        let pow = if buffer.is_memory_hard() {
+            let root = buffer.merkle_tree.root();
 
-        let (index_a, index_b) = Self::indices(index_picker_preimage, nonce);
+            let (index_a, index_b) = Self::indices(index_picker_preimage, nonce);
 
-        let path_a = buffer
-            .merkle_tree
-            .path(index_a as usize)
-            .try_into()
-            .unwrap();
+            let path_a = buffer
+                .merkle_tree
+                .path(index_a as usize)
+                .try_into()
+                .unwrap();
 
-        let path_b = buffer
-            .merkle_tree
-            .path(index_b as usize)
-            .try_into()
-            .unwrap();
+            let path_b = buffer
+                .merkle_tree
+                .path(index_b as usize)
+                .try_into()
+                .unwrap();
 
-        let pow = Pow {
-            nonce,
-            root,
-            path_a,
-            path_b,
+            Pow {
+                nonce,
+                root,
+                path_a,
+                path_b,
+            }
+        } else {
+            let mut pow = Pow {
+                nonce,
+                root: Default::default(),
+                path_a: [Digest::default(); MERKLE_TREE_HEIGHT],
+                path_b: [Digest::default(); MERKLE_TREE_HEIGHT],
+            };
+
+            if let Some(lustration) = lustration_status {
+                pow.set_lustration_status(lustration);
+            }
+
+            if let Some(version) = version {
+                pow.set_version_in_pow(version);
+            }
+
+            pow
         };
 
         let pow_digest = mast_auth_paths.fast_mast_hash(pow);
@@ -513,10 +628,20 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         consensus_rule_set: ConsensusRuleSet,
         parent_digest: Digest,
     ) -> Result<(), PowValidationError> {
+        let pow_digest = auth_paths.fast_mast_hash(self);
+        let meets_threshold = pow_digest <= target;
         let leaf_prefix = match consensus_rule_set {
             ConsensusRuleSet::Reboot => auth_paths.commit(),
             ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::TvmProofVersion1 => parent_digest,
+            ConsensusRuleSet::HardforkBeta => {
+                if !meets_threshold {
+                    return Err(PowValidationError::ThresholdNotMet);
+                }
+
+                return Ok(());
+            }
         };
+
         let index_picker_preimage = Tip5::hash_pair(self.root, auth_paths.commit());
         let (index_a, index_b) = Self::indices(index_picker_preimage, self.nonce);
 
@@ -547,8 +672,6 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             return Err(PowValidationError::PathBInvalid);
         }
 
-        let pow_digest = auth_paths.fast_mast_hash(self);
-        let meets_threshold = pow_digest <= target;
         if !meets_threshold {
             return Err(PowValidationError::ThresholdNotMet);
         }
@@ -562,6 +685,7 @@ pub(crate) enum PowValidationError {
     PathAInvalid,
     PathBInvalid,
     ThresholdNotMet,
+    CannotParseLustrationCounter,
 }
 
 // Not under test flag since it's used in both tests and benchmarks
@@ -591,6 +715,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Distribution<Pow<MERKLE_TREE_HEIGHT>> for 
 pub(crate) mod tests {
     use std::time::Instant;
 
+    use num_traits::Zero;
+    use proptest::prelude::TestCaseError;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
@@ -605,6 +731,7 @@ pub(crate) mod tests {
     use crate::api::export::Network;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::protocol::consensus::block::tests::DIFFICULTY_LIMIT_FOR_TESTS;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::tests::shared::blocks::invalid_empty_block;
 
     impl MTree {
@@ -615,6 +742,57 @@ pub(crate) mod tests {
         fn leaf(&self, index: usize) -> Digest {
             self.leafs[index]
         }
+    }
+
+    impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
+        pub(in super::super) fn set_unparseable_lustration_status(&mut self) {
+            let elements = bfe_array![
+                1u64 << 32,
+                1u64 << 33,
+                1u64 << 34,
+                1u64 << 35,
+                1u64 << 36,
+                1u64 << 37
+            ];
+            self.set_lustration_status_raw(elements);
+        }
+    }
+
+    #[test]
+    fn lustration_encoding_error_on_invalid_amount() {
+        // Last four elements encode amount
+        let mut pow = Pow::<29>::default();
+        pow.set_lustration_status_raw(bfe_array![0, 0, 0, 0, 1u64 << 32, 0]);
+        assert_eq!(
+            PowValidationError::CannotParseLustrationCounter,
+            pow.lustration_status().unwrap_err()
+        );
+    }
+
+    #[test]
+    fn lustration_encoding_error_on_invalid_threshold() {
+        // First two elements encode leaf index threshold
+        let mut pow = Pow::<29>::default();
+        pow.set_lustration_status_raw(bfe_array![1u64 << 32, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            PowValidationError::CannotParseLustrationCounter,
+            pow.lustration_status().unwrap_err()
+        );
+    }
+
+    #[test]
+    fn hardfork_no_memory_hardness_is_not_memory_hard() {
+        let mut rng = rng();
+        let auth_paths = rng.random::<PowMastPaths>();
+        let prev_block_digest = rng.random();
+        let buffer = Pow::<10>::preprocess(
+            auth_paths,
+            None,
+            ConsensusRuleSet::HardforkBeta,
+            prev_block_digest,
+        );
+
+        assert!(!buffer.is_memory_hard());
     }
 
     #[test]
@@ -666,6 +844,41 @@ pub(crate) mod tests {
         report::<27>(auth_paths, parent_block_hash);
         report::<28>(auth_paths, parent_block_hash);
         report::<29>(auth_paths, parent_block_hash);
+    }
+
+    #[test]
+    fn lustration_counter_is_followed_by_9_unbound_elems_in_encoding() {
+        // Leaving 9 unbound b field elements after the lustration counter
+        // allows for the insertion of more data into the PoW field (through
+        // later forks) without punishing heavily optimized guesser hardware
+        // or software.
+        let amount = NativeCurrencyAmount::from_raw_i128(u128::MAX as i128);
+        assert_eq!(
+            i128::BITS,
+            amount.to_nau().count_ones(),
+            "Test value must be all ones"
+        );
+        let mut pow = Pow::<10>::default();
+        pow.set_lustration_status(LustrationStatus {
+            counter: amount,
+            max_lustrating_aocl_leaf_index: u64::MAX,
+        });
+        let encoding = pow.encode();
+        let mut iterator = encoding.iter().peekable();
+
+        while iterator.peek().is_some_and(|x| x.is_zero()) {
+            iterator.next();
+        }
+        for _ in 0..6 {
+            assert_eq!(bfe!(u32::MAX), *iterator.next().unwrap());
+        }
+
+        // Next 9 B-field elements are zero
+        for _ in 0..9 {
+            assert!(iterator.next().unwrap().is_zero());
+        }
+
+        assert!(iterator.next().is_none());
     }
 
     #[test]
@@ -721,8 +934,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn happy_path() {
-        const MERKLE_TREE_HEIGHT: usize = 10;
+    fn happy_path_all_consensus_rule_sets() {
+        const MERKLE_TREE_HEIGHT: usize = 8;
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
         let prev_block_digest = rng.random();
@@ -735,9 +948,9 @@ pub(crate) mod tests {
                 prev_block_digest,
             );
 
-            for difficulty in [2_u32, 4] {
+            for difficulty in [2_u32, 8] {
                 let difficulty = Difficulty::from(difficulty);
-                let successful_guess = solve(&buffer, &auth_paths, difficulty);
+                let successful_guess = solve(&buffer, &auth_paths, difficulty, None, None);
                 assert!(successful_guess
                     .validate(
                         auth_paths,
@@ -748,6 +961,45 @@ pub(crate) mod tests {
                     .is_ok());
             }
         }
+    }
+
+    fn lustration_encoding_prop(lustration_status: LustrationStatus) -> Result<(), TestCaseError> {
+        let mut pow = Pow::<29>::default();
+        pow.set_lustration_status(lustration_status);
+        let read = pow.lustration_status().unwrap();
+        prop_assert_eq!(lustration_status, read);
+
+        Ok(())
+    }
+
+    #[proptest(cases = 20)]
+    fn lustration_encoding_consistency_u64(
+        #[strategy(arb())] amount: NativeCurrencyAmount,
+        #[strategy(arb())] aocl_leaf_index: u64,
+    ) {
+        lustration_encoding_prop(LustrationStatus {
+            counter: amount,
+            max_lustrating_aocl_leaf_index: aocl_leaf_index,
+        })?;
+    }
+
+    #[proptest(cases = 20)]
+    fn lustration_encoding_consistency_u32(
+        #[strategy(arb())] amount: NativeCurrencyAmount,
+        #[strategy(arb())] aocl_leaf_index: u32,
+    ) {
+        lustration_encoding_prop(LustrationStatus {
+            counter: amount,
+            max_lustrating_aocl_leaf_index: aocl_leaf_index.into(),
+        })?;
+    }
+
+    #[proptest(cases = 20)]
+    fn version_encoding_consistency(#[strategy(arb())] version: BFieldElement) {
+        let mut pow = Pow::<29>::default();
+        pow.set_version_in_pow(version);
+        let read = pow.version_in_pow();
+        prop_assert_eq!(version, read);
     }
 
     /// Ensure that indices cannot be reused over two proposals that share the
@@ -800,7 +1052,7 @@ pub(crate) mod tests {
 
         // Verify that 1st block proposal can be solved
         let difficulty = Difficulty::from(2u32);
-        let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty);
+        let correct_guess_1 = solve(&buffer, &auth_paths_1, difficulty, None, None);
         assert!(correct_guess_1
             .validate(
                 auth_paths_1,
@@ -828,7 +1080,7 @@ pub(crate) mod tests {
         // Verify that a 2nd proposal can use the same `buffer` value to create
         // a successful guess, and that only the `auth_paths` value needs to
         // change.
-        let correct_guess_2 = solve(&buffer, &auth_paths_2, difficulty);
+        let correct_guess_2 = solve(&buffer, &auth_paths_2, difficulty, None, None);
         assert!(correct_guess_2
             .validate(
                 auth_paths_2,
@@ -843,6 +1095,8 @@ pub(crate) mod tests {
         buffer: &GuesserBuffer<N>,
         auth_paths: &PowMastPaths,
         difficulty: Difficulty,
+        lustration_status: Option<LustrationStatus>,
+        version: Option<BFieldElement>,
     ) -> Pow<N> {
         assert!(
             difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
@@ -856,9 +1110,15 @@ pub(crate) mod tests {
         let index_picker_preimage = buffer.index_picker_preimage(auth_paths);
         loop {
             let nonce = rng.random();
-            if let Some(solution) =
-                Pow::guess(buffer, auth_paths, index_picker_preimage, nonce, target)
-            {
+            if let Some(solution) = Pow::guess(
+                buffer,
+                auth_paths,
+                index_picker_preimage,
+                nonce,
+                target,
+                lustration_status,
+                version,
+            ) {
                 break solution;
             }
         }

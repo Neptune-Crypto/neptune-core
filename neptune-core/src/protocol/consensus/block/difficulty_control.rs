@@ -48,7 +48,7 @@ impl Difficulty {
     pub const MINIMUM: Self = Self::new(Self::LIMBS_FOR_MINIMUM);
     pub const MAXIMUM: Self = Self::new([u32::MAX; Self::NUM_LIMBS]);
 
-    pub(crate) const fn new(difficulty: [u32; DIFFICULTY_NUM_LIMBS]) -> Self {
+    pub const fn new(difficulty: [u32; DIFFICULTY_NUM_LIMBS]) -> Self {
         let mut lte_minimum = true;
         let mut i = 0;
         while i < Self::NUM_LIMBS {

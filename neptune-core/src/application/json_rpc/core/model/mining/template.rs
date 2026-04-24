@@ -1,10 +1,12 @@
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::block::Block;
 
@@ -29,20 +31,34 @@ pub struct RpcBlockTemplateMetadata {
 
     // All fields public since used downstream by mining pool software.
     pub pow_mast_paths: PowMastPaths,
+
+    /// The lustration status that must be set in the pow field of the header
+    /// for the block to be valid. Should only be used once hardfork-beta is
+    /// active. Otherwise, ignore.
+    pub lustration_status: Option<LustrationStatus>,
+
+    /// The version field in the header.
+    pub version: BFieldElement,
 }
 
 impl RpcBlockTemplateMetadata {
     /// Extracts template metadata assuming that the caller has already set the
     /// correct guesser digest.
-    pub fn new(block_proposal: &Block, parent_difficulty: Difficulty) -> Self {
+    /// # Warning
+    /// - The provided difficulty will be used, regardless of the consensus
+    ///   rule set. So it must be correct.
+    // TODO: Remove 2nd argument when hardfork-beta is activated
+    pub fn new(block_proposal: &Block, difficulty: Difficulty) -> Self {
         let digest = block_proposal.hash();
         let prev_block = block_proposal.header().prev_block_digest;
-        let threshold = parent_difficulty.target();
+        let threshold = difficulty.target();
         let guesser_reward = block_proposal
             .body()
             .total_guesser_reward()
             .expect("Block proposal must have well-defined guesser reward");
         let auth_paths = block_proposal.pow_mast_paths();
+
+        let lustration_status = block_proposal.header().pow.lustration_status().ok();
 
         Self {
             digest,
@@ -50,6 +66,8 @@ impl RpcBlockTemplateMetadata {
             threshold,
             total_guesser_reward: guesser_reward.into(),
             pow_mast_paths: auth_paths,
+            lustration_status,
+            version: block_proposal.header().version,
         }
     }
 }
@@ -91,6 +109,8 @@ mod tests {
                         index_picker_preimage,
                         nonce,
                         self.threshold,
+                        self.lustration_status,
+                        Some(self.version),
                     )
                 })
                 .find_map(|x| x)

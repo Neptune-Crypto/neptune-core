@@ -23,9 +23,12 @@ impl Args {
     ///
     /// Sets cache.
     pub(crate) fn second_parse(&mut self) -> Result<(), CliArgsParseError> {
-        let auto_consolidate =
-            AutoConsolidationSetting::parse(&self.auto_consolidate, self.network)
-                .map_err(CliArgsParseError::InvalidConsolidationAddress)?;
+        let auto_consolidate = AutoConsolidationSetting::parse(
+            &self.auto_consolidate,
+            self.network,
+            self.accept_consolidation_lustrations,
+        )
+        .map_err(CliArgsParseError::InvalidConsolidationAddress)?;
         self.auto_consolidate_cache.set(auto_consolidate).unwrap();
 
         let proving_capability = self.derive_proving_capability()?;

@@ -852,11 +852,16 @@ impl MainLoopHandler {
                 //       identified by transaction-ID, into *one* update job.
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
-                let (consolidate, maybe_consolidation_address) =
+                let (consolidate, maybe_consolidation_address, accept_lustrations) =
                     match self.global_state_lock.cli().auto_consolidate() {
-                        AutoConsolidationSetting::Inactive => (false, None),
-                        AutoConsolidationSetting::ActiveDynamic => (true, None),
-                        AutoConsolidationSetting::ActiveFixed { address } => (true, Some(address)),
+                        AutoConsolidationSetting::Inactive => (false, None, false),
+                        AutoConsolidationSetting::ActiveDynamic { accept_lustrations } => {
+                            (true, None, accept_lustrations)
+                        }
+                        AutoConsolidationSetting::ActiveFixed {
+                            accept_lustrations,
+                            address,
+                        } => (true, Some(address), accept_lustrations),
                     };
 
                 if consolidate {
@@ -864,7 +869,12 @@ impl MainLoopHandler {
                     let mut tx_initiator = self.global_state_lock().api_mut().tx_initiator();
                     tokio::task::spawn(async move {
                         let _ = tx_initiator
-                            .consolidate(Default::default(), maybe_consolidation_address, timestamp)
+                            .consolidate(
+                                Default::default(),
+                                maybe_consolidation_address,
+                                timestamp,
+                                accept_lustrations,
+                            )
                             .await
                             .inspect_err(|err| warn!("{err}"));
                     });

@@ -1,3 +1,4 @@
+use crate::api::export::Network;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -24,23 +25,34 @@ pub struct LightState {
     /// the current. In normal operations, this will be the time it took miners
     /// to find the current tip.
     time_to_mine: Option<Timestamp>,
+
+    /// The network that the light state belongs to.
+    ///
+    /// Matches the network on which the node was started.
+    network: Network,
 }
 
 impl LightState {
     /// Contruct a new light state, from a block.
-    pub fn new(block: Block) -> Self {
+    pub fn new(block: Block, network: Network) -> Self {
         Self {
             mutator_set_accumulator_after: block
                 .mutator_set_accumulator_after()
                 .expect("Block stored as tip must be valid"),
             tip: block,
             time_to_mine: None,
+            network,
         }
     }
 
     /// A reference to the most canonical block seen on the network.
     pub fn tip(&self) -> &Block {
         &self.tip
+    }
+
+    /// Return the network on which this node runs.
+    pub(super) fn network(&self) -> Network {
+        self.network
     }
 
     /// Return the mutator set accumulator as it looks after the application of
@@ -93,10 +105,11 @@ pub(crate) mod tests {
 
     #[test]
     fn update_works() {
-        let previous_block = Block::genesis(Network::Main);
+        let network = Network::Main;
+        let previous_block = Block::genesis(network);
         let previous_block_hash = previous_block.hash();
         let new_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
-        let mut light_state = LightState::new(previous_block.clone());
+        let mut light_state = LightState::new(previous_block.clone(), network);
         assert_eq!(light_state.tip().hash(), previous_block_hash);
 
         let new_block: Block = Block::new(
@@ -105,6 +118,7 @@ pub(crate) mod tests {
                 previous_block_hash,
                 new_timestamp,
                 Timestamp::minutes(10),
+                network,
             ),
             previous_block.body().clone(),
             BlockAppendix::default(),
@@ -118,23 +132,25 @@ pub(crate) mod tests {
 
     #[test]
     fn time_to_mine_should_be_missing_until_updated() {
-        let previous_block = Block::genesis(Network::Main);
-        let light_state = LightState::new(previous_block.clone());
+        let network = Network::Main;
+        let previous_block = Block::genesis(network);
+        let light_state = LightState::new(previous_block.clone(), network);
         assert_eq!(light_state.time_to_mine(), None);
     }
 
     #[test]
     fn time_to_mine_should_be_missing_if_tip_not_direct_descendant() {
+        let network = Network::Main;
         let mut rng: StdRng = SeedableRng::seed_from_u64(893423984254);
-        let previous_block = Block::genesis(Network::Main);
+        let previous_block = Block::genesis(network);
         let previous_block_hash = previous_block.hash();
         let new_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
-        let mut light_state = LightState::new(previous_block);
+        let mut light_state = LightState::new(previous_block, network);
         assert_eq!(light_state.tip().hash(), previous_block_hash);
 
         let mut new_block: Block = rng.random();
 
-        new_block.set_header_timestamp_and_difficulty(new_timestamp, new_block.header().difficulty);
+        new_block.set_difficulty_related_fields(new_timestamp, new_block.header().difficulty, None);
 
         light_state.update(new_block);
         assert_eq!(light_state.time_to_mine(), None);
