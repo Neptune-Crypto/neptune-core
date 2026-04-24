@@ -759,6 +759,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn lustration_encoding_error_on_invalid_amount() {
+        // Last four elements encode amount
+        let mut pow = Pow::<29>::default();
+        pow.set_lustration_status_raw(bfe_array![0, 0, 0, 0, 1u64 << 32, 0]);
+        assert_eq!(
+            PowValidationError::CannotParseLustrationCounter,
+            pow.lustration_status().unwrap_err()
+        );
+    }
+
+    #[test]
+    fn lustration_encoding_error_on_invalid_threshold() {
+        // First two elements encode leaf index threshold
+        let mut pow = Pow::<29>::default();
+        pow.set_lustration_status_raw(bfe_array![1u64 << 32, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            PowValidationError::CannotParseLustrationCounter,
+            pow.lustration_status().unwrap_err()
+        );
+    }
+
+    #[test]
     fn hardfork_no_memory_hardness_is_not_memory_hard() {
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
