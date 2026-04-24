@@ -226,9 +226,9 @@ pub struct Pow<const MERKLE_TREE_HEIGHT: usize> {
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, BFieldCodec, Default, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct PowMastPaths {
-    pub(super) pow: [Digest; BlockHeader::MAST_HEIGHT],
-    pub(super) header: [Digest; BlockKernel::MAST_HEIGHT],
-    pub(super) kernel: [Digest; Block::MAST_HEIGHT],
+    pub pow: [Digest; BlockHeader::MAST_HEIGHT],
+    pub header: [Digest; BlockKernel::MAST_HEIGHT],
+    pub kernel: [Digest; Block::MAST_HEIGHT],
 }
 
 impl PowMastPaths {
