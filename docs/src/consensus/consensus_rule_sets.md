@@ -15,5 +15,5 @@ Neptune Core's mainnet has utilized the following consensus rule sets since the 
 | HardforkBeta     | hard                       | ~2026-05-13                       | 38,000                              | Removes memory hardness of PoW; adds a lustration barrier to ensure the prior soundness bug did not inflate supply; checks PoW threshold against own difficulty, not parent.      |
 
 ## Notes
-- **TvmProofVersion1** fixed the soundness error that was present in the `triton-vm` proof version 0, which was used by `triton-vm` version `v1.0.0`. `triton-vm` v2.0.0 uses proof version 1.
+- **TvmProofVersion1** fixed the soundness error that was present in the `triton-vm` proof version 0, which was used by `triton-vm` version `v1.0.0`. `triton-vm` `v2.0.0` uses proof version 1.
 - **HardforkBeta** introduces a lustration barrier to the block header. This lustration barrier acts as a counter that is decremented whenever a UTXO generated prior to HardforkBeta is spent. The counter is decremented by the number of Neptune coins being spent. If the counter reaches zero, UTXOs generated prior to the activation of HardforkBeta become unspendable. This provides a global guarantee that the total money supply was not increased beyond its intended limit due to the soundness error prior to the **TvmProofVersion1** rule set.
