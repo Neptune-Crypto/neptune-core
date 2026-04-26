@@ -1,3 +1,5 @@
+#![allow(clippy::unit_arg)]
+
 mod common;
 
 use common::genesis_node::GenesisNode;
@@ -10,8 +12,12 @@ use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::TransparentTransactionInfo;
 use neptune_cash::api::export::TxProvingCapability;
 use neptune_cash::api::tx_initiation::error::SendError;
+use neptune_cash::util_types::proof_of_transfer;
 use num_traits::ops::checked::CheckedSub;
 use num_traits::Zero;
+use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::twenty_first::prelude::Mmr;
+use tracing::debug;
 
 /// test: alice sends funds to herself onchain
 ///
@@ -77,11 +83,13 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
 /// see description of alice_sends_to_bob() for details
 #[tokio::test(flavor = "multi_thread")]
 pub async fn alice_sends_to_bob_with_primitive_witness_capability() -> anyhow::Result<()> {
-    alice_sends_to_bob(
+    let _ = alice_sends_to_bob(
         &GenesisNode::cluster_id(),
         TxProvingCapability::PrimitiveWitness,
     )
-    .await
+    .await?;
+
+    Ok(())
 }
 
 /// test: alice sends funds to bob onchain with proof collection capability
@@ -89,11 +97,12 @@ pub async fn alice_sends_to_bob_with_primitive_witness_capability() -> anyhow::R
 /// see description of alice_sends_to_bob() for details
 #[tokio::test(flavor = "multi_thread")]
 pub async fn alice_sends_to_bob_with_proof_collection_capability() -> anyhow::Result<()> {
-    alice_sends_to_bob(
+    let _ = alice_sends_to_bob(
         &GenesisNode::cluster_id(),
         TxProvingCapability::PrimitiveWitness,
     )
-    .await
+    .await?;
+    Ok(())
 }
 
 /// test: alice sends funds to bob onchain with single proof capability
@@ -101,16 +110,103 @@ pub async fn alice_sends_to_bob_with_proof_collection_capability() -> anyhow::Re
 /// see description of alice_sends_to_bob() for details
 #[tokio::test(flavor = "multi_thread")]
 pub async fn alice_sends_to_bob_with_single_proof_capability() -> anyhow::Result<()> {
-    alice_sends_to_bob(
+    let _ = alice_sends_to_bob(
         &GenesisNode::cluster_id(),
         TxProvingCapability::PrimitiveWitness,
     )
-    .await
+    .await?;
+
+    Ok(())
 }
 
-/// test: alice sends funds to bob onchain
+/// test: Bob verifies a proof Alice made for him over the transfer (proving is a part of this one)
 ///
-/// this is a basic test of:
+/// (single proof capability)
+///
+/// see description of `alice_sends_to_bob()` for details
+#[tokio::test(flavor = "multi_thread")]
+pub async fn alice_sends_to_bob_tritonverify() -> anyhow::Result<()> {
+    let ([alice, bob], bob_address) = alice_sends_to_bob(
+        &GenesisNode::cluster_id(),
+        TxProvingCapability::PrimitiveWitness,
+    )
+    .await?;
+
+    tracing::trace!["Alice proves the transfer"];
+    let tip_the = alice.gsl.lock(|gs| gs.chain.tip().hash()).await;
+    let (claim, proof) = proof_of_transfer::helper(alice.gsl.clone(), 0, 0, tip_the)
+        .await
+        .unwrap();
+
+    tracing::trace!["Bob verifies the claim"];
+
+    let bob_address = neptune_cash::state::wallet::address::generation_address::GenerationReceivingAddress::try_from(bob_address).unwrap();
+
+    assert_eq!(
+        &claim.input[0..5],
+        bob_address
+            .receiver_postimage()
+            .values()
+            .into_iter()
+            .rev()
+            .collect::<Vec<BFieldElement>>()
+            .as_slice(),
+        "Bob checks it's sent to his address"
+    );
+
+    tracing::debug!["{:?}| `&claim.input`", &claim.input];
+    assert_eq!(
+        &claim.output[0..5],
+        bob_address.lock_script().hash().values(),
+        "Bob checks he commands the sent coin"
+    );
+
+    // it's expected that a good prover pass the block digest along the argument & claim: let's imagine here that piece of data was lost and we have only required minimum
+    let aocl_digest = tasm_lib::prelude::Digest::try_from(&claim.output[10..15]).unwrap();
+    match bob
+        .gsl
+        .lock_async(|gs| {
+            futures::FutureExt::boxed(async move {
+                let mut t = gs.chain.tip().clone();
+                debug!(
+                    "{:?}| The height of the tip Bob starts traversing the chain from.",
+                    t.header().height
+                );
+
+                while !t.header().height.is_genesis() {
+                    if aocl_digest == t.mutator_set_accumulator_after().unwrap().aocl.bag_peaks() {
+                        return Some(t.hash());
+                    }
+
+                    t = gs
+                        .chain
+                        .archival_state()
+                        .get_block(t.header().prev_block_digest)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                }
+
+                None
+            })
+        })
+        .await
+    {
+        Some(b) => {
+            tracing::trace!("{b}| Bob has the block of this digest which have the claimed AOCL")
+        }
+        None => panic!["Bob has no canonical `Block` of the claimed AOCL"],
+    }
+
+    Ok(assert!(
+        tasm_lib::triton_vm::verify(Default::default(), &claim, &proof,),
+        "Triton verification failed: the argument does not prove the claim"
+    ))
+}
+
+/// helper: Alice sends funds to Bob onchain
+///
+/// this is a basic test of the following
 ///  * peer connectivity
 ///  * block generation
 ///  * block propagation between nodes
@@ -125,10 +221,13 @@ pub async fn alice_sends_to_bob_with_single_proof_capability() -> anyhow::Result
 /// 4. alice mines 3 blocks to her own wallet.
 /// 5. alice sends a payment to bob.
 /// 6. bob verifies the unconfirmed balance matches payment amount.
-pub async fn alice_sends_to_bob(
+async fn alice_sends_to_bob(
     cluster_id: &str,
     proving_capability: TxProvingCapability,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<(
+    [GenesisNode; 2],
+    neptune_cash::api::export::ReceivingAddress,
+)> {
     logging::tracing_logger();
     let timeout_secs = 5;
 
@@ -186,7 +285,7 @@ pub async fn alice_sends_to_bob(
         .api_mut()
         .tx_sender_mut()
         .send(
-            vec![(bob_address, payment_amount)],
+            vec![(bob_address.clone(), payment_amount)],
             Default::default(),
             fee_amount,
             Timestamp::now(),
@@ -256,7 +355,7 @@ pub async fn alice_sends_to_bob(
     assert_eq!(bob_balances.confirmed_available, payment_amount);
     assert_eq!(bob_balances.unconfirmed_available, payment_amount);
 
-    Ok(())
+    Ok(([alice, bob], bob_address))
 }
 
 /// test: alice sends funds to random key.
