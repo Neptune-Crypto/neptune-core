@@ -368,7 +368,7 @@ impl GlobalStateLock {
     /// Releases locks after each validation such that this method does not
     /// block the entire application. In other words: A new tip can be set while
     /// this method is running.
-    pub(crate) async fn revalidate_canonical_chain(
+    pub async fn revalidate_canonical_chain(
         &self,
         mut first: BlockHeight,
         last: BlockHeight,

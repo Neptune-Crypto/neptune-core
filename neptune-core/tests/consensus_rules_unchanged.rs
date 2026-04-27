@@ -81,13 +81,21 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
     // Verify that wallet state was handled correctly, that balance is still
     // premine reward, since the devnet reward was not spent during first
     // blocks.
-    let block_height = state.chain.tip().header().height;
+    let final_height = state.chain.tip().header().height;
     let wallet_status = state.get_wallet_status_for_tip().await;
     let balance = wallet_status
-        .confirmed_available_balance(block_height, network.launch_date() + Timestamp::months(7));
+        .confirmed_available_balance(final_height, network.launch_date() + Timestamp::months(7));
     assert_eq!(
         NativeCurrencyAmount::coins(20),
         balance,
         "Expected balance must be available after state-recovery"
     );
+
+    drop(state);
+
+    assert!(alice
+        .gsl
+        .revalidate_canonical_chain(BlockHeight::genesis(), final_height)
+        .await
+        .is_ok());
 }
