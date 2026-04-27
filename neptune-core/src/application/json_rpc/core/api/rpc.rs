@@ -123,6 +123,9 @@ pub enum RpcError {
         "The consensus rules require lustration of the input, but the lustration flag was not set."
     )]
     TransactionRequiresLustration,
+    
+    #[error("Sent tx index is out of bounds.")]
+    SentTxIndexOutOfBounds,
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
