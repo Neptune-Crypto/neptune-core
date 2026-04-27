@@ -441,8 +441,8 @@ mod tests {
     use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
     use crate::protocol::consensus::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
+    use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     impl TritonProgramSpecification for CollectTypeScripts {

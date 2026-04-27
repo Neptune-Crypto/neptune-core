@@ -1012,8 +1012,8 @@ mod tests {
     use super::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use super::*;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
+    use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
 
     impl TritonProgramSpecification for TimeLock {
         #[expect(clippy::needless_return)]

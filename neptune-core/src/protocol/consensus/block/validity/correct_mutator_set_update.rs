@@ -51,7 +51,7 @@ impl TritonProgram for CorrectMutatorSetUpdate {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
+    use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
 
     impl TritonProgramSpecification for CorrectMutatorSetUpdate {
         fn source(&self) {
