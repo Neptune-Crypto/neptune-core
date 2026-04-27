@@ -123,9 +123,14 @@ pub enum BlockValidationError {
         got: NativeCurrencyAmount,
         initial: NativeCurrencyAmount,
     },
+
     /// xxx -- unknown lustration error -- hopefully dead code
     #[error("Unknown lustration problem. This should not happen.")]
     UnknownLustrationProblem,
+
+    /// 2.t
+    #[error("Transaction mutator set must match parent block")]
+    TransactionMutatorSetMismatch,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {
@@ -165,6 +170,7 @@ mod tests {
     use crate::protocol::consensus::block::BlockProof;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
+    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::proof_abstractions::verifier::cache_true_claims;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
@@ -456,17 +462,23 @@ mod tests {
     ) {
         let network = Network::Main;
         let (mut b_prev, ts, rness) = s;
-        let b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
 
         b_prev
             .kernel
             .body
             .mutator_set_accumulator
             .add(&record_addition_an);
-        b_prev.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
-            b_prev.body(),
-            ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height),
+        let new_kernel = TransactionKernelModifier::default()
+            .mutator_set_hash(b_prev.mutator_set_accumulator_after().unwrap().hash())
+            .modify(b_new.kernel.body.transaction_kernel.clone());
+        b_new.kernel.body.transaction_kernel = new_kernel;
+        b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
+            b_new.body(),
+            ConsensusRuleSet::infer_from(network, b_new.header().height),
         ));
+
+        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
         prop_assert_eq!(
             BlockValidationError::MutatorSetUpdateIntegrity,
@@ -616,8 +628,13 @@ mod tests {
             .body
             .block_mmr_accumulator
             .append(b_prev.hash());
-        b_new.fix_mutator_set_field(&b_prev);
+        b_new.fix_mutator_set_fields(&b_prev);
         b_new.set_lustration_status(LustrationStatus::default());
+        b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
+            b_new.body(),
+            ConsensusRuleSet::infer_from(network, b_new.header().height),
+        ));
+
         cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
 
         prop_assert_eq!(

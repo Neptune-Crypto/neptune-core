@@ -842,6 +842,11 @@ impl Block {
             }
         }
 
+        // 2.t)
+        if msa_before.hash() != self.body().transaction_kernel.mutator_set_hash {
+            return Err(BlockValidationError::TransactionMutatorSetMismatch);
+        }
+
         // 2.c)
         let mut absolute_index_sets = inputs
             .iter()
@@ -1480,8 +1485,14 @@ pub(crate) mod tests {
             self.unset_digest();
         }
 
-        pub(super) fn fix_mutator_set_field(&mut self, prev_block: &Block) {
+        pub(super) fn fix_mutator_set_fields(&mut self, prev_block: &Block) {
             let mut msa = prev_block.mutator_set_accumulator_after().unwrap();
+
+            let new_kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(msa.hash())
+                .modify(self.kernel.body.transaction_kernel.clone());
+            self.kernel.body.transaction_kernel = new_kernel;
+
             let ms_update = MutatorSetUpdate::new(
                 self.body().transaction_kernel.inputs.clone(),
                 self.body().transaction_kernel.outputs.clone(),
