@@ -3239,21 +3239,6 @@ impl GlobalState {
             for block in blocks {
                 let block_height = block.header().height;
 
-                let block_is_new = self
-                    .chain
-                    .archival_state()
-                    .get_block_header(block.hash())
-                    .await
-                    .is_none();
-                if !block_is_new {
-                    warn!(
-                        "Attempted to process a block from {} \
-                        which was already known. Block height: {block_height}.",
-                        block_file_path.to_string_lossy()
-                    );
-                    continue;
-                }
-
                 if validate_blocks {
                     let prev_block_digest = block.header().prev_block_digest;
 
@@ -3302,6 +3287,21 @@ impl GlobalState {
                         Block height: {block_height}.",
                         block_file_path.to_string_lossy()
                     );
+                }
+
+                let block_is_new = self
+                    .chain
+                    .archival_state()
+                    .get_block_header(block.hash())
+                    .await
+                    .is_none();
+                if !block_is_new {
+                    warn!(
+                        "Attempted to process a block from {} \
+                        which was already known. Block height: {block_height}.",
+                        block_file_path.to_string_lossy()
+                    );
+                    continue;
                 }
 
                 self.set_new_tip_internal(block.clone()).await.unwrap();
