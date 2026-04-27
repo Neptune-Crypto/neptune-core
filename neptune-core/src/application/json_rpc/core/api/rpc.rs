@@ -112,6 +112,9 @@ pub enum RpcError {
 
     #[error("The UTXO that you try to claim cannot be registered by the wallet. Error: {0}")]
     CannotClaimUtxo(String),
+
+    #[error("Sent tx index is out of bounds.")]
+    SentTxIndexOutOfBounds,
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;

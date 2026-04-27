@@ -1302,22 +1302,35 @@ impl RpcApi for RpcServer {
         &self,
         request: ProveAnTransferRequest,
     ) -> RpcResult<ProveAnTransferResponse> {
-        let (claim, proof) = crate::util_types::proof_of_transfer::helper(
-            self.state.clone(),
-            request.tx_ix,
-            request.utxo_ix,
-            request.block,
-        )
-        .await
-        .map_err(|e| {
-            RpcError::Server(JsonError::Custom {
-                code: -32603,
-                message: format!("Failed to prove transfer: {}", e),
-                data: None,
-            })
-        })?;
+        if request.tx_ix
+            < self
+                .state
+                .lock_async(|gs| {
+                    crate::application::database::storage::storage_vec::traits::StorageVecBase::len(
+                        gs.wallet_state.wallet_db.sent_transactions(),
+                    )
+                })
+                .await
+        {
+            let (claim, proof) = crate::util_types::proof_of_transfer::helper(
+                self.state.clone(),
+                request.tx_ix,
+                request.utxo_ix,
+                request.block,
+            )
+            .await
+            .map_err(|e| {
+                RpcError::Server(JsonError::Custom {
+                    code: -32603,
+                    message: format!("Failed to prove transfer: {}", e),
+                    data: None,
+                })
+            })?;
 
-        Ok(ProveAnTransferResponse { claim, proof })
+            Ok(ProveAnTransferResponse { claim, proof })
+        } else {
+            Err(RpcError::SentTxIndexOutOfBounds)
+        }
     }
 
     async fn triton_verify_call(
