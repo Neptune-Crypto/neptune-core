@@ -880,10 +880,14 @@ pub(crate) mod tests {
             parent = block;
         }
 
+        // Set lustration counter to zero to trigger a negative lustration
+        // counter when validating the next block.
         parent.set_lustration_status(LustrationStatus {
             counter: NativeCurrencyAmount::zero(),
             max_lustrating_aocl_leaf_index: 0,
         });
+
+        premine_receiver.set_new_tip(parent.clone()).await.unwrap();
 
         // Now make a non-lustrating transaction
         let outputs = vec![OutputFormat::AddressAndAmount(
