@@ -362,6 +362,87 @@ impl GlobalStateLock {
         self.cli = cli;
     }
 
+    /// Validate all historical, canonical blocks.
+    ///
+    /// Locks: Takes read-locks to read the blocks from the archival state.
+    /// Releases locks after each validation such that this method does not
+    /// block the entire application. In other words: A new tip can be set while
+    /// this method is running.
+    pub(crate) async fn revalidate_canonical_chain(
+        &self,
+        mut first: BlockHeight,
+        last: BlockHeight,
+    ) -> Result<()> {
+        if first.is_genesis() && last.is_genesis() {
+            return Ok(());
+        }
+
+        let start_height_previous = match first.previous() {
+            Some(prev) => prev,
+            None => {
+                first = first.next();
+                BlockHeight::genesis()
+            }
+        };
+
+        ensure!(first <= last, "Must be called with a non-empty range");
+
+        let Some(mut previous) = self
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .canonical_block_by_height(start_height_previous)
+            .await
+        else {
+            bail!("Previous block must be known. height {start_height_previous} is not known. Nothing to do.");
+        };
+
+        let network = self.cli.network;
+        let now = Timestamp::now();
+        for height in first.value()..=last.value() {
+            let height: BlockHeight = height.into();
+            let block = self
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .canonical_block_by_height(height)
+                .await;
+
+            let Some(block) = block else {
+                info!("Block of height {height} not known yet. Stopping this check.");
+                return Ok(());
+            };
+
+            if let Err(err) = block.validate(&previous, now, network).await {
+                bail!(
+                    "Canonical block of height {height} not valid. Hash: {:x}. Error: {err}",
+                    block.hash()
+                );
+            }
+
+            let has_proof_of_work = block.has_proof_of_work(network, previous.header());
+            ensure!(
+                has_proof_of_work,
+                "Canonical block of height {height} does not satisfy PoW requirement. Hash: {:x}.",
+                block.hash()
+            );
+
+            if height.value().is_multiple_of(100) {
+                info!("Canonical block of height {height} was valid");
+            } else {
+                debug!("Canonical block of height {height} was valid");
+            }
+
+            previous = block;
+        }
+
+        info!("All blocks in range {first}..={last} are valid.");
+
+        Ok(())
+    }
+
     /// stores/records a locally-initiated transaction into the global state.
     pub async fn record_own_transaction(
         &mut self,

@@ -193,6 +193,11 @@ mod tests {
     }
 
     #[test]
+    fn default_height_is_genesis() {
+        assert!(BlockHeight::default().is_genesis());
+    }
+
+    #[test]
     fn block_interval_times_generation_count_is_three_years() {
         let network = Network::Main;
         let calculated_halving_time =

@@ -35,4 +35,10 @@ pub(crate) enum BlockchainCommand {
         /// one of: `genesis, tip, height/<n>, digest/<hex>`
         block_selector: BlockSelector,
     },
+
+    /// Validate all historical canonical blocks (again).
+    RevalidateHistory {
+        first: Option<u64>,
+        last: Option<u64>,
+    },
 }

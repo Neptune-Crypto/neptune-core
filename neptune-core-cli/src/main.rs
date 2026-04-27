@@ -21,6 +21,7 @@ use clap::Parser;
 use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
+use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::application::config::data_directory::DataDirectory;
@@ -581,6 +582,16 @@ async fn main() -> Result<()> {
             } else {
                 println!("Block did not exist in database.");
             }
+        }
+        Command::Blockchain(BlockchainCommand::RevalidateHistory { first, last }) => {
+            let tip_height = client.block_height(ctx, token).await??;
+            let first = first.map(BlockHeight::from).unwrap_or_default();
+            let last = last.map(BlockHeight::from).unwrap_or(tip_height);
+            println!(
+                "Re-validating block range {first}..={last} ...\
+             Check the node's log for the result."
+            );
+            let _ = client.revalidate_history(ctx, token, first, last).await;
         }
         Command::Wallet(WalletCommand::ConfirmedAvailableBalance) => {
             let val = client.confirmed_available_balance(ctx, token).await??;

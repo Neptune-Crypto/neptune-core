@@ -1502,6 +1502,16 @@ pub trait RPC {
         txid: TransactionKernelId,
     ) -> RpcResult<TransactionProofType>;
 
+    /// Validate all canonical, stored blocks within the specified range.
+    ///
+    /// Does not return the result, as this check may take a very long time.
+    /// To inspect the result of this verification, see the application's log.
+    async fn revalidate_history(
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()>;
+
     /******** BLOCKCHAIN STATISTICS ********/
     // Place all endpoints that relate to statistics of the blockchain here
 
@@ -2340,15 +2350,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self
-            .state
-            .lock_guard()
-            .await
-            .chain
-            .tip()
-            .kernel
-            .header
-            .height)
+        Ok(self.state.lock_guard().await.chain.tip_height())
     }
 
     async fn best_proposal(
@@ -4360,6 +4362,33 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         Ok(self.state.api().tx_initiator().proof_type(txid).await?)
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn revalidate_history(
+        self,
+        _ctx: context::Context,
+        token: auth::Token,
+        first: BlockHeight,
+        last: BlockHeight,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if last < first {
+            return Err(RpcError::BlockRangeError);
+        }
+
+        info!("Spawning task to revalidate all blocks in range: {first}..={last}");
+
+        let _handle = tokio::spawn(async move {
+            let result = self.state.revalidate_canonical_chain(first, last).await;
+            if let Err(err) = result {
+                error!("Revalidation error: {err}");
+            }
+        });
+
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.
