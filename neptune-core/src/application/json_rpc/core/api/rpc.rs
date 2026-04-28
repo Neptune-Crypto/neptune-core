@@ -48,6 +48,12 @@ pub enum SubmitTransactionError {
 
     #[error("Transaction not confirmable relative to the mutator set")]
     NotConfirmable,
+
+    #[error("Transaction fails to lustrate the required inputs")]
+    MissingLustration,
+
+    #[error("Transaction cannot be mined since it would make the lustration counter negative")]
+    LustrationMakesCounterNegative,
 }
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
