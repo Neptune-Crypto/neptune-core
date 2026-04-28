@@ -301,7 +301,7 @@ impl InputSelector {
             self.policy.accept_lustrations
                 || self
                     .lustration_threshold
-                    .is_none_or(|threshold| threshold >= min_aocl_range)
+                    .is_none_or(|threshold| threshold < min_aocl_range)
         })
     }
 
@@ -428,6 +428,8 @@ fn sort<O: Ord>(order: SortOrder, a: &O, b: &O) -> std::cmp::Ordering {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use strum::IntoEnumIterator;
 
     use super::*;
@@ -467,15 +469,35 @@ mod tests {
     }
 
     #[test]
+    fn filter_on_lustration_requirement_simple() {
+        let early_aocl = dummy_input(0);
+        let early_aocls = vec![early_aocl];
+        let lustration_threshold = u64::from(WINDOW_SIZE) * 3;
+        let reject_lustrations = InputSelector::new(Some(lustration_threshold))
+            .input_candidates(early_aocls.clone())
+            .policy(InputSelectionPolicy {
+                priority: InputSelectionPriority::ByAge(SortOrder::Descending),
+                required_number_of_confirmations: 0,
+                max_num_inputs: None,
+                accept_lustrations: false,
+            });
+        assert!(reject_lustrations
+            .filter_by_lustration_requirement(&early_aocls)
+            .into_iter()
+            .next()
+            .is_none());
+    }
+
+    #[test]
     fn filters_on_lustration_requirement() {
-        let dummy_inputs = (0u64..=u64::from(WINDOW_SIZE) * 40)
+        let dummy_inputs = (0u64..=u64::from(WINDOW_SIZE) * 50)
             .step_by(WINDOW_SIZE as usize)
             .map(dummy_input)
             .collect_vec();
         let num_utxos = dummy_inputs.len();
 
-        let lustration_threshold = Some(u64::from(WINDOW_SIZE) * 2);
-        let reject_lustration = InputSelector::new(lustration_threshold)
+        let lustration_threshold = u64::from(WINDOW_SIZE) * 3;
+        let reject_lustration = InputSelector::new(Some(lustration_threshold))
             .input_candidates(dummy_inputs.clone())
             .policy(InputSelectionPolicy {
                 priority: InputSelectionPriority::ByAge(SortOrder::Descending),
@@ -484,15 +506,30 @@ mod tests {
                 accept_lustrations: false,
             });
 
-        assert!(
-            (reject_lustration
-                .filter_by_lustration_requirement(&dummy_inputs)
-                .into_iter()
-                .count())
-                < num_utxos
-        );
+        let dont_require_lustrations = reject_lustration
+            .filter_by_lustration_requirement(&dummy_inputs)
+            .into_iter()
+            .collect_vec();
+        assert!(dont_require_lustrations
+            .iter()
+            .all(|x| x.index_set().aocl_range().unwrap().0 > lustration_threshold));
+        assert!(dont_require_lustrations.len() < num_utxos);
+        assert!(!dont_require_lustrations.is_empty());
 
-        let accept_lustration = InputSelector::new(lustration_threshold)
+        let dont_require_lustrations: HashSet<_> = dont_require_lustrations
+            .iter()
+            .map(|x| x.index_set())
+            .collect();
+        for input in &dummy_inputs {
+            if dont_require_lustrations.contains(&input.index_set()) {
+                continue;
+            }
+
+            let needs_lustration = input;
+            assert!(needs_lustration.index_set().aocl_range().unwrap().0 <= lustration_threshold);
+        }
+
+        let accept_lustration = InputSelector::new(Some(lustration_threshold))
             .input_candidates(dummy_inputs.clone())
             .policy(InputSelectionPolicy {
                 priority: InputSelectionPriority::ByAge(SortOrder::Descending),
