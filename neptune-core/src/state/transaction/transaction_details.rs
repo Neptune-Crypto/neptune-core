@@ -266,13 +266,13 @@ impl TransactionDetails {
     /// Use this method for announcements that are *not* encrypted UTXO
     /// notifications.
     ///
-    /// Announcements are not part of the main constructor [`Self::new`]
+    /// Announcements are not part of the main constructor `Self::new`
     /// because in the common case they are not necessary. If there are
     /// encrypted UTXO notifications, these are computed on the fly from the
     /// transaction outputs. This function should only be used for
     /// announcements that are not encrypted UTXO notifications, which is an
     /// exceptional case.
-    pub(crate) fn with_announcements<Iter: IntoIterator<Item = Announcement>>(
+    pub fn with_announcements<Iter: IntoIterator<Item = Announcement>>(
         mut self,
         announcements: Iter,
     ) -> Self {
@@ -286,7 +286,7 @@ impl TransactionDetails {
 
     /// Returns true if the (presumably locally produced) transaction contains
     /// lustration announcements.
-    pub(crate) fn contains_lustrations(&self) -> bool {
+    pub fn contains_lustrations(&self) -> bool {
         self.announcements()
             .iter()
             .any(|x| x.looks_like_lustration())

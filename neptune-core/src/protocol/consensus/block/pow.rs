@@ -407,7 +407,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
     }
 
     /// Return the lustration status set in the PoW field of the block header.
-    pub(crate) fn lustration_status(&self) -> Result<LustrationStatus, PowValidationError> {
+    pub fn lustration_status(&self) -> Result<LustrationStatus, PowValidationError> {
         let [e0, e1, e2, e3, e4] = self.path_a[MERKLE_TREE_HEIGHT - 2].values();
         let e5 = self.path_a[MERKLE_TREE_HEIGHT - 1].values()[0];
 
@@ -681,7 +681,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PowValidationError {
+pub enum PowValidationError {
     PathAInvalid,
     PathBInvalid,
     ThresholdNotMet,

@@ -331,23 +331,11 @@ impl TransactionDetailsBuilder {
             ",
                 lustration_status.max_lustrating_aocl_leaf_index
             );
-            for input in tx_inputs.iter() {
-                // Match consensus rule that defines when inputs need to be
-                // lustrated.
-                let (input_index_lower_end, _) = input
-                    .absolute_indices()
-                    .aocl_range()
-                    .expect("Must be able to calculate AOCL range of own input");
 
-                if input_index_lower_end <= lustration_status.max_lustrating_aocl_leaf_index {
-                    debug!(
-                        "Found input in need of lustration. Lustrating now. Input index min
-                     range was: {input_index_lower_end}"
-                    );
-                    // We need to lustrate!
-                    custom_announcements.push(input.lustration());
-                }
-            }
+            custom_announcements.extend(Announcement::lustration_announcements(
+                lustration_status,
+                &tx_inputs,
+            ));
         };
 
         let transaction_details = TransactionDetails::new(

@@ -9,7 +9,10 @@ use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
+use tracing::debug;
 
+use crate::api::export::UnlockedUtxo;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::transaction::transaction_kernel::LUSTRATION_FLAG;
 
 /// Represents arbitrary data that can be stored in a transaction on the public
@@ -53,6 +56,33 @@ impl Announcement {
         self.message
             .first()
             .is_some_and(|elem0| *elem0 == LUSTRATION_FLAG)
+    }
+
+    pub fn lustration_announcements(
+        lustration_status: LustrationStatus,
+        tx_inputs: &[UnlockedUtxo],
+    ) -> Vec<Self> {
+        let mut lustrations = vec![];
+
+        for input in tx_inputs {
+            // Match consensus rule that defines when inputs need to be
+            // lustrated.
+            let (input_index_lower_end, _) = input
+                .absolute_indices()
+                .aocl_range()
+                .expect("Must be able to calculate AOCL range of own input");
+
+            if input_index_lower_end <= lustration_status.max_lustrating_aocl_leaf_index {
+                debug!(
+                    "Found input in need of lustration. Lustrating now. Input index min
+                     range was: {input_index_lower_end}"
+                );
+                // Input must be lustrated
+                lustrations.push(input.lustration());
+            }
+        }
+
+        lustrations
     }
 }
 
