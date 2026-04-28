@@ -361,7 +361,6 @@ impl TritonProgram for KernelToOutputs {
 #[cfg(any(test, feature = "spec"))]
 mod spec {
     use super::*;
-
     use crate::api::export::AdditionRecord;
     use crate::api::export::Utxo;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;

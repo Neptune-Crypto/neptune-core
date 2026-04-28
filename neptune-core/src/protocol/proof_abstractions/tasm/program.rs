@@ -169,13 +169,12 @@ pub struct TritonVmProofJobOptions {
 
 #[cfg(any(test, feature = "spec"))]
 pub mod spec {
-    use super::*;
-
     use std::panic::catch_unwind;
 
     use itertools::Itertools;
     use tracing::debug;
 
+    use super::*;
     use crate::protocol::proof_abstractions::tasm::environment;
 
     pub trait TritonProgramSpecification: TritonProgram {

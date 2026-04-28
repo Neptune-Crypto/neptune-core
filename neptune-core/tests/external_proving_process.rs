@@ -236,7 +236,6 @@ async fn can_prove_out_of_process_fibonacci() {
 // decoration. This test module activates that guard.
 #[cfg(test)]
 pub mod tests {
-    use super::*;
     use neptune_cash::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use neptune_cash::protocol::consensus::transaction::validity::kernel_to_outputs::KernelToOutputs;
     use neptune_cash::protocol::consensus::transaction::validity::kernel_to_outputs::KernelToOutputsWitness;
@@ -245,6 +244,8 @@ pub mod tests {
     use neptune_cash::protocol::proof_abstractions::SecretWitness;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
+
+    use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn can_prove_out_of_process_kernel_to_outputs() {
