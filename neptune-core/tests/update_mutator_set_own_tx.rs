@@ -213,7 +213,7 @@ pub async fn update_mutator_set_on_own_transaction_two_new_blocks_from_peer() {
     let mut base_args = GenesisNode::default_args().await;
     base_args.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
     let [alice, bob] = GenesisNode::start_connected_cluster(
-        &GenesisNode::cluster_id(),
+        &GenesisNode::cluster_id(None),
         2,
         Some(base_args),
         timeout_secs,

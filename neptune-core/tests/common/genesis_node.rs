@@ -83,6 +83,24 @@ impl GenesisNode {
                 .expect("Must be able to get socket on local host")
                 .port();
             args.rpc_port = rpc_port;
+
+            let quic_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("Must be able to get socket on local host");
+            let quic_port = quic_listener
+                .local_addr()
+                .expect("Must be able to get socket on local host")
+                .port();
+            args.quic_port = quic_port;
+
+            let tcp_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("Must be able to get socket on local host");
+            let tcp_port = tcp_listener
+                .local_addr()
+                .expect("Must be able to get socket on local host")
+                .port();
+            args.tcp_port = tcp_port;
         }
 
         // we default proving capability to primitive-witness as lowest common
@@ -147,8 +165,10 @@ impl GenesisNode {
     }
 
     #[track_caller]
-    pub fn cluster_id() -> String {
-        core::panic::Location::caller().to_string()
+    pub fn cluster_id(test_id: Option<u8>) -> String {
+        let test_id = test_id.unwrap_or_default();
+        let location = core::panic::Location::caller().to_string();
+        format!("{location}-{test_id}")
     }
 
     /// provides cli args for each node in a cluster to connect with eachother

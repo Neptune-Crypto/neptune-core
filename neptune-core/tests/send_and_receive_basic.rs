@@ -78,7 +78,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 pub async fn alice_sends_to_bob_with_primitive_witness_capability() -> anyhow::Result<()> {
     alice_sends_to_bob(
-        &GenesisNode::cluster_id(),
+        &GenesisNode::cluster_id(None),
         TxProvingCapability::PrimitiveWitness,
     )
     .await
@@ -90,7 +90,7 @@ pub async fn alice_sends_to_bob_with_primitive_witness_capability() -> anyhow::R
 #[tokio::test(flavor = "multi_thread")]
 pub async fn alice_sends_to_bob_with_proof_collection_capability() -> anyhow::Result<()> {
     alice_sends_to_bob(
-        &GenesisNode::cluster_id(),
+        &GenesisNode::cluster_id(None),
         TxProvingCapability::PrimitiveWitness,
     )
     .await
@@ -102,7 +102,7 @@ pub async fn alice_sends_to_bob_with_proof_collection_capability() -> anyhow::Re
 #[tokio::test(flavor = "multi_thread")]
 pub async fn alice_sends_to_bob_with_single_proof_capability() -> anyhow::Result<()> {
     alice_sends_to_bob(
-        &GenesisNode::cluster_id(),
+        &GenesisNode::cluster_id(None),
         TxProvingCapability::PrimitiveWitness,
     )
     .await
@@ -272,7 +272,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
 
     // alice starts a single node cluster
     let [mut alice] =
-        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(), 1, None, timeout_secs)
+        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(None), 1, None, timeout_secs)
             .await?;
 
     // alice generates a random symmetric key outside her wallet.
@@ -390,7 +390,7 @@ pub async fn alice_sends_transparent_transaction() -> anyhow::Result<()> {
 
     // alice starts a single node cluster
     let [mut alice] =
-        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(), 1, None, timeout_secs)
+        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(None), 1, None, timeout_secs)
             .await?;
 
     // alice generates a random symmetric key outside her wallet.
@@ -536,7 +536,7 @@ pub async fn alice_sends_transparent_transaction() -> anyhow::Result<()> {
 ///     because the time
 #[tokio::test(flavor = "multi_thread")]
 pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
-    let cluster_id = GenesisNode::cluster_id();
+    let cluster_id = GenesisNode::cluster_id(None);
     logging::tracing_logger();
     let timeout_secs = 5;
 

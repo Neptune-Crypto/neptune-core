@@ -13,16 +13,19 @@ use num_traits::ops::checked::CheckedSub;
 use num_traits::Zero;
 use tracing_test::traced_test;
 
-async fn wallet_with_mining_rewards(num_blocks: u32) -> (GenesisNode, GenesisNode) {
+/// Return a connected cluster where the Alice node has mining rewards.
+///
+/// Must be called with a unique test ID to avoid multiple tests requesting the
+/// same ports from the OS, when tests run in parallel.
+async fn wallet_with_mining_rewards(num_blocks: u32, test_id: u8) -> (GenesisNode, GenesisNode) {
     let timeout_secs = 5;
 
     let mut base_args = GenesisNode::default_args().await;
     base_args.tx_proving_capability =
         Some(neptune_cash::api::export::TxProvingCapability::SingleProof);
 
-    // alice and bob start 2 peer cluster (regtest)
     let [mut alice, bob] = GenesisNode::start_connected_cluster(
-        &GenesisNode::cluster_id(),
+        &GenesisNode::cluster_id(Some(test_id)),
         2,
         Some(base_args),
         timeout_secs,
@@ -67,7 +70,7 @@ pub async fn consolidation_basic() {
     let timeout_secs = 5;
 
     let num_blocks_mined = 3 + NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION as u32;
-    let (mut alice, mut bob) = wallet_with_mining_rewards(num_blocks_mined).await;
+    let (mut alice, mut bob) = wallet_with_mining_rewards(num_blocks_mined, 0).await;
 
     let bob_address = bob
         .gsl
@@ -219,7 +222,7 @@ pub async fn consolidation_tx_with_lustration() {
     logging::tracing_logger();
 
     let num_blocks_mined = 20;
-    let (mut alice, bob) = wallet_with_mining_rewards(num_blocks_mined).await;
+    let (mut alice, bob) = wallet_with_mining_rewards(num_blocks_mined, 1).await;
     assert_eq!(
         alice.gsl.lock_guard().await.chain.tip_height(),
         u64::from(num_blocks_mined).into()
@@ -338,7 +341,7 @@ pub async fn merge_consolidation_txs() {
     let timeout_secs = 5;
 
     let num_blocks_mined = 23;
-    let (mut alice, mut bob) = wallet_with_mining_rewards(num_blocks_mined).await;
+    let (mut alice, mut bob) = wallet_with_mining_rewards(num_blocks_mined, 2).await;
 
     assert_eq!(
         alice.gsl.lock_guard().await.chain.tip().header().height,
