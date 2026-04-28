@@ -1,3 +1,75 @@
+## [0.9.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.8.0..v0.9.0) - 2026-04-28
+
+### ✨ Features
+
+- Set lustration status when composing HF-β blocks ([16456c3c](https://github.com/Neptune-Crypto/neptune-core/commit/16456c3c))
+- *(TransactionInitiator)* Auto-lustrate if required ([9b77ee97](https://github.com/Neptune-Crypto/neptune-core/commit/9b77ee97))
+- Clear mempool across fork ([91fd8c9f](https://github.com/Neptune-Crypto/neptune-core/commit/91fd8c9f))
+- Indicate if lustration is accepted ([59511e5b](https://github.com/Neptune-Crypto/neptune-core/commit/59511e5b))
+- Add CLI command to validate all historical blocks ([4fe43b46](https://github.com/Neptune-Crypto/neptune-core/commit/4fe43b46))
+
+### 🐛 Bug Fixes
+
+- *(`NetworkActor`)* Track duplicate connections in `active_connections` ([2d597522](https://github.com/Neptune-Crypto/neptune-core/commit/2d597522))
+- Refer to own difficulty when updating cum pow if HF-beta ([ec76ae96](https://github.com/Neptune-Crypto/neptune-core/commit/ec76ae96))
+- Avoid panics when prioritizing inputs ([19810380](https://github.com/Neptune-Crypto/neptune-core/commit/19810380))
+
+### 📚 Documentation
+
+- Improve docs wrt. Triton programs ([e973a5fd](https://github.com/Neptune-Crypto/neptune-core/commit/e973a5fd))
+- Describe lustration barrier and some aspects of hardfork-beta ([241f5cc1](https://github.com/Neptune-Crypto/neptune-core/commit/241f5cc1))
+
+### ♻️ Refactor
+
+- *(peer_loop)* Lower severity of some peer sanctions ([8efefb27](https://github.com/Neptune-Crypto/neptune-core/commit/8efefb27))
+- Lustration barrier on test networks at height 20 ([ce108a55](https://github.com/Neptune-Crypto/neptune-core/commit/ce108a55))
+- Reduce future-dating limit to 1 minute ([e6835f13](https://github.com/Neptune-Crypto/neptune-core/commit/e6835f13))
+- Relax some sync challenge rules ([58d72272](https://github.com/Neptune-Crypto/neptune-core/commit/58d72272))
+- Hasten the coming of hardfork-beta on testnet ([7a577814](https://github.com/Neptune-Crypto/neptune-core/commit/7a577814))
+- Drop send-rate limit everywhere but on main net ([45b65405](https://github.com/Neptune-Crypto/neptune-core/commit/45b65405))
+- Move lustration tolerance to input selector ([4b576397](https://github.com/Neptune-Crypto/neptune-core/commit/4b576397))
+- Change hardfork-beta activation to block height 38,000 ([7f9157cd](https://github.com/Neptune-Crypto/neptune-core/commit/7f9157cd))
+- Allow revalidation of stored blocks ([82d5676d](https://github.com/Neptune-Crypto/neptune-core/commit/82d5676d))
+
+### ✅ Testing
+
+- *(DbtVec)* Verify out-of-bounds panic on `get` and `set` ([fec446af](https://github.com/Neptune-Crypto/neptune-core/commit/fec446af))
+- *(TransactionKernel)* Test lustration functionality ([a548e9a6](https://github.com/Neptune-Crypto/neptune-core/commit/a548e9a6))
+- Blocks across hard-fork beta transition ([4d09480f](https://github.com/Neptune-Crypto/neptune-core/commit/4d09480f))
+- Add negative tests of Block validation wrt. lustration ([a5e1073d](https://github.com/Neptune-Crypto/neptune-core/commit/a5e1073d))
+- More negative tests of lustration check ([e58c7021](https://github.com/Neptune-Crypto/neptune-core/commit/e58c7021))
+- *(Block)* Fix negative test of future dating validation error ([d5d07998](https://github.com/Neptune-Crypto/neptune-core/commit/d5d07998))
+- Verify that false lustration is rejected ([49e00cd0](https://github.com/Neptune-Crypto/neptune-core/commit/49e00cd0))
+- Add two negative tests of lustration status parsing ([b01e0aab](https://github.com/Neptune-Crypto/neptune-core/commit/b01e0aab))
+- Test new revalidation method with early blocks ([20019d5c](https://github.com/Neptune-Crypto/neptune-core/commit/20019d5c))
+
+### 🎨 Styling
+
+- *(peer_loop)* Drop some manual Display impls ([880fca72](https://github.com/Neptune-Crypto/neptune-core/commit/880fca72))
+
+### ⚙️ Miscellaneous
+
+- Expose pow-related fields ([223b8021](https://github.com/Neptune-Crypto/neptune-core/commit/223b8021))
+
+### 🔱 Fork
+
+- (!) Remove memory hardness ([590412dd](https://github.com/Neptune-Crypto/neptune-core/commit/590412dd))
+- (!) Introduce lustration barrier ([755e58fa](https://github.com/Neptune-Crypto/neptune-core/commit/755e58fa))
+- (!) Use own difficulty, not parent difficulty in hardfork-beta ([f54c79aa](https://github.com/Neptune-Crypto/neptune-core/commit/f54c79aa))
+- Disallow guessing with version field ([3c3cd6e1](https://github.com/Neptune-Crypto/neptune-core/commit/3c3cd6e1))
+- Add extra check of tx/block consistency ([698ba6c8](https://github.com/Neptune-Crypto/neptune-core/commit/698ba6c8))
+
+### 🪵 Log
+
+- Downgrade multihop warning from warn to trace ([e66a5773](https://github.com/Neptune-Crypto/neptune-core/commit/e66a5773))
+
+### 🪢 Merge
+
+- Merge([#904](https://github.com/Neptune-Crypto/neptune-core/issues/904)): Regtest Mine Loop Fixes ([01f1db22](https://github.com/Neptune-Crypto/neptune-core/commit/01f1db22))
+- Merge([#912](https://github.com/Neptune-Crypto/neptune-core/issues/912)): Hardfork Beta 38k ([e83f0eac](https://github.com/Neptune-Crypto/neptune-core/commit/e83f0eac))
+- Merge([#914](https://github.com/Neptune-Crypto/neptune-core/issues/914)): Validate Historical Blocks ([e4d346a5](https://github.com/Neptune-Crypto/neptune-core/commit/e4d346a5))
+- Merge([#894](https://github.com/Neptune-Crypto/neptune-core/issues/894)): Out-of-Process Tests and Feature Flag "spec" ([da173942](https://github.com/Neptune-Crypto/neptune-core/commit/da173942))
+
 ## [0.8.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.7.0..v0.8.0) - 2026-03-25
 
 ### ✨ Features
