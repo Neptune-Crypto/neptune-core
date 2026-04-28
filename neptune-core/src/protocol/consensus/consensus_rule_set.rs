@@ -279,7 +279,6 @@ pub(crate) mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tasm_lib::prelude::Digest;
-    use tasm_lib::triton_vm::proof::Claim;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::prelude::Mmr;
     use tracing_test::traced_test;
@@ -856,9 +855,7 @@ pub(crate) mod tests {
 
             let appendix = BlockAppendix::consensus_claims(block.body(), consensus_rule_set);
             block.set_appendix(BlockAppendix::new(appendix));
-            block.set_proof(BlockProof::SingleProof(NeptuneProof::valid_mock(
-                Claim::new(Digest::default()),
-            )));
+            block.set_proof(BlockProof::SingleProof(NeptuneProof::valid_mock()));
             block.set_lustration_status(parent.header().pow.lustration_status().unwrap());
 
             let now = block.header().timestamp;

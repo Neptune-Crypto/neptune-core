@@ -9,18 +9,15 @@ use crate::application::loops::mine_loop::composer_parameters::ComposerParameter
 use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
-use crate::protocol::consensus::block::validity::block_program::BlockProgram;
 use crate::protocol::consensus::block::validity::block_proof_witness::BlockProofWitness;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockProof;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::transaction_output::TxOutputList;
@@ -50,8 +47,7 @@ impl MockBlockGenerator {
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
-            let claim = BlockProgram::claim(&body, &appendix);
-            (appendix, BlockProof::SingleProof(Proof::valid_mock(claim)))
+            (appendix, BlockProof::SingleProof(Proof::valid_mock()))
         };
 
         Block::new(header, body, appendix, proof)
@@ -61,17 +57,12 @@ impl MockBlockGenerator {
     /// seems to pass but without the hassle of producing a proof for it. Behind the
     /// scenes, this method updates the true claims cache, such that the call to
     /// `triton_vm::verify` will be by-passed.
-    fn mock_transaction_from_details(
-        transaction_details: &TransactionDetails,
-        consensus_rule_set: ConsensusRuleSet,
-    ) -> Transaction {
+    fn mock_transaction_from_details(transaction_details: &TransactionDetails) -> Transaction {
         let kernel = PrimitiveWitness::from_transaction_details(transaction_details).kernel;
-
-        let claim = single_proof_claim(kernel.mast_hash(), consensus_rule_set);
 
         Transaction {
             kernel,
-            proof: TransactionProof::SingleProof(Proof::valid_mock(claim)),
+            proof: TransactionProof::SingleProof(Proof::valid_mock()),
         }
     }
 
@@ -112,8 +103,6 @@ impl MockBlockGenerator {
         shuffle_seed: [u8; 32],
         mut selected_mempool_txs: Vec<Transaction>,
     ) -> (BlockTransaction, TxOutputList) {
-        let consensus_rule_set =
-            ConsensusRuleSet::infer_from(network, predecessor_block.header().height.next());
         let (composer_txos, transaction_details) = prepare_coinbase_transaction_stateless(
             predecessor_block,
             composer_parameters,
@@ -121,8 +110,7 @@ impl MockBlockGenerator {
             network,
         );
 
-        let coinbase_transaction =
-            Self::mock_transaction_from_details(&transaction_details, consensus_rule_set);
+        let coinbase_transaction = Self::mock_transaction_from_details(&transaction_details);
 
         if selected_mempool_txs.is_empty() {
             // create the nop-tx and merge into the coinbase transaction to set the
@@ -132,12 +120,13 @@ impl MockBlockGenerator {
                 timestamp,
                 network,
             );
-            let nop_transaction =
-                Self::mock_transaction_from_details(&nop_details, consensus_rule_set);
+            let nop_transaction = Self::mock_transaction_from_details(&nop_details);
 
             selected_mempool_txs = vec![nop_transaction];
         }
 
+        let consensus_rule_set =
+            ConsensusRuleSet::infer_from(network, predecessor_block.header().height.next());
         let mut block_transaction = coinbase_transaction.into();
         let mut rng = StdRng::from_seed(shuffle_seed);
         for tx_to_include in selected_mempool_txs {

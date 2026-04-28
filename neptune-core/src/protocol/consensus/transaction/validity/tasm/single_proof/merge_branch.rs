@@ -148,23 +148,27 @@ impl MergeWitness {
     ) -> Result<Transaction> {
         let new_kernel = self.new_kernel.clone();
 
-        let new_single_proof_witness = SingleProofWitness::from_merge(self);
-        let new_single_proof_claim = new_single_proof_witness.claim();
-        info!("Start: creating new single proof through merge");
-        let new_single_proof = SingleProof
-            .prove(
-                new_single_proof_claim,
-                new_single_proof_witness.nondeterminism(),
-                triton_vm_job_queue,
-                proof_job_options,
-            )
-            .await?;
+        let proof = if proof_job_options.job_settings.network.use_mock_proof() {
+            Proof::valid_mock()
+        } else {
+            let new_single_proof_witness = SingleProofWitness::from_merge(self);
+            let new_single_proof_claim = new_single_proof_witness.claim();
+            info!("Start: creating new single proof through merge");
+            SingleProof
+                .prove(
+                    new_single_proof_claim,
+                    new_single_proof_witness.nondeterminism(),
+                    triton_vm_job_queue,
+                    proof_job_options,
+                )
+                .await?
+        };
 
         info!("Done: creating new single proof through merge");
 
         Ok(Transaction {
             kernel: new_kernel,
-            proof: TransactionProof::SingleProof(new_single_proof),
+            proof: TransactionProof::SingleProof(proof),
         })
     }
 

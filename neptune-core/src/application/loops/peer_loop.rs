@@ -2887,7 +2887,16 @@ mod tests {
             assert!(!invalid_pow.has_proof_of_work(network, predecessor.header()));
 
             let mut block_with_valid_mock_pow = block.clone();
-            block_with_valid_mock_pow.satisfy_mock_pow(difficulty, rand::random());
+            block_with_valid_mock_pow.satisfy_mock_pow(
+                difficulty,
+                rand::random(),
+                block_with_valid_mock_pow
+                    .header()
+                    .pow
+                    .lustration_status()
+                    .ok(),
+                block_with_valid_mock_pow.header().version,
+            );
             assert!(block_with_valid_mock_pow.is_valid_mock_pow(difficulty.target()));
             assert!(!block_with_valid_mock_pow.has_proof_of_work(network, predecessor.header()));
 

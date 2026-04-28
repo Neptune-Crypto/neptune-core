@@ -309,11 +309,10 @@ pub(crate) fn single_proof_claim(
 }
 
 pub(crate) fn produce_single_proof_mock(valid_mock: bool) -> Proof {
-    let claim = Claim::new(Digest::default());
     if valid_mock {
-        Proof::valid_mock(claim)
+        Proof::valid_mock()
     } else {
-        Proof::invalid_mock(claim)
+        Proof::invalid_mock()
     }
 }
 

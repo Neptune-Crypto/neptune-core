@@ -52,7 +52,7 @@ impl Announcement {
     /// method cannot be trusted to correctly identify lustration announcements
     /// which would be meaningless anyway without the context of the whole
     /// transaction kernel.
-    pub(crate) fn looks_like_lustration(&self) -> bool {
+    pub fn looks_like_lustration(&self) -> bool {
         self.message
             .first()
             .is_some_and(|elem0| *elem0 == LUSTRATION_FLAG)

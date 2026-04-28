@@ -110,7 +110,7 @@ impl BlockchainState {
     }
 
     /// Block height of current tip.
-    pub(crate) fn tip_height(&self) -> BlockHeight {
+    pub fn tip_height(&self) -> BlockHeight {
         self.tip().header().height
     }
 
@@ -127,7 +127,7 @@ impl BlockchainState {
     /// - If lustration rules have been activated, but no lustration status can
     ///   be parsed from the tip. This would mean that the tip is not a valid
     ///   block.
-    pub(crate) fn lustration_status(&self) -> Option<LustrationStatus> {
+    pub fn lustration_status(&self) -> Option<LustrationStatus> {
         // If the lustration status can be read from the header, the lustration
         // status must be set. Otherwise, this function reads
         let height = self.tip_height();

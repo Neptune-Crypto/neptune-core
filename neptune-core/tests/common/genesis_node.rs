@@ -11,6 +11,7 @@ use std::str::FromStr;
 use neptune_cash::api::export::GlobalStateLock;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::TransactionKernelId;
+use neptune_cash::api::export::TransactionProofType;
 use neptune_cash::application::config::cli_args::Args;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
@@ -394,6 +395,36 @@ impl GenesisNode {
             }
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
                 anyhow::bail!("tx not confirmable after {} seconds", timeout_secs);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(())
+    }
+
+    /// Wait until the mempool contains exactly n transactions, of the specified
+    /// proof type.
+    pub async fn wait_until_n_txs_in_mempool(
+        &self,
+        n: usize,
+        proof_type: TransactionProofType,
+        timeout_secs: u16,
+    ) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        loop {
+            let num_txs_in_mempool = self
+                .gsl
+                .lock_guard()
+                .await
+                .mempool
+                .num_with_proof_type(proof_type);
+            if num_txs_in_mempool == n {
+                break;
+            }
+
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
+                anyhow::bail!(
+                    "mempool did not contain {n} transactions after {timeout_secs} seconds. Saw: {num_txs_in_mempool}"
+                );
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
