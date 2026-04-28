@@ -219,11 +219,10 @@ impl ProofCollection {
         debug!("proving, salted inputs hash: {}", salted_inputs_hash);
         debug!("proving, salted outputs hash: {}", salted_outputs_hash);
 
-        let claim = Claim::new(Digest::default());
         let mock_proof = if valid_mock {
-            Proof::valid_mock(claim)
+            Proof::valid_mock()
         } else {
-            Proof::invalid_mock(claim)
+            Proof::invalid_mock()
         };
 
         let merge_bit_mast_path = primitive_witness

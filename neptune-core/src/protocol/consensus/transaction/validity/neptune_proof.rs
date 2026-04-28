@@ -6,7 +6,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Library;
 use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof as VmProof;
 
 use crate::protocol::consensus::transaction::BFieldCodec;
@@ -145,14 +144,14 @@ impl NeptuneProof {
     }
 
     /// create a mock proof that will pass validation (if mock proofs are allowed)
-    pub fn valid_mock(_claim: Claim) -> Self {
+    pub fn valid_mock() -> Self {
         Self {
             proof: VmProof(MockProofBehavior::ValidMock.encode()),
         }
     }
 
     /// create a mock proof that will fail validation (if mock proofs are allowed, or not)
-    pub fn invalid_mock(_claim: Claim) -> Self {
+    pub fn invalid_mock() -> Self {
         Self {
             proof: VmProof(MockProofBehavior::InvalidMock.encode()),
         }

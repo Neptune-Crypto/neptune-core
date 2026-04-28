@@ -100,7 +100,7 @@ pub(crate) async fn prove_triton_program(
 ) -> Result<Proof, CreateProofError> {
     // regtest mode: just return a mock (empty) Proof
     if proof_job_options.job_settings.network.use_mock_proof() {
-        return Ok(Proof::valid_mock(claim));
+        return Ok(Proof::valid_mock());
     }
 
     // create a triton-vm-job-queue job for generating this proof.

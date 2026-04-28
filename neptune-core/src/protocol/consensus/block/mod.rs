@@ -1152,13 +1152,25 @@ impl Block {
     /// Satisfy mock-PoW, meaning that only the hash needs to be lower than the
     /// threshold, does not set valid root/authentication paths of the PoW
     /// field.
-    pub fn satisfy_mock_pow(&mut self, difficulty: Difficulty, seed: [u8; 32]) {
+    pub fn satisfy_mock_pow(
+        &mut self,
+        difficulty: Difficulty,
+        seed: [u8; 32],
+        lustration_status: Option<LustrationStatus>,
+        version: BFieldElement,
+    ) {
         let mut rng = StdRng::from_seed(seed);
 
         // Guessing loop.
         let threshold = difficulty.target();
         while !self.is_valid_mock_pow(threshold) {
-            let pow = rng.random();
+            let mut pow: BlockPow = rng.random();
+            if let Some(lustration_status) = lustration_status {
+                pow.set_lustration_status(lustration_status);
+            }
+
+            pow.set_version_in_pow(version);
+
             self.set_header_pow(pow);
         }
     }

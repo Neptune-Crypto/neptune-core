@@ -278,7 +278,7 @@ impl ProverJob {
     async fn prove(&self, rx: JobCancelReceiver) -> JobCompletion {
         // produce mock proofs if network so requires. (ie RegTest)
         if self.job_settings.network.use_mock_proof() {
-            let proof = Proof::valid_mock(self.claim.clone());
+            let proof = Proof::valid_mock();
             return ProverProcessCompletion::Finished(proof).into();
         }
 

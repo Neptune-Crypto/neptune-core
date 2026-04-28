@@ -52,9 +52,12 @@ use tracing::error;
 use tracing::warn;
 
 use crate::api::export::AdditionRecord;
+use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::NeptuneProof;
+use crate::api::export::TransactionProofType;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
@@ -305,6 +308,91 @@ impl Mempool {
                 true
             }
         }
+    }
+
+    /// Return a transaction that can be merged with the specified transaction
+    /// if any is present in the mempool.
+    ///
+    /// The specified transaction should be backed by a single proof. Otherwise
+    /// the returned transaction cannot actually be merged with the input
+    /// transaction.
+    ///
+    /// The returned transaction is guaranteed to:
+    /// 1. Not conflict with the input transaction
+    /// 2. Be synced to the same mutator set
+    /// 3. Pay at least the specified fee
+    /// 4. Not exceed allowed sizes after being merged with the specified
+    ///
+    /// Note that the returned a returned transaction is not guaranteed to be
+    /// synced to the tip. If the input transaction is not synced to the tip,
+    /// neither will any returned transaction be.
+    pub(crate) fn merge_partner(
+        &self,
+        kernel: &TransactionKernel,
+        consensus_rule_set: ConsensusRuleSet,
+        minimum_fee: NativeCurrencyAmount,
+    ) -> Option<(TransactionKernel, Proof, UpgradePriority)> {
+        // Constants to avoid going to the limit of the consensus rules in
+        // terms of outputs and announcements, since the composer probably wants
+        // to set a few outputs and announcement themselves.
+        const NUM_OUTPUTS_BUFFER: usize = 6;
+        const NUM_ANNOUNCEMENTS_BUFFER: usize = 6;
+
+        let max_num_inputs = consensus_rule_set.max_num_inputs();
+        let max_num_outputs = consensus_rule_set.max_num_outputs();
+        let max_num_announcements = consensus_rule_set.max_num_announcements();
+
+        let tx_index_sets: HashSet<_> = kernel.inputs.iter().map(|x| x.absolute_indices).collect();
+
+        for (txid, priority) in self.upgrade_priority_iter().chain(
+            self.fee_density_iter()
+                .map(|(txid, _)| (txid, UpgradePriority::Irrelevant)),
+        ) {
+            let candidate = self
+                .get(txid)
+                .expect("Referenced tx in iterators must exist");
+
+            let TransactionProof::SingleProof(single_proof) = &candidate.proof else {
+                continue;
+            };
+
+            let candidate = &candidate.kernel;
+
+            if candidate.fee < minimum_fee {
+                continue;
+            }
+
+            if candidate.mutator_set_hash != kernel.mutator_set_hash {
+                continue;
+            }
+
+            let conflicts = candidate
+                .inputs
+                .iter()
+                .any(|input| tx_index_sets.contains(&input.absolute_indices));
+            if conflicts {
+                continue;
+            }
+
+            if candidate.inputs.len() + kernel.inputs.len() > max_num_inputs {
+                continue;
+            }
+
+            if candidate.outputs.len() + kernel.outputs.len() + NUM_OUTPUTS_BUFFER > max_num_outputs
+            {
+                continue;
+            }
+
+            if candidate.announcements.len() + kernel.announcements.len() + NUM_ANNOUNCEMENTS_BUFFER
+                > max_num_announcements
+            {
+                continue;
+            }
+
+            return Some((candidate.to_owned(), single_proof.to_owned(), priority));
+        }
+
+        None
     }
 
     /// Return the preferred single-proof backed transaction for the "update"
@@ -866,6 +954,22 @@ impl Mempool {
     /// Computes in O(1)
     pub fn len(&self) -> usize {
         self.tx_dictionary.len()
+    }
+
+    /// Return the number of transactions with the specified proof quality that
+    /// are present in the mempool.
+    pub fn num_with_proof_type(&self, proof_quality: TransactionProofType) -> usize {
+        let mut count = 0;
+        for (txid, _) in self.fee_density_iter() {
+            let tx = self
+                .get(txid)
+                .expect("Transaction referenced in fee density iter must exist in mempool.");
+            if tx.proof.proof_type() == proof_quality {
+                count += 1;
+            }
+        }
+
+        count
     }
 
     /// Return the number of transaction stored in the mempool that are deemed

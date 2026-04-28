@@ -31,6 +31,7 @@ use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
@@ -44,6 +45,8 @@ use crate::state::GlobalStateLock;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 pub(crate) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
+const MINIMUM_FEE_FOR_FREE_MERGE: NativeCurrencyAmount =
+    NativeCurrencyAmount::from_nau(NativeCurrencyAmount::coin_as_nau() / 200);
 
 /// Enumerates the types of 'proof upgrades' that can be done.
 ///
@@ -259,6 +262,18 @@ impl UpgradeJob {
         }
     }
 
+    /// Return true if this upgrade job performs the expensive "raise" operation
+    /// which is how a single proof is first created.
+    fn performs_raise(&self) -> bool {
+        match self {
+            UpgradeJob::PrimitiveWitnessToSingleProof(_)
+            | UpgradeJob::ProofCollectionToSingleProof(_) => true,
+            UpgradeJob::PrimitiveWitnessToProofCollection(_)
+            | UpgradeJob::Merge { .. }
+            | UpgradeJob::UpdateMutatorSetData(_) => false,
+        }
+    }
+
     /// The gobbling fee charged for an upgrade job
     ///
     /// Gobbling fees are charged when a transaction is upgraded from
@@ -418,22 +433,17 @@ impl UpgradeJob {
     ) {
         let mut upgrade_job = self;
 
-        let upgrade_incentive = upgrade_job.upgrade_incentive();
-        let priority = match upgrade_incentive {
-            UpgradeIncentive::Critical => TritonVmJobPriority::High,
-            _ => TritonVmJobPriority::Low,
-        };
-
         // process in a loop.  in case a new block comes in while processing
         // the current tx, then we can move on to the next, and so on.
         loop {
             /* Prepare upgrade */
+            let upgrade_incentive = upgrade_job.upgrade_incentive();
+            let priority = match upgrade_incentive {
+                UpgradeIncentive::Critical => TritonVmJobPriority::High,
+                _ => TritonVmJobPriority::Low,
+            };
             let affected_txids = upgrade_job.affected_txids();
             let mutator_set_for_tx = upgrade_job.mutator_set();
-
-            // note: if this task is cancelled, the job will continue
-            // because TritonVmJobOptions::cancel_job_rx is None.
-            // see how compose_task handles cancellation in mine_loop.
             let job_options = global_state_lock.cli().proof_job_options(priority);
 
             // It's a important to *not* hold any locks when proving happens.
@@ -446,7 +456,7 @@ impl UpgradeJob {
                 )
             };
 
-            /* Perform upgrade */
+            /* Perform upgrade by generating a new Triton VM proof */
             // No locks may be held here!
             let offchain_notifications = global_state_lock.cli().fee_notification;
             let (upgraded, expected_utxos) = match upgrade_job
@@ -530,6 +540,43 @@ impl UpgradeJob {
                     }
 
                     info!("Successfully handled proof upgrade.");
+
+                    // Did we just perform a "raise" operation? If so, we see if
+                    // the transaction can be merged with anything favorable to
+                    // us.
+                    if upgrade_job.performs_raise() {
+                        let merge_tx = global_state_lock.lock_guard().await.mempool.merge_partner(
+                            &upgraded.kernel,
+                            consensus_rule_set,
+                            MINIMUM_FEE_FOR_FREE_MERGE,
+                        );
+                        if let Some((right_kernel, single_proof_right, right_priority)) = merge_tx {
+                            info!("Found merge candidate for newly upgraded transaction.");
+
+                            let mut rng: StdRng =
+                                SeedableRng::from_seed(wallet_entropy.shuffle_seed(block_height));
+                            let shuffle_seed: [u8; 32] = rng.random();
+                            let single_proof_left = upgraded.proof.into_single_proof();
+                            let left_priority: UpgradePriority = upgrade_incentive.into();
+                            let new_priority = left_priority + right_priority;
+                            let gobbling_fee = NativeCurrencyAmount::zero();
+                            let merge_job = UpgradeJob::Merge {
+                                left_kernel: upgraded.kernel,
+                                single_proof_left,
+                                right_kernel,
+                                single_proof_right,
+                                shuffle_seed,
+                                mutator_set: upgrade_job.mutator_set(),
+                                upgrade_incentive: new_priority
+                                    .incentive_given_gobble_potential(gobbling_fee),
+                            };
+
+                            upgrade_job = merge_job;
+
+                            continue;
+                        }
+                    }
+
                     return;
                 }
 
@@ -1100,7 +1147,7 @@ mod tests {
             // Alice is premine recipient, so she can make a transaction (after
             // expiry of timelock).
             let (main_to_peer_tx, mut main_to_peer_rx, _bob_peer_to_main_tx, _, _, _, mut alice, _) =
-                get_test_genesis_setup(network, 2, cli).await.unwrap();
+                get_test_genesis_setup(2, cli).await.unwrap();
             let pwtx = transaction_from_state(
                 alice.clone(),
                 512777439428,
@@ -1180,7 +1227,7 @@ mod tests {
             // Alice is premine recipient, so she can make a transaction (after
             // expiry of timelock).
             let (main_to_peer_tx, mut main_to_peer_rx, _, _, _, _, mut alice, _) =
-                get_test_genesis_setup(network, 2, cli).await.unwrap();
+                get_test_genesis_setup(2, cli).await.unwrap();
             let pwtx = transaction_from_state(
                 alice.clone(),
                 512777439429,
@@ -1268,6 +1315,109 @@ mod tests {
                 alice.lock_guard().await.chain.tip_mutator_set_after();
             assert!(mempool_tx.is_confirmable_relative_to(&mutator_set_accumulator_after));
         }
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn merge_after_single_proof_upgrade() {
+        let network = Network::Main;
+
+        let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
+        let cli = cli_args::Args {
+            network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
+
+        // Give Bob multiple UTXOs such that at least two transactions can be
+        // created.
+        let mut bob =
+            state_with_premine_and_self_mined_blocks(cli, rng.random::<[Digest; 1]>()).await;
+        let (main_to_peer_tx, main_to_peer_rx) =
+            broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+
+        // Insert a single proof transaction into the mempool, such that the
+        // later primitive witness -> single proof upgrade handler finds a
+        // single proof transaction in the mempool, that it can merge with.
+        let tx_fee = NativeCurrencyAmount::coins(2);
+        let first_tx = transaction_from_state(
+            bob.clone(),
+            rng.random(),
+            TxProvingCapability::SingleProof,
+            tx_fee,
+        )
+        .await;
+        bob.lock_guard_mut()
+            .await
+            .mempool_insert(first_tx.clone().into(), UpgradePriority::Critical)
+            .await;
+
+        let second_tx = transaction_from_state(
+            bob.clone(),
+            rng.random(),
+            TxProvingCapability::PrimitiveWitness,
+            tx_fee,
+        )
+        .await;
+
+        let as_sp_upgrade_job =
+            UpgradeJob::PrimitiveWitnessToSingleProof(PrimitiveWitnessToSingleProof {
+                primitive_witness: second_tx.proof.clone().into_primitive_witness(),
+            });
+        as_sp_upgrade_job
+            .handle_upgrade(
+                TritonVmJobQueue::get_instance(),
+                bob.clone(),
+                main_to_peer_tx,
+            )
+            .await;
+        assert_eq!(
+            1,
+            bob.lock_guard().await.mempool.len(),
+            "Upgraded tx must be merged"
+        );
+
+        assert_eq!(
+            2,
+            main_to_peer_rx.len(),
+            "Must have received info about exactly two new transactions, one raise, and one merge"
+        );
+
+        let mempool_tx = bob
+            .lock_guard()
+            .await
+            .mempool
+            .get_transactions_for_block_composition(usize::MAX, None);
+        assert_eq!(1, mempool_tx.len());
+        let mempool_tx = &mempool_tx[0];
+
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
+        assert!(mempool_tx.is_valid(network, consensus_rule_set).await);
+
+        // Verify that the two transactions got merged
+        let mempool_inputs: HashSet<_> = mempool_tx
+            .kernel
+            .inputs
+            .iter()
+            .map(|x| x.absolute_indices)
+            .collect();
+        let expected_inputs: HashSet<_> = first_tx
+            .kernel
+            .inputs
+            .iter()
+            .chain(second_tx.kernel.inputs.iter())
+            .map(|x| x.absolute_indices)
+            .collect();
+        assert_eq!(expected_inputs, mempool_inputs);
+
+        let mempool_outputs: HashSet<_> = mempool_tx.kernel.outputs.iter().collect();
+        let expected_outputs: HashSet<_> = first_tx
+            .kernel
+            .outputs
+            .iter()
+            .chain(second_tx.kernel.outputs.iter())
+            .collect();
+        assert_eq!(expected_outputs, mempool_outputs);
     }
 
     #[traced_test]

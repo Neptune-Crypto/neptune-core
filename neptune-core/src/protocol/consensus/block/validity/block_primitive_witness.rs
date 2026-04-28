@@ -73,6 +73,8 @@ impl BlockPrimitiveWitness {
         &self.transaction
     }
 
+    /// Return the index of the last AOCL element in this block, including
+    /// guesser reward UTXOs.
     fn max_aocl_leaf_index(&self) -> u64 {
         let num_own_outputs =
             self.transaction.kernel.outputs.len() as u64 + NUM_GUESSER_FEE_OUTPUTS;

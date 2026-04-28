@@ -83,7 +83,7 @@ impl NativeCurrencyAmount {
         Self(-Self::MAX_NAU)
     }
 
-    pub(crate) const fn coin_as_nau() -> i128 {
+    pub const fn coin_as_nau() -> i128 {
         Self::conversion_factor()
     }
 

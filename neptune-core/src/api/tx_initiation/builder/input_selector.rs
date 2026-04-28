@@ -283,6 +283,28 @@ impl InputSelector {
         })
     }
 
+    fn filter_by_lustration_requirement<'a, InputCandidateIter>(
+        &'a self,
+        inputs: InputCandidateIter,
+    ) -> impl IntoIterator<Item = &'a InputCandidate>
+    where
+        InputCandidateIter: IntoIterator<Item = &'a InputCandidate>,
+    {
+        inputs.into_iter().filter(|input_candidate| {
+            let min_aocl_range = match input_candidate.index_set().aocl_range() {
+                Ok((min, _max)) => min,
+                Err(err) => panic!("Failed to get AOCL range for input candidate during lustration filtering: {err}"),
+            };
+
+            // if lustration is not acceptable, exclude inputs with AOCL range
+            // that includes or is less than the lustration threshold.
+            self.policy.accept_lustrations
+                || self
+                    .lustration_threshold
+                    .is_none_or(|threshold| threshold < min_aocl_range)
+        })
+    }
+
     fn prioritize<'a, InputCandidateIter>(
         &'a self,
         inputs: InputCandidateIter,
@@ -339,6 +361,7 @@ impl InputSelector {
     pub fn take(self, number: usize) -> Vec<InputCandidate> {
         let iter = self.input_candidates_inputs.iter();
         let iter = self.filter_by_confirmation_count(iter);
+        let iter = self.filter_by_lustration_requirement(iter);
         let iter = self.prioritize(iter);
         iter.into_iter().take(number).cloned().collect_vec()
     }
@@ -349,6 +372,8 @@ impl InputSelector {
         // scan sequence until we have enough
         let spend_amount = self.spend_amount;
 
+        // Avoid filtering by lustration requirement here since that's handled
+        // better in the loop below.
         let iter = self.input_candidates_inputs.iter();
         let iter = self.filter_by_confirmation_count(iter);
         let iter = self.prioritize(iter);
@@ -403,10 +428,13 @@ fn sort<O: Ord>(order: SortOrder, a: &O, b: &O) -> std::cmp::Ordering {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use strum::IntoEnumIterator;
 
     use super::*;
     use crate::state::wallet::wallet_status::SyncedUtxo;
+    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
     #[expect(clippy::derivable_impls)]
     impl Default for SortOrder {
@@ -419,10 +447,6 @@ mod tests {
 
     #[test]
     fn no_panic_in_prioritize() {
-        let dummy_input = |aocl_leaf_index: u64| InputCandidate {
-            synced_utxo: SyncedUtxo::empty_dummy(aocl_leaf_index),
-            number_of_confirmations: 14,
-        };
         let dummy_inputs = (0..100).map(dummy_input).collect_vec();
 
         for priority in InputSelectionPriority::iter() {
@@ -441,6 +465,91 @@ mod tests {
 
             // Ensure no panic when calling `prioritize`
             let _inputs = input_selector.prioritize(&dummy_inputs);
+        }
+    }
+
+    #[test]
+    fn filter_on_lustration_requirement_simple() {
+        let early_aocl = dummy_input(0);
+        let early_aocls = vec![early_aocl];
+        let lustration_threshold = u64::from(WINDOW_SIZE) * 3;
+        let reject_lustrations = InputSelector::new(Some(lustration_threshold))
+            .input_candidates(early_aocls.clone())
+            .policy(InputSelectionPolicy {
+                priority: InputSelectionPriority::ByAge(SortOrder::Descending),
+                required_number_of_confirmations: 0,
+                max_num_inputs: None,
+                accept_lustrations: false,
+            });
+        assert!(reject_lustrations
+            .filter_by_lustration_requirement(&early_aocls)
+            .into_iter()
+            .next()
+            .is_none());
+    }
+
+    #[test]
+    fn filters_on_lustration_requirement() {
+        let dummy_inputs = (0u64..=u64::from(WINDOW_SIZE) * 50)
+            .step_by(WINDOW_SIZE as usize)
+            .map(dummy_input)
+            .collect_vec();
+        let num_utxos = dummy_inputs.len();
+
+        let lustration_threshold = u64::from(WINDOW_SIZE) * 3;
+        let reject_lustration = InputSelector::new(Some(lustration_threshold))
+            .input_candidates(dummy_inputs.clone())
+            .policy(InputSelectionPolicy {
+                priority: InputSelectionPriority::ByAge(SortOrder::Descending),
+                required_number_of_confirmations: 0,
+                max_num_inputs: None,
+                accept_lustrations: false,
+            });
+
+        let dont_require_lustrations = reject_lustration
+            .filter_by_lustration_requirement(&dummy_inputs)
+            .into_iter()
+            .collect_vec();
+        assert!(dont_require_lustrations
+            .iter()
+            .all(|x| x.index_set().aocl_range().unwrap().0 > lustration_threshold));
+        assert!(dont_require_lustrations.len() < num_utxos);
+        assert!(!dont_require_lustrations.is_empty());
+
+        let dont_require_lustrations: HashSet<_> = dont_require_lustrations
+            .iter()
+            .map(|x| x.index_set())
+            .collect();
+        for input in &dummy_inputs {
+            if dont_require_lustrations.contains(&input.index_set()) {
+                continue;
+            }
+
+            let needs_lustration = input;
+            assert!(needs_lustration.index_set().aocl_range().unwrap().0 <= lustration_threshold);
+        }
+
+        let accept_lustration = InputSelector::new(Some(lustration_threshold))
+            .input_candidates(dummy_inputs.clone())
+            .policy(InputSelectionPolicy {
+                priority: InputSelectionPriority::ByAge(SortOrder::Descending),
+                required_number_of_confirmations: 0,
+                max_num_inputs: None,
+                accept_lustrations: true,
+            });
+        assert_eq!(
+            num_utxos,
+            accept_lustration
+                .filter_by_lustration_requirement(&dummy_inputs)
+                .into_iter()
+                .count()
+        );
+    }
+
+    fn dummy_input(aocl_leaf_index: u64) -> InputCandidate {
+        InputCandidate {
+            synced_utxo: SyncedUtxo::empty_dummy(aocl_leaf_index),
+            number_of_confirmations: 14,
         }
     }
 }

@@ -38,7 +38,7 @@ use tracing::trace;
 use tracing::warn;
 
 use crate::api::export::Timestamp;
-use crate::application::config::auto_consolidation::AutoConsolidationSetting;
+use crate::application::config::auto_consolidation::ConsolidationTarget;
 use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::loops::channel::MainToMiner;
 use crate::application::loops::channel::MinerToMain;
@@ -762,6 +762,11 @@ impl MainLoopHandler {
 
                 let block_hashes = blocks.iter().map(|x| x.hash()).collect_vec();
                 let last_block = blocks.last().unwrap().to_owned();
+
+                // Track the list of "update" jobs that should be performed
+                // after a new tip is set. Using hashmap deduplicates the jobs
+                // in case multiple incoming blocks trigger the same mempool
+                // transaction to be updated multiple times.
                 let update_jobs = {
                     // Double-check canonicity.
                     // The peer tasks also check this condition. However, there
@@ -780,7 +785,6 @@ impl MainLoopHandler {
                         return Ok(());
                     }
 
-                    // Report.
                     info!(
                         "Block {} from peer is new canonical tip: {:x}",
                         last_block.header().height,
@@ -808,7 +812,7 @@ impl MainLoopHandler {
                     // blocks are sent to the main loop through dedicated
                     // message, NewSyncBlock.
 
-                    let mut update_jobs: Vec<MempoolUpdateJob> = vec![];
+                    let mut update_jobs: HashMap<_, _> = HashMap::new();
                     for new_block in blocks {
                         debug!(
                             "Storing block {:x} in database. Height: {}, Mined: {}",
@@ -817,18 +821,13 @@ impl MainLoopHandler {
                             new_block.kernel.header.timestamp.standard_format()
                         );
 
-                        // Potential race condition here.
-                        // What if last block is new and canonical, but first
-                        // block is already known then we'll store the same block
-                        // twice. That should be OK though, as the appropriate
-                        // database entries are simply overwritten with the new
-                        // block info. See the
-                        // [GlobalState::tests::setting_same_tip_twice_is_allowed]
-                        // test for a test of this phenomenon.
-
                         let update_jobs_ = global_state_mut.set_new_tip(new_block).await?;
 
-                        update_jobs.extend(update_jobs_);
+                        update_jobs.extend(
+                            update_jobs_
+                                .into_iter()
+                                .map(|update_job| (update_job.txid(), update_job)),
+                        );
                     }
 
                     global_state_mut.flush_databases().await?;
@@ -848,21 +847,24 @@ impl MainLoopHandler {
                 }
 
                 // Spawn task to handle mempool tx-updating after new blocks.
-                // TODO: Do clever trick to collapse all jobs relating to the same transaction,
-                //       identified by transaction-ID, into *one* update job.
+                let update_jobs = update_jobs.into_values().collect_vec();
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
-                let (consolidate, maybe_consolidation_address, accept_lustrations) =
-                    match self.global_state_lock.cli().auto_consolidate() {
-                        AutoConsolidationSetting::Inactive => (false, None, false),
-                        AutoConsolidationSetting::ActiveDynamic { accept_lustrations } => {
-                            (true, None, accept_lustrations)
-                        }
-                        AutoConsolidationSetting::ActiveFixed {
-                            accept_lustrations,
-                            address,
-                        } => (true, Some(address), accept_lustrations),
+                let (consolidate, maybe_consolidation_address, max_num_inputs, accept_lustrations) = {
+                    let settings = self.global_state_lock.cli().auto_consolidate();
+                    let (cons, cons_addr) = match settings.policy {
+                        ConsolidationTarget::Inactive => (false, None),
+                        ConsolidationTarget::ActiveDynamic => (true, None),
+                        ConsolidationTarget::ActiveFixed { address } => (true, Some(address)),
                     };
+
+                    (
+                        cons,
+                        cons_addr,
+                        settings.max_num_inpus,
+                        settings.accept_lustrations,
+                    )
+                };
 
                 if consolidate {
                     let timestamp = Timestamp::now();
@@ -870,7 +872,7 @@ impl MainLoopHandler {
                     tokio::task::spawn(async move {
                         let _ = tx_initiator
                             .consolidate(
-                                Default::default(),
+                                max_num_inputs as usize,
                                 maybe_consolidation_address,
                                 timestamp,
                                 accept_lustrations,
@@ -2438,7 +2440,7 @@ impl MainLoopHandler {
                 return None;
             }
             SyncToMain::TipSuccessor(block) => {
-                log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::TipSuccessor");
                 let height = block.header().height;
 
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
@@ -2606,6 +2608,7 @@ mod tests {
         main_to_miner_rx: mpsc::Receiver<MainToMiner>,
     }
 
+    /// Return a state synced to the genesis block, with the devnet wallet.
     async fn setup(
         num_init_peers_outgoing: u8,
         num_peers_incoming: u8,
@@ -2613,7 +2616,6 @@ mod tests {
     ) -> TestSetup {
         const CHANNEL_CAPACITY_MINER_TO_MAIN: usize = 10;
 
-        let network = Network::Main;
         let (
             main_to_peer_tx,
             main_to_peer_rx,
@@ -2623,7 +2625,7 @@ mod tests {
             network_event_rx,
             mut state,
             _own_handshake_data,
-        ) = get_test_genesis_setup(network, num_init_peers_outgoing, cli)
+        ) = get_test_genesis_setup(num_init_peers_outgoing, cli)
             .await
             .unwrap();
         assert!(

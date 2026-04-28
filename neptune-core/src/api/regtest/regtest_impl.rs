@@ -168,8 +168,15 @@ impl RegTestPrivate {
             gsl.cli().network,
         );
 
+        let lustration_status = block.header().pow.lustration_status().ok();
+        let version = block.header().version;
         if find_valid_pow {
-            block.satisfy_mock_pow(parent_difficulty, rand::random());
+            block.satisfy_mock_pow(
+                parent_difficulty,
+                rand::random(),
+                lustration_status,
+                version,
+            );
         }
 
         (

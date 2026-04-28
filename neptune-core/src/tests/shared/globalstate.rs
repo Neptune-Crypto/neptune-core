@@ -160,7 +160,6 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
 /// Returns:
 /// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, global state, peer's handshake data)
 pub(crate) async fn get_test_genesis_setup(
-    network: Network,
     peer_count: u8,
     cli: cli_args::Args,
 ) -> anyhow::Result<(
@@ -173,12 +172,12 @@ pub(crate) async fn get_test_genesis_setup(
     GlobalStateLock,
     HandshakeData,
 )> {
+    let network = cli.network;
     let genesis = Block::genesis(network);
-    test_setup_custom_genesis_block(network, peer_count, cli, genesis).await
+    test_setup_custom_genesis_block(peer_count, cli, genesis).await
 }
 
 pub(crate) async fn test_setup_custom_genesis_block(
-    network: Network,
     peer_count: u8,
     cli: cli_args::Args,
     custom_genesis: Block,
@@ -200,6 +199,7 @@ pub(crate) async fn test_setup_custom_genesis_block(
     let (_network_event_tx, network_event_rx) =
         mpsc::channel::<NetworkEvent>(PEER_CHANNEL_CAPACITY);
 
+    let network = cli.network;
     let wallet = WalletEntropy::devnet_wallet();
     let state = mock_genesis_global_state_with_block(peer_count, wallet, cli, custom_genesis).await;
     Ok((

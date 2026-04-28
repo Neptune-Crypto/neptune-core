@@ -10,6 +10,161 @@ use neptune_cash::api::export::TxProvingCapability;
 use rand::Rng;
 use tracing_test::traced_test;
 
+enum SourceOfNewBlocks {
+    OwnMiner,
+    Peer {
+        num_new_blocks: u8,
+        peer: Box<GenesisNode>,
+    },
+}
+
+async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
+    let tx_proving_capability = alice.gsl.cli().tx_proving_capability.unwrap();
+
+    // Mine two blocks to get a positive balance
+    alice
+        .gsl
+        .api_mut()
+        .regtest_mut()
+        .mine_blocks_to_wallet(2, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        BlockHeight::from(2u64),
+        alice.gsl.lock_guard().await.chain.tip().header().height,
+        "Expected block height: 2"
+    );
+
+    // Generate an address
+    let alice_address = alice
+        .gsl
+        .api_mut()
+        .wallet_mut()
+        .next_receiving_address(KeyType::Generation)
+        .await
+        .unwrap();
+
+    // Create transaction to self
+    let accept_lustrations = true;
+    let tx_artifacts = alice
+        .gsl
+        .api_mut()
+        .tx_sender_mut()
+        .send(
+            vec![(
+                alice_address,
+                NativeCurrencyAmount::coins_from_str("2.45").unwrap(),
+            )],
+            Default::default(),
+            NativeCurrencyAmount::coins(1),
+            Timestamp::now(),
+            accept_lustrations,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
+
+    // Wait until tx has right proof quality
+    let timeout_secs = 10;
+
+    let txid = tx_artifacts.transaction().txid();
+    match tx_proving_capability {
+        TxProvingCapability::LockScript => unreachable!("Not testing this"),
+        TxProvingCapability::PrimitiveWitness => alice
+            .wait_until_tx_in_mempool(txid, timeout_secs)
+            .await
+            .unwrap(),
+        TxProvingCapability::ProofCollection => alice
+            .wait_until_tx_in_mempool_has_proof_collection(txid, timeout_secs)
+            .await
+            .unwrap(),
+        TxProvingCapability::SingleProof => alice
+            .wait_until_tx_in_mempool_has_single_proof(
+                tx_artifacts.transaction().txid(),
+                timeout_secs,
+            )
+            .await
+            .unwrap(),
+    };
+
+    assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
+
+    let expected_new_height = match new_block_source {
+        SourceOfNewBlocks::OwnMiner => 3,
+        SourceOfNewBlocks::Peer { num_new_blocks, .. } => 2 + u64::from(num_new_blocks),
+    };
+
+    // Add new block(s) that do not include the transaction, and verify that
+    // transaction stays in the mempool, and that it eventually gets updated to
+    // the new mutator set.
+    let mine_mempool_txs = false;
+    match new_block_source {
+        SourceOfNewBlocks::OwnMiner => {
+            alice
+                .gsl
+                .api_mut()
+                .regtest_mut()
+                .mine_blocks_to_wallet(1, mine_mempool_txs)
+                .await
+                .unwrap();
+        }
+        SourceOfNewBlocks::Peer {
+            num_new_blocks,
+            peer: mut bob,
+        } => {
+            bob.gsl
+                .api_mut()
+                .regtest_mut()
+                .mine_blocks_to_wallet(num_new_blocks.into(), mine_mempool_txs)
+                .await
+                .unwrap();
+        }
+    }
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
+
+    let tip = alice.gsl.lock_guard().await.chain.tip().to_owned();
+
+    assert_eq!(
+        BlockHeight::from(expected_new_height),
+        tip.header().height,
+        "Expected block height: {expected_new_height}",
+    );
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    let tip_msa = tip.mutator_set_accumulator_after().unwrap();
+    let tx_upgrade_timeout_secs = 15;
+    alice
+        .wait_until_tx_in_mempool_confirmable(
+            tx_artifacts.transaction().txid(),
+            &tip_msa,
+            tx_upgrade_timeout_secs,
+        )
+        .await
+        .unwrap();
+
+    // Sleep to give application time to send all messages before receivers
+    // are dropped. When the application shuts down after it goes out of
+    // scope all messages must have been sent, otherwise there might be a
+    // sender without a receiver and that causes a panic.
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Verify that transaction is confirmable against tip.
+    let txid = tx_artifacts.transaction().txid();
+    let tx = alice
+        .gsl
+        .lock_guard()
+        .await
+        .mempool
+        .get(txid)
+        .unwrap()
+        .to_owned();
+    assert!(tx.is_confirmable_relative_to(&tip_msa));
+}
+
 /// Test: Alice creates a proof-collection backed transaction.
 ///
 /// this is a test that proof collection backed transactions are updated on the
@@ -25,15 +180,16 @@ use tracing_test::traced_test;
 ///    after the processing of the new block.
 #[traced_test]
 #[tokio::test(flavor = "multi_thread")]
-pub async fn alice_updates_mutator_set_data_on_own_transaction() {
-    logging::tracing_logger();
-
-    let mut rng = rand::rng();
+pub async fn update_mutator_set_on_own_transaction_one_new_block_self_mined() {
     for tx_proving_capability in [
         TxProvingCapability::PrimitiveWitness,
         TxProvingCapability::ProofCollection,
         TxProvingCapability::SingleProof,
     ] {
+        logging::tracing_logger();
+
+        let mut rng = rand::rng();
+
         let mut cli_args = GenesisNode::default_args().await;
         cli_args.tx_proving_capability = Some(tx_proving_capability);
 
@@ -41,127 +197,36 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
         // socket.
         cli_args.peer_port = rng.random_range((1 << 10)..=u16::MAX);
         cli_args.rpc_port = rng.random_range((1 << 10)..=u16::MAX);
-        let mut alice = GenesisNode::start_node(cli_args).await.unwrap();
-
-        // Mine two blocks to get a positive balance
-        alice
-            .gsl
-            .api_mut()
-            .regtest_mut()
-            .mine_blocks_to_wallet(2, false)
-            .await
-            .unwrap();
-        assert_eq!(
-            BlockHeight::from(2u64),
-            alice.gsl.lock_guard().await.chain.tip().header().height,
-            "Expected block height: 2"
-        );
-
-        // Generate an address
-        let alice_address = alice
-            .gsl
-            .api_mut()
-            .wallet_mut()
-            .next_receiving_address(KeyType::Generation)
-            .await
-            .unwrap();
-
-        // Create transaction to self
-        let accept_lustrations = true;
-        let tx_artifacts = alice
-            .gsl
-            .api_mut()
-            .tx_sender_mut()
-            .send(
-                vec![(
-                    alice_address,
-                    NativeCurrencyAmount::coins_from_str("2.45").unwrap(),
-                )],
-                Default::default(),
-                NativeCurrencyAmount::coins(1),
-                Timestamp::now(),
-                accept_lustrations,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
-
-        // Wait until tx has right proof quality
-        let timeout_secs = 10;
-
-        let txid = tx_artifacts.transaction().txid();
-        match tx_proving_capability {
-            TxProvingCapability::LockScript => unreachable!("Not testing this"),
-            TxProvingCapability::PrimitiveWitness => alice
-                .wait_until_tx_in_mempool(txid, timeout_secs)
-                .await
-                .unwrap(),
-            TxProvingCapability::ProofCollection => alice
-                .wait_until_tx_in_mempool_has_proof_collection(txid, timeout_secs)
-                .await
-                .unwrap(),
-            TxProvingCapability::SingleProof => alice
-                .wait_until_tx_in_mempool_has_single_proof(
-                    tx_artifacts.transaction().txid(),
-                    timeout_secs,
-                )
-                .await
-                .unwrap(),
-        };
-
-        assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
-
-        // Mine one block that does *not* include the transaction, and verify
-        // that transaction stays in the mempool, and that it eventually gets
-        // updated to the new mutator set.
-        let mine_mempool_txs = false;
-        alice
-            .gsl
-            .api_mut()
-            .regtest_mut()
-            .mine_blocks_to_wallet(1, mine_mempool_txs)
-            .await
-            .unwrap();
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-        assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
-
-        let tip = alice.gsl.lock_guard().await.chain.tip().to_owned();
-        assert_eq!(
-            BlockHeight::from(3u64),
-            tip.header().height,
-            "Expected block height: 3"
-        );
-
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        let tip_msa = tip.mutator_set_accumulator_after().unwrap();
-        let tx_upgrade_timeout_secs = 15;
-        alice
-            .wait_until_tx_in_mempool_confirmable(
-                tx_artifacts.transaction().txid(),
-                &tip_msa,
-                tx_upgrade_timeout_secs,
-            )
-            .await
-            .unwrap();
-
-        // Sleep to give application time to send all messages before receivers
-        // are dropped. When the application shuts down after it goes out of
-        // scope all messages must have been sent, otherwise there might be a
-        // sender without a receiver and that causes a panic.
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-        // Verify that transaction is confirmable against tip.
-        let txid = tx_artifacts.transaction().txid();
-        let tx = alice
-            .gsl
-            .lock_guard()
-            .await
-            .mempool
-            .get(txid)
-            .unwrap()
-            .to_owned();
-        assert!(tx.is_confirmable_relative_to(&tip_msa));
+        let alice = GenesisNode::start_node(cli_args).await.unwrap();
+        worker(alice, SourceOfNewBlocks::OwnMiner).await;
     }
+}
+
+#[traced_test]
+#[tokio::test(flavor = "multi_thread")]
+pub async fn update_mutator_set_on_own_transaction_two_new_blocks_from_peer() {
+    // alice and bob start 2 peer cluster (regtest)
+    logging::tracing_logger();
+
+    let timeout_secs = 5;
+
+    let mut base_args = GenesisNode::default_args().await;
+    base_args.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
+    let [alice, bob] = GenesisNode::start_connected_cluster(
+        &GenesisNode::cluster_id(None),
+        2,
+        Some(base_args),
+        timeout_secs,
+    )
+    .await
+    .unwrap();
+
+    worker(
+        alice,
+        SourceOfNewBlocks::Peer {
+            num_new_blocks: 2,
+            peer: Box::new(bob),
+        },
+    )
+    .await;
 }

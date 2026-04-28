@@ -36,11 +36,7 @@ pub enum TransactionProofType {
 
 impl From<&TransactionProof> for TransactionProofType {
     fn from(proof: &TransactionProof) -> Self {
-        match *proof {
-            TransactionProof::Witness(_) => Self::PrimitiveWitness,
-            TransactionProof::ProofCollection(_) => Self::ProofCollection,
-            TransactionProof::SingleProof(_) => Self::SingleProof,
-        }
+        proof.proof_type()
     }
 }
 
@@ -130,6 +126,14 @@ impl TransactionProof {
             }
             TransactionProof::ProofCollection(_) => Ok(TransactionProofQuality::ProofCollection),
             TransactionProof::SingleProof(_) => Ok(TransactionProofQuality::SingleProof),
+        }
+    }
+
+    pub(crate) fn proof_type(&self) -> TransactionProofType {
+        match self {
+            TransactionProof::Witness(_) => TransactionProofType::PrimitiveWitness,
+            TransactionProof::ProofCollection(_) => TransactionProofType::ProofCollection,
+            TransactionProof::SingleProof(_) => TransactionProofType::SingleProof,
         }
     }
 

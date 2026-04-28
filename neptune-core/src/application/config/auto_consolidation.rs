@@ -2,40 +2,46 @@ use crate::api::export::Network;
 use crate::api::export::ReceivingAddress;
 
 #[derive(Debug, Clone, Default)]
-pub enum AutoConsolidationSetting {
+pub struct AutoConsolidationSettings {
+    pub(crate) max_num_inpus: u8,
+    pub(crate) policy: ConsolidationTarget,
+    pub(crate) accept_lustrations: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub enum ConsolidationTarget {
     #[default]
     Inactive,
-    ActiveDynamic {
-        accept_lustrations: bool,
-    },
+    ActiveDynamic,
     ActiveFixed {
-        accept_lustrations: bool,
         address: ReceivingAddress,
     },
 }
 
-impl AutoConsolidationSetting {
+impl AutoConsolidationSettings {
     // OK to suppress this linter rule because we are parsing and the nested
     // type tells clap how to parse.
     #[expect(clippy::option_option)]
     pub(crate) fn parse(
-        cli_argument: &Option<Option<String>>,
+        auto_consolidate_cli: &Option<Option<String>>,
+        num_consolidation_inputs_cli: u8,
         network: Network,
         accept_lustrations: bool,
     ) -> Result<Self, String> {
-        let auto_consolidate = match cli_argument {
-            Some(None) => AutoConsolidationSetting::ActiveDynamic { accept_lustrations },
+        let policy = match auto_consolidate_cli {
+            Some(None) => ConsolidationTarget::ActiveDynamic,
             Some(Some(address)) => {
                 let address = ReceivingAddress::from_bech32m(address, network)
                     .map_err(|inner_err| inner_err.to_string())?;
-                AutoConsolidationSetting::ActiveFixed {
-                    accept_lustrations,
-                    address,
-                }
+                ConsolidationTarget::ActiveFixed { address }
             }
-            None => AutoConsolidationSetting::Inactive,
+            None => ConsolidationTarget::Inactive,
         };
 
-        Ok(auto_consolidate)
+        Ok(AutoConsolidationSettings {
+            max_num_inpus: num_consolidation_inputs_cli,
+            policy,
+            accept_lustrations,
+        })
     }
 }
