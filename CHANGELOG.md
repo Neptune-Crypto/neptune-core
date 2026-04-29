@@ -1,3 +1,39 @@
+
+## [0.10.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.9.0..v0.10.0) - 2026-04-29
+
+### ✨ Features
+
+- Allow for a variable number of consolidation inputs ([e886119c](https://github.com/Neptune-Crypto/neptune-core/commit/e886119c))
+- *(proof_upgrader)* Merge after raise, if possible ([437fa746](https://github.com/Neptune-Crypto/neptune-core/commit/437fa746))
+
+### 🐛 Bug Fixes
+
+- *(json_rpc)* Verify lustration status before accepting tx ([d13c2610](https://github.com/Neptune-Crypto/neptune-core/commit/d13c2610))
+- *(mempool)* Deduplicate "update" jobs on multiple new blocks ([3a6ff13d](https://github.com/Neptune-Crypto/neptune-core/commit/3a6ff13d))
+- Function name in log message ([b3bb2c50](https://github.com/Neptune-Crypto/neptune-core/commit/b3bb2c50))
+- Allow some integration tests to run in parallel ([6aac0fc3](https://github.com/Neptune-Crypto/neptune-core/commit/6aac0fc3))
+- Wrong inequality in lustration threshold check ([85e75106](https://github.com/Neptune-Crypto/neptune-core/commit/85e75106))
+
+### 📚 Documentation
+
+- Clarify release protocol wrt tags ([5961ceb6](https://github.com/Neptune-Crypto/neptune-core/commit/5961ceb6))
+
+### ♻️ Refactor
+
+- Ensure never consolidate 0 or 1 inputs ([87f77b33](https://github.com/Neptune-Crypto/neptune-core/commit/87f77b33))
+
+### ✅ Testing
+
+- Avoid duplicate argument in test state generator ([5311db81](https://github.com/Neptune-Crypto/neptune-core/commit/5311db81))
+
+### ⚙️ Miscellaneous
+
+- Expose functionality for downstream `neptune-wallet-app` ([e5b3de7b](https://github.com/Neptune-Crypto/neptune-core/commit/e5b3de7b))
+
+### 🪢 Merge
+
+- Merge([#906](https://github.com/Neptune-Crypto/neptune-core/issues/906)): Variable Numberof Consolidation Inputs ([581b53f8](https://github.com/Neptune-Crypto/neptune-core/commit/581b53f8))
+
 ## [0.9.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.8.0..v0.9.0) - 2026-04-28
 
 ### ✨ Features
