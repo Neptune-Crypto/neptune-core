@@ -179,6 +179,8 @@ Edit them until you are happy, then push the tag(s) to GitHub.
  - To show tags: `git tag --list`
  - To push a tag: `git push origin [tag_name]`
 
+**Note:** `cargo release` actually creates a bunch of tags, one for each crate and of the form `crate-name-vX.Y.Z`. These should be pushed to GitHub as well. However, it is important to push the generic one (`vX.Y.Z`) *first*, because otherwise GitHub's release builder will not trigger.
+
 ### Set Tag `release`
 
 By convention, tag `release` should always point to the latest stable commit compatible with the latest release.
