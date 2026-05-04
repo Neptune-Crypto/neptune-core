@@ -140,11 +140,11 @@ impl Debug for WalletState {
 }
 
 impl WalletState {
-    /// Generate [`ComposerParameters`] for composing the next block. If a
-    /// coinbase distribution is specified, that will be used. If no coinbase
-    /// distribution is specified, the entire coinbase reward goes to an address
-    /// of the wallet. If the coinbase distribution *is* set, it is assumed that
-    /// the composer reward does not go to the wallet of this node.
+    /// Generate [`ComposerParameters`] for composing the next block. If an
+    /// overridden coinbase distribution is specified, that will be used. If no
+    /// coinbase distribution is specified, the entire coinbase reward goes to
+    /// an address of the wallet. If the coinbase distribution *is* set, it is
+    /// assumed that the composer reward does not go to the wallet of this node.
     ///
     ///  # Panics
     ///
@@ -154,16 +154,16 @@ impl WalletState {
         next_block_height: BlockHeight,
         guesser_fraction: f64,
         fee_notification: FeeNotificationPolicy,
-        coinbase_distribution: Option<CoinbaseDistribution>,
+        overridden_coinbase_distribution: Option<CoinbaseDistribution>,
     ) -> ComposerParameters {
         let reward_address = self.wallet_entropy.prover_fee_address();
         let sender_randomness_for_composer = self
             .wallet_entropy
             .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
 
-        // If coinbase distribution is not set, we assume this wallet does not
-        // have the receiver preimage.
-        let receiver_preimage = if coinbase_distribution.is_some() {
+        // If coinbase distribution is set, we assume this wallet does not have
+        // the receiver preimage.
+        let receiver_preimage = if overridden_coinbase_distribution.is_some() {
             None
         } else {
             Some(self.wallet_entropy.composer_fee_key().receiver_preimage())
@@ -171,7 +171,7 @@ impl WalletState {
 
         // If no coinbase distribution is set, reward this node's wallet.
         let coinbase_distribution =
-            coinbase_distribution.unwrap_or(CoinbaseDistribution::solo(reward_address));
+            overridden_coinbase_distribution.unwrap_or(CoinbaseDistribution::solo(reward_address));
 
         ComposerParameters::new(
             coinbase_distribution,
@@ -3092,7 +3092,7 @@ pub(crate) mod tests {
         use crate::application::loops::channel::NewBlockFound;
         use crate::application::loops::mine_loop::composer_parameters;
         use crate::application::loops::mine_loop::guess_nonce;
-        use crate::application::loops::mine_loop::GuessingConfiguration;
+        use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
         use crate::protocol::consensus::transaction::TransactionProof;
         use crate::tests::shared::blocks::fake_valid_block_proposal_from_tx;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
@@ -3121,12 +3121,7 @@ pub(crate) mod tests {
             )
             .await;
 
-            let guesser_key = bob
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_entropy
-                .guesser_fee_key();
+            let guesser_address = bob.lock_guard().await.guesser_address();
 
             // Mine it till it has a valid PoW digest
             // Add this block to the wallet through the same pipeline as the
@@ -3139,7 +3134,7 @@ pub(crate) mod tests {
                 guesser_tx,
                 GuessingConfiguration {
                     num_guesser_threads: Some(2),
-                    address: guesser_key.to_address().into(),
+                    address: guesser_address,
                     override_rng: None,
                     override_timestamp: None,
                 },

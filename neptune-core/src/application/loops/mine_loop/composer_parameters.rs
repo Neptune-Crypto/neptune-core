@@ -86,7 +86,7 @@ impl ComposerParameters {
 
         let sender_randomness = self.sender_randomness;
         let notification_medium: UtxoNotificationMedium = self.notification_policy.into();
-        let owned = true;
+        let owned = self.maybe_receiver_preimage.is_some();
         let mut ret = vec![];
         let mut distributed = NativeCurrencyAmount::zero();
         for coinbase_output in self.coinbase_distribution.iter() {
@@ -171,5 +171,161 @@ impl ComposerParameters {
         };
 
         composer_txos.expected_utxos(UtxoNotifier::OwnMinerComposeBlock, receiver_preimage)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::export::BlockHeight;
+    use crate::api::export::Network;
+    use crate::api::export::ReceivingAddress;
+    use crate::api::export::WalletEntropy;
+    use crate::application::config::cli_args;
+    use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::mock_genesis_wallet_state;
+
+    #[tokio::test]
+    async fn dynamic_overriding_trumps_cli_override() {
+        let network = Network::Main;
+        let devnet_wallet = WalletEntropy::devnet_wallet();
+        let another_wallet = WalletEntropy::new_random();
+        let third_wallet = WalletEntropy::new_random();
+
+        let cli_override = cli_args::Args {
+            network,
+            guesser_fraction: 0.4,
+            mining_address: Some(
+                third_wallet
+                    .composer_fee_key()
+                    .to_address()
+                    .to_bech32m(network)
+                    .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let mut dynamic_override =
+            mock_genesis_global_state(0, devnet_wallet.clone(), cli_override).await;
+        let mut dynamic_override = dynamic_override.lock_guard_mut().await;
+
+        let composition_receiver: ReceivingAddress = another_wallet
+            .nth_generation_spending_key(0)
+            .to_address()
+            .into();
+        let overridden_cb_distribution = CoinbaseDistribution::solo(composition_receiver.clone());
+
+        let now = Timestamp::now();
+        let coinbase_amount = INITIAL_BLOCK_SUBSIDY;
+        let next_height = BlockHeight::genesis().next();
+        dynamic_override
+            .mining_state
+            .set_coinbase_distribution(overridden_cb_distribution);
+        let dynamic_overriden_composer_outputs = dynamic_override
+            .composer_parameters(next_height)
+            .tx_outputs(coinbase_amount, now);
+
+        let another_wallet = mock_genesis_wallet_state(
+            another_wallet,
+            &cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let third_wallet =
+            mock_genesis_wallet_state(third_wallet, &cli_args::Args::default_with_network(network))
+                .await;
+        for output in dynamic_overriden_composer_outputs.iter() {
+            assert!(
+                another_wallet.can_unlock(&output.utxo()),
+                "Dynamic mining recipient must be able to spend composer reward."
+            );
+            assert!(
+                !third_wallet.can_unlock(&output.utxo()),
+                "Mining address set in CLI argument must be overridden by dynamic override."
+            );
+            assert!(
+                !dynamic_override.wallet_state.can_unlock(&output.utxo()),
+                "Wallet may not be able to spend composition rewards when composer distribution is overridden."
+            );
+            assert_eq!(
+                composition_receiver.privacy_digest(),
+                output.receiver_digest(),
+                "Receiver digest of composer output must match that from overridden mining address"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn composer_parameters_respect_cli_flag_overriding() {
+        let network = Network::Main;
+        let devnet_wallet = WalletEntropy::devnet_wallet();
+
+        // No override
+        let no_override = cli_args::Args {
+            network,
+            guesser_fraction: 0.4,
+            ..Default::default()
+        };
+        let no_override = mock_genesis_global_state(0, devnet_wallet.clone(), no_override).await;
+        let no_override = no_override.lock_guard().await;
+
+        let now = Timestamp::now();
+        let coinbase_amount = INITIAL_BLOCK_SUBSIDY;
+        let next_height = BlockHeight::genesis().next();
+
+        let no_override_composer_outputs = no_override
+            .composer_parameters(next_height)
+            .tx_outputs(coinbase_amount, now);
+        assert_eq!(
+            2,
+            no_override_composer_outputs.len(),
+            "Default parameters must produce exactly two coinbase outputs"
+        );
+
+        for output in no_override_composer_outputs.iter() {
+            assert!(
+                no_override.wallet_state.can_unlock(&output.utxo()),
+                "Wallet must be able to spend composition rewards when explicit mining address is not set."
+            );
+        }
+
+        // CLI flag override
+        let another_wallet = WalletEntropy::new_random();
+        let mining_address: ReceivingAddress = another_wallet
+            .nth_generation_spending_key(0)
+            .to_address()
+            .into();
+        let another_wallet = mock_genesis_wallet_state(
+            another_wallet,
+            &cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let cli_override = cli_args::Args {
+            network,
+            guesser_fraction: 0.4,
+            mining_address: Some(mining_address.to_display_bech32m(network).unwrap()),
+            ..Default::default()
+        };
+
+        let cli_override = mock_genesis_global_state(0, devnet_wallet.clone(), cli_override).await;
+        let cli_override = cli_override.lock_guard().await;
+        let cli_override_composer_outputs = cli_override
+            .composer_parameters(next_height)
+            .tx_outputs(coinbase_amount, now);
+
+        for output in cli_override_composer_outputs.iter() {
+            assert!(
+                another_wallet.can_unlock(&output.utxo()),
+                "Mining recipient must be able to unlock composer reward."
+            );
+            assert!(
+                !cli_override.wallet_state.can_unlock(&output.utxo()),
+                "Wallet may not be able to spend composition rewards when mining reward address is overridden through a CLI flag."
+            );
+            assert_eq!(
+                mining_address.privacy_digest(),
+                output.receiver_digest(),
+                "Receiver digest of composer output must match that from overridden mining address"
+            );
+        }
     }
 }

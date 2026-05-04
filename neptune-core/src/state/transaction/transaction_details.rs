@@ -189,11 +189,9 @@ impl TransactionDetails {
     ///
     /// Does sanity checks on:
     /// - amounts, must be balanced
-    /// - mutator set membership proofs, must be valid wrt. supplied mutator set
     ///
     /// See also: [Self::new_without_coinbase].
     pub(crate) fn new_with_coinbase(
-        tx_inputs: impl Into<TxInputs>,
         tx_outputs: impl Into<TxOutputList>,
         coinbase: NativeCurrencyAmount,
         fee: NativeCurrencyAmount,
@@ -201,8 +199,9 @@ impl TransactionDetails {
         mutator_set_accumulator: MutatorSetAccumulator,
         network: Network,
     ) -> Self {
+        let inputs = TxInputs::empty();
         Self::new(
-            tx_inputs,
+            inputs,
             tx_outputs,
             fee,
             Some(coinbase),

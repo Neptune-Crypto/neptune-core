@@ -311,7 +311,7 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::compose_block_helper;
     use crate::application::loops::mine_loop::create_block_transaction_from;
     use crate::application::loops::mine_loop::guess_nonce;
-    use crate::application::loops::mine_loop::GuessingConfiguration;
+    use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
     use crate::application::loops::mine_loop::TxMergeOrigin;
     use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
@@ -671,14 +671,7 @@ pub(crate) mod tests {
                     .await;
 
             // Solve PoW for block_b
-            let guesser_address: ReceivingAddress = bob
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_entropy
-                .guesser_fee_key()
-                .to_address()
-                .into();
+            let guesser_address: ReceivingAddress = bob.lock_guard().await.guesser_address();
             let (guesser_tx_b, guesser_rx_b) = oneshot::channel::<NewBlockFound>();
             let guesser_timestamp_b = block_b_no_pow.header().timestamp;
             guess_nonce(

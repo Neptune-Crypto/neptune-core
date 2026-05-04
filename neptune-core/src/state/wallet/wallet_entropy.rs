@@ -46,7 +46,7 @@ impl WalletEntropy {
 
     /// Returns the spending key for guesser rewards.
     pub fn guesser_fee_key(&self) -> generation_address::GenerationSpendingKey {
-        self.nth_generation_spending_key(0u64)
+        self.composer_fee_key()
     }
 
     /// Returns the spending key for prover rewards, *i.e.*, composer fee or

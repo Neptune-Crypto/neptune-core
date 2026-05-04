@@ -2065,12 +2065,10 @@ pub mod tests {
         let network = rpc_server.state.cli().network;
 
         // Prepare a transaction to our wallet coming from devnet wallet.
-        let mut devnet_node = mock_genesis_global_state(
-            0,
-            WalletEntropy::devnet_wallet(),
-            rpc_server.state.cli().clone(),
-        )
-        .await;
+        let mut cli = cli_args::Args::default_with_network(Network::Main);
+        cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
+        let mut devnet_node =
+            mock_genesis_global_state(0, WalletEntropy::devnet_wallet(), cli).await;
 
         let rpc_address = rpc_server
             .state

@@ -31,6 +31,8 @@ impl CoinbaseOutputReadable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::export::KeyType;
+    use crate::api::export::WalletEntropy;
 
     impl CoinbaseOutputReadable {
         pub(crate) fn new(fraction_in_promille: u32, recipient: String, timelocked: bool) -> Self {
@@ -40,5 +42,19 @@ mod tests {
                 timelocked,
             }
         }
+    }
+
+    #[test]
+    fn print_coinbase_output_readable_as_json() {
+        let recipient = WalletEntropy::devnet_wallet()
+            .nth_receiving_address(0, KeyType::Generation)
+            .to_display_bech32m(Network::Main)
+            .unwrap();
+        let timelocked = CoinbaseOutputReadable::new(540, recipient.clone(), true);
+        let liquid = CoinbaseOutputReadable::new(460, recipient, false);
+
+        let cb_outputs = vec![timelocked, liquid];
+        let cb_outputs = serde_json::to_string(&cb_outputs).unwrap();
+        println!("{cb_outputs}");
     }
 }

@@ -1,5 +1,6 @@
 pub mod coinbase_distribution;
 pub(crate) mod composer_parameters;
+pub(crate) mod guesser_configuration;
 use std::cmp::max;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,7 +28,6 @@ use tokio::time::sleep;
 use tracing::*;
 
 use crate::api::export::ReceivingAddress;
-use crate::api::export::TxInputs;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
@@ -37,6 +37,7 @@ use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::job_queue::errors::JobHandleError;
 use crate::application::loops::channel::*;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
@@ -64,15 +65,6 @@ use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::GlobalStateLock;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
-
-/// Information related to guessing.
-#[derive(Debug, Clone)]
-pub(crate) struct GuessingConfiguration {
-    pub(crate) num_guesser_threads: Option<usize>,
-    pub(crate) address: ReceivingAddress,
-    pub(crate) override_rng: Option<StdRng>,
-    pub(crate) override_timestamp: Option<Timestamp>,
-}
 
 /// Creates a block transaction and composes a block from it. Returns the block
 /// and the composer UTXOs. Block will reward caller according to block
@@ -157,12 +149,7 @@ pub(crate) async fn mock_compose_block(
         Default::default(),
         gs.mining_state.overridden_coinbase_distribution(),
     );
-    let guesser_address = gs
-        .wallet_state
-        .wallet_entropy
-        .guesser_fee_key()
-        .to_address()
-        .into();
+    let guesser_address = gs.guesser_address();
     let txs = gs.mempool.get_transactions_for_block_composition(
         SIZE_20MB_IN_BYTES,
         Some(gs.cli().max_num_compose_mergers.get()),
@@ -523,7 +510,6 @@ pub(crate) fn prepare_coinbase_transaction_stateless(
     );
 
     let transaction_details = TransactionDetails::new_with_coinbase(
-        TxInputs::empty(),
         composer_outputs.clone(),
         coinbase_amount,
         guesser_fee,
@@ -848,12 +834,8 @@ pub(crate) async fn mine(
                 .set_mining_status_to_guessing(&proposal)
                 .await;
 
-            let guesser_key = global_state_lock
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_entropy
-                .guesser_fee_key();
+            let guesser_address: ReceivingAddress =
+                global_state_lock.lock_guard().await.guesser_address();
 
             let latest_block_header = global_state_lock
                 .lock(|s| s.chain.tip().header().to_owned())
@@ -865,7 +847,7 @@ pub(crate) async fn mine(
                 guesser_tx,
                 GuessingConfiguration {
                     num_guesser_threads: cli_args.guesser_threads,
-                    address: guesser_key.to_address().into(),
+                    address: guesser_address,
                     override_rng: None,
                     override_timestamp: None,
                 },
@@ -1459,7 +1441,6 @@ pub(crate) mod tests {
         let amt_to_alice = NativeCurrencyAmount::coins(4);
         let tx_from_alice = make_transaction(amt_to_alice, &alice, now).await;
 
-        let mut cli = cli_args::Args::default();
         for guesser_fee_fraction in [0f64, 0.5, 1.0] {
             // Verify constructed coinbase transaction and block template when mempool is empty
             assert!(
@@ -1467,6 +1448,8 @@ pub(crate) mod tests {
                 "Mempool must be empty at start of loop"
             );
 
+            let mut cli = cli_args::Args::default_with_network(network);
+            cli.second_parse().unwrap();
             cli.guesser_fraction = guesser_fee_fraction;
             alice.set_cli(cli.clone()).await;
             let (transaction_empty_mempool, coinbase_utxo_info) = {
@@ -1734,21 +1717,15 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        let guesser_key = global_state_lock
-            .lock_guard()
-            .await
-            .wallet_state
-            .wallet_entropy
-            .guesser_fee_key();
+        let guesser_address = global_state_lock.lock_guard().await.guesser_address();
         let transaction = BlockTransaction::upgrade(transaction);
-        let mut block = Block::block_template_invalid_proof(
+        let block = Block::block_template_invalid_proof(
             &tip_block_orig,
             transaction,
             launch_date,
             None,
             network,
         );
-        block.set_header_guesser_address(guesser_key.to_address().into());
 
         let num_guesser_threads = None;
 
@@ -1759,7 +1736,7 @@ pub(crate) mod tests {
             worker_task_tx,
             GuessingConfiguration {
                 num_guesser_threads,
-                address: guesser_key.to_address().into(),
+                address: guesser_address,
                 override_rng: None,
                 override_timestamp: None,
             },

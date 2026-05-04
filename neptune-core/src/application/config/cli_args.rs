@@ -20,8 +20,10 @@ use tracing::error;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
+use crate::api::export::ReceivingAddress;
 use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 use crate::application::config::parser::multiaddr::parse_to_multiaddr;
+use crate::application::config::parser::CliArgsParseError;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::json_rpc::core::api::ops::Namespace;
@@ -266,6 +268,20 @@ pub struct Args {
     /// relayed to peers.
     #[clap(long, default_value = "0.0005", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_relay_pctx_fee_per_input: NativeCurrencyAmount,
+
+    /// If set, all mining rewards will be sent to this address.
+    ///
+    /// If set, both guesser rewards and composer rewards will be sent to this
+    /// address. However, a custom coinbase distribution takes precendence over
+    /// this value, for composition rewards.
+    ///
+    /// The method [`Self::mining_address()`] should be preferred when
+    /// reading this value.
+    #[clap(long)]
+    pub mining_address: Option<String>,
+
+    #[clap(skip)]
+    pub(crate) mining_address_cache: OnceLock<Option<ReceivingAddress>>,
 
     /// Whether to produce block proposals, which is the 2nd step of three-step
     /// mining. Note that composing block proposals involves the computationally
@@ -782,6 +798,47 @@ impl Args {
         }
     }
 
+    /// Parse CLI arguments supplementary to CLAP's native parsing.
+    ///
+    /// # Side Effects
+    ///
+    /// Sets cache.
+    ///
+    /// # Panics
+    /// - If this method is ever called more than once on the same object.
+    pub(crate) fn second_parse(&mut self) -> Result<(), CliArgsParseError> {
+        let network = self.network;
+        let auto_consolidate = AutoConsolidationSettings::parse(
+            &self.auto_consolidate,
+            self.num_consolidation_inputs,
+            network,
+            self.accept_consolidation_lustrations,
+        )
+        .map_err(CliArgsParseError::InvalidConsolidationAddress)?;
+        self.auto_consolidate_cache.set(auto_consolidate).unwrap();
+
+        let proving_capability = self.derive_proving_capability()?;
+        self.tx_proving_capability_cache
+            .set(proving_capability)
+            .expect("This function may only be called once.");
+
+        let mining_address = match &self.mining_address {
+            Some(addr) => match ReceivingAddress::from_bech32m(addr, network) {
+                Ok(addr) => Some(addr),
+                Err(_) => {
+                    return Err(CliArgsParseError::InvalidMiningAddress(addr.to_owned()));
+                }
+            },
+            None => None,
+        };
+
+        self.mining_address_cache.set(mining_address).expect(
+            "Cache value may not be set if already set. Is this function being called twice?",
+        );
+
+        Ok(())
+    }
+
     /// Indicates if all incoming peer connections are disallowed.
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
         self.max_num_peers.is_zero()
@@ -1010,6 +1067,17 @@ impl Args {
             })
             .to_owned()
     }
+
+    /// The address that all mining rewards should go to.
+    ///
+    /// If None is returned, the wallet must be probed to get an address for
+    /// mining rewards.
+    pub fn mining_address(&self) -> Option<ReceivingAddress> {
+        self.mining_address_cache
+            .get()
+            .expect("Cache must be set before calling this method")
+            .clone()
+    }
 }
 
 impl From<&Args> for ProverJobSettings {
@@ -1042,6 +1110,7 @@ mod tests {
     use std::ops::RangeBounds;
 
     use super::*;
+    use crate::api::export::WalletEntropy;
     use crate::application::config::parser::multiaddr::parse_to_multiaddr;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 
@@ -1206,5 +1275,21 @@ mod tests {
 
         cli.peers.push(parse_to_multiaddr(&ipv4).unwrap());
         cli.peers.push(parse_to_multiaddr(&ipv4_udp_quic).unwrap());
+    }
+
+    #[test]
+    fn uses_mining_address_value() {
+        let network = Network::Main;
+        let devnet_address = WalletEntropy::devnet_wallet()
+            .nth_generation_spending_key(0)
+            .to_address();
+        let devnet_address: ReceivingAddress = devnet_address.into();
+        let devnet_address_str = devnet_address.to_display_bech32m(network).unwrap();
+
+        let mut cli = Args::default_with_network(network);
+        cli.mining_address = Some(devnet_address_str);
+        cli.second_parse().unwrap();
+
+        assert_eq!(devnet_address, cli.mining_address().unwrap());
     }
 }
