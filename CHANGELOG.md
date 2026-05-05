@@ -1,3 +1,19 @@
+## [0.10.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.10.1..vX.Y.Z) - 2026-05-05
+
+### ✨ Features
+
+- Mine without knowing mining keys ([629bdd0d](https://github.com/Neptune-Crypto/neptune-core/commit/629bdd0d))
+- Allow fee gobbling without knowing secret key ([4bbc5283](https://github.com/Neptune-Crypto/neptune-core/commit/4bbc5283))
+
+### ⚙️ Miscellaneous
+
+- Cargo update ([83e6f2b7](https://github.com/Neptune-Crypto/neptune-core/commit/83e6f2b7))
+
+### 🪢 Merge
+
+- Merge([#915](https://github.com/Neptune-Crypto/neptune-core/issues/915)): Neptune-Crypto/cold-mining ([5fc5d8d6](https://github.com/Neptune-Crypto/neptune-core/commit/5fc5d8d6))
+
+
 ## [0.10.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.10.0..v0.10.1) - 2026-04-29
 
 ### 🏗️ Build
