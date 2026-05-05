@@ -2763,7 +2763,7 @@ mod tests {
         use super::*;
         use crate::application::loops::channel::NewBlockFound;
         use crate::application::loops::mine_loop::guess_nonce;
-        use crate::application::loops::mine_loop::GuessingConfiguration;
+        use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
         use crate::protocol::consensus::block::difficulty_control::Difficulty;
         use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
         use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;

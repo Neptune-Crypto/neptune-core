@@ -3036,29 +3036,22 @@ mod tests {
             let num_outgoing_connections = 0;
             let num_incoming_connections = 0;
 
-            let TestSetup {
-                mut main_loop_handler,
-                mut main_to_peer_rx,
-                ..
-            } = setup(
-                num_outgoing_connections,
-                num_incoming_connections,
-                cli_args::Args::default(),
-            )
-            .await;
-
             // Force instance to create SingleProofs, otherwise CI and other
             // weak machines fail.
-            let mocked_cli = cli_args::Args {
+            let network = Network::Main;
+            let cli = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 tx_proof_upgrading: true,
+                network,
                 ..Default::default()
             };
 
-            main_loop_handler
-                .global_state_lock
-                .set_cli(mocked_cli.clone())
-                .await;
+            let TestSetup {
+                main_loop_handler,
+                mut main_to_peer_rx,
+                ..
+            } = setup(num_outgoing_connections, num_incoming_connections, cli).await;
+
             let mut main_loop_handler = main_loop_handler.with_mocked_time(SystemTime::now());
             let mut mutable_main_loop_state = main_loop_handler.mutable();
 
@@ -3070,8 +3063,7 @@ mod tests {
                 "Scheduled task returns OK when run on empty mempool"
             );
 
-            let consensus_rule_set =
-                ConsensusRuleSet::infer_from(mocked_cli.network, BlockHeight::genesis());
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
             let fee = NativeCurrencyAmount::coins(1);
             let proof_collection_tx = tx_no_outputs(
                 &mut main_loop_handler.global_state_lock,
@@ -3116,20 +3108,26 @@ mod tests {
                 .next_back()
                 .expect("mempool should contain one item here");
 
+            let state = main_loop_handler.global_state_lock.lock_guard().await;
+            let (mempool_tx, priority) = state.mempool.get_with_priority(merged_txid).unwrap();
             assert!(
-                matches!(
-                    main_loop_handler
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .mempool
-                        .get(merged_txid)
-                        .unwrap()
-                        .proof,
-                    TransactionProof::SingleProof(_)
-                ),
+                matches!(mempool_tx.proof, TransactionProof::SingleProof(_)),
                 "Proof in mempool must now be of type single proof"
             );
+
+            println!("priority: {priority:?}");
+
+            let timestamp = Timestamp::now();
+            let unconfirmed = state
+                .get_wallet_status_for_tip()
+                .await
+                .unconfirmed_available_balance(timestamp);
+
+            assert!(
+                matches!(priority, UpgradePriority::Interested(_)),
+                "Upgraded tx must have priority 'interested'"
+            );
+            assert_eq!(priority, UpgradePriority::Interested(unconfirmed));
 
             match main_to_peer_rx.recv().await {
                 Ok(MainToPeerTask::TransactionNotification(tx_noti)) => {

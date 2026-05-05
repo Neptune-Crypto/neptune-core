@@ -2015,7 +2015,7 @@ pub trait RPC {
     async fn restart_miner(token: auth::Token) -> RpcResult<()>;
 
     /// Set coinbase distribution for this node's block proposals. This
-    /// distribution will be in effect until it is overwritted or manually
+    /// distribution will be in effect until it is overwritten or manually
     /// unset. The value set through this command stays in effect regardless of
     /// whether the block's proposals are mined or not. Only by overwriting this
     /// value by calling this function again, or by unsetting this value through
@@ -4116,27 +4116,20 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        let Some(proposal) = self
-            .state
-            .lock_guard()
-            .await
-            .mining_state
-            .block_proposal
-            .map(|x| x.to_owned())
-        else {
-            return Ok(None);
+        let (proposal, guesser_address) = {
+            let state = self.state.lock_guard().await;
+            let Some(proposal) = state.mining_state.block_proposal.map(|x| x.to_owned()) else {
+                return Ok(None);
+            };
+
+            let (guesser_address, _) = state.mining_rewards_address();
+
+            (proposal, guesser_address)
         };
 
-        let guesser_key = self
-            .state
-            .lock_guard()
-            .await
-            .wallet_state
-            .wallet_entropy
-            .guesser_fee_key();
-
-        self.pow_puzzle_inner(guesser_key.to_address().into(), proposal)
-            .await
+        // Release lock before calling next function! Otherwise, immediate
+        // deadlock.
+        self.pow_puzzle_inner(guesser_address, proposal).await
     }
 
     // documented in trait. do not add doc-comment.

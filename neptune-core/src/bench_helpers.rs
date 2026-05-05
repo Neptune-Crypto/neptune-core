@@ -77,10 +77,7 @@ pub async fn devops_wallet_state_genesis(network: Network) -> WalletState {
     DataDirectory::create_dir_if_not_exists(&data_directory.wallet_directory_path())
         .await
         .unwrap();
-    let cli_args = cli_args::Args {
-        network,
-        ..Default::default()
-    };
+    let cli_args = cli_args::Args::default_with_network(network);
     let configuration = WalletConfiguration::new(&data_directory).absorb_options(&cli_args);
 
     let genesis = Block::genesis(network);

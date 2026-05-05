@@ -38,10 +38,13 @@ use crate::VERSION;
 pub(crate) async fn mock_genesis_global_state_with_block(
     peer_count: u8,
     wallet: WalletEntropy,
-    cli: cli_args::Args,
+    mut cli: cli_args::Args,
     genesis_block: Block,
 ) -> GlobalStateLock {
     let data_dir = crate::tests::shared::files::unit_test_data_directory(cli.network).unwrap();
+
+    cli.second_parse().unwrap();
+
     let archival_state = crate::state::archival_state::ArchivalState::new(
         data_dir.clone(),
         genesis_block.clone(),
@@ -128,8 +131,10 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
         mock_genesis_global_state(2, wallet.clone(), cli_args.clone()).await;
     let mut previous_block = Block::genesis(network);
 
-    let guesser_key = wallet.guesser_fee_key();
-    let guesser_address = guesser_key.to_address();
+    let (guesser_address, _) = global_state_lock
+        .lock_guard()
+        .await
+        .mining_rewards_address();
     for coinbase_sender_randomness in coinbase_sender_randomness_coll {
         let (next_block, composer_utxos) =
             super::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
@@ -139,7 +144,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
                 None,
                 composer_key,
                 coinbase_sender_randomness,
-                (0.5, guesser_address.into()),
+                (0.5, guesser_address.clone()),
                 network,
             )
             .await;

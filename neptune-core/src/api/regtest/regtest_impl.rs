@@ -131,19 +131,8 @@ impl RegTestPrivate {
         let gs = gsl.lock_guard().await;
 
         let tip = gs.chain.tip().to_owned();
-
         let next_block_height = tip.header().height.next();
-        let fee_notification_policy = Default::default();
-        let guesser_fraction = gs.cli().guesser_fraction;
-        let overridden_coinbase_distribution = gs.mining_state.overridden_coinbase_distribution();
-        let composer_parameters = gs.wallet_state.composer_parameters(
-            next_block_height,
-            guesser_fraction,
-            fee_notification_policy,
-            overridden_coinbase_distribution,
-        );
-
-        let guesser_key = gs.wallet_state.wallet_entropy.guesser_fee_key();
+        let composer_parameters = gs.composer_parameters(next_block_height);
 
         // retrieve selected tx from mempool for block inclusion.
         let txs_from_mempool = if include_mempool_txs {
@@ -155,13 +144,14 @@ impl RegTestPrivate {
             vec![]
         };
 
+        let (guesser_address, _) = gs.mining_rewards_address();
         drop(gs);
 
         let parent_difficulty = tip.header().difficulty;
         let (mut block, composer_tx_outputs) = MockBlockGenerator::mock_successor_no_pow(
             tip,
             composer_parameters.clone(),
-            guesser_key.to_address().into(),
+            guesser_address,
             timestamp,
             seed,
             txs_from_mempool,

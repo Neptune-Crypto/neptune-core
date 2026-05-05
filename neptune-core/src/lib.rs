@@ -312,13 +312,7 @@ pub async fn initialize(
         own_handshake_data.tip_header.height
     );
     let legacy_socketaddr = |multiaddr: &libp2p::Multiaddr| {
-        multiaddr_to_socketaddr(multiaddr).and_then(|sa| {
-            if [9800, 9801].contains(&sa.port()) {
-                None
-            } else {
-                Some(sa)
-            }
-        })
+        multiaddr_to_socketaddr(multiaddr).filter(|&sa| ![9800, 9801].contains(&sa.port()))
     };
     for multiaddress in &global_state_lock.cli().peers {
         if let Some(peer_address) = legacy_socketaddr(multiaddress) {

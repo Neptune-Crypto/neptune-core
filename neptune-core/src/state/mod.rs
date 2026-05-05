@@ -54,6 +54,7 @@ use wallet::wallet_status::WalletStatus;
 
 use crate::api;
 use crate::api::export::NeptuneProof;
+use crate::api::export::ReceivingAddress;
 use crate::api::export::SpendingKey;
 use crate::api::export::TxInputs;
 use crate::application::config::cli_args;
@@ -69,6 +70,7 @@ use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingl
 use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
@@ -1473,6 +1475,21 @@ impl GlobalState {
         )
     }
 
+    /// Return the address where all guesser rewards and transaction proof
+    /// upgrading rewards should be sent.
+    ///
+    /// Also returns the address' privacy preimage, if known.
+    pub fn mining_rewards_address(&self) -> (ReceivingAddress, Option<Digest>) {
+        match self.cli().mining_address() {
+            Some(addr) => (addr, None),
+            None => {
+                let key = self.wallet_state.wallet_entropy.guesser_fee_key();
+
+                (key.to_address().into(), Some(key.receiver_preimage()))
+            }
+        }
+    }
+
     /// Automatically assemble the composer parameters for composing the next
     /// block from the state.
     ///
@@ -1486,13 +1503,20 @@ impl GlobalState {
     pub(crate) fn composer_parameters(&self, next_block_height: BlockHeight) -> ComposerParameters {
         assert!(!next_block_height.is_genesis());
 
-        let coinbase_distribution = self.mining_state.overridden_coinbase_distribution();
+        // Is coinbase distribution overridden through flags or CLI commands?
+        // - First look at overridde through mining state
+        // - then look at override through CLI flag.
+        let overridden_coinbase_distribution =
+            match self.mining_state.overridden_coinbase_distribution() {
+                Some(distr) => Some(distr),
+                None => self.cli().mining_address().map(CoinbaseDistribution::solo),
+            };
 
         self.wallet_state.composer_parameters(
             next_block_height,
             self.cli.guesser_fraction,
             self.cli.fee_notification,
-            coinbase_distribution,
+            overridden_coinbase_distribution,
         )
     }
 
@@ -3238,11 +3262,15 @@ impl GlobalState {
             bail!("Could not find mutator set update for update job");
         };
 
+        let (fee_address, fee_address_preimage) = self.mining_rewards_address();
+
         Ok(ProofCollectionToSingleProof::new(
             kernel,
             proof,
             transaction_msa,
             upgrade_incentive,
+            fee_address,
+            fee_address_preimage,
         ))
     }
 
@@ -4517,13 +4545,12 @@ mod tests {
             let mut alice =
                 mock_genesis_global_state(0, WalletEntropy::new_random(), cli_args.clone()).await;
             let mut alice = alice.lock_guard_mut().await;
-            let alice_guesser_key: SpendingKey =
-                alice.wallet_state.wallet_entropy.guesser_fee_key().into();
+            let (alice_guesser_address, _) = alice.mining_rewards_address();
 
             let guesser_fraction = 1f64;
             let mut block1 =
                 invalid_empty_block1_with_guesser_fraction(network, guesser_fraction).await;
-            block1.set_header_guesser_address(alice_guesser_key.to_address());
+            block1.set_header_guesser_address(alice_guesser_address);
 
             alice.set_new_tip(block1.clone()).await.unwrap();
 

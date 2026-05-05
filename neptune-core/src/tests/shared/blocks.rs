@@ -24,8 +24,8 @@ use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistrib
 use crate::application::loops::mine_loop::compose_block_helper;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::loops::mine_loop::guess_nonce;
+use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
 use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-use crate::application::loops::mine_loop::GuessingConfiguration;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::block_appendix::BlockAppendix;
 use crate::protocol::consensus::block::block_body::BlockBody;
@@ -92,14 +92,10 @@ pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block
 
     let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
 
-    let guesser_address = global_state_lock
+    let (guesser_address, _) = global_state_lock
         .lock_guard()
         .await
-        .wallet_state
-        .wallet_entropy
-        .guesser_fee_key()
-        .to_address()
-        .into();
+        .mining_rewards_address();
     let new_timestamp = parent.header().timestamp + Timestamp::minutes(9);
     let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
     guess_nonce(
@@ -449,17 +445,14 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         )
         .await?;
 
-    let guesser_key = global_state_lock
+    let (guesser_address, _) = global_state_lock
         .lock_guard()
         .await
-        .wallet_state
-        .wallet_entropy
-        .guesser_fee_key();
-    let guesser_address = guesser_key.to_address();
+        .mining_rewards_address();
     let network = global_state_lock.cli().network;
     let mut block =
         Block::block_template_invalid_proof(&tip, transaction, timestamp, None, network);
-    block.set_header_guesser_address(guesser_address.into());
+    block.set_header_guesser_address(guesser_address);
 
     global_state_lock
         .set_new_self_composed_tip(block.clone(), expected_composer_utxos)

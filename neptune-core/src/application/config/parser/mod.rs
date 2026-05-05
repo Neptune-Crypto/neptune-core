@@ -5,41 +5,20 @@ use sysinfo::System;
 
 use super::cli_args::Args;
 use crate::api::export::TxProvingCapability;
-use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub(crate) enum CliArgsParseError {
     #[error("Consolidation address is invalid: {0}")]
     InvalidConsolidationAddress(String),
 
+    #[error("Mining address is invalid: {0}")]
+    InvalidMiningAddress(String),
+
     #[error("If composition is selected, proving capability must be single proof")]
     ComposerMustBeSingleProofCapable,
 }
 
 impl Args {
-    /// Parse CLI arguments supplementary to CLAP's native parsing.
-    ///
-    /// # Side Effects
-    ///
-    /// Sets cache.
-    pub(crate) fn second_parse(&mut self) -> Result<(), CliArgsParseError> {
-        let auto_consolidate = AutoConsolidationSettings::parse(
-            &self.auto_consolidate,
-            self.num_consolidation_inputs,
-            self.network,
-            self.accept_consolidation_lustrations,
-        )
-        .map_err(CliArgsParseError::InvalidConsolidationAddress)?;
-        self.auto_consolidate_cache.set(auto_consolidate).unwrap();
-
-        let proving_capability = self.derive_proving_capability()?;
-        self.tx_proving_capability_cache
-            .set(proving_capability)
-            .expect("This function may only be called once.");
-
-        Ok(())
-    }
-
     pub(super) fn derive_proving_capability(
         &self,
     ) -> Result<TxProvingCapability, CliArgsParseError> {
