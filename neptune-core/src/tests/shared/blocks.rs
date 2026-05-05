@@ -92,7 +92,10 @@ pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block
 
     let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
 
-    let guesser_address = global_state_lock.lock_guard().await.guesser_address();
+    let (guesser_address, _) = global_state_lock
+        .lock_guard()
+        .await
+        .mining_rewards_address();
     let new_timestamp = parent.header().timestamp + Timestamp::minutes(9);
     let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
     guess_nonce(
@@ -442,7 +445,10 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         )
         .await?;
 
-    let guesser_address = global_state_lock.lock_guard().await.guesser_address();
+    let (guesser_address, _) = global_state_lock
+        .lock_guard()
+        .await
+        .mining_rewards_address();
     let network = global_state_lock.cli().network;
     let mut block =
         Block::block_template_invalid_proof(&tip, transaction, timestamp, None, network);

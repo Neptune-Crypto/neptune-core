@@ -131,7 +131,10 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
         mock_genesis_global_state(2, wallet.clone(), cli_args.clone()).await;
     let mut previous_block = Block::genesis(network);
 
-    let guesser_address = global_state_lock.lock_guard().await.guesser_address();
+    let (guesser_address, _) = global_state_lock
+        .lock_guard()
+        .await
+        .mining_rewards_address();
     for coinbase_sender_randomness in coinbase_sender_randomness_coll {
         let (next_block, composer_utxos) =
             super::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(

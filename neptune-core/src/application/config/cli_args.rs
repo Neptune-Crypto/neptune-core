@@ -269,11 +269,17 @@ pub struct Args {
     #[clap(long, default_value = "0.0005", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_relay_pctx_fee_per_input: NativeCurrencyAmount,
 
-    /// If set, all mining rewards will be sent to this address.
+    /// If set, all mining rewards will be sent to this address, including fees
+    /// collected for transaction proof upgrading.
     ///
-    /// If set, both guesser rewards and composer rewards will be sent to this
-    /// address. However, a custom coinbase distribution takes precendence over
-    /// this value, for composition rewards.
+    /// Setting this value allows for cold-mining, the process where a machine
+    /// collects various mining rewards without holding the secret key to the
+    /// address where the rewards are sent.
+    ///
+    /// If set, guesser rewards, transaction proof upgrading rewards, and
+    /// composer rewards will be sent to this address. However, a custom
+    /// coinbase distribution takes precendence over this value, in terms of the
+    /// composer rewards.
     ///
     /// The method [`Self::mining_address()`] should be preferred when
     /// reading this value.

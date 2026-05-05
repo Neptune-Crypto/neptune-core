@@ -292,7 +292,6 @@ pub(crate) mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::NeptuneProof;
     use crate::api::export::OutputFormat;
-    use crate::api::export::ReceivingAddress;
     use crate::api::export::StateLock;
     use crate::api::export::Timestamp;
     use crate::api::export::TransactionProofType;
@@ -671,7 +670,7 @@ pub(crate) mod tests {
                     .await;
 
             // Solve PoW for block_b
-            let guesser_address: ReceivingAddress = bob.lock_guard().await.guesser_address();
+            let (guesser_address, _) = bob.lock_guard().await.mining_rewards_address();
             let (guesser_tx_b, guesser_rx_b) = oneshot::channel::<NewBlockFound>();
             let guesser_timestamp_b = block_b_no_pow.header().timestamp;
             guess_nonce(

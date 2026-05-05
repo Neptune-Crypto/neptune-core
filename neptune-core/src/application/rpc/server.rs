@@ -4122,7 +4122,7 @@ impl RPC for NeptuneRPCServer {
                 return Ok(None);
             };
 
-            let guesser_address = state.guesser_address();
+            let (guesser_address, _) = state.mining_rewards_address();
 
             (proposal, guesser_address)
         };

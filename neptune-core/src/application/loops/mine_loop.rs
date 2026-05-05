@@ -27,7 +27,6 @@ use tokio::time;
 use tokio::time::sleep;
 use tracing::*;
 
-use crate::api::export::ReceivingAddress;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
@@ -149,7 +148,7 @@ pub(crate) async fn mock_compose_block(
         Default::default(),
         gs.mining_state.overridden_coinbase_distribution(),
     );
-    let guesser_address = gs.guesser_address();
+    let (guesser_address, _) = gs.mining_rewards_address();
     let txs = gs.mempool.get_transactions_for_block_composition(
         SIZE_20MB_IN_BYTES,
         Some(gs.cli().max_num_compose_mergers.get()),
@@ -644,7 +643,7 @@ pub(crate) async fn create_block_transaction_from(
                     proof_job_options.clone(),
                     &wallet_entropy,
                     new_height,
-                    notification_policy,
+                    notification_policy.into(),
                 )
                 .await
             {
@@ -834,8 +833,10 @@ pub(crate) async fn mine(
                 .set_mining_status_to_guessing(&proposal)
                 .await;
 
-            let guesser_address: ReceivingAddress =
-                global_state_lock.lock_guard().await.guesser_address();
+            let (guesser_address, _) = global_state_lock
+                .lock_guard()
+                .await
+                .mining_rewards_address();
 
             let latest_block_header = global_state_lock
                 .lock(|s| s.chain.tip().header().to_owned())
@@ -1094,6 +1095,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::api::export::GenerationSpendingKey;
+    use crate::api::export::ReceivingAddress;
     use crate::application::config::cli_args;
     use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
     use crate::application::config::network::Network;
@@ -1717,7 +1719,10 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        let guesser_address = global_state_lock.lock_guard().await.guesser_address();
+        let (guesser_address, _) = global_state_lock
+            .lock_guard()
+            .await
+            .mining_rewards_address();
         let transaction = BlockTransaction::upgrade(transaction);
         let block = Block::block_template_invalid_proof(
             &tip_block_orig,

@@ -3121,7 +3121,7 @@ pub(crate) mod tests {
             )
             .await;
 
-            let guesser_address = bob.lock_guard().await.guesser_address();
+            let (guesser_address, _) = bob.lock_guard().await.mining_rewards_address();
 
             // Mine it till it has a valid PoW digest
             // Add this block to the wallet through the same pipeline as the
@@ -4951,6 +4951,11 @@ pub(crate) mod tests {
             let mut rando =
                 mock_genesis_global_state(2, rando_wallet_secret.clone(), rando_cli_args).await;
             let upgrade_incentive = UpgradeIncentive::Gobble(fee);
+            let (gobble_fee_recipient, recipient_preimage) = rando
+                .global_state_lock
+                .lock_guard()
+                .await
+                .mining_rewards_address();
             let upgrade_job_one =
                 UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof::new(
                     proof_collection_transaction.kernel.clone(),
@@ -4960,6 +4965,8 @@ pub(crate) mod tests {
                         .into_proof_collection(),
                     genesis_block.mutator_set_accumulator_after().unwrap(),
                     upgrade_incentive,
+                    gobble_fee_recipient,
+                    recipient_preimage,
                 ));
             let (channel_to_nowhere_one, nowhere_one) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);

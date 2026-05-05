@@ -1,4 +1,5 @@
 use anyhow::Result;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Tip5;
@@ -155,6 +156,23 @@ impl WalletEntropy {
         seed[0..32].try_into().unwrap()
     }
 
+    fn sender_randomness_inner(
+        own_secret_seed: XFieldElement,
+        block_height: BlockHeight,
+        receiver_digest: Digest,
+    ) -> Digest {
+        const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
+
+        Tip5::hash_varlen(
+            &[
+                own_secret_seed.encode(),
+                bfe_vec![SENDER_RANDOMNESS_FLAG, block_height],
+                receiver_digest.encode(),
+            ]
+            .concat(),
+        )
+    }
+
     /// Return pseudo-random sender randomness derived from secret seed and
     /// other parameters.
     pub fn generate_sender_randomness(
@@ -162,15 +180,19 @@ impl WalletEntropy {
         block_height: BlockHeight,
         receiver_digest: Digest,
     ) -> Digest {
-        const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
-        Tip5::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                bfe_vec![SENDER_RANDOMNESS_FLAG, block_height],
-                receiver_digest.encode(),
-            ]
-            .concat(),
-        )
+        Self::sender_randomness_inner(self.secret_seed.0, block_height, receiver_digest)
+    }
+
+    /// Return pseudo-random sender randomness for the case where the own seed
+    /// is not desired as input.
+    ///
+    /// Used for cold-mining to derive sender randomness without relying on the
+    /// wallet's own seed.
+    pub(crate) fn sender_randomness_without_own_seed(
+        block_height: BlockHeight,
+        receiver_digest: Digest,
+    ) -> Digest {
+        Self::sender_randomness_inner(XFieldElement::zero(), block_height, receiver_digest)
     }
 
     /// Convert a secret seed phrase (list of 18 valid BIP-39 words) to a

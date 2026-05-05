@@ -1,7 +1,6 @@
 use tasm_lib::prelude::Digest;
 
 use super::error::RegTestError;
-use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::protocol::consensus::block::mock_block_generator::MockBlockGenerator;
 use crate::protocol::consensus::block::Block;
@@ -145,7 +144,7 @@ impl RegTestPrivate {
             vec![]
         };
 
-        let guesser_address: ReceivingAddress = gs.guesser_address();
+        let (guesser_address, _) = gs.mining_rewards_address();
         drop(gs);
 
         let parent_difficulty = tip.header().difficulty;

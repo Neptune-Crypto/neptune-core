@@ -72,7 +72,7 @@ pub async fn can_find_valid_pow_solution() {
         .block_proposal
         .expect("Just set block proposal")
         .clone();
-    let guesser_address = alice.gsl.lock_guard().await.guesser_address();
+    let (guesser_address, _) = alice.gsl.lock_guard().await.mining_rewards_address();
     proposal.set_header_guesser_address(guesser_address);
 
     let latest_block_header = *alice.gsl.lock_guard().await.chain.tip().header();
