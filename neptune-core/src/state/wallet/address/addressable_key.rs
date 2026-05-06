@@ -15,6 +15,7 @@ use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::state::wallet::address::private_address;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
@@ -31,6 +32,13 @@ pub enum KeyType {
 
     /// [symmetric_key] built on aes-256-gcm
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
+
+    /// Private address. Only post-quantum secure if address is kept private,
+    /// between sender and receiver.
+    ///
+    /// If attacker has a quantum computer *and* knows the address, they can see
+    /// the entire transaction history of that address.
+    Private = private_address::PRIVATE_ADDRESS_FLAG_U8,
 }
 
 impl std::fmt::Display for KeyType {
@@ -38,6 +46,7 @@ impl std::fmt::Display for KeyType {
         match self {
             Self::Generation => write!(f, "Generation"),
             Self::Symmetric => write!(f, "Symmetric"),
+            Self::Private => write!(f, "Private"),
         }
     }
 }
@@ -47,6 +56,7 @@ impl From<&ReceivingAddress> for KeyType {
         match addr {
             ReceivingAddress::Generation(_) => Self::Generation,
             ReceivingAddress::Symmetric(_) => Self::Symmetric,
+            ReceivingAddress::PrivateAddress(_) => Self::Private,
         }
     }
 }
@@ -96,6 +106,7 @@ impl KeyType {
 /// Represents cryptographic data necessary for spending funds (or, more
 /// specifically, for unlocking UTXOs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SpendingKey {
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),

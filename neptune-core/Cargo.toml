@@ -89,6 +89,7 @@ field_count = "0.1"
 futures = "0.3"
 get-size2 = { version = "0.7", features = ["derive"] }
 itertools = "0.14"
+k256 = { version = "0.13", features = ["serde", "ecdsa", "ecdh"] }
 memmap2 = "0.9"
 num-bigint = { version = "0.4", features = ["serde"] }
 num-rational = "0.4"
