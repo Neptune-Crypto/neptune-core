@@ -471,6 +471,7 @@ impl RpcApi for RpcServer {
         let address_type = Some(match &addr {
             ReceivingAddress::Generation(_) => "generation".to_string(),
             ReceivingAddress::Symmetric(_) => "symmetric".to_string(),
+            ReceivingAddress::PrivateAddress(_) => "private address".to_string(),
         });
         let receiver_identifier = Some(addr.receiver_identifier().value());
         let announcement_flags: Option<AnnouncementFlag> = Some((&addr).into());
@@ -1746,6 +1747,7 @@ pub mod tests {
     use libp2p::Multiaddr;
     use macro_rules_attr::apply;
     use num_traits::Zero;
+    use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
     use tasm_lib::twenty_first::bfe;
@@ -2559,6 +2561,24 @@ pub mod tests {
             NativeCurrencyAmount::coins(20),
             unspent_utxos[0].amount.into()
         );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn derivation_index_at_startup() {
+        let network = Network::Main;
+        let cli = cli_args::Args::default_with_network(network);
+        let wallet = WalletEntropy::devnet_wallet();
+        let rpc_server = test_rpc_server_with_cli_args_and_wallet(cli, wallet.clone()).await;
+        for key_type in KeyType::iter() {
+            assert_eq!(
+                0,
+                rpc_server
+                    .derivation_index(key_type)
+                    .await
+                    .unwrap()
+                    .derivation_index
+            );
+        }
     }
 
     mod send {

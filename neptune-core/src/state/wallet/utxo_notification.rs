@@ -96,6 +96,7 @@ impl UtxoNotificationMethod {
 /// these payloads from sender to receiver off-chain for lower-fee transfers
 /// between trusted parties or eg wallets owned by the same person/org.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct UtxoNotificationPayload {
     pub(crate) utxo: Utxo,
     pub(crate) sender_randomness: Digest,

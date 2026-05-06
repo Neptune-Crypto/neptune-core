@@ -519,6 +519,10 @@ pub trait RpcApi: Sync + Send {
         request: DerivationIndexRequest,
     ) -> RpcResult<DerivationIndexResponse>;
 
+    /// Endpoint to increase the derivation index to a new value.
+    ///
+    /// All keys between the current derivation value and the value given to
+    /// this endpoint (both inclusive) will be added to the wallet.
     async fn set_derivation_index(
         &self,
         key_type: KeyType,

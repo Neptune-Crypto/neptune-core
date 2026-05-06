@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::Network;
+use strum::IntoEnumIterator;
 
 /// Type for abbreviated addresses that clap can pase
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +41,7 @@ fn key_type_from_hrp(hrp: &str) -> Option<KeyType> {
         Network::TestnetMock,
         Network::Testnet(0),
     ] {
-        for key_type in KeyType::all_types() {
+        for key_type in KeyType::iter() {
             if hrp == key_type.get_hrp(network) {
                 return Some(key_type);
             }

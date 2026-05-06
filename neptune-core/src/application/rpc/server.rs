@@ -2948,22 +2948,12 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        let counter = match key_type {
-            KeyType::Generation => self
-                .state
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_db
-                .get_generation_key_counter(),
-            KeyType::Symmetric => self
-                .state
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_db
-                .get_symmetric_key_counter(),
-        };
+        let counter = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .key_counter(key_type);
 
         let derivation_index = counter
             .checked_sub(1)
@@ -6189,6 +6179,27 @@ mod tests {
             .is_err());
     }
 
+    #[apply(shared_tokio_runtime)]
+    async fn all_key_counters_are_zero_at_startup() {
+        let network = Network::Main;
+        let bob = test_rpc_server(
+            WalletEntropy::new_random(),
+            2,
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let bob_token = cookie_token(&bob).await;
+
+        for key_type in KeyType::iter() {
+            assert!(bob
+                .clone()
+                .get_derivation_index(context::current(), bob_token, key_type)
+                .await
+                .unwrap()
+                .is_zero());
+        }
+    }
+
     mod pow_puzzle_tests {
         use rand::random;
 
@@ -7007,12 +7018,12 @@ mod tests {
             }
         }
 
-        /// sends a tx with two outputs: one self, one external, for each key type
-        /// that accepts incoming UTXOs.
+        /// sends a tx with two outputs: one self, one external, for each key
+        /// type.
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn send_to_many_test() -> Result<()> {
-            for recipient_key_type in KeyType::all_types() {
+            for recipient_key_type in KeyType::iter() {
                 worker::send_to_many(recipient_key_type).await?;
             }
             Ok(())
@@ -7079,6 +7090,7 @@ mod tests {
         mod worker {
             use super::*;
             use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+            use crate::state::wallet::address::private_address::PrivateAddressKey;
             use crate::state::wallet::address::symmetric_key::SymmetricKey;
             use crate::state::wallet::address::SpendingKey;
 
@@ -7167,11 +7179,13 @@ mod tests {
                 };
 
                 // --- Setup. generate an output that our wallet cannot claim. ---
+                let key_seed: Digest = rng.random();
                 let external_receiving_address: ReceivingAddress = match recipient_key_type {
                     KeyType::Generation => {
-                        GenerationReceivingAddress::derive_from_seed(rng.random()).into()
+                        GenerationReceivingAddress::derive_from_seed(key_seed).into()
                     }
-                    KeyType::Symmetric => SymmetricKey::from_seed(rng.random()).into(),
+                    KeyType::Symmetric => SymmetricKey::from_seed(key_seed).into(),
+                    KeyType::Private => PrivateAddressKey::from_seed(key_seed).to_address().into(),
                 };
                 let output1: OutputFormat = (
                     external_receiving_address.clone(),

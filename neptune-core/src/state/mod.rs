@@ -5524,7 +5524,7 @@ mod tests {
             .next_unused_spending_key(KeyType::Generation)
             .await;
         let config_alice_and_bob = TxCreationConfig::default()
-            .recover_change_off_chain(genesis_key)
+            .recover_change_off_chain(genesis_key.clone())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_outputs_for_alice_and_bob =
             [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()].concat();

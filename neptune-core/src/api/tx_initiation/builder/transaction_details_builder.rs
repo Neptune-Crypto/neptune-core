@@ -258,7 +258,7 @@ impl TransactionDetailsBuilder {
                             &gs.wallet_state,
                             height,
                             change_amount,
-                            *key,
+                            key.as_ref().to_owned(),
                             medium,
                         );
                         Ok((change_output, msa, lustration_status))

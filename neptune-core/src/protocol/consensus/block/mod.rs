@@ -2263,6 +2263,10 @@ pub(crate) mod tests {
             let consensus_rule_set_1 = ConsensusRuleSet::infer_from(network, block_height);
             let fee = NativeCurrencyAmount::coins(1);
             let plus_nine_months = plus_eight_months + Timestamp::months(1);
+
+            let config2 = TxCreationConfig::default()
+                .recover_change_on_chain(alice_key.clone())
+                .with_prover_capability(TxProvingCapability::SingleProof);
             for i in 0..10 {
                 println!("i: {i}");
                 alice = mock_genesis_global_state(
@@ -2273,9 +2277,7 @@ pub(crate) mod tests {
                 .await;
                 alice.set_new_tip(block1.clone()).await.unwrap();
                 let outputs = vec![output_to_self.clone(); i];
-                let config2 = TxCreationConfig::default()
-                    .recover_change_on_chain(alice_key)
-                    .with_prover_capability(TxProvingCapability::SingleProof);
+
                 let tx2 = alice
                     .api()
                     .tx_initiator_internal()
@@ -2283,7 +2285,7 @@ pub(crate) mod tests {
                         outputs.into(),
                         fee,
                         plus_eight_months,
-                        config2,
+                        config2.clone(),
                         consensus_rule_set_1,
                     )
                     .await
@@ -2331,9 +2333,7 @@ pub(crate) mod tests {
 
                 let block_height2 = block2_without_valid_pow.header().height;
                 let consensus_rule_set_2 = ConsensusRuleSet::infer_from(network, block_height2);
-                let config3 = TxCreationConfig::default()
-                    .recover_change_on_chain(alice_key)
-                    .with_prover_capability(TxProvingCapability::SingleProof);
+
                 let tx3 = alice
                     .api()
                     .tx_initiator_internal()
@@ -2341,7 +2341,7 @@ pub(crate) mod tests {
                         vec![output_to_self.clone()].into(),
                         fee,
                         plus_nine_months,
-                        config3,
+                        config2.clone(),
                         consensus_rule_set_2,
                     )
                     .await

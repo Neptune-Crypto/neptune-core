@@ -15,12 +15,23 @@ use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::state::wallet::address::private_address;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, strum::EnumString)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::EnumString,
+    strum::EnumIter,
+)]
 #[strum(serialize_all = "snake_case", ascii_case_insensitive)]
-#[cfg_attr(test, derive(strum::EnumIter))]
 #[repr(u8)]
 #[non_exhaustive]
 pub enum KeyType {
@@ -31,6 +42,13 @@ pub enum KeyType {
 
     /// [symmetric_key] built on aes-256-gcm
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
+
+    /// Private address. Only post-quantum secure if address is kept private,
+    /// between sender and receiver.
+    ///
+    /// If attacker has a quantum computer *and* knows the address, they can see
+    /// the entire transaction history of that address.
+    Private = private_address::PRIVATE_ADDRESS_FLAG_U8,
 }
 
 impl std::fmt::Display for KeyType {
@@ -38,6 +56,7 @@ impl std::fmt::Display for KeyType {
         match self {
             Self::Generation => write!(f, "Generation"),
             Self::Symmetric => write!(f, "Symmetric"),
+            Self::Private => write!(f, "Private"),
         }
     }
 }
@@ -47,6 +66,7 @@ impl From<&ReceivingAddress> for KeyType {
         match addr {
             ReceivingAddress::Generation(_) => Self::Generation,
             ReceivingAddress::Symmetric(_) => Self::Symmetric,
+            ReceivingAddress::PrivateAddress(_) => Self::Private,
         }
     }
 }
@@ -56,6 +76,7 @@ impl From<&SpendingKey> for KeyType {
         match addr {
             SpendingKey::Generation(_) => Self::Generation,
             SpendingKey::Symmetric(_) => Self::Symmetric,
+            SpendingKey::PrivateAddress(_) => Self::Private,
         }
     }
 }
@@ -79,29 +100,29 @@ impl TryFrom<&Announcement> for KeyType {
 }
 
 impl KeyType {
-    /// returns all available `AddressableKeyType`
-    pub fn all_types() -> Vec<KeyType> {
-        vec![Self::Generation, Self::Symmetric]
-    }
-
     /// returns human-readable-prefix (hrp) for a given network
     pub fn get_hrp(&self, network: Network) -> String {
         match self {
             Self::Generation => generation_address::GenerationReceivingAddress::get_hrp(network),
-            Self::Symmetric => symmetric_key::SymmetricKey::get_hrp(network).to_string(),
+            Self::Symmetric => symmetric_key::SymmetricKey::get_hrp(network),
+            Self::Private => private_address::PrivateAddress::get_hrp(network),
         }
     }
 }
 
 /// Represents cryptographic data necessary for spending funds (or, more
 /// specifically, for unlocking UTXOs).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SpendingKey {
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),
 
     /// a [symmetric_key]
     Symmetric(symmetric_key::SymmetricKey),
+
+    /// a private address key
+    PrivateAddress(private_address::PrivateAddressKey),
 }
 
 impl std::hash::Hash for SpendingKey {
@@ -122,6 +143,12 @@ impl From<symmetric_key::SymmetricKey> for SpendingKey {
     }
 }
 
+impl From<private_address::PrivateAddressKey> for SpendingKey {
+    fn from(key: private_address::PrivateAddressKey) -> Self {
+        Self::PrivateAddress(key)
+    }
+}
+
 // future improvements: a strong argument can be made that this type
 // (and the key types it wraps) should not have any methods with
 // outside types as parameters.  for example:
@@ -135,10 +162,11 @@ impl From<symmetric_key::SymmetricKey> for SpendingKey {
 // a key, which means this method belongs elsewhere.
 impl SpendingKey {
     /// returns the address that corresponds to this spending key.
-    pub fn to_address(self) -> ReceivingAddress {
+    pub fn to_address(&self) -> ReceivingAddress {
         match self {
             Self::Generation(k) => k.to_address().into(),
             Self::Symmetric(k) => k.into(),
+            Self::PrivateAddress(k) => k.to_address().into(),
         }
     }
 
@@ -149,6 +177,9 @@ impl SpendingKey {
                 generation_spending_key.lock_script_and_witness()
             }
             SpendingKey::Symmetric(symmetric_key) => symmetric_key.lock_script_and_witness(),
+            SpendingKey::PrivateAddress(private_address_key) => {
+                private_address_key.lock_script_and_witness()
+            }
         }
     }
 
@@ -171,6 +202,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.receiver_preimage(),
             Self::Symmetric(k) => k.receiver_preimage(),
+            Self::PrivateAddress(k) => k.receiver_preimage(),
         }
     }
 
@@ -191,6 +223,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.receiver_identifier(),
             Self::Symmetric(k) => k.receiver_identifier(),
+            Self::PrivateAddress(k) => k.receiver_identifier(),
         }
     }
 
@@ -207,6 +240,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.decrypt(ciphertext_bfes),
             Self::Symmetric(k) => k.decrypt(ciphertext_bfes).map_err(anyhow::Error::new),
+            Self::PrivateAddress(k) => k.viewing_key().decrypt(ciphertext_bfes),
         }
     }
 

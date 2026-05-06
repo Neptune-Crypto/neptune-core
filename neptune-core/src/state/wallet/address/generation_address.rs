@@ -47,6 +47,8 @@ use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);
 
+pub const HRP_PREFIX: &str = "nolga";
+
 // note: we serde(skip) fields that can be computed from the seed in order to
 // keep the serialized (including bech32m) representation small.
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize)]
@@ -313,7 +315,7 @@ impl GenerationReceivingAddress {
     /// returns human readable prefix (hrp) of an address.
     pub(super) fn get_hrp(network: Network) -> String {
         // NOLGA: Neptune lattice-based generation address
-        let mut hrp = "nolga".to_string();
+        let mut hrp = HRP_PREFIX.to_string();
         let network_byte = network_hrp_char(network);
         hrp.push(network_byte);
         hrp

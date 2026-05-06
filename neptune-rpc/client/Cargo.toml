@@ -20,7 +20,9 @@ async-trait = "0.1.83"
 
 [dev-dependencies]
 itertools = "0.14"
+num-traits = "0.2"
 rand = "0.9"
+strum = { version = "0.27.0" }
 tokio = { version = "1.47", features = [
     "fs",
     "io-util",
@@ -29,7 +31,6 @@ tokio = { version = "1.47", features = [
     "time",
     "tracing",
 ] }
-num-traits = "0.2"
 
 [lints]
 workspace = true
