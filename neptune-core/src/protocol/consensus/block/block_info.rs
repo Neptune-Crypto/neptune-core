@@ -12,6 +12,7 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
@@ -38,11 +39,23 @@ pub struct BlockInfo {
     pub is_tip: bool,
     pub is_canonical: bool,
     pub sibling_blocks: Vec<Digest>, // blocks at same height
+    pub lustration_status: Option<LustrationStatus>,
 }
 
 // note: this is used by neptune-cli block-info command.
 impl std::fmt::Display for BlockInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let lustration_state = self
+            .lustration_status
+            .map(|status| {
+                String::new()
+                    + &format!("lustration counter: {}\n", status.counter)
+                    + &format!(
+                        "lustration threshold: {:x}\n",
+                        status.max_lustrating_aocl_leaf_index
+                    )
+            })
+            .unwrap_or_default();
         let buf = String::new()
             + &format!("height: {}\n", self.height)
             + &format!("digest: {:x}\n", self.digest)
@@ -62,6 +75,7 @@ impl std::fmt::Display for BlockInfo {
             + &format!("is_genesis: {}\n", self.is_genesis)
             + &format!("is_tip: {}\n", self.is_tip)
             + &format!("is_canonical: {}\n", self.is_canonical)
+            + &lustration_state
             + &format!(
                 "sibling_blocks: {}\n",
                 self.sibling_blocks.iter().map(|d| d.to_hex()).join(",")
@@ -99,6 +113,7 @@ impl BlockInfo {
             is_tip: digest == tip_digest,
             is_canonical,
             sibling_blocks,
+            lustration_status: header.pow.lustration_status().ok(),
         }
     }
 
@@ -114,6 +129,14 @@ impl BlockInfo {
 
 impl Distribution<BlockInfo> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BlockInfo {
+        let lustration_status = if rng.random_bool(0.7) {
+            Some(LustrationStatus {
+                counter: NativeCurrencyAmount::coins(rng.random_range(0..10_000_000)),
+                max_lustrating_aocl_leaf_index: rng.random_range(100_000..1_000_000_000),
+            })
+        } else {
+            None
+        };
         BlockInfo {
             height: rng.random(),
             size: rng.random_range(100_000..1_000_000),
@@ -137,6 +160,7 @@ impl Distribution<BlockInfo> for StandardUniform {
             sibling_blocks: (0..rng.random_range(0..2))
                 .map(|_| rng.random())
                 .collect_vec(),
+            lustration_status,
         }
     }
 }
