@@ -31,6 +31,13 @@ pub fn derive_receiver_id(seed: Digest) -> BFieldElement {
 /// deterministic announcements, since these are needed to be able to
 /// reuse proofs for tests. These values are used in the encryption
 /// step.
+///
+/// It's important that the *entire* payload is used here. As repeated
+/// nonce/secret keys in two different UTXOs are only acceptable when the
+/// plaintext ([UtxoNotificationPayload]) is also repeated. In other words: If
+/// this function could give the same result for two different payloads, then
+/// the secret key/nonce could be repeated for two different plaintexts, and
+/// that would leak the secret key through the so-called "forbidden attack".
 pub fn deterministically_derive_seed_and_nonce(
     payload: &UtxoNotificationPayload,
 ) -> ([u8; 32], BFieldElement) {
@@ -203,5 +210,35 @@ pub(super) mod tests {
 
             assert_eq!(test_case, bytes_again);
         }
+    }
+
+    #[test]
+    fn tripwire_for_deterministic_derivation_fields() {
+        // WARNING TO FUTURE DEVELOPERS:
+        // If this test fails to compile, it means a field was added to `UtxoNotificationPayload`.
+        //
+        // You MUST update `deterministically_derive_seed_and_nonce` to include the new field
+        // in the Tip5 hash derivation.
+        //
+        // If a field is added to the payload but omitted from the seed/nonce derivation,
+        // two different payloads could generate the exact same AES key and nonce, resulting
+        // in a catastrophic failure of the AES-GCM encryption scheme (the "Forbidden Attack").
+
+        // Create a dummy instance. We just need the compiler to see the type.
+        // Assuming your fields implement `Default` or you can provide mock values:
+        let tripwire = UtxoNotificationPayload {
+            sender_randomness: Default::default(),
+            utxo: Default::default(),
+        };
+
+        // STRICT DESTRUCTURING:
+        // Because we do not use `..` at the end of this block, the Rust compiler
+        // guarantees that EVERY single field in the struct is explicitly named here.
+        // If a 3rd field is added, this will throw a hard compile error:
+        // "pattern does not mention field `new_field`"
+        let UtxoNotificationPayload {
+            sender_randomness: _,
+            utxo: _,
+        } = tripwire;
     }
 }

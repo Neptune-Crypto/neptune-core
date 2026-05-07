@@ -68,6 +68,12 @@ impl From<&symmetric_key::SymmetricKey> for ReceivingAddress {
     }
 }
 
+impl From<private_address::PrivateAddress> for ReceivingAddress {
+    fn from(value: private_address::PrivateAddress) -> Self {
+        Self::PrivateAddress(value)
+    }
+}
+
 impl TryFrom<ReceivingAddress> for generation_address::GenerationReceivingAddress {
     type Error = anyhow::Error;
 
@@ -279,6 +285,7 @@ impl ReceivingAddress {
         match self {
             Self::Generation(x) => x.lock_script().hash(),
             Self::Symmetric(x) => x.lock_script().hash(),
+            Self::PrivateAddress(x) => x.lock_script().hash(),
         }
     }
 

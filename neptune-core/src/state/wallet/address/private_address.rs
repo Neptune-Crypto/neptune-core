@@ -8,6 +8,10 @@ use bincode::Options;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::triton_vm::isa::triton_asm;
+use tasm_lib::triton_vm::isa::triton_instr;
+use tasm_lib::triton_vm::isa::triton_program;
+use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::tip5::Digest;
@@ -16,6 +20,8 @@ use tasm_lib::twenty_first::tip5::Tip5;
 use crate::api::export::Announcement;
 use crate::api::export::Utxo;
 use crate::application::config::network::Network;
+use crate::protocol::consensus::transaction::lock_script::LockScript;
+use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
 use crate::state::wallet::address::common;
 use crate::state::wallet::address::common::deterministically_derive_seed_and_nonce;
 use crate::state::wallet::address::common::network_hrp_char;
@@ -49,11 +55,16 @@ fn aes_key_receiver_part(lock_postimage: [BFieldElement; 3], receiever_digest: D
 pub struct PrivateAddressKey {
     seed: Digest,
 
+    // All fields are derivable from the seed. They are cached here to make
+    // many wallet operations faster.
     #[serde(skip)]
     receiver_identifier: BFieldElement,
 
     #[serde(skip)]
     ec_secret_key: k256::SecretKey,
+
+    #[serde(skip)]
+    ec_public_key: k256::PublicKey,
 
     #[serde(skip)]
     receiver_preimage: Digest,
@@ -86,26 +97,48 @@ impl PrivateAddressKey {
             .unwrap();
         let ec_secret_key = k256::SecretKey::from_slice(&privacy_seed)
             .expect("Derived randomness exceeded secp256k1 curve order");
-        let ec_pubkey = ec_secret_key.public_key();
-        let receiver_identifier = receiver_id(&ec_pubkey);
+        let ec_public_key = ec_secret_key.public_key();
+        let receiver_identifier = receiver_id(&ec_public_key);
 
         Self {
             seed,
             receiver_identifier,
             ec_secret_key,
+            ec_public_key,
             receiver_preimage,
             unlock_key_preimage,
         }
     }
 
     pub fn viewing_key(&self) -> PrivateAddressViewingKey {
-        let [e0, e1, e2, _, _] = self.unlock_key_preimage.hash().values();
-        let lock_postimage = [e0, e1, e2];
+        let [_, _, e2, e3, e4] = self.unlock_key_preimage.hash().values();
+        let lock_postimage = [e2, e3, e4];
         PrivateAddressViewingKey {
             ec_secret_key: self.ec_secret_key.clone(),
             receiver_digest: self.receiver_preimage.hash(),
             lock_postimage,
         }
+    }
+
+    pub fn to_address(&self) -> PrivateAddress {
+        let viewing_key = self.viewing_key();
+        viewing_key.to_address()
+    }
+
+    pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
+        let lock_script = self.to_address().lock_script();
+        LockScriptAndWitness::new_with_nondeterminism(
+            lock_script.program,
+            NonDeterminism::new(self.unlock_key_preimage.reversed().values()),
+        )
+    }
+
+    pub(crate) fn receiver_identifier(&self) -> BFieldElement {
+        self.receiver_identifier
+    }
+
+    pub(crate) fn receiver_preimage(&self) -> Digest {
+        self.receiver_preimage
     }
 }
 
@@ -182,11 +215,21 @@ impl PrivateAddressViewingKey {
 
         Ok((payload.utxo, payload.sender_randomness))
     }
+
+    pub fn to_address(&self) -> PrivateAddress {
+        PrivateAddress {
+            ec_public_key: self.ec_secret_key.public_key(),
+            receiver_digest: self.receiver_digest,
+            lock_postimage: self.lock_postimage,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrivateAddress {
-    ec_pubkey: k256::PublicKey,
+    /// The public key with which to communicate the sender-part of the
+    /// AES key to the receiver.
+    ec_public_key: k256::PublicKey,
 
     /// Post-image of the receiver preimage
     receiver_digest: Digest,
@@ -206,8 +249,47 @@ impl PrivateAddress {
         aes_key_receiver_part(self.lock_postimage, self.receiver_digest)
     }
 
+    pub fn lock_script(&self) -> LockScript {
+        let push_spending_lock_after_image_to_stack = self
+            .lock_postimage
+            .iter()
+            .rev()
+            .map(|elem| triton_instr!(push elem.value()))
+            .collect_vec();
+
+        let instructions = triton_asm!(
+            divine 5
+            hash
+            pop 2
+
+            // _ e4 e3 e2
+
+            {&push_spending_lock_after_image_to_stack}
+            // _ e4 e3 e2 f4 f3 f2
+
+            pick 3
+            eq
+            assert
+            // _ e4 e3 f4 f3
+
+            pick 2
+            eq
+            assert
+            // _ e4 f4
+
+            eq
+            assert
+            // _
+
+            read_io 5
+            halt
+        );
+
+        instructions.into()
+    }
+
     pub fn receiver_id(&self) -> BFieldElement {
-        receiver_id(&self.ec_pubkey)
+        receiver_id(&self.ec_public_key)
     }
 
     pub fn receiver_postimage(&self) -> Digest {
@@ -276,7 +358,7 @@ impl PrivateAddress {
         // 2. Perform ECDH to get the asymmetric shared secret
         let sender_key_share = k256::ecdh::diffie_hellman(
             ephemeral_secret.to_nonzero_scalar(),
-            self.ec_pubkey.as_affine(),
+            self.ec_public_key.as_affine(),
         );
 
         // 3. Hash the shared secret to destroy curve structure and get uniform
@@ -319,6 +401,12 @@ impl PrivateAddress {
 
         common::bytes_to_bfes(&all_bytes)
     }
+
+    #[cfg(any(test, feature = "arbitrary-impls"))]
+    pub(crate) fn from_seed(seed: Digest) -> Self {
+        let key = PrivateAddressKey::from_seed(seed);
+        key.to_address()
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
@@ -340,7 +428,7 @@ mod tests {
     // Note: Adjust the internals to match how you natively instantiate your keys/digests
     fn generate_test_address_pair() -> (PrivateAddressKey, PrivateAddress) {
         let ec_secret_key = k256::SecretKey::random(&mut OsRng);
-        let ec_pubkey = ec_secret_key.public_key();
+        let ec_public_key = ec_secret_key.public_key();
 
         // Mock deterministic digests for the test
         let mock_digest = Tip5::hash(&[BFieldElement::new(1)]);
@@ -349,12 +437,13 @@ mod tests {
             seed: mock_digest,
             receiver_identifier: BFieldElement::new(42),
             ec_secret_key,
+            ec_public_key,
             receiver_preimage: mock_digest,
             unlock_key_preimage: mock_digest,
         };
 
         let pub_address = PrivateAddress {
-            ec_pubkey,
+            ec_public_key,
             receiver_digest: mock_digest,
             lock_postimage: [
                 BFieldElement::new(1),
