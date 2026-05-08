@@ -516,14 +516,13 @@ mod tests {
     use crate::api::export::WalletEntropy;
 
     #[test]
-    fn print_a_private_address() {
-        println!(
-            "{}",
+    fn bech32_representation_is_unchanged() {
+        assert_eq!(
+            "nprivm1qtmcrts70kl4hzjej5te74pk67aja8wmz6aawx995c0cnzl2sxuxdv37p70sgxl7z4dqnmrvqcy2lgsy3xu8gc6xpgaps8x6ppxulpzqj8vqnm5p3n4cyjrzpr2pjr6zwn49x0ejs2p3vyausep5pcftn2dquhw90z",
             WalletEntropy::devnet_wallet()
                 .nth_private_address_key(0)
                 .to_address()
-                .to_bech32m(Network::Main)
-        );
+                .to_bech32m(Network::Main));
     }
 
     #[proptest(cases = 10)]
