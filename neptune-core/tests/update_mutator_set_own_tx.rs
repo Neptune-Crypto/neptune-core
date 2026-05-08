@@ -6,6 +6,7 @@ use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::Timestamp;
+use neptune_cash::api::export::TransactionProofType;
 use neptune_cash::api::export::TxProvingCapability;
 use rand::Rng;
 use tracing_test::traced_test;
@@ -122,9 +123,15 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
         }
     }
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+    let proof_type: TransactionProofType = tx_proving_capability.into();
+    alice
+        .wait_until_n_txs_in_mempool(1, proof_type, timeout_secs)
+        .await
+        .unwrap();
 
-    assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
+    let num_mempool_txs_alice = alice.gsl.lock_guard().await.mempool.len();
+    assert_eq!(1, num_mempool_txs_alice);
 
     let tip = alice.gsl.lock_guard().await.chain.tip().to_owned();
 

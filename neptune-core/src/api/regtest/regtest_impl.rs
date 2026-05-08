@@ -1,4 +1,5 @@
 use tasm_lib::prelude::Digest;
+use tracing::info;
 
 use super::error::RegTestError;
 use crate::api::export::Timestamp;
@@ -209,6 +210,8 @@ impl RegTestPrivate {
 
         let block_hash = block.hash();
 
+        let num_mempool_txs_before = self.global_state_lock.lock_guard().await.mempool.len();
+
         // inform main-loop.  to add to mempool and broadcast.
         //
         // todo: ideally we would pass a listener here to wait on, so that
@@ -228,6 +231,11 @@ impl RegTestPrivate {
         //
         // note: temporary until listener approach is implemented.
         Self::wait_until_block_in_chain(&self.global_state_lock, block_hash).await?;
+        let num_mempool_txs_after = self.global_state_lock.lock_guard().await.mempool.len();
+        info!(
+            "Applied block. Mempool tx count before block: {num_mempool_txs_before}. \
+         After: {num_mempool_txs_after}"
+        );
 
         Ok(block_hash)
     }
