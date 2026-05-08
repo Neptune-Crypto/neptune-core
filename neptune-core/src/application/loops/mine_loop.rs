@@ -319,11 +319,16 @@ fn guess_worker(
 
     let version = block.header().version;
 
+    let slow_guessing = std::env::var("NEPTUNE_SLOW_GUESSING").is_ok();
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(
                 || rng.clone().unwrap_or(std_rng_from_thread_rng()),
                 |rng, _i| {
+                    if slow_guessing {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+
                     guess_nonce_iteration(
                         &guesser_buffer,
                         &mast_auth_paths,
