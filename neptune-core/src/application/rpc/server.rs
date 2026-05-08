@@ -3607,7 +3607,7 @@ impl RPC for NeptuneRPCServer {
                         upgrade_priority.incentive_given_gobble_potential(gobbling_potential),
                     )
                     .await?;
-                UpgradeJob::ProofCollectionToSingleProof(raise_job)
+                UpgradeJob::ProofCollectionToSingleProof(Box::new(raise_job))
             }
 
             // This implementation is not done because local transaction initiation

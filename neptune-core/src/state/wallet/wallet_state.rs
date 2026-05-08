@@ -5041,8 +5041,8 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .mining_rewards_address();
-            let upgrade_job_one =
-                UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof::new(
+            let upgrade_job_one = UpgradeJob::ProofCollectionToSingleProof(Box::new(
+                ProofCollectionToSingleProof::new(
                     proof_collection_transaction.kernel.clone(),
                     proof_collection_transaction
                         .proof
@@ -5052,7 +5052,8 @@ pub(crate) mod tests {
                     upgrade_incentive,
                     gobble_fee_recipient,
                     recipient_preimage,
-                ));
+                ),
+            ));
             let (channel_to_nowhere_one, nowhere_one) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
             upgrade_job_one
