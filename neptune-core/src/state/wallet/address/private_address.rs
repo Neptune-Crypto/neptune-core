@@ -8,7 +8,6 @@ use anyhow::Result;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use bech32::Variant;
-use bincode::Options;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -260,10 +259,65 @@ pub struct PrivateAddress {
 }
 
 impl PrivateAddress {
-    fn serialize(&self) -> Vec<u8> {
-        let bincode_opts = bincode::DefaultOptions::new().with_fixint_encoding();
+    const RAW_SERIALIZATION_LENGTH: usize = 97;
 
-        bincode_opts.serialize(self).expect("Serialization failed")
+    /// Manually serialize to exactly 97 bytes to avoid bincode overhead.
+    ///
+    /// Used to make the address as short as possible.
+    fn to_raw_bytes(self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(Self::RAW_SERIALIZATION_LENGTH);
+
+        let pubkey_bytes = self.ec_public_key.to_sec1_bytes();
+        bytes.extend_from_slice(&pubkey_bytes);
+
+        // 2. Serialize Digest (40 bytes)
+        let digest: [u8; Digest::BYTES] = self.receiver_digest.into();
+        bytes.extend_from_slice(&digest);
+
+        // 3. Serialize the 3 BFieldElements (24 bytes)
+        for element in &self.lock_postimage {
+            bytes.extend_from_slice(&element.value().to_le_bytes());
+        }
+
+        debug_assert_eq!(bytes.len(), 97, "Address payload must be exactly 97 bytes");
+        bytes
+    }
+
+    /// Manually deserialize from exactly 97 bytes
+    fn from_raw_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
+        if bytes.len() != Self::RAW_SERIALIZATION_LENGTH {
+            return Err("Invalid byte length for PrivateAddress: expected exactly 97 bytes");
+        }
+
+        let ec_public_key = k256::PublicKey::from_sec1_bytes(&bytes[0..33])
+            .map_err(|_| "Failed to parse compressed sec1 public key")?;
+
+        // 2. Parse Digest (bytes 33..73)
+        let mut digest_bytes = [0u8; Digest::BYTES];
+        digest_bytes.copy_from_slice(&bytes[33..73]);
+        let receiver_digest = Digest::try_from(digest_bytes).map_err(|_| "Invalid digest")?;
+
+        // 3. Parse 3 BFieldElements (bytes 73..97)
+        let mut lock_postimage_elements = Vec::with_capacity(3);
+        for i in 0..3 {
+            let start = 73 + (i * BFieldElement::BYTES);
+            let mut le_bytes = [0u8; BFieldElement::BYTES];
+            le_bytes.copy_from_slice(&bytes[start..start + BFieldElement::BYTES]);
+
+            let elem = BFieldElement::try_from(le_bytes).map_err(|_| "Invalid B field element")?;
+            lock_postimage_elements.push(elem);
+        }
+
+        // Convert the Vec back into a fixed-size array of 3 elements
+        let lock_postimage: [BFieldElement; 3] = lock_postimage_elements
+            .try_into()
+            .expect("Guaranteed to be exactly 3 elements");
+
+        Ok(Self {
+            ec_public_key,
+            receiver_digest,
+            lock_postimage,
+        })
     }
 
     fn aes_key_receiver_part(&self) -> [u8; 32] {
@@ -283,7 +337,7 @@ impl PrivateAddress {
         );
 
         let payload = Vec::<u8>::from_base32(&data)?;
-        bincode::deserialize(&payload)
+        Self::from_raw_bytes(&payload)
             .map_err(|e| anyhow!("Could not decode bech32m address because of error: {e}"))
     }
 
@@ -345,7 +399,7 @@ impl PrivateAddress {
     pub fn to_bech32m(&self, network: Network) -> String {
         let hrp = Self::get_hrp(network);
 
-        let payload = self.serialize();
+        let payload = self.to_raw_bytes();
 
         let variant = Variant::Bech32m;
         bech32::encode(&hrp, payload.to_base32(), variant)
@@ -459,6 +513,39 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::api::export::WalletEntropy;
+
+    #[test]
+    fn print_a_private_address() {
+        println!(
+            "{}",
+            WalletEntropy::devnet_wallet()
+                .nth_private_address_key(0)
+                .to_address()
+                .to_bech32m(Network::Main)
+        );
+    }
+
+    #[proptest(cases = 10)]
+    fn custom_serialization_consistency(#[strategy(arb())] key_seed: Digest) {
+        let address = PrivateAddressKey::from_seed(key_seed).to_address();
+
+        prop_assert_eq!(
+            address,
+            PrivateAddress::from_raw_bytes(&address.to_raw_bytes()).unwrap()
+        );
+    }
+
+    #[proptest(cases = 10)]
+    fn bech32_consistency(#[strategy(arb())] key_seed: Digest) {
+        let network = Network::Main;
+        let address = PrivateAddressKey::from_seed(key_seed).to_address();
+
+        prop_assert_eq!(
+            address,
+            PrivateAddress::from_bech32m(&address.to_bech32m(network), network).unwrap()
+        );
+    }
 
     #[test]
     fn private_address_encryption_roundtrip_unit() {
@@ -479,7 +566,7 @@ mod tests {
         );
     }
 
-    #[proptest]
+    #[proptest(cases = 10)]
     fn private_address_encryption_roundtrip_prop(
         #[strategy(arb())] payload: UtxoNotificationPayload,
         #[strategy(arb())] key_seed: Digest,
