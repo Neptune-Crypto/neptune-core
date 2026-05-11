@@ -20,12 +20,10 @@ pub use receiving_address::ReceivingAddress;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use generation_address::GenerationReceivingAddress;
-    use generation_address::GenerationSpendingKey;
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::Rng;
-    use symmetric_key::SymmetricKey;
+    use strum::IntoEnumIterator;
     use test_strategy::proptest;
 
     use super::*;
@@ -36,58 +34,45 @@ mod tests {
     use crate::state::Digest;
     use crate::tests::shared::mock_tx::make_mock_transaction;
 
-    /// tests scanning for announced utxos with a symmetric key
     #[proptest]
-    fn scan_for_announced_utxos_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(SymmetricKey::from_seed(seed).into())
+    fn scan_for_announceed_utxos(#[strategy(arb())] seed: Digest) {
+        for key_type in KeyType::iter() {
+            let key = SpendingKey::from_seed(seed, key_type);
+            worker::scan_for_announced_utxos(key)
+        }
     }
 
-    /// tests scanning for announced utxos with an asymmetric (generation) key
-    #[proptest]
-    fn scan_for_announced_utxos_generation(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(GenerationSpendingKey::derive_from_seed(seed).into())
-    }
-
-    /// tests encrypting and decrypting with a symmetric key
-    #[proptest]
-    fn test_encrypt_decrypt_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(SymmetricKey::from_seed(seed).into())
-    }
-
-    /// tests encrypting and decrypting with an asymmetric (generation) key
-    #[proptest]
-    fn test_encrypt_decrypt_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(GenerationSpendingKey::derive_from_seed(seed).into())
+    /// tests encrypting and decrypting with all key types.
+    #[proptest(cases = 10)]
+    fn test_encrypt_decrypt(#[strategy(arb())] seed: Digest) {
+        for key_type in KeyType::iter() {
+            let key = SpendingKey::from_seed(seed, key_type);
+            worker::test_encrypt_decrypt(key);
+        }
     }
 
     /// tests keygen, sign, and verify with a symmetric key
-    #[proptest]
-    fn test_keygen_sign_verify_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::test_keypair_validity(
-            SymmetricKey::from_seed(seed).into(),
-            SymmetricKey::from_seed(seed).into(),
-        );
+    #[proptest(cases = 10)]
+    fn test_keygen_sign_verify(#[strategy(arb())] seed: Digest) {
+        for key_type in KeyType::iter() {
+            let key = SpendingKey::from_seed(seed, key_type);
+            worker::test_keypair_validity(key.clone(), key.to_address());
+        }
     }
 
-    /// tests keygen, sign, and verify with an asymmetric (generation) key
-    #[proptest]
-    fn test_keygen_sign_verify_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_keypair_validity(
-            GenerationSpendingKey::derive_from_seed(seed).into(),
-            GenerationReceivingAddress::derive_from_seed(seed).into(),
-        );
+    #[test]
+    fn test_keygen_sign_verify_unit() {
+        let key: SpendingKey =
+            private_address::PrivateAddressKey::from_seed(Digest::default()).into();
+        worker::test_keypair_validity(key.clone(), key.to_address());
     }
 
-    /// tests bech32m serialize, deserialize with a symmetric key
-    #[proptest]
-    fn test_bech32m_conversion_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(SymmetricKey::from_seed(seed).into());
-    }
-
-    /// tests bech32m serialize, deserialize with an asymmetric (generation) key
-    #[proptest]
-    fn test_bech32m_conversion_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(GenerationReceivingAddress::derive_from_seed(seed).into());
+    #[proptest(cases = 10)]
+    fn test_bech32m_conversion(#[strategy(arb())] seed: Digest) {
+        for key_type in KeyType::iter() {
+            let key = SpendingKey::from_seed(seed, key_type);
+            worker::test_bech32m_conversion(key.to_address());
+        }
     }
 
     mod worker {

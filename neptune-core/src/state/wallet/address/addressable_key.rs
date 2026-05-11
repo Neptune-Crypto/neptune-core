@@ -94,6 +94,7 @@ impl TryFrom<&Announcement> for KeyType {
         match common::key_type_from_announcement(pa) {
             Ok(kt) if kt == Self::Generation.into() => Ok(Self::Generation),
             Ok(kt) if kt == Self::Symmetric.into() => Ok(Self::Symmetric),
+            Ok(kt) if kt == Self::Private.into() => Ok(Self::Private),
             _ => bail!("encountered Announcement of unknown type"),
         }
     }
@@ -321,6 +322,18 @@ mod tests {
     use strum::IntoEnumIterator;
 
     use super::*;
+
+    impl SpendingKey {
+        pub(crate) fn from_seed(seed: Digest, key_type: KeyType) -> Self {
+            match key_type {
+                KeyType::Generation => {
+                    generation_address::GenerationSpendingKey::derive_from_seed(seed).into()
+                }
+                KeyType::Symmetric => symmetric_key::SymmetricKey::from_seed(seed).into(),
+                KeyType::Private => private_address::PrivateAddressKey::from_seed(seed).into(),
+            }
+        }
+    }
 
     #[test]
     fn keytype_to_string_is_as_defined() {

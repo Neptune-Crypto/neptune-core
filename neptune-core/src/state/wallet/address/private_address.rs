@@ -11,8 +11,6 @@ use bech32::Variant;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::triton_vm::isa::triton_asm;
-use tasm_lib::triton_vm::isa::triton_instr;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
@@ -342,42 +340,7 @@ impl PrivateAddress {
     }
 
     pub fn lock_script(&self) -> LockScript {
-        let push_spending_lock_after_image_to_stack = self
-            .lock_postimage
-            .iter()
-            .rev()
-            .map(|elem| triton_instr!(push elem.value()))
-            .collect_vec();
-
-        let instructions = triton_asm!(
-            divine 5
-            hash
-            pop 2
-
-            // _ e4 e3 e2
-
-            {&push_spending_lock_after_image_to_stack}
-            // _ e4 e3 e2 f4 f3 f2
-
-            pick 3
-            eq
-            assert
-            // _ e4 e3 f4 f3
-
-            pick 2
-            eq
-            assert
-            // _ e4 f4
-
-            eq
-            assert
-            // _
-
-            read_io 5
-            halt
-        );
-
-        instructions.into()
+        LockScript::hash_lock_from_after_image_192_bit_security(self.lock_postimage)
     }
 
     pub fn receiver_id(&self) -> BFieldElement {
