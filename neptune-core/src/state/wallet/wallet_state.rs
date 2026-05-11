@@ -1849,6 +1849,15 @@ impl WalletState {
         let guesser_fee_outputs = self.scan_for_guesser_fee_utxos(block);
 
         debug!(
+            "\nNum known generation keys: {};\n \
+               Num known symmetric keys:  {};\n \
+               Num known private keys:  {};\n ",
+            self.known_generation_keys.len(),
+            self.known_symmetric_keys.len(),
+            self.known_private_address_keys.len()
+        );
+        debug!("Num spent UTXOs: {}", spent_inputs.len());
+        debug!(
             "Scanned block for incoming UTXOs; received {} onchain \
             notifications, {} onchain through scan mode, {} offchain \
             notifications",

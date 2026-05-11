@@ -292,6 +292,7 @@ pub(crate) mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::NeptuneProof;
     use crate::api::export::OutputFormat;
+    use crate::api::export::ReceivingAddress;
     use crate::api::export::StateLock;
     use crate::api::export::Timestamp;
     use crate::api::export::TransactionProofType;
@@ -324,6 +325,7 @@ pub(crate) mod tests {
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
+    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::invalid_block_with_tx_kernel;
     use crate::tests::shared::blocks::invalid_empty_block;
@@ -332,23 +334,34 @@ pub(crate) mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
     use crate::tests::tokio_runtime;
 
-    async fn tx_with_n_outputs(
+    /// Send n outputs to the same address.
+    ///
+    /// If no address is provided, the next symmetric address will be used.
+    pub(crate) async fn tx_with_n_outputs(
         mut state: GlobalStateLock,
         num_outputs: usize,
         timestamp: Timestamp,
         input_selection_policy: Option<InputSelectionPolicy>,
+        address: Option<ReceivingAddress>,
+        amt_per_output: Option<NativeCurrencyAmount>,
     ) -> Result<TxCreationArtifacts, error::CreateTxError> {
+        let address = match address {
+            Some(addr) => addr,
+            None => state
+                .api()
+                .wallet_mut()
+                .next_receiving_address(KeyType::Symmetric)
+                .await
+                .unwrap(),
+        };
+
+        let amt_per_output = amt_per_output.unwrap_or(NativeCurrencyAmount::from_nau(1));
         let mut addresses_and_amts = vec![];
-        let same_address = state
-            .api()
-            .wallet_mut()
-            .next_receiving_address(KeyType::Symmetric)
-            .await
-            .unwrap();
         for _ in 0..num_outputs {
-            let value = OutputFormat::AddressAndAmount(
-                same_address.clone(),
-                NativeCurrencyAmount::from_nau(1),
+            let value = OutputFormat::AddressAndAmountAndMedium(
+                address.clone(),
+                amt_per_output,
+                UtxoNotificationMedium::OnChain,
             );
             addresses_and_amts.push(value);
         }
@@ -435,9 +448,10 @@ pub(crate) mod tests {
         timestamp: Timestamp,
     ) -> Block {
         let current_tip = me.lock_guard().await.chain.archival_state().get_tip().await;
-        let tx_many_outputs = tx_with_n_outputs(me.clone(), num_outputs, timestamp, None)
-            .await
-            .unwrap();
+        let tx_many_outputs =
+            tx_with_n_outputs(me.clone(), num_outputs, timestamp, None, None, None)
+                .await
+                .unwrap();
         let (block_tx, _) = create_block_transaction_from(
             &current_tip,
             me,
@@ -800,7 +814,7 @@ pub(crate) mod tests {
 
             // 4th block after hard fork, with a transaction.
             let tx_timestamp = block_f.header().timestamp + Timestamp::minutes(6);
-            let tx_artifacts = tx_with_n_outputs(bob.clone(), 2, tx_timestamp, None)
+            let tx_artifacts = tx_with_n_outputs(bob.clone(), 2, tx_timestamp, None, None, None)
                 .await
                 .unwrap();
             bob.api_mut()
@@ -1093,9 +1107,10 @@ pub(crate) mod tests {
             // Insert a tx in mempool to verify it gets deleted when the
             // hardfork happens. And that the composer doesn't attempt to pick
             // up this incompatible transaction.
-            let never_mined_tx = tx_with_n_outputs(bob.clone(), 1, minus1.header().timestamp, None)
-                .await
-                .unwrap();
+            let never_mined_tx =
+                tx_with_n_outputs(bob.clone(), 1, minus1.header().timestamp, None, None, None)
+                    .await
+                    .unwrap();
             bob.lock_guard_mut()
                 .await
                 .mempool_insert(
@@ -1157,6 +1172,8 @@ pub(crate) mod tests {
                     200,
                     hf.header().timestamp,
                     Some(prefer_old_inputs),
+                    None,
+                    None,
                 )
                 .await
                 .unwrap_err()
@@ -1168,6 +1185,8 @@ pub(crate) mod tests {
                 3,
                 hf.header().timestamp,
                 Some(prefer_old_inputs.set_lustration_acceptance(true)),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -1230,6 +1249,8 @@ pub(crate) mod tests {
                 65,
                 plus1.header().timestamp,
                 Some(prefer_old_inputs.set_lustration_acceptance(true)),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -1291,6 +1312,8 @@ pub(crate) mod tests {
                 1,
                 plus2.header().timestamp,
                 Some(prefer_new_inputs),
+                None,
+                None,
             )
             .await
             .unwrap();

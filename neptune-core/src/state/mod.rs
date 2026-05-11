@@ -2900,6 +2900,14 @@ impl GlobalState {
     async fn set_new_tip_internal(&mut self, new_tip: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
+        let tx_kernel = new_tip.body().transaction_kernel();
+        debug!(
+            "Setting new tip. Tx kernel: Num inputs: {}; num ouputs: {}; num announcements: {}",
+            tx_kernel.inputs.len(),
+            tx_kernel.outputs.len(),
+            tx_kernel.announcements.len()
+        );
+
         debug!("Applying block to archival state.");
         self.chain
             .archival_state_mut()

@@ -25,6 +25,7 @@ mod tests {
     use rand::Rng;
     use strum::IntoEnumIterator;
     use test_strategy::proptest;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::application::config::network::Network;
@@ -60,13 +61,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_keygen_sign_verify_unit() {
-        let key: SpendingKey =
-            private_address::PrivateAddressKey::from_seed(Digest::default()).into();
-        worker::test_keypair_validity(key.clone(), key.to_address());
-    }
-
     #[proptest(cases = 10)]
     fn test_bech32m_conversion(#[strategy(arb())] seed: Digest) {
         for key_type in KeyType::iter() {
@@ -75,10 +69,116 @@ mod tests {
         }
     }
 
+    #[traced_test]
+    #[tokio::test]
+    async fn can_spend_from_address_type() {
+        for key_type in KeyType::iter() {
+            worker::can_spend_from_address_type(key_type).await;
+        }
+    }
+
     mod worker {
+        use num_traits::CheckedSub;
+
         use super::*;
+        use crate::api::export::ChangePolicy;
+        use crate::api::export::OutputFormat;
+        use crate::api::export::Timestamp;
+        use crate::api::export::TxProvingCapability;
+        use crate::api::export::WalletEntropy;
+        use crate::application::config::cli_args;
+        use crate::protocol::consensus::block::Block;
+        use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+        use crate::protocol::consensus::consensus_rule_set::tests::tx_with_n_outputs;
         use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
+        use crate::state::mempool::upgrade_priority::UpgradePriority;
+        use crate::state::wallet::address::private_address::PrivateAddress;
+        use crate::tests::shared::blocks::next_block;
+        use crate::tests::shared::globalstate::mock_genesis_global_state;
+
+        pub(super) async fn can_spend_from_address_type(key_type: KeyType) {
+            let network = Network::Main;
+            let cli = cli_args::Args {
+                network,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                ..Default::default()
+            };
+
+            let wallet = WalletEntropy::devnet_wallet();
+            let genesis = Block::genesis(network);
+            let mut state = mock_genesis_global_state(2, wallet, cli).await;
+
+            let recipient_address = {
+                let mut state = state.global_state_lock.lock_guard_mut().await;
+                let recipient_key = state.wallet_state.next_unused_spending_key(key_type).await;
+                recipient_key.to_address()
+            };
+
+            let timestamp = genesis.header().timestamp + Timestamp::months(9);
+            let tx = tx_with_n_outputs(
+                state.clone(),
+                2,
+                timestamp,
+                None,
+                Some(recipient_address),
+                Some(NativeCurrencyAmount::coins(8)),
+            )
+            .await
+            .unwrap();
+
+            state
+                .lock_guard_mut()
+                .await
+                .mempool_insert(tx.transaction().to_owned(), UpgradePriority::Critical)
+                .await;
+
+            let block1 = next_block(state.clone(), genesis.clone()).await;
+            let now = block1.header().timestamp;
+            assert!(block1.is_valid(&genesis, now, network).await);
+
+            let height1 = block1.header().height;
+            state.set_new_tip(block1).await.unwrap();
+
+            // Verify that balance is set correctly
+            let new_liquid = state
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .confirmed_available_balance(height1, now);
+            println!("new_liquid: {new_liquid}");
+            let expected_liquid = NativeCurrencyAmount::coins(20)
+                + INITIAL_BLOCK_SUBSIDY
+                    .half()
+                    .checked_sub(&tx.transaction().kernel.fee.half())
+                    .unwrap();
+            println!("expected_liquid: {expected_liquid}");
+            assert_eq!(expected_liquid, new_liquid);
+
+            // Verify that received funds can be spent, from the address type.
+            // Make a big enough transaction that UTXOs received on this
+            // address type must be used.
+            let third_party_address = PrivateAddress::from_seed(Digest::default());
+            let to_third_party = vec![OutputFormat::AddressAndAmount(
+                third_party_address.into(),
+                NativeCurrencyAmount::coins(82),
+            )];
+
+            let fee = NativeCurrencyAmount::coins(1);
+            let tx_from_address = state
+                .api_mut()
+                .tx_sender_mut()
+                .send(to_third_party, ChangePolicy::Burn, fee, timestamp, false)
+                .await
+                .unwrap();
+
+            assert!(
+                tx_from_address
+                    .is_valid(network, state.lock_guard().await.consensus_rule_set())
+                    .await
+            );
+        }
 
         /// this tests the generate_announcement() and
         /// scan_for_announced_utxos() methods with a [SpendingKey]
