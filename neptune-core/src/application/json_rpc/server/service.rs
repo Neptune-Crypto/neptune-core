@@ -14,6 +14,7 @@ use crate::api::export::AdditionRecord;
 use crate::api::export::AnnouncementFlag;
 use crate::api::export::ChangePolicy;
 use crate::api::export::InputSelectionPriority;
+use crate::api::export::KeyType;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::OutputFormat;
 use crate::api::export::ReceivingAddress;
@@ -468,11 +469,8 @@ impl RpcApi for RpcServer {
             });
         };
 
-        let address_type = Some(match &addr {
-            ReceivingAddress::Generation(_) => "generation".to_string(),
-            ReceivingAddress::Symmetric(_) => "symmetric".to_string(),
-            ReceivingAddress::SecretAddress(_) => "secret address".to_string(),
-        });
+        let key_type: KeyType = (&addr).into();
+        let address_type = Some(key_type.to_string());
         let receiver_identifier = Some(addr.receiver_identifier().value());
         let announcement_flags: Option<AnnouncementFlag> = Some((&addr).into());
 

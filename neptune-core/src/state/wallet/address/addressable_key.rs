@@ -54,8 +54,8 @@ pub enum KeyType {
 impl std::fmt::Display for KeyType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Generation => write!(f, "Generation"),
-            Self::Symmetric => write!(f, "Symmetric"),
+            Self::Generation => write!(f, "generation"),
+            Self::Symmetric => write!(f, "symmetric"),
             Self::SecretAddress => write!(f, "secret_address"),
         }
     }
@@ -337,8 +337,8 @@ mod tests {
 
     #[test]
     fn keytype_to_string_is_as_defined() {
-        assert_eq!(KeyType::Generation.to_string(), "Generation");
-        assert_eq!(KeyType::Symmetric.to_string(), "Symmetric");
+        assert_eq!(KeyType::Generation.to_string(), "generation");
+        assert_eq!(KeyType::Symmetric.to_string(), "symmetric");
     }
 
     #[test]

@@ -600,7 +600,7 @@ mod tests {
         let wallet = WalletEntropy::devnet_wallet();
         let (client, gsl) = start_pseudo_real_server(
             network,
-            HashSet::from([Namespace::Personal]),
+            HashSet::from([Namespace::Personal, Namespace::Wallet]),
             unsafe_rpc,
             40610,
             Some(wallet.clone()),
@@ -629,7 +629,20 @@ mod tests {
             );
 
             let next_address = client.generate_address(key_type).await.unwrap().address;
+
+            // Verify that new address passes as valid address
+            let valid = client.validate_address(next_address.clone()).await.unwrap();
+            assert_eq!(
+                valid.receiver_identifier.unwrap(),
+                valid.announcement_flags.unwrap().receiver_id.value()
+            );
+            assert_eq!(key_type.to_string(), valid.address_type.unwrap());
+
             let next_address = ReceivingAddress::from_bech32m(&next_address, network).unwrap();
+            assert_eq!(
+                next_address.receiver_identifier().value(),
+                valid.receiver_identifier.unwrap()
+            );
 
             assert_eq!(next_address, wallet.nth_receiving_address(44, key_type));
 
