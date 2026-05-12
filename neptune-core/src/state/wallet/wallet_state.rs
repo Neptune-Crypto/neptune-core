@@ -1030,13 +1030,31 @@ impl WalletState {
         &self,
         num_future_keys: usize,
     ) -> impl Iterator<Item = (KeyType, u64, SpendingKey)> + '_ {
-        let future_generation_keys = self
-            .get_future_generation_spending_keys(num_future_keys)
-            .map(|(i, gsk)| (KeyType::Generation, i, SpendingKey::from(gsk)));
-        let future_symmetric_keys = self
-            .get_future_symmetric_keys(num_future_keys)
-            .map(|(i, sk)| (KeyType::Symmetric, i, SpendingKey::from(sk)));
-        future_generation_keys.chain(future_symmetric_keys)
+        KeyType::iter().flat_map(move |key_type| {
+            self.get_future_spending_keys_internal(key_type, num_future_keys)
+                .map(move |(i, key)| (key_type, i, key))
+        })
+    }
+
+    fn get_future_spending_keys_internal(
+        &self,
+        key_type: KeyType,
+        num_future_keys: usize,
+    ) -> Box<dyn Iterator<Item = (u64, SpendingKey)> + '_> {
+        match key_type {
+            KeyType::Generation => Box::new(
+                self.get_future_generation_spending_keys(num_future_keys)
+                    .map(|(i, key)| (i, SpendingKey::from(key))),
+            ),
+            KeyType::Symmetric => Box::new(
+                self.get_future_symmetric_keys(num_future_keys)
+                    .map(|(i, key)| (i, SpendingKey::from(key))),
+            ),
+            KeyType::Private => Box::new(
+                self.get_future_private_address_keys(num_future_keys)
+                    .map(|(i, key)| (i, SpendingKey::from(key))),
+            ),
+        }
     }
 
     /// Return an iterator over all `SpendingKey`s of the given type that the
@@ -1260,6 +1278,17 @@ impl WalletState {
         let index = self.wallet_db.get_symmetric_key_counter();
         (index..index + (num_future_keys as u64))
             .map(|i| (i, self.wallet_entropy.nth_symmetric_key(i)))
+    }
+
+    /// Get the next n private address keys spending keys (with derivation
+    /// indices) without modifying the counter.
+    pub(crate) fn get_future_private_address_keys(
+        &self,
+        num_future_keys: usize,
+    ) -> impl Iterator<Item = (u64, private_address::PrivateAddressKey)> + use<'_> {
+        let index = self.wallet_db.get_private_address_key_counter();
+        (index..index + (num_future_keys as u64))
+            .map(|i| (i, self.wallet_entropy.nth_private_address_key(i)))
     }
 
     /// Claim a UTXO by adding it as either an [`ExpectedUtxo`], a
@@ -4541,6 +4570,7 @@ pub(crate) mod tests {
             // generate iterators for future keys
             let generation_counter = wallet_state.wallet_db.get_generation_key_counter();
             let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter();
+            let private_address_counter = wallet_state.wallet_db.get_private_address_key_counter();
 
             // don't just generate the iterators; run through them also
             let num_future_keys = 100;
@@ -4549,6 +4579,9 @@ pub(crate) mod tests {
                 .collect_vec();
             let future_symmetric_keys = wallet_state
                 .get_future_symmetric_keys(num_future_keys)
+                .collect_vec();
+            let future_private_address_keys = wallet_state
+                .get_future_private_address_keys(num_future_keys)
                 .collect_vec();
 
             // verify that the counters haven't changed
@@ -4560,10 +4593,15 @@ pub(crate) mod tests {
                 symmetric_counter,
                 wallet_state.wallet_db.get_symmetric_key_counter(),
             );
+            assert_eq!(
+                private_address_counter,
+                wallet_state.wallet_db.get_private_address_key_counter(),
+            );
 
             // make sure passing over the iterators is not being optimized away
             black_box(future_generation_keys);
             black_box(future_symmetric_keys);
+            black_box(future_private_address_keys);
         }
 
         /// Test that the method
