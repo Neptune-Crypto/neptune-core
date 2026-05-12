@@ -451,6 +451,8 @@ pub trait RpcApi: Sync + Send {
         request: SubmitTransactionRequest,
     ) -> RpcResult<SubmitTransactionResponse>;
 
+    /* Personal */
+
     async fn rescan_announced(
         &self,
         first: RpcBlockHeight,
@@ -464,8 +466,6 @@ pub trait RpcApi: Sync + Send {
         })
         .await
     }
-
-    /* Personal */
 
     async fn rescan_announced_call(
         &self,
