@@ -13,8 +13,8 @@ use super::symmetric_key;
 use crate::api::export::KeyType;
 use crate::application::config::network::Network;
 use crate::protocol::consensus::transaction::announcement::Announcement;
-use crate::state::wallet::address::private_address;
-use crate::state::wallet::address::private_address::PRIVATE_ADDRESS_FLAG;
+use crate::state::wallet::address::secret_address;
+use crate::state::wallet::address::secret_address::SECRET_ADDRESS_FLAG;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::BFieldElement;
 
@@ -41,7 +41,7 @@ pub enum ReceivingAddress {
     Symmetric(symmetric_key::SymmetricKey),
 
     /// An address that should only be known by sender and receiver.
-    PrivateAddress(private_address::PrivateAddress),
+    SecretAddress(secret_address::SecretAddress),
 }
 
 impl From<generation_address::GenerationReceivingAddress> for ReceivingAddress {
@@ -68,9 +68,9 @@ impl From<&symmetric_key::SymmetricKey> for ReceivingAddress {
     }
 }
 
-impl From<private_address::PrivateAddress> for ReceivingAddress {
-    fn from(value: private_address::PrivateAddress) -> Self {
-        Self::PrivateAddress(value)
+impl From<secret_address::SecretAddress> for ReceivingAddress {
+    fn from(value: secret_address::SecretAddress) -> Self {
+        Self::SecretAddress(value)
     }
 }
 
@@ -92,7 +92,7 @@ impl ReceivingAddress {
         match self {
             Self::Generation(a) => a.receiver_identifier(),
             Self::Symmetric(a) => a.receiver_identifier(),
-            Self::PrivateAddress(a) => a.receiver_id(),
+            Self::SecretAddress(a) => a.receiver_id(),
         }
     }
 
@@ -100,7 +100,7 @@ impl ReceivingAddress {
         match self {
             ReceivingAddress::Generation(addr) => addr.flag(),
             ReceivingAddress::Symmetric(addr) => addr.flag(),
-            ReceivingAddress::PrivateAddress(_) => PRIVATE_ADDRESS_FLAG,
+            ReceivingAddress::SecretAddress(_) => SECRET_ADDRESS_FLAG,
         }
     }
 
@@ -124,8 +124,8 @@ impl ReceivingAddress {
             ReceivingAddress::Symmetric(symmetric_key) => {
                 symmetric_key.generate_announcement(&utxo_notification_payload)
             }
-            ReceivingAddress::PrivateAddress(private_address) => {
-                private_address.generate_announcement(&utxo_notification_payload)
+            ReceivingAddress::SecretAddress(secret_address) => {
+                secret_address.generate_announcement(&utxo_notification_payload)
             }
         }
     }
@@ -143,8 +143,8 @@ impl ReceivingAddress {
             ReceivingAddress::Symmetric(symmetric_key) => {
                 symmetric_key.private_utxo_notification(&utxo_notification_payload, network)
             }
-            ReceivingAddress::PrivateAddress(private_address) => {
-                private_address.private_utxo_notification(&utxo_notification_payload, network)
+            ReceivingAddress::SecretAddress(secret_address) => {
+                secret_address.private_utxo_notification(&utxo_notification_payload, network)
             }
         }
     }
@@ -155,7 +155,7 @@ impl ReceivingAddress {
         match self {
             Self::Generation(a) => a.receiver_postimage(),
             Self::Symmetric(k) => k.receiver_postimage(),
-            Self::PrivateAddress(a) => a.receiver_postimage(),
+            Self::SecretAddress(a) => a.receiver_postimage(),
         }
     }
 
@@ -168,7 +168,7 @@ impl ReceivingAddress {
         match self {
             Self::Generation(a) => a.encrypt(utxo_notification_payload),
             Self::Symmetric(a) => a.encrypt(utxo_notification_payload),
-            Self::PrivateAddress(a) => a.encrypt(utxo_notification_payload),
+            Self::SecretAddress(a) => a.encrypt(utxo_notification_payload),
         }
     }
 
@@ -186,7 +186,7 @@ impl ReceivingAddress {
         match self {
             Self::Generation(k) => k.to_bech32m(network),
             Self::Symmetric(k) => k.to_bech32m(network),
-            Self::PrivateAddress(a) => Ok(a.to_bech32m(network)),
+            Self::SecretAddress(a) => Ok(a.to_bech32m(network)),
         }
     }
 
@@ -217,7 +217,7 @@ impl ReceivingAddress {
     /// [ReceivingAddress] if provided as input to [Self::from_bech32m()].  For
     /// that, [Self::to_bech32m()] should be used instead.
     ///
-    /// For [Self::Generation] and [Self::PrivateAddress] keys, this is
+    /// For [Self::Generation] and [Self::SecretAddress] keys, this is
     /// equivalent to calling [Self::to_bech32m()].
     /// For [Self::Symmetric] keys, this returns the privacy_preimage hash
     ///  bech32m encoded instead of the key itself.
@@ -225,7 +225,7 @@ impl ReceivingAddress {
         match self {
             Self::Generation(k) => k.to_bech32m(network),
             Self::Symmetric(k) => k.to_display_bech32m(network),
-            Self::PrivateAddress(a) => Ok(a.to_bech32m(network)),
+            Self::SecretAddress(a) => Ok(a.to_bech32m(network)),
         }
     }
 
@@ -260,8 +260,8 @@ impl ReceivingAddress {
 
     /// parses an address from its bech32m encoding
     pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
-        if encoded.starts_with(private_address::HRP_PREFIX) {
-            return Ok(private_address::PrivateAddress::from_bech32m(encoded, network)?.into());
+        if encoded.starts_with(secret_address::HRP_PREFIX) {
+            return Ok(secret_address::SecretAddress::from_bech32m(encoded, network)?.into());
         }
 
         if encoded.starts_with(generation_address::HRP_PREFIX) {
@@ -287,7 +287,7 @@ impl ReceivingAddress {
         match self {
             Self::Generation(x) => x.lock_script().hash(),
             Self::Symmetric(x) => x.lock_script().hash(),
-            Self::PrivateAddress(x) => x.lock_script().hash(),
+            Self::SecretAddress(x) => x.lock_script().hash(),
         }
     }
 
@@ -307,7 +307,7 @@ mod tests {
     use super::*;
     use crate::api::export::GenerationSpendingKey;
     use crate::api::export::SymmetricKey;
-    use crate::state::wallet::address::private_address::PrivateAddressKey;
+    use crate::state::wallet::address::secret_address::SecretAddressKey;
 
     fn address_from_seed(seed: Digest, key_type: KeyType) -> ReceivingAddress {
         match key_type {
@@ -315,7 +315,7 @@ mod tests {
                 .to_address()
                 .into(),
             KeyType::Symmetric => ReceivingAddress::Symmetric(SymmetricKey::from_seed(seed)),
-            KeyType::Private => PrivateAddressKey::from_seed(seed).to_address().into(),
+            KeyType::SecretAddress => SecretAddressKey::from_seed(seed).to_address().into(),
         }
     }
 

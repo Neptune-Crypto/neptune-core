@@ -1,6 +1,6 @@
 # Keys and Addresses
 
-`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present two types of keys are supported: `Generation` and `Symmetric`.
+`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present three types of keys are supported: `Generation`, `Secret`, and `Symmetric`.
 
 ## Abstraction layer
 
@@ -27,14 +27,12 @@ For each key-type, the neptune-core wallet keeps a counter which tracks the late
 
 To obtain the next unused address for a given key type call the rpc method `next_receiving_address(key_type)`.
 
-(note: as of this writing it always returns the same address at index 0, but in the future it will work as described)
-
-An equivalent API for obtaining the next unused spending key is available in the neptune-core crate, but is not (yet?) exposed as an rpc API.
+An equivalent API for obtaining the next unused spending key is available in the neptune-core crate.
 
 
 ## Available key types
 
-`Generation` and `Symmetric` type keys are intended for different usages.
+`Generation`, `Secret`, and `Symmetric` type keys are intended for different usages.
 
 ### `Generation` keys and addresses
 
@@ -54,6 +52,26 @@ unbreakable for at least a generation and hopefully many generations.  If
 correct, it would be safe to put funds in a paper or metal wallet and ignore
 them for decades, perhaps until they are transferred to the original owner's
 children or grand-children.
+
+### `Secret` keys and addresses
+
+Secret keys are implemented with aes-256-gcm and EC Diffie-Hellman key exchange.
+
+Like `Generation` addresses, `Secret` addresses are post-quantum secure but only when the addresses
+are kept secret. In other words, an attacker that possesses a quantum computer *and* knows the address
+can read the UTXO notifications for a specific address and thus decrypt all amounts and UTXOs that
+were announced on-chain for this address.
+
+`Secret` addresses are intended to be seen by two parties: the sender and the receiver. If it is spread
+beyond that, then the privacy of this address is no longer post-quantum secure.
+
+Concretely the AES key used for the encryption of the notificaiton payload is the XOR of a value that
+can be read from the address and a value chosen by the sender. This value chosen by the sender is then
+shared with the receiver through a Diffie-Hellman key exchange protocol where the public key in the
+exchange protocol is read from the address.
+
+The selling point for `Secret` addresses over `Generation` addresses is that `Secret` addresses are
+much shorter.
 
 
 ### `Symmetric` keys and addresses

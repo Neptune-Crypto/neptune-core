@@ -15,7 +15,7 @@ use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::state::wallet::address::private_address;
+use crate::state::wallet::address::secret_address;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
@@ -43,12 +43,12 @@ pub enum KeyType {
     /// [symmetric_key] built on aes-256-gcm
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
 
-    /// Private address. Only post-quantum secure if address is kept private,
+    /// Secret address. Only post-quantum secure if address is kept private,
     /// between sender and receiver.
     ///
     /// If attacker has a quantum computer *and* knows the address, they can see
     /// the entire transaction history of that address.
-    Private = private_address::PRIVATE_ADDRESS_FLAG_U8,
+    SecretAddress = secret_address::SECRET_ADDRESS_FLAG_U8,
 }
 
 impl std::fmt::Display for KeyType {
@@ -56,7 +56,7 @@ impl std::fmt::Display for KeyType {
         match self {
             Self::Generation => write!(f, "Generation"),
             Self::Symmetric => write!(f, "Symmetric"),
-            Self::Private => write!(f, "Private"),
+            Self::SecretAddress => write!(f, "secret_address"),
         }
     }
 }
@@ -66,7 +66,7 @@ impl From<&ReceivingAddress> for KeyType {
         match addr {
             ReceivingAddress::Generation(_) => Self::Generation,
             ReceivingAddress::Symmetric(_) => Self::Symmetric,
-            ReceivingAddress::PrivateAddress(_) => Self::Private,
+            ReceivingAddress::SecretAddress(_) => Self::SecretAddress,
         }
     }
 }
@@ -76,7 +76,7 @@ impl From<&SpendingKey> for KeyType {
         match addr {
             SpendingKey::Generation(_) => Self::Generation,
             SpendingKey::Symmetric(_) => Self::Symmetric,
-            SpendingKey::PrivateAddress(_) => Self::Private,
+            SpendingKey::SecretAddress(_) => Self::SecretAddress,
         }
     }
 }
@@ -94,7 +94,7 @@ impl TryFrom<&Announcement> for KeyType {
         match common::key_type_from_announcement(pa) {
             Ok(kt) if kt == Self::Generation.into() => Ok(Self::Generation),
             Ok(kt) if kt == Self::Symmetric.into() => Ok(Self::Symmetric),
-            Ok(kt) if kt == Self::Private.into() => Ok(Self::Private),
+            Ok(kt) if kt == Self::SecretAddress.into() => Ok(Self::SecretAddress),
             _ => bail!("encountered Announcement of unknown type"),
         }
     }
@@ -106,7 +106,7 @@ impl KeyType {
         match self {
             Self::Generation => generation_address::GenerationReceivingAddress::get_hrp(network),
             Self::Symmetric => symmetric_key::SymmetricKey::get_hrp(network),
-            Self::Private => private_address::PrivateAddress::get_hrp(network),
+            Self::SecretAddress => secret_address::SecretAddress::get_hrp(network),
         }
     }
 }
@@ -122,8 +122,8 @@ pub enum SpendingKey {
     /// a [symmetric_key]
     Symmetric(symmetric_key::SymmetricKey),
 
-    /// a private address key
-    PrivateAddress(private_address::PrivateAddressKey),
+    /// a secret address key
+    SecretAddress(secret_address::SecretAddressKey),
 }
 
 impl std::hash::Hash for SpendingKey {
@@ -144,9 +144,9 @@ impl From<symmetric_key::SymmetricKey> for SpendingKey {
     }
 }
 
-impl From<private_address::PrivateAddressKey> for SpendingKey {
-    fn from(key: private_address::PrivateAddressKey) -> Self {
-        Self::PrivateAddress(key)
+impl From<secret_address::SecretAddressKey> for SpendingKey {
+    fn from(key: secret_address::SecretAddressKey) -> Self {
+        Self::SecretAddress(key)
     }
 }
 
@@ -167,7 +167,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.to_address().into(),
             Self::Symmetric(k) => k.into(),
-            Self::PrivateAddress(k) => k.to_address().into(),
+            Self::SecretAddress(k) => k.to_address().into(),
         }
     }
 
@@ -178,8 +178,8 @@ impl SpendingKey {
                 generation_spending_key.lock_script_and_witness()
             }
             SpendingKey::Symmetric(symmetric_key) => symmetric_key.lock_script_and_witness(),
-            SpendingKey::PrivateAddress(private_address_key) => {
-                private_address_key.lock_script_and_witness()
+            SpendingKey::SecretAddress(secret_address_key) => {
+                secret_address_key.lock_script_and_witness()
             }
         }
     }
@@ -203,7 +203,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.receiver_preimage(),
             Self::Symmetric(k) => k.receiver_preimage(),
-            Self::PrivateAddress(k) => k.receiver_preimage(),
+            Self::SecretAddress(k) => k.receiver_preimage(),
         }
     }
 
@@ -224,7 +224,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.receiver_identifier(),
             Self::Symmetric(k) => k.receiver_identifier(),
-            Self::PrivateAddress(k) => k.receiver_identifier(),
+            Self::SecretAddress(k) => k.receiver_identifier(),
         }
     }
 
@@ -241,7 +241,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.decrypt(ciphertext_bfes),
             Self::Symmetric(k) => k.decrypt(ciphertext_bfes).map_err(anyhow::Error::new),
-            Self::PrivateAddress(k) => k.viewing_key().decrypt(ciphertext_bfes),
+            Self::SecretAddress(k) => k.viewing_key().decrypt(ciphertext_bfes),
         }
     }
 
@@ -330,7 +330,7 @@ mod tests {
                     generation_address::GenerationSpendingKey::derive_from_seed(seed).into()
                 }
                 KeyType::Symmetric => symmetric_key::SymmetricKey::from_seed(seed).into(),
-                KeyType::Private => private_address::PrivateAddressKey::from_seed(seed).into(),
+                KeyType::SecretAddress => secret_address::SecretAddressKey::from_seed(seed).into(),
             }
         }
     }
@@ -348,12 +348,18 @@ mod tests {
             KeyType::from_str("generation").unwrap()
         );
         assert_eq!(KeyType::Symmetric, KeyType::from_str("symmetric").unwrap());
+        assert_eq!(
+            KeyType::SecretAddress,
+            KeyType::from_str("secret_address").unwrap()
+        );
     }
 
     #[test]
     fn keytype_string_roundtrip() {
         for v in KeyType::iter() {
-            assert_eq!(v, KeyType::from_str(&v.to_string()).unwrap());
+            let as_str = v.to_string();
+            println!("as_str: {as_str}");
+            assert_eq!(v, KeyType::from_str(&as_str).unwrap());
         }
     }
 }

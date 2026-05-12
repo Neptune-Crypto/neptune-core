@@ -15,7 +15,7 @@ use super::address::ReceivingAddress;
 use crate::api::export::KeyType;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::state::wallet::address::generation_address;
-use crate::state::wallet::address::private_address;
+use crate::state::wallet::address::secret_address;
 use crate::state::wallet::address::symmetric_key;
 use crate::state::wallet::secret_key_material::SecretKeyMaterial;
 
@@ -70,8 +70,8 @@ impl WalletEntropy {
                 ReceivingAddress::from(self.nth_generation_spending_key(index).to_address())
             }
             KeyType::Symmetric => ReceivingAddress::from(self.nth_symmetric_key(index)),
-            KeyType::Private => {
-                ReceivingAddress::from(self.nth_private_address_key(index).to_address())
+            KeyType::SecretAddress => {
+                ReceivingAddress::from(self.nth_secret_address_key(index).to_address())
             }
         }
     }
@@ -115,26 +115,26 @@ impl WalletEntropy {
         symmetric_key::SymmetricKey::from_seed(key_seed)
     }
 
-    pub fn nth_private_address_key(&self, index: u64) -> private_address::PrivateAddressKey {
-        // All private address keys can be derived from this master key, in case
+    pub fn nth_secret_address_key(&self, index: u64) -> secret_address::SecretAddressKey {
+        // All secret address keys can be derived from this master key, in case
         // that would ever be useful.
-        let master_private_address_key = Tip5::hash_varlen(
+        let master_secret_address_key = Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
-                bfe_vec![private_address::PRIVATE_ADDRESS_FLAG],
+                bfe_vec![secret_address::SECRET_ADDRESS_FLAG],
             ]
             .concat(),
         );
 
         let key_seed = Tip5::hash_varlen(
             &[
-                master_private_address_key.encode(),
-                bfe_vec![private_address::PRIVATE_ADDRESS_FLAG, index],
+                master_secret_address_key.encode(),
+                bfe_vec![secret_address::SECRET_ADDRESS_FLAG, index],
             ]
             .concat(),
         );
 
-        private_address::PrivateAddressKey::from_seed(key_seed)
+        secret_address::SecretAddressKey::from_seed(key_seed)
     }
 
     // note: legacy tests were written to call nth_generation_spending_key()

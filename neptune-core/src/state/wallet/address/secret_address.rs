@@ -28,12 +28,12 @@ use crate::state::wallet::address::common::network_hrp_char;
 use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
-pub(super) const PRIVATE_ADDRESS_FLAG_U8: u8 = 81;
-pub const PRIVATE_ADDRESS_FLAG: BFieldElement = BFieldElement::new(PRIVATE_ADDRESS_FLAG_U8 as u64);
+pub(super) const SECRET_ADDRESS_FLAG_U8: u8 = 81;
+pub const SECRET_ADDRESS_FLAG: BFieldElement = BFieldElement::new(SECRET_ADDRESS_FLAG_U8 as u64);
 
-const PRIVATE_ADDRESS_AES_NONCE: [u8; 12] = [0u8; 12];
+const SECRET_ADDRESS_AES_NONCE: [u8; 12] = [0u8; 12];
 
-pub(crate) const HRP_PREFIX: &str = "npriv";
+pub(crate) const HRP_PREFIX: &str = "nsec";
 
 fn receiver_id(ec_pubkey: &k256::PublicKey) -> BFieldElement {
     let pubkey_encoded = ec_pubkey.to_sec1_bytes().to_vec();
@@ -54,27 +54,27 @@ fn aes_key_receiver_part(lock_postimage: [BFieldElement; 3], receiever_digest: D
 /// Lightweight struct containing what is sent over the wire in case of RPC
 /// serialization.
 #[derive(Serialize, Deserialize)]
-struct PrivateAddressKeyDto {
+struct SecretAddressKeyDto {
     seed: Digest,
 }
 
-impl From<PrivateAddressKeyDto> for PrivateAddressKey {
-    fn from(helper: PrivateAddressKeyDto) -> Self {
-        PrivateAddressKey::from_seed(helper.seed)
+impl From<SecretAddressKeyDto> for SecretAddressKey {
+    fn from(helper: SecretAddressKeyDto) -> Self {
+        SecretAddressKey::from_seed(helper.seed)
     }
 }
 
-impl From<PrivateAddressKey> for PrivateAddressKeyDto {
-    fn from(key: PrivateAddressKey) -> Self {
-        PrivateAddressKeyDto { seed: key.seed }
+impl From<SecretAddressKey> for SecretAddressKeyDto {
+    fn from(key: SecretAddressKey) -> Self {
+        SecretAddressKeyDto { seed: key.seed }
     }
 }
 
 // note: we serde(skip) fields that can be computed from the seed in order to
 // keep the serialized (including bech32m) representation small.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "PrivateAddressKeyDto", into = "PrivateAddressKeyDto")]
-pub struct PrivateAddressKey {
+#[serde(from = "SecretAddressKeyDto", into = "SecretAddressKeyDto")]
+pub struct SecretAddressKey {
     seed: Digest,
 
     // All fields are derivable from the seed. They are cached here to make
@@ -90,14 +90,14 @@ pub struct PrivateAddressKey {
     unlock_key_preimage: Digest,
 }
 
-impl PrivateAddressKey {
+impl SecretAddressKey {
     pub fn from_seed(seed: Digest) -> Self {
         let [e0, e1, e2, e3, e4] = seed.values();
 
         // The unlock preimage may not be linkable to any of the other fields,
         // except for the seed field.
-        let unlock_key_preimage = Tip5::hash(&[PRIVATE_ADDRESS_FLAG, e0, e1, e2, e3, e4]);
-        let privacy_seed = Tip5::hash(&[e0, e1, e2, e3, e4, PRIVATE_ADDRESS_FLAG]);
+        let unlock_key_preimage = Tip5::hash(&[SECRET_ADDRESS_FLAG, e0, e1, e2, e3, e4]);
+        let privacy_seed = Tip5::hash(&[e0, e1, e2, e3, e4, SECRET_ADDRESS_FLAG]);
 
         // May not be derivable from the elliptic curve secret key. Otherwise
         // the viewing key would leak the receiver preimage -- meaning that the
@@ -127,17 +127,17 @@ impl PrivateAddressKey {
         }
     }
 
-    pub fn viewing_key(&self) -> PrivateAddressViewingKey {
+    pub fn viewing_key(&self) -> SecretAddressViewingKey {
         let [_, _, e2, e3, e4] = self.unlock_key_preimage.hash().values();
         let lock_postimage = [e2, e3, e4];
-        PrivateAddressViewingKey {
+        SecretAddressViewingKey {
             ec_secret_key: self.ec_secret_key.clone(),
             receiver_digest: self.receiver_preimage.hash(),
             lock_postimage,
         }
     }
 
-    pub fn to_address(&self) -> PrivateAddress {
+    pub fn to_address(&self) -> SecretAddress {
         let viewing_key = self.viewing_key();
         viewing_key.to_address()
     }
@@ -166,7 +166,7 @@ impl PrivateAddressKey {
 /// (still without spending abilities), you will need the receiver preimage, in
 /// addition to this data structure.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PrivateAddressViewingKey {
+pub struct SecretAddressViewingKey {
     ec_secret_key: k256::SecretKey,
 
     receiver_digest: Digest,
@@ -174,7 +174,7 @@ pub struct PrivateAddressViewingKey {
     lock_postimage: [BFieldElement; 3],
 }
 
-impl PrivateAddressViewingKey {
+impl SecretAddressViewingKey {
     pub fn decrypt(
         &self,
         encrypted_bfes: &[BFieldElement],
@@ -193,7 +193,7 @@ impl PrivateAddressViewingKey {
         let ephemeral_pubkey = k256::PublicKey::from_sec1_bytes(ephemeral_pubkey_bytes)
             .map_err(|e| anyhow::anyhow!("Invalid ephemeral public key: {:?}", e))?;
 
-        // 4. Perform ECDH using the receiver's private key and the sender's ephemeral public key.
+        // 4. Perform ECDH using the receiver's secret key and the sender's ephemeral public key.
         // The math guarantees this matches the sender's `sender_key_share`.
         let shared_secret = k256::ecdh::diffie_hellman(
             self.ec_secret_key.to_nonzero_scalar(),
@@ -221,7 +221,7 @@ impl PrivateAddressViewingKey {
 
         // 7. Decrypt the payload using the reconstructed AES key and the fixed nonce.
         let cipher = Aes256Gcm::new(&aes_key.into());
-        let nonce = Nonce::from_slice(&PRIVATE_ADDRESS_AES_NONCE);
+        let nonce = Nonce::from_slice(&SECRET_ADDRESS_AES_NONCE);
 
         let plaintext = cipher
             .decrypt(nonce, ciphertext)
@@ -234,8 +234,8 @@ impl PrivateAddressViewingKey {
         Ok((payload.utxo, payload.sender_randomness))
     }
 
-    pub fn to_address(&self) -> PrivateAddress {
-        PrivateAddress {
+    pub fn to_address(&self) -> SecretAddress {
+        SecretAddress {
             ec_public_key: self.ec_secret_key.public_key(),
             receiver_digest: self.receiver_digest,
             lock_postimage: self.lock_postimage,
@@ -244,7 +244,7 @@ impl PrivateAddressViewingKey {
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PrivateAddress {
+pub struct SecretAddress {
     /// The public key with which to communicate the sender-part of the
     /// AES key to the receiver.
     ec_public_key: k256::PublicKey,
@@ -256,7 +256,7 @@ pub struct PrivateAddress {
     lock_postimage: [BFieldElement; 3],
 }
 
-impl PrivateAddress {
+impl SecretAddress {
     const RAW_SERIALIZATION_LENGTH: usize = 97;
 
     /// Manually serialize to exactly 97 bytes to avoid bincode overhead.
@@ -284,7 +284,7 @@ impl PrivateAddress {
     /// Manually deserialize from exactly 97 bytes
     fn from_raw_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
         if bytes.len() != Self::RAW_SERIALIZATION_LENGTH {
-            return Err("Invalid byte length for PrivateAddress: expected exactly 97 bytes");
+            return Err("Invalid byte length for SecretAddress: expected exactly 97 bytes");
         }
 
         let ec_public_key = k256::PublicKey::from_sec1_bytes(&bytes[0..33])
@@ -329,8 +329,14 @@ impl PrivateAddress {
             variant == Variant::Bech32m,
             "Can only decode bech32m addresses.",
         );
+
+        // human-readable part must be prefix plus one character for network
         ensure!(
-            hrp[0..=5] == Self::get_hrp(network),
+            hrp.len() == HRP_PREFIX.len() + 1,
+            "Wrong size for human-readable part",
+        );
+        ensure!(
+            hrp == Self::get_hrp(network),
             "Could not decode bech32m address because of invalid prefix",
         );
 
@@ -374,7 +380,7 @@ impl PrivateAddress {
         utxo_notification_payload: &UtxoNotificationPayload,
     ) -> Announcement {
         let encrypted_utxo_notification = EncryptedUtxoNotification {
-            flag: PRIVATE_ADDRESS_FLAG,
+            flag: SECRET_ADDRESS_FLAG,
             receiver_identifier: self.receiver_id(),
             ciphertext: self.encrypt(utxo_notification_payload),
         };
@@ -388,7 +394,7 @@ impl PrivateAddress {
         network: Network,
     ) -> String {
         let encrypted_utxo_notification = EncryptedUtxoNotification {
-            flag: PRIVATE_ADDRESS_FLAG,
+            flag: SECRET_ADDRESS_FLAG,
             receiver_identifier: self.receiver_id(),
             ciphertext: self.encrypt(utxo_notification_payload),
         };
@@ -444,7 +450,7 @@ impl PrivateAddress {
         // the addition record will also be repeated. So there's no point in
         // trying to obfuscate in that scenario.
         let plaintext = bincode::serialize(payload).unwrap();
-        let nonce = Nonce::from_slice(&PRIVATE_ADDRESS_AES_NONCE);
+        let nonce = Nonce::from_slice(&SECRET_ADDRESS_AES_NONCE);
 
         let cipher = Aes256Gcm::new(&aes_key.into());
         let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
@@ -456,13 +462,13 @@ impl PrivateAddress {
 
     #[cfg(any(test, feature = "arbitrary-impls"))]
     pub(crate) fn from_seed(seed: Digest) -> Self {
-        let key = PrivateAddressKey::from_seed(seed);
+        let key = SecretAddressKey::from_seed(seed);
         key.to_address()
     }
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
-impl<'a> arbitrary::Arbitrary<'a> for PrivateAddress {
+impl<'a> arbitrary::Arbitrary<'a> for SecretAddress {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let seed = Digest::arbitrary(u)?;
         Ok(Self::from_seed(seed))
@@ -481,37 +487,59 @@ mod tests {
     #[test]
     fn bech32_representation_is_unchanged() {
         assert_eq!(
-            "nprivm1qtmcrts70kl4hzjej5te74pk67aja8wmz6aawx995c0cnzl2sxuxdv37p70sgxl7z4dqnmrvqcy2lgsy3xu8gc6xpgaps8x6ppxulpzqj8vqnm5p3n4cyjrzpr2pjr6zwn49x0ejs2p3vyausep5pcftn2dquhw90z",
+            "nsecm1qtmcrts70kl4hzjej5te74pk67aja8wmz6aawx995c0cnzl2sxuxdv37p70sgxl7z4dqnmrvqcy2lgsy3xu8gc6xpgaps8x6ppxulpzqj8vqnm5p3n4cyjrzpr2pjr6zwn49x0ejs2p3vyausep5pcftn2dqzyms6y",
             WalletEntropy::devnet_wallet()
-                .nth_private_address_key(0)
+                .nth_secret_address_key(0)
                 .to_address()
                 .to_bech32m(Network::Main));
     }
 
+    #[test]
+    fn no_crash_in_bech32_decoding() {
+        const SHORT_PREFIX: &str = "n";
+        let network = Network::Main;
+
+        for i in 0..10 {
+            let as_ = "a".repeat(i);
+            assert!(
+                SecretAddress::from_bech32m(&as_, network).is_err(),
+                "Invalid bech32 encoding must lead to error 1"
+            );
+            assert!(
+                SecretAddress::from_bech32m(&format!("{HRP_PREFIX}1{as_}"), network).is_err(),
+                "Invalid bech32 encoding must lead to error 2"
+            );
+            assert!(
+                SecretAddress::from_bech32m(&format!("{SHORT_PREFIX}1{as_}"), network).is_err(),
+                "Invalid bech32 encoding must lead to error 3"
+            );
+        }
+    }
+
     #[proptest(cases = 10)]
     fn custom_serialization_consistency(#[strategy(arb())] key_seed: Digest) {
-        let address = PrivateAddressKey::from_seed(key_seed).to_address();
+        let address = SecretAddressKey::from_seed(key_seed).to_address();
 
         prop_assert_eq!(
             address,
-            PrivateAddress::from_raw_bytes(&address.to_raw_bytes()).unwrap()
+            SecretAddress::from_raw_bytes(&address.to_raw_bytes()).unwrap()
         );
     }
 
     #[proptest(cases = 10)]
     fn bech32_consistency(#[strategy(arb())] key_seed: Digest) {
         let network = Network::Main;
-        let address = PrivateAddressKey::from_seed(key_seed).to_address();
+        let address = SecretAddressKey::from_seed(key_seed).to_address();
 
         prop_assert_eq!(
             address,
-            PrivateAddress::from_bech32m(&address.to_bech32m(network), network).unwrap()
+            SecretAddress::from_bech32m(&address.to_bech32m(network), network).unwrap()
         );
     }
 
     #[test]
-    fn private_address_encryption_roundtrip_unit() {
-        let key = PrivateAddressKey::from_seed(Digest::default());
+    fn encryption_roundtrip_unit() {
+        let key = SecretAddressKey::from_seed(Digest::default());
         let address = key.to_address();
 
         let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
@@ -529,11 +557,11 @@ mod tests {
     }
 
     #[proptest(cases = 10)]
-    fn private_address_encryption_roundtrip_prop(
+    fn encryption_roundtrip_prop(
         #[strategy(arb())] payload: UtxoNotificationPayload,
         #[strategy(arb())] key_seed: Digest,
     ) {
-        let key = PrivateAddressKey::from_seed(key_seed);
+        let key = SecretAddressKey::from_seed(key_seed);
         let address = key.to_address();
 
         let encrypted_bfes = address.encrypt(&payload);
@@ -552,8 +580,8 @@ mod tests {
 
     #[test]
     fn decryption_fails_with_wrong_key() {
-        let alice_key = PrivateAddressKey::from_seed(Digest::default());
-        let bob_key = PrivateAddressKey::from_seed(Digest::default().hash());
+        let alice_key = SecretAddressKey::from_seed(Digest::default());
+        let bob_key = SecretAddressKey::from_seed(Digest::default().hash());
         let bob_address = bob_key.to_address();
         let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
 
@@ -565,7 +593,7 @@ mod tests {
 
         assert!(
             result.is_err(),
-            "Decryption should fail when using the wrong private key"
+            "Decryption should fail when using the wrong secret address key"
         );
     }
 }

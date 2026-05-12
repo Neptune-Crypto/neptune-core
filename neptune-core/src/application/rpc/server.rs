@@ -7090,7 +7090,7 @@ mod tests {
         mod worker {
             use super::*;
             use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-            use crate::state::wallet::address::private_address::PrivateAddressKey;
+            use crate::state::wallet::address::secret_address::SecretAddressKey;
             use crate::state::wallet::address::symmetric_key::SymmetricKey;
             use crate::state::wallet::address::SpendingKey;
 
@@ -7185,7 +7185,9 @@ mod tests {
                         GenerationReceivingAddress::derive_from_seed(key_seed).into()
                     }
                     KeyType::Symmetric => SymmetricKey::from_seed(key_seed).into(),
-                    KeyType::Private => PrivateAddressKey::from_seed(key_seed).to_address().into(),
+                    KeyType::SecretAddress => {
+                        SecretAddressKey::from_seed(key_seed).to_address().into()
+                    }
                 };
                 let output1: OutputFormat = (
                     external_receiving_address.clone(),

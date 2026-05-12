@@ -9,8 +9,8 @@ pub mod announcement_flag;
 mod common;
 pub mod encrypted_utxo_notification;
 pub mod generation_address;
-pub mod private_address;
 mod receiving_address;
+pub mod secret_address;
 pub mod symmetric_key;
 
 pub use addressable_key::KeyType;
@@ -93,7 +93,7 @@ mod tests {
         use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
-        use crate::state::wallet::address::private_address::PrivateAddress;
+        use crate::state::wallet::address::secret_address::SecretAddress;
         use crate::tests::shared::blocks::next_block;
         use crate::tests::shared::globalstate::mock_genesis_global_state;
 
@@ -159,7 +159,7 @@ mod tests {
             // Verify that received funds can be spent, from the address type.
             // Make a big enough transaction that UTXOs received on this
             // address type must be used.
-            let third_party_address = PrivateAddress::from_seed(Digest::default());
+            let third_party_address = SecretAddress::from_seed(Digest::default());
             let to_third_party = vec![OutputFormat::AddressAndAmount(
                 third_party_address.into(),
                 NativeCurrencyAmount::coins(82),

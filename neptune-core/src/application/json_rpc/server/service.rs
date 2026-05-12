@@ -471,7 +471,7 @@ impl RpcApi for RpcServer {
         let address_type = Some(match &addr {
             ReceivingAddress::Generation(_) => "generation".to_string(),
             ReceivingAddress::Symmetric(_) => "symmetric".to_string(),
-            ReceivingAddress::PrivateAddress(_) => "private address".to_string(),
+            ReceivingAddress::SecretAddress(_) => "secret address".to_string(),
         });
         let receiver_identifier = Some(addr.receiver_identifier().value());
         let announcement_flags: Option<AnnouncementFlag> = Some((&addr).into());
