@@ -1082,11 +1082,7 @@ impl WalletState {
         &self,
         key_type: KeyType,
     ) -> Box<dyn Iterator<Item = SpendingKey> + '_> {
-        match key_type {
-            KeyType::Generation => Box::new(self.get_known_generation_spending_keys()),
-            KeyType::Symmetric => Box::new(self.get_known_symmetric_keys()),
-            KeyType::Private => Box::new(self.get_known_private_address_keys()),
-        }
+        self.get_known_spending_keys(key_type)
     }
 
     /// An iterator over all known generation spending keys.
@@ -4626,7 +4622,7 @@ pub(crate) mod tests {
         ///     b) the relative index is smaller than num_future_keys.
         ///
         #[traced_test]
-        #[test_strategy::proptest(async = "tokio")]
+        #[test_strategy::proptest(async = "tokio", cases = 10)]
         async fn scan_for_utxos_announced_to_future_keys_behaves(
             #[strategy(txkernel::with_lengths(10, 10, 10, false))] kernel: TransactionKernel,
             #[strategy(arb())] wallet_secret: WalletEntropy,
@@ -4640,11 +4636,16 @@ pub(crate) mod tests {
                 NUM_FUTURE_KEYS,
             ))]
             mut future_symmetric_relative_indices: Vec<usize>,
-            #[strategy(collection::vec(arb(), 2 * NUM_FUTURE_KEYS))] mut utxo_vec: Vec<Utxo>,
-            #[strategy(collection::vec(arb(), 2 * NUM_FUTURE_KEYS))] mut sender_randomness_vec: Vec<
+            #[strategy(collection::vec(
+                0_usize..100,
+                NUM_FUTURE_KEYS,
+            ))]
+            mut future_private_address_relative_indices: Vec<usize>,
+            #[strategy(collection::vec(arb(), 3 * NUM_FUTURE_KEYS))] mut utxo_vec: Vec<Utxo>,
+            #[strategy(collection::vec(arb(), 3 * NUM_FUTURE_KEYS))] mut sender_randomness_vec: Vec<
                 Digest,
             >,
-            #[strategy(collection::vec(any::<bool>(), 2 * NUM_FUTURE_KEYS))] mut select_vec: Vec<
+            #[strategy(collection::vec(any::<bool>(), 3 * NUM_FUTURE_KEYS))] mut select_vec: Vec<
                 bool,
             >,
         ) {
@@ -4662,6 +4663,7 @@ pub(crate) mod tests {
 
             let generation_counter = wallet_state.wallet_db.get_generation_key_counter();
             let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter();
+            let priv_counter = wallet_state.wallet_db.get_private_address_key_counter();
 
             future_generation_relative_indices.sort();
             let future_generation_keys = future_generation_relative_indices
@@ -4691,6 +4693,19 @@ pub(crate) mod tests {
                     )
                 })
                 .collect_vec();
+            future_private_address_relative_indices.sort();
+            let future_private_keys = future_private_address_relative_indices
+                .into_iter()
+                .map(|relative_index| (relative_index, priv_counter + relative_index as u64))
+                .map(|(relative_index, absolute_index)| {
+                    (
+                        KeyType::Private,
+                        relative_index,
+                        absolute_index,
+                        SpendingKey::from(wallet_secret.nth_private_address_key(absolute_index)),
+                    )
+                })
+                .collect_vec();
 
             // create master list of UTXOs with context
             struct UtxoContext {
@@ -4706,6 +4721,7 @@ pub(crate) mod tests {
             for (key_type, relative_index, absolute_index, key) in future_generation_keys
                 .into_iter()
                 .chain(future_symmetric_keys)
+                .chain(future_private_keys)
             {
                 let utxo = utxo_vec.pop().unwrap();
                 let sender_randomness = sender_randomness_vec.pop().unwrap();
