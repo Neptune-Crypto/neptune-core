@@ -299,6 +299,8 @@ impl ReceivingAddress {
 
 #[cfg(test)]
 mod tests {
+    use bech32::ToBase32;
+    use bech32::Variant;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use strum::IntoEnumIterator;
@@ -337,6 +339,50 @@ mod tests {
                 address,
                 ReceivingAddress::from_bech32m(&address.to_bech32m(network).unwrap(), network,)
                     .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn no_crash_in_bech32_decoding() {
+        const SHORT_PREFIX: &str = "n";
+        let network = Network::Main;
+
+        // Encodings with valid checksum
+        let short_prefix =
+            bech32::encode(SHORT_PREFIX, vec![].to_base32(), Variant::Bech32m).unwrap();
+        let long_prefix =
+            bech32::encode("nolganolga", vec![].to_base32(), Variant::Bech32m).unwrap();
+
+        for str in [short_prefix, long_prefix] {
+            assert!(
+                SymmetricKey::from_bech32m(&str, network).is_err(),
+                "Invalid bech32 encoding must lead to error: {str}"
+            );
+        }
+
+        // Not valid checksums.
+        for i in 0..10 {
+            let as_ = "a".repeat(i);
+            assert!(
+                ReceivingAddress::from_bech32m(&as_, network).is_err(),
+                "Invalid bech32 encoding must lead to error 1"
+            );
+            assert!(
+                ReceivingAddress::from_bech32m(
+                    &format!("{}1{as_}", generation_address::HRP_PREFIX),
+                    network
+                )
+                .is_err(),
+                "Invalid bech32 encoding must lead to error 2"
+            );
+            assert!(
+                ReceivingAddress::from_bech32m(&format!("{SHORT_PREFIX}1{as_}"), network).is_err(),
+                "Invalid bech32 encoding must lead to error 3"
+            );
+            assert!(
+                ReceivingAddress::from_bech32m(&format!("1{as_}"), network).is_err(),
+                "Invalid bech32 encoding must lead to error 4"
             );
         }
     }

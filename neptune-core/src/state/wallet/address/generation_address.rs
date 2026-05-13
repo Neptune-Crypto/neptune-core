@@ -339,7 +339,7 @@ impl GenerationReceivingAddress {
             "Can only decode bech32m addresses.",
         );
         ensure!(
-            hrp[0..=5] == Self::get_hrp(network),
+            hrp == Self::get_hrp(network),
             "Could not decode bech32m address because of invalid prefix",
         );
 
@@ -485,5 +485,48 @@ mod tests {
 
         // no crash
         let _ = GenerationReceivingAddress::from_bech32m(bech32m_string, network).unwrap();
+    }
+
+    #[test]
+    fn no_crash_in_bech32_decoding() {
+        const SHORT_PREFIX: &str = "n";
+        let network = Network::Main;
+
+        // Encodings with valid checksum
+        let short_prefix =
+            bech32::encode(SHORT_PREFIX, vec![].to_base32(), Variant::Bech32m).unwrap();
+        let long_prefix =
+            bech32::encode("nolganolga", vec![].to_base32(), Variant::Bech32m).unwrap();
+
+        for str in [short_prefix, long_prefix] {
+            assert!(
+                GenerationReceivingAddress::from_bech32m(&str, network).is_err(),
+                "Invalid bech32 encoding must lead to error: {str}"
+            );
+        }
+
+        // Not valid checksums.
+        for i in 0..10 {
+            let as_ = "a".repeat(i);
+            assert!(
+                GenerationReceivingAddress::from_bech32m(&as_, network).is_err(),
+                "Invalid bech32 encoding must lead to error 1"
+            );
+            assert!(
+                GenerationReceivingAddress::from_bech32m(&format!("{HRP_PREFIX}1{as_}"), network)
+                    .is_err(),
+                "Invalid bech32 encoding must lead to error 2"
+            );
+
+            assert!(
+                GenerationReceivingAddress::from_bech32m(&format!("{SHORT_PREFIX}1{as_}"), network)
+                    .is_err(),
+                "Invalid bech32 encoding must lead to error 4"
+            );
+            assert!(
+                GenerationReceivingAddress::from_bech32m(&format!("1{as_}"), network).is_err(),
+                "Invalid bech32 encoding must lead to error 5"
+            );
+        }
     }
 }

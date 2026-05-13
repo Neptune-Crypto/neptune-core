@@ -61,6 +61,8 @@ pub enum EncryptError {
 pub(super) const SYMMETRIC_KEY_FLAG_U8: u8 = 80;
 pub const SYMMETRIC_KEY_FLAG: BFieldElement = BFieldElement::new(SYMMETRIC_KEY_FLAG_U8 as u64);
 
+const HRP_PREFIX: &str = "nsymk";
+
 /// represents an AES 256 bit symmetric key
 ///
 /// this is an opaque type.  all fields are read-only via accessor methods.
@@ -286,10 +288,53 @@ impl SymmetricKey {
     /// returns human readable prefix (hrp) of a key, specific to `network`
     pub(super) fn get_hrp(network: Network) -> String {
         // nsk: neptune-symmetric-key
-        format!("nsymk{}", common::network_hrp_char(network))
+        format!("{HRP_PREFIX}{}", common::network_hrp_char(network))
     }
 
     pub(super) fn flag(&self) -> BFieldElement {
         SYMMETRIC_KEY_FLAG
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bech32::Variant;
+
+    use super::*;
+
+    #[test]
+    fn no_crash_in_bech32_decoding() {
+        const SHORT_PREFIX: &str = "n";
+        let network = Network::Main;
+
+        // Encodings with valid checksum
+        let short_prefix =
+            bech32::encode(SHORT_PREFIX, vec![].to_base32(), Variant::Bech32m).unwrap();
+        let long_prefix =
+            bech32::encode("nolganolga", vec![].to_base32(), Variant::Bech32m).unwrap();
+
+        for str in [short_prefix, long_prefix] {
+            assert!(
+                SymmetricKey::from_bech32m(&str, network).is_err(),
+                "Invalid bech32 encoding must lead to error: {str}"
+            );
+        }
+
+        // Not valid checksums.
+        for i in 0..10 {
+            let as_ = "a".repeat(i);
+            assert!(
+                SymmetricKey::from_bech32m(&as_, network).is_err(),
+                "Invalid bech32 encoding must lead to error 1"
+            );
+            assert!(
+                SymmetricKey::from_bech32m(&format!("{HRP_PREFIX}1{as_}"), network).is_err(),
+                "Invalid bech32 encoding must lead to error 2"
+            );
+            assert!(
+                SymmetricKey::from_bech32m(&format!("{SHORT_PREFIX}1{as_}"), network).is_err(),
+                "Invalid bech32 encoding must lead to error 3"
+            );
+        }
     }
 }

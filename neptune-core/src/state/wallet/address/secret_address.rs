@@ -43,6 +43,11 @@ fn receiver_id(ec_pubkey: &k256::PublicKey) -> BFieldElement {
 }
 
 /// The receiver-shard of the main AES key.
+///
+/// When a transaction is made, the notification payload is AES encrypted and
+/// sent to the receiver. The AES key used for this encryption is the XOR of to
+/// 256-bit values: the sender part and the receiver part. This function returns
+/// the receiver part, which is the part that the receiver gets to define.
 fn aes_key_receiver_part(lock_postimage: [BFieldElement; 3], receiever_digest: Digest) -> [u8; 32] {
     let [e0, e1, e2] = lock_postimage;
     let digest = Tip5::hash_pair(receiever_digest, Digest([e0, e1, e2, bfe!(0), bfe!(0)]));
@@ -499,6 +504,20 @@ mod tests {
         const SHORT_PREFIX: &str = "n";
         let network = Network::Main;
 
+        // Encodings with valid checksum
+        let short_prefix =
+            bech32::encode(SHORT_PREFIX, vec![].to_base32(), Variant::Bech32m).unwrap();
+        let long_prefix =
+            bech32::encode("nolganolga", vec![].to_base32(), Variant::Bech32m).unwrap();
+
+        for str in [short_prefix, long_prefix] {
+            assert!(
+                SecretAddress::from_bech32m(&str, network).is_err(),
+                "Invalid bech32 encoding must lead to error: {str}"
+            );
+        }
+
+        // Not valid checksums.
         for i in 0..10 {
             let as_ = "a".repeat(i);
             assert!(
