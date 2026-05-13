@@ -226,7 +226,6 @@ pub(super) mod tests {
         // in a catastrophic failure of the AES-GCM encryption scheme (the "Forbidden Attack").
 
         // Create a dummy instance. We just need the compiler to see the type.
-        // Assuming your fields implement `Default` or you can provide mock values:
         let tripwire = UtxoNotificationPayload {
             sender_randomness: Default::default(),
             utxo: Utxo::empty_dummy(),
