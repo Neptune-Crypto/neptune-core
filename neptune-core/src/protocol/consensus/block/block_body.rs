@@ -149,6 +149,21 @@ impl BlockBody {
         msa
     }
 
+    /// Return the number of AOCL leafs in the mutator set *prior* to the
+    /// application of any outputs from this block.
+    pub fn num_aocl_leafs_prior(&self) -> u64 {
+        let num_outputs: u64 = self
+            .transaction_kernel
+            .outputs
+            .len()
+            .try_into()
+            .expect("Can't contain more than u64::MAX outputs");
+
+        // The mutator set field on the block body does not contain guesser
+        // outputs. So those should not be subtracted here either.
+        self.mutator_set_accumulator.aocl.num_leafs() - num_outputs
+    }
+
     /// Return the mutator set as it looks after the application of the
     /// transaction in this block but before the guesser-fee UTXOs are applied.
     ///
@@ -256,6 +271,7 @@ impl rand::distr::Distribution<BlockBody> for rand::distr::StandardUniform {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use num_traits::Zero;
     use proptest::prelude::BoxedStrategy;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
@@ -264,7 +280,10 @@ mod tests {
 
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
+    use crate::api::export::Network;
+    use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
@@ -276,13 +295,43 @@ mod tests {
         #[strategy(BlockBody::arbitrary_with_mutator_set_accumulator(#_msa_and_records.mutator_set_accumulator))]
         body: BlockBody,
     ) {
-        let guesser_outputs = [AdditionRecord::new(Digest::default()); 2];
+        let guesser_outputs =
+            [AdditionRecord::new(Digest::default()); NUM_GUESSER_FEE_OUTPUTS as usize];
         let expected_max_index = body
             .mutator_set_accumulator_after(guesser_outputs.to_vec())
             .aocl
             .num_leafs()
             - 1;
         prop_assert_eq!(expected_max_index, body.max_aocl_leaf_index());
+
+        let num_outputs: u64 = body.transaction_kernel.outputs.len().try_into().unwrap();
+        let num_outputs = num_outputs + NUM_GUESSER_FEE_OUTPUTS;
+        prop_assert_eq!(
+            expected_max_index + 1,
+            body.num_aocl_leafs_prior() + num_outputs
+        );
+    }
+
+    #[test]
+    fn num_aocl_leafs_prior_genesis() {
+        assert!(Block::genesis(Network::Main)
+            .kernel
+            .body
+            .num_aocl_leafs_prior()
+            .is_zero());
+    }
+
+    #[test]
+    fn num_aocl_leafs_prior_block1() {
+        let network = Network::Main;
+        let num_premine_outputs: u64 = Block::premine_distribution().len().try_into().unwrap();
+        assert_eq!(
+            num_premine_outputs,
+            invalid_empty_block(&Block::genesis(network), network)
+                .kernel
+                .body
+                .num_aocl_leafs_prior()
+        );
     }
 
     impl BlockBody {
