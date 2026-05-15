@@ -1,6 +1,8 @@
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -11,7 +13,7 @@ use crate::util_types::mutator_set::commit;
 
 /// Represents the preimage of a transaction output, so not just the UTXO but
 /// also the randomnesses.
-#[derive(Debug, Clone, BFieldCodec)]
+#[derive(Debug, Clone, BFieldCodec, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct UtxoTriple {
     pub utxo: Utxo,
