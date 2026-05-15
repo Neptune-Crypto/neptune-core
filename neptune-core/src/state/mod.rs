@@ -493,6 +493,17 @@ impl GlobalStateLock {
             .add_sent_transaction(SentTransaction::new(details.as_ref(), tip_digest))
             .await;
 
+        // Populate `outgoing_randomness.dat` with all known `UtxoTriple`s
+        // from the transaction.
+        for txoutput in tx_artifacts.details.tx_outputs.iter() {
+            gsm.wallet_state
+                .append_to_outgoing_randomness(&txoutput.utxo_triple())
+                .await
+                .map_err(|err| {
+                    RecordTransactionError::FailedToRecordOutgoingRandomness(err.to_string())
+                })?;
+        }
+
         // insert transaction into mempool
         gsm.mempool_insert((*transaction).clone(), UpgradePriority::Critical)
             .await;
@@ -523,6 +534,9 @@ impl DerefMut for GlobalStateLock {
 pub enum RecordTransactionError {
     #[error("Invalid transaction: {0}")]
     InvalidTransaction(#[from] TxCreationArtifactsError),
+
+    #[error("Failed to record outgoing randomenss: {0}")]
+    FailedToRecordOutgoingRandomness(String),
 }
 
 /// abstracts over lock acquisition types for [GlobalStateLock]

@@ -36,6 +36,7 @@ use super::wallet_configuration::WalletConfiguration;
 use super::wallet_entropy::WalletEntropy;
 use super::wallet_file::WalletFileContext;
 use super::wallet_status::WalletStatus;
+use crate::api::export::UtxoTriple;
 use crate::application::config::cli_args::Args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
@@ -75,6 +76,11 @@ use crate::util_types::mutator_set::removal_record::absolute_index_set::Absolute
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 const CHANGE_KEY_TYPE: KeyType = KeyType::Symmetric;
+
+#[cfg(windows)]
+const LINE_ENDING: &str = "\r\n";
+#[cfg(not(windows))]
+const LINE_ENDING: &str = "\n";
 
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
@@ -190,12 +196,6 @@ impl WalletState {
         &self,
         utxo_ms_recovery_data: IncomingUtxoRecoveryData,
     ) -> Result<()> {
-        // Create JSON string ending with a newline as this flushes the write
-        #[cfg(windows)]
-        const LINE_ENDING: &str = "\r\n";
-        #[cfg(not(windows))]
-        const LINE_ENDING: &str = "\n";
-
         #[cfg(test)]
         {
             tokio::fs::create_dir_all(self.configuration.data_directory().wallet_directory_path())
@@ -210,6 +210,7 @@ impl WalletState {
             .await?;
         let mut incoming_secrets_file = BufWriter::new(incoming_secrets_file);
 
+        // Create JSON string ending with a newline as this flushes the write
         let mut json_string = serde_json::to_string(&utxo_ms_recovery_data)?;
         json_string.push_str(LINE_ENDING);
         incoming_secrets_file
@@ -592,6 +593,54 @@ impl WalletState {
             .sent_transactions_mut()
             .push(sent_transaction)
             .await;
+    }
+
+    pub(crate) async fn append_to_outgoing_randomness(&self, output: &UtxoTriple) -> Result<()> {
+        #[cfg(test)]
+        {
+            tokio::fs::create_dir_all(self.configuration.data_directory().wallet_directory_path())
+                .await?;
+        }
+
+        let outgoing_secrets_file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(self.configuration.outgoing_secrets_path())
+            .await?;
+        let mut outgoing_secrets_file = BufWriter::new(outgoing_secrets_file);
+
+        // Create JSON string ending with a newline as this flushes the write
+        let mut json_string = serde_json::to_string(output)?;
+        json_string.push_str(LINE_ENDING);
+        outgoing_secrets_file
+            .write_all(json_string.as_bytes())
+            .await?;
+
+        // Flush just in case, since this is cryptographic data, you can't be
+        // too sure, and tests seem to need this.
+        outgoing_secrets_file.flush().await?;
+
+        Ok(())
+    }
+
+    /// Read the outgoing randomness file, and return its content parsed as a
+    /// list of [`UtxoTriple`]s.
+    pub async fn parse_outgoing_randomness(&self) -> Result<Vec<UtxoTriple>> {
+        let outgoing_secrets_file = OpenOptions::new()
+            .read(true)
+            .open(self.configuration.outgoing_secrets_path())
+            .await?;
+
+        let file_reader = BufReader::new(outgoing_secrets_file);
+        let mut ret = vec![];
+        let mut lines = file_reader.lines();
+        while let Some(line) = lines.next_line().await? {
+            let utxo_ms_recovery_data: UtxoTriple =
+                serde_json::from_str(&line).expect("Could not parse JSON string");
+            ret.push(utxo_ms_recovery_data);
+        }
+
+        Ok(ret)
     }
 
     /// returns a count of transactions this wallet intiated at given block.

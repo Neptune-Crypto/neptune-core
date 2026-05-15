@@ -336,7 +336,7 @@ mod tests {
     #[tokio::test]
     async fn send_from_premine_receiver() {
         let unsafe_rpc = true;
-        let (client, _) = start_pseudo_real_server(
+        let (client, gsl) = start_pseudo_real_server(
             Network::Main,
             HashSet::from([Namespace::Personal, Namespace::Mempool, Namespace::Node]),
             unsafe_rpc,
@@ -394,15 +394,12 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         // Verify tx is in mempool
-        assert_eq!(
-            1,
-            client
-                .get_transactions_by_addition_records(resp.outputs)
-                .await
-                .unwrap()
-                .transactions
-                .len()
-        );
+        let mempool_txs = client
+            .get_transactions_by_addition_records(resp.outputs)
+            .await
+            .unwrap()
+            .transactions;
+        assert_eq!(1, mempool_txs.len());
 
         assert_eq!(
             key_counter_prior + 1,
@@ -413,6 +410,23 @@ mod tests {
                 .derivation_index,
             "Derivation key counter must be bumped after successful 'send'"
         );
+
+        // Verify that outgoing randomness was populated.
+        let txoutputs = gsl
+            .lock_guard()
+            .await
+            .wallet_state
+            .parse_outgoing_randomness()
+            .await
+            .unwrap();
+
+        assert_eq!(2, txoutputs.len());
+
+        let mempool_tx = &mempool_txs[0];
+        for txoutput in txoutputs {
+            let addition_record: RpcAdditionRecord = txoutput.addition_record().into();
+            assert!(mempool_tx.kernel.outputs.contains(&addition_record));
+        }
     }
 
     #[tokio::test]

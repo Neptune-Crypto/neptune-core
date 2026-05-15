@@ -6992,7 +6992,7 @@ mod tests {
             // note: we can only perform 2 iters, else we bump into send rate-limit (per block)
             let accept_lustrations = true;
             for i in 5..7 {
-                let result = rpc_server
+                let _result = rpc_server
                     .clone()
                     .send(
                         ctx,
@@ -7002,8 +7002,8 @@ mod tests {
                         fee,
                         accept_lustrations,
                     )
-                    .await;
-                assert!(result.is_ok());
+                    .await
+                    .unwrap();
             }
         }
 

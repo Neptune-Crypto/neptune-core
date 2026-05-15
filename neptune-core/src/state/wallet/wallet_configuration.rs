@@ -4,6 +4,7 @@ use tracing::info;
 
 use super::scan_mode_configuration::ScanModeConfiguration;
 use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
+use super::wallet_file::WALLET_OUTGOING_SECRETS_FILE_NAME;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::network::Network;
@@ -93,6 +94,12 @@ impl WalletConfiguration {
         self.data_directory()
             .wallet_directory_path()
             .join(WALLET_INCOMING_SECRETS_FILE_NAME)
+    }
+
+    pub(crate) fn outgoing_secrets_path(&self) -> PathBuf {
+        self.data_directory()
+            .wallet_directory_path()
+            .join(WALLET_OUTGOING_SECRETS_FILE_NAME)
     }
 
     pub(crate) fn network(&self) -> Network {
