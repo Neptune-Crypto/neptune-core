@@ -102,7 +102,7 @@ impl BlockKernel {
     ) -> Result<MutatorSetUpdate, BlockValidationError> {
         let outputs = self.all_addition_records(block_hash)?;
         let inputs = RemovalRecordList::try_unpack(self.body.transaction_kernel.inputs.clone())
-            .map_err(BlockValidationError::from)?;
+            .unwrap_or_else(|_| self.body.transaction_kernel.inputs.clone());
 
         Ok(MutatorSetUpdate::new(inputs, outputs))
     }

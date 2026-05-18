@@ -374,6 +374,40 @@ impl SyncLoop {
                             if new_tip.header().height > self.tip.header().height {
                                 self.download_state.fast_forward(new_tip.header().height);
                                 self.tip = *new_tip;
+
+                                // If the next block after the new tip is already
+                                // in the coverage bitmask (e.g., recovered from a
+                                // previous sync session), start the subtask now.
+                                // Without this, the subtask would only start when
+                                // a peer sends a block at exactly tip+1, which
+                                // never happens for already-covered heights.
+                                if maybe_successors_subtask.is_none()
+                                    && self.download_state.coverage().contains(
+                                        self.tip.header().height.next().value(),
+                                    )
+                                {
+                                    tracing::info!(
+                                        "Sync loop: next block {} is already in coverage; \
+                                        starting successors subtask immediately.",
+                                        self.tip.header().height.next()
+                                    );
+                                    let moved_tip = self.tip.clone();
+                                    let moved_download_state = self.download_state.clone();
+                                    let moved_main_channel_sender =
+                                        self.main_channel_sender.clone();
+                                    let moved_return_sender = successors_sender.clone();
+                                    let moved_block_validator = self.block_validator.clone();
+                                    maybe_successors_subtask = Some(tokio::spawn(async move {
+                                        Self::process_successors_of_tip(
+                                            moved_tip,
+                                            moved_download_state,
+                                            moved_main_channel_sender,
+                                            moved_return_sender,
+                                            moved_block_validator,
+                                        )
+                                        .await
+                                    }));
+                                }
                             }
                         }
                     }
