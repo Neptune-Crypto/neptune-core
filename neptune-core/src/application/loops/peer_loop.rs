@@ -2374,7 +2374,13 @@ impl PeerLoopHandler {
                                 drop(state_lock);
                             }
                         } else {
-                            debug!("Block {} received outside of sync mode; dropping.", block_height);
+                            // Not in sync mode — process via the normal path
+                            // (fork reconciliation / new-tip application).
+                            if let Some(new_height) =
+                                self.try_ensure_path(block, &mut peer, peer_state_info).await?
+                            {
+                                peer_state_info.highest_shared_block_height = new_height;
+                            }
                         }
                         continue;
                     }
