@@ -153,6 +153,15 @@ pub async fn initialize(
     let mut global_state_lock =
         GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
 
+    // Ensure archival state is consistent.
+    global_state_lock
+        .lock_guard_mut()
+        .await
+        .chain
+        .archival_state_mut()
+        .recover()
+        .await?;
+
     // Construct the broadcast channel to communicate from the main task to peer tasks
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =
         broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);

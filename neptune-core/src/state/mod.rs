@@ -6050,8 +6050,6 @@ mod tests {
     }
 
     mod state_update_on_reorganizations {
-        use tasm_lib::twenty_first::prelude::Mmr;
-
         use super::*;
 
         async fn assert_correct_global_state(
@@ -6065,74 +6063,11 @@ mod tests {
             let expected_tip_digest = expected_tip.hash();
             assert_eq!(expected_tip_digest, global_state.chain.tip().hash());
 
-            // Peeking into archival state
-            assert_eq!(
-                expected_tip_digest,
-                global_state
-                    .chain
-                    .archival_state()
-                    .archival_mutator_set
-                    .get_sync_label(),
-                "Archival state must have expected sync-label",
-            );
-
-            let expected_msa = expected_tip.mutator_set_accumulator_after().unwrap();
-            let msa_from_archive = global_state
+            global_state
                 .chain
                 .archival_state()
-                .archival_mutator_set
-                .ams()
-                .accumulator()
+                .assert_consistent(&expected_tip)
                 .await;
-            assert_eq!(
-                expected_msa, msa_from_archive,
-                "Archival mutator set must match that in expected tip"
-            );
-            assert_eq!(expected_msa.hash(), msa_from_archive.hash());
-
-            assert_eq!(
-                expected_tip_digest,
-                global_state
-                    .chain
-                    .archival_state()
-                    .get_block(expected_tip.hash())
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .hash(),
-                "Expected block must be returned"
-            );
-
-            assert_eq!(
-                expected_tip_digest,
-                global_state
-                    .chain
-                    .archival_state()
-                    .archival_block_mmr
-                    .ammr()
-                    .get_latest_leaf()
-                    .await
-                    .unwrap(),
-                "Latest leaf in archival block MMR must match expected block"
-            );
-
-            // Verify that archival-block MMR matches that of block
-            {
-                let mut expected_archival_block_mmr_value =
-                    expected_tip.body().block_mmr_accumulator.clone();
-                expected_archival_block_mmr_value.append(expected_tip_digest);
-                assert_eq!(
-                    expected_archival_block_mmr_value,
-                    global_state
-                        .chain
-                        .archival_state()
-                        .archival_block_mmr
-                        .ammr()
-                        .to_accumulator_async()
-                        .await,
-                    "archival block-MMR must match that in tip after adding tip digest"
-                );
-            }
 
             let tip_height = expected_tip.header().height;
             assert_eq!(
