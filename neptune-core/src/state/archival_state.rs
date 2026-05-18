@@ -1869,6 +1869,11 @@ impl ArchivalState {
             // Get the block digest that the mutator set was most recently synced to
             let ms_block_sync_digest = self.archival_mutator_set.get_sync_label();
 
+            // AMS is already synced to this block; skip to avoid double-application.
+            if ms_block_sync_digest == new_block.hash() {
+                return Ok(());
+            }
+
             // Find path from mutator set sync digest to new block. Optimize for the common case,
             // where the new block is the child block of block that the mutator set is synced to.
             let (backwards, _luca, forwards) =
