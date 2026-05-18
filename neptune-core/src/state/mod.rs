@@ -2156,29 +2156,68 @@ impl GlobalState {
         }))
     }
 
+    /// Rebuild the archival mutator set one block at a time from `from_label`
+    /// to `to_tip`. Applying blocks one by one keeps the active-window
+    /// indices within bounds; bulk replay from genesis fails because removal
+    /// records reference absolute indices relative to a non-zero window start.
+    async fn rebuild_ams_to_tip(&mut self, from_label: Digest, to_tip: Digest) -> Result<()> {
+        let tip_block = self
+            .chain
+            .archival_state()
+            .get_block(to_tip)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("tip block {to_tip:x} not found in DB"))?;
+
+        let (_, _, forward_hashes) = self
+            .chain
+            .archival_state()
+            .find_path(from_label, tip_block.header().prev_block_digest)
+            .await;
+        let all_forward: Vec<Digest> = forward_hashes.into_iter().chain([to_tip]).collect();
+        let total = all_forward.len();
+
+        info!("AMS rebuild: applying {total} blocks one at a time.");
+        for (i, block_hash) in all_forward.into_iter().enumerate() {
+            let block = self
+                .chain
+                .archival_state()
+                .get_block(block_hash)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("block {block_hash:x} not found during AMS rebuild"))?;
+            self.chain
+                .archival_state_mut()
+                .update_mutator_set(&block)
+                .await?;
+            if i % 500 == 0 {
+                info!("AMS rebuild progress: {}/{total}", i + 1);
+            }
+        }
+        info!("AMS rebuild complete.");
+        Ok(())
+    }
+
     /// In case the wallet database is corrupted or deleted, this method will restore
     /// monitored UTXO data structures from recovery data. This method should only be
     /// called on startup, not while the program is running, since it will only restore
     /// a wallet state, if the monitored UTXOs have been deleted. Not merely if they
     /// are not synced with a valid mutator set membership proof. And this corruption
     /// can only happen if the wallet database is deleted or corrupted.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the mutator set is not synced to current tip.
     pub(crate) async fn restore_monitored_utxos_from_recovery_data(&mut self) -> Result<()> {
         let tip_hash = self.chain.tip_hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
         let asm_sync_label = ams_ref.get_sync_label();
         if tip_hash != asm_sync_label {
-            // AMS is behind tip — likely a crash during update_mutator_set.
-            // Skip UTXO recovery; AMS will catch up via update_mutator_set on
-            // the next set_new_tip call (find_path handles non-trivial rewalk).
+            // AMS is behind tip — likely a crash mid-update_mutator_set.
+            // Rebuild incrementally so restore_monitored_utxos_from_archival_mutator_set
+            // (called ~60 s later via mp_resync_interval) sees a consistent AMS.
             warn!(
-                "AMS sync label disagrees with tip (ams={asm_sync_label:x} tip={tip_hash:x}). \
-                Skipping UTXO recovery; AMS will self-heal as new blocks arrive."
+                "AMS sync label disagrees with tip. \
+                Rebuilding AMS incrementally from {asm_sync_label:x} to {tip_hash:x}."
             );
+            self.rebuild_ams_to_tip(asm_sync_label, tip_hash).await?;
+            // AMS is now synced; skip UTXO recovery (membership proofs may be
+            // stale but will be refreshed on the next wallet scan).
             return Ok(());
         }
 
