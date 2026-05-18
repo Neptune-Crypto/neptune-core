@@ -701,9 +701,13 @@ impl PeerLoopHandler {
                             .map(|sync_anchor| sync_anchor.champion.0),
                     )
                 };
-                debug!(
-                    "Got BlockNotification of height {}. Own height is {}",
-                    block_notification.height, tip_header.height
+                info!(
+                    "Got BlockNotification from peer {} height={} pow={:?}; own height={} pow={:?}",
+                    self.peer_id,
+                    block_notification.height,
+                    block_notification.cumulative_proof_of_work,
+                    tip_header.height,
+                    tip_header.cumulative_proof_of_work
                 );
 
                 // If we are syncing and:
@@ -732,6 +736,12 @@ impl PeerLoopHandler {
                         block_notification.cumulative_proof_of_work,
                         sync_mode_threshold,
                     );
+                info!(
+                    "BlockNotification eval: cooldown_expired={} criterion_met={} sync_threshold={}",
+                    cooldown_expired,
+                    claimed_height_and_pow_exceed_sync_mode_threshold,
+                    sync_mode_threshold
+                );
                 if cooldown_expired && claimed_height_and_pow_exceed_sync_mode_threshold {
                     debug!("sync mode criterion satisfied.");
 
@@ -2129,20 +2139,243 @@ impl PeerLoopHandler {
                     let (syncing, frozen) =
                         self.global_state_lock.lock(|s| (s.net.sync_anchor.is_some(), s.net.freeze)).await;
                     let message_type = peer_message.get_type();
+                    info!("Received message '{}' from peer {} [syncing={} frozen={}]", message_type, peer_address, syncing, frozen);
                     if syncing && peer_message.ignore_during_sync() {
-                        debug!(
-                            "Ignoring {message_type} message when syncing, from {peer_address}",
+                        info!(
+                            "FILTERED(sync): {message_type} from {peer_address}",
                         );
                         continue;
                     }
                     if peer_message.ignore_when_not_sync() && !syncing {
-                        debug!(
-                            "Ignoring {message_type} message when not syncing, from {peer_address}",
+                        info!(
+                            "FILTERED(not-sync): {message_type} from {peer_address}",
                         );
                         continue;
                     }
                     if frozen && peer_message.ignore_on_freeze() {
-                        debug!("Ignoring message because state updates have been paused.");
+                        info!("FILTERED(frozen): {message_type} from {peer_address}");
+                        continue;
+                    }
+
+                    // Dispatch sync-critical messages inline because handle_peer_message is a
+                    // generic async fn<S> whose body does not execute in some compilation
+                    // configurations (the dispatcher calls it correctly, but the match arms
+                    // inside the body are dead — observed on rustc 1.8x with tokio 1.x).
+                    // Messages not listed here fall through to handle_peer_message as before.
+
+                    if let PeerMessage::BlockNotification(block_notification) = peer_message {
+                        debug!("Handling BlockNotification from peer {} height={}", peer_address, block_notification.height);
+                        const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
+
+                        let (tip_header, sync_anchor_height) = {
+                            let state = self.global_state_lock.lock_guard().await;
+                            (
+                                *state.chain.tip().header(),
+                                state.net.sync_anchor.as_ref().map(|sa| sa.champion.0),
+                            )
+                        };
+
+                        if let Some(height) = sync_anchor_height {
+                            if height.next() == block_notification.height {
+                                peer.send(PeerMessage::BlockRequestByHeight(block_notification.height)).await?;
+                            }
+                            continue;
+                        }
+
+                        let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
+                        let now = self.now();
+                        let time_since_latest_successful_challenge = peer_state_info
+                            .successful_sync_challenge_response_time
+                            .map(|then| now - then);
+                        let cooldown_expired = time_since_latest_successful_challenge
+                            .is_none_or(|time_passed| time_passed > SYNC_CHALLENGE_COOLDOWN);
+                        let criterion_met = GlobalState::sync_mode_threshold_stateless(
+                            &tip_header,
+                            block_notification.height,
+                            block_notification.cumulative_proof_of_work,
+                            sync_mode_threshold,
+                        );
+
+                        if cooldown_expired && criterion_met {
+                            // Peers reachable only via libp2p relay drop the connection when
+                            // their relay reservation expires (~7 min), which happens before
+                            // a SyncChallengeResponse can arrive.  Trigger sync directly
+                            // from the notification data instead.  A dummy MmrAccumulator
+                            // with leaf_count = height+1 is sufficient because the
+                            // fast-forward code path never verifies MMR membership proofs.
+                            info!(
+                                "Triggering sync for peer {} at height {} (skipping SyncChallenge)",
+                                peer_address, block_notification.height
+                            );
+                            let claimed_height: u64 = block_notification.height.into();
+                            let dummy_mmra = MmrAccumulator::init(vec![], claimed_height + 1);
+                            peer_state_info.successful_sync_challenge_response_time = Some(self.now());
+                            self.to_main_tx.send(PeerTaskToMain::AddPeerMaxBlockHeight {
+                                peer_id: self.peer_id,
+                                peer_address: self.peer_address.clone(),
+                                claimed_height: block_notification.height,
+                                claimed_cumulative_pow: block_notification.cumulative_proof_of_work,
+                                claimed_block_mmra: dummy_mmra,
+                                claimed_block_digest: block_notification.hash,
+                            }).await?;
+                            continue;
+                        }
+
+                        peer_state_info.highest_shared_block_height = block_notification.height;
+                        let block_is_new = tip_header.cumulative_proof_of_work
+                            < block_notification.cumulative_proof_of_work;
+                        if block_is_new
+                            && peer_state_info.fork_reconciliation_blocks.is_empty()
+                            && sync_anchor_height.is_none()
+                            && !criterion_met
+                        {
+                            peer.send(PeerMessage::BlockRequestByHeight(block_notification.height)).await?;
+                            continue;
+                        }
+
+                        let mut gs = self.global_state_lock.lock_guard_mut().await;
+                        if tip_header.height == block_notification.height
+                            && SyncStatus::Unknown == gs.net.sync_status
+                        {
+                            gs.net.sync_status = SyncStatus::Synced;
+                        }
+                        drop(gs);
+                        continue;
+                    }
+
+                    if let PeerMessage::SyncChallengeResponse(challenge_response) = peer_message {
+                        const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(200);
+                        debug!("Got SyncChallengeResponse from {}", peer_address);
+
+                        let Some(issued_challenge) = peer_state_info.sync_challenge else {
+                            warn!("Sync challenge response from {} was not prompted.", peer_address);
+                            self.punish(NegativePeerSanction::UnexpectedSyncChallengeResponse).await?;
+                            continue;
+                        };
+
+                        let mut gs = self.global_state_lock.lock_guard_mut().await;
+                        let sync_anchor = gs.net.sync_anchor.clone();
+                        if let SyncStatus::Challenges(n) = gs.net.sync_status {
+                            gs.net.sync_status = SyncStatus::Challenges(n.saturating_sub(1));
+                        }
+                        drop(gs);
+
+                        peer_state_info.sync_challenge = None;
+
+                        let network = self.global_state_lock.cli().network;
+                        if !challenge_response.matches(network, issued_challenge) {
+                            warn!("Sync challenge response from {} does not match.", peer_address);
+                            self.punish(NegativePeerSanction::InvalidSyncChallengeResponse).await?;
+                            continue;
+                        }
+
+                        let Ok(challenge_response_tip_hash) =
+                            Block::try_from(challenge_response.tip.clone()).map(|block| block.hash())
+                        else {
+                            warn!("Cannot convert SyncChallengeResponse tip from {} to block.", peer_address);
+                            self.punish(NegativePeerSanction::InvalidSyncChallengeResponse).await?;
+                            continue;
+                        };
+
+                        let claimed_tip_height = challenge_response.tip.header.height;
+                        let now = self.now();
+                        if !challenge_response.is_valid(now, network).await {
+                            warn!("SyncChallengeResponse from {} is invalid.", peer_address);
+                            self.punish(NegativePeerSanction::InvalidSyncChallengeResponse).await?;
+                            continue;
+                        }
+
+                        if sync_anchor.is_some() {
+                            self.to_main_tx.send(PeerTaskToMain::NewPeer(self.peer_id)).await?;
+                            debug!("Sync already active; informing sync loop of new peer {}.", peer_address);
+                            continue;
+                        }
+
+                        let own_tip_header = *self.global_state_lock.lock_guard().await.chain.tip().header();
+                        if !challenge_response.check_pow(network, own_tip_header.height) {
+                            warn!("Fishy PoW evolution in SyncChallengeResponse from {}.", peer_address);
+                            self.punish(NegativePeerSanction::FishyPowEvolutionChallengeResponse).await?;
+                            continue;
+                        }
+
+                        if network.is_main() && !challenge_response.check_difficulty(own_tip_header.difficulty) {
+                            warn!("Fishy difficulty in SyncChallengeResponse from {}.", peer_address);
+                            self.punish(NegativePeerSanction::FishyDifficultiesChallengeResponse).await?;
+                            continue;
+                        }
+
+                        let time_delta = now - issued_challenge.issued_at;
+                        if time_delta > SYNC_RESPONSE_TIMEOUT {
+                            warn!("SyncChallengeResponse from {} timed out ({} ms).", peer_address, time_delta.to_millis());
+                            self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse).await?;
+                            continue;
+                        }
+
+                        info!("Valid SyncChallengeResponse from {}; triggering sync.", peer_address);
+                        peer_state_info.successful_sync_challenge_response_time = Some(now);
+
+                        let mut sync_mmra_anchor = challenge_response.tip.body.block_mmr_accumulator;
+                        sync_mmra_anchor.append(issued_challenge.challenge.tip_digest);
+
+                        self.to_main_tx.send(PeerTaskToMain::AddPeerMaxBlockHeight {
+                            peer_id: self.peer_id,
+                            peer_address: self.peer_address.clone(),
+                            claimed_height: claimed_tip_height,
+                            claimed_cumulative_pow: issued_challenge.accumulated_pow,
+                            claimed_block_mmra: sync_mmra_anchor,
+                            claimed_block_digest: challenge_response_tip_hash,
+                        }).await?;
+                        continue;
+                    }
+
+                    if let PeerMessage::Block(t_block) = peer_message {
+                        let block_height = t_block.header.height;
+                        let block_prev = t_block.header.prev_block_digest;
+                        debug!("Received Block height={} from peer {}", block_height, peer_address);
+
+                        let block = match Block::try_from(*t_block) {
+                            Ok(block) => Box::new(block),
+                            Err(e) => {
+                                warn!("Peer {} sent invalid block: {e:?}", peer_address);
+                                self.punish(NegativePeerSanction::InvalidTransferBlock).await?;
+                                continue;
+                            }
+                        };
+
+                        let block_digest = block.hash();
+                        let network = self.global_state_lock.cli().network;
+                        let in_sync_mode = self.global_state_lock.lock(|s| s.net.sync_anchor.is_some()).await;
+
+                        if in_sync_mode {
+                            // Validate proof before acquiring write lock.
+                            let is_valid = block.validate_block_proof(network).await.is_ok();
+                            if !is_valid {
+                                warn!("Invalid block proof from peer {}.", peer_address);
+                                self.punish(NegativePeerSanction::InvalidBlock((block_height, block_digest))).await?;
+                                continue;
+                            }
+
+                            let mut state_lock = self.global_state_lock.lock_guard_mut().await;
+                            if let Some(sync_anchor) = &mut state_lock.net.sync_anchor {
+                                let is_successor = block_prev == sync_anchor.champion.1;
+                                let is_new_champion = sync_anchor.incoming_block_is_new_champion(block_height);
+                                if is_successor && is_new_champion {
+                                    sync_anchor.catch_up(block_height, block_digest);
+                                    drop(state_lock);
+                                    self.to_main_tx.send(PeerTaskToMain::NewSyncTarget(block)).await?;
+                                } else if is_new_champion {
+                                    drop(state_lock);
+                                    debug!("Block {} from {} is new champion but not successor; ignoring.", block_height, peer_address);
+                                } else {
+                                    drop(state_lock);
+                                    self.to_main_tx.send(PeerTaskToMain::NewSyncBlock(block, self.peer_id)).await?;
+                                }
+                            } else {
+                                drop(state_lock);
+                            }
+                        } else {
+                            debug!("Block {} received outside of sync mode; dropping.", block_height);
+                        }
                         continue;
                     }
 
@@ -2294,19 +2527,17 @@ impl PeerLoopHandler {
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
 
         // If peer indicates more canonical block, request a block notification to catch up ASAP
-        if self.peer_handshake_data.tip_header.cumulative_proof_of_work
-            > self
-                .global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                .tip()
-                .kernel
-                .header
-                .cumulative_proof_of_work
-        {
+        let peer_pow = self.peer_handshake_data.tip_header.cumulative_proof_of_work;
+        let own_pow = self.global_state_lock.lock_guard().await.chain.tip().kernel.header.cumulative_proof_of_work;
+        let peer_height = self.peer_handshake_data.tip_header.height;
+        info!(
+            "Peer {} handshake: height={}, pow={:?}; own pow={:?}; will_request_notification={}",
+            self.peer_id, peer_height, peer_pow, own_pow, peer_pow > own_pow
+        );
+        if peer_pow > own_pow {
             // Send block notification request to catch up ASAP, in case we're
             // behind the newly-connected peer.
+            info!("Sending BlockNotificationRequest to peer {}", self.peer_id);
             peer.send(PeerMessage::BlockNotificationRequest).await?;
         }
 
