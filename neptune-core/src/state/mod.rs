@@ -6061,17 +6061,20 @@ mod tests {
                     .get_sync_label(),
                 "Archival state must have expected sync-label",
             );
+
+            let expected_msa = expected_tip.mutator_set_accumulator_after().unwrap();
+            let msa_from_archive = global_state
+                .chain
+                .archival_state()
+                .archival_mutator_set
+                .ams()
+                .accumulator()
+                .await;
             assert_eq!(
-                expected_tip.mutator_set_accumulator_after().unwrap(),
-                global_state
-                    .chain
-                    .archival_state()
-                    .archival_mutator_set
-                    .ams()
-                    .accumulator()
-                    .await,
+                expected_msa, msa_from_archive,
                 "Archival mutator set must match that in expected tip"
             );
+            assert_eq!(expected_msa.hash(), msa_from_archive.hash());
 
             assert_eq!(
                 expected_tip_digest,
@@ -6590,6 +6593,9 @@ mod tests {
                     global_state.set_new_tip(block_1.clone()).await.unwrap();
                     global_state.set_new_tip(block_1.clone()).await.unwrap();
                 }
+
+                // One more time
+                global_state.set_new_tip(block_1.clone()).await.unwrap();
 
                 let expected_num_mutxos = if claim_coinbase { 3 } else { 1 };
                 assert_correct_global_state(
