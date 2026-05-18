@@ -72,18 +72,26 @@ jobs:
             test(blocks_with_0_to_10_inputs_and_successors_are_valid) |
             test(can_cancel_preprocess_within_one_second) |
             test(can_cancel_merkle_tree_construction_within_two_seconds) |
-            test(alice_updates_mutator_set_data_on_own_transaction) |
+            test(update_mutator_set_on_own_transaction_one_new_block_self_mined) |
+            test(update_mutator_set_on_own_transaction_two_new_blocks_from_peer) |
+            test(validate_donation_address) |
             test(can_sync_from) |
             test(can_sync_with_moving) |
             test(verify_all_proof_servers_work)
           )'
 
-      - name: Run Ignored Tests
+      - name: Run Sequential tests
         run: >
           cargo nextest run
           --run-ignored all
           --test-threads=1
-          -E 'test(can_resume_block_download_from_saved_incomplete_state) or test(can_resume_block_download_from_saved_overcomplete_state) or test(can_resume_sync_from_saved_state)'
+          -E 'test(can_resume_block_download_from_saved_incomplete_state) |
+              test(can_resume_block_download_from_saved_overcomplete_state) |
+              test(can_resume_sync_from_saved_state) |
+              test(update_mutator_set_on_own_transaction_one_new_block_self_mined) |
+              test(update_mutator_set_on_own_transaction_two_new_blocks_from_peer) |
+              test(validate_donation_address)
+              '
 
       # `--doc` cannot be mixed with other target option
       - name: Run documentation tests
