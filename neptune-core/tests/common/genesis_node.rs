@@ -16,6 +16,7 @@ use neptune_cash::application::config::cli_args::Args;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
+use neptune_cash::state::sync_status::SyncStatus;
 use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
 use neptune_cash::state::wallet::wallet_file::WalletFile;
@@ -541,6 +542,20 @@ impl GenesisNode {
                     h,
                     timeout_secs
                 );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(())
+    }
+
+    pub async fn wait_until_sync_mode(&self, timeout_secs: u16) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        while !matches!(
+            self.gsl.lock_guard().await.net.sync_status,
+            SyncStatus::Syncing(_),
+        ) {
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
+                anyhow::bail!("Sync status not reached after {} seconds", timeout_secs);
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }

@@ -454,7 +454,7 @@ pub struct Args {
     // [SYNC_CHALLENGE_POW_WITNESS_LENGTH](crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH)
     // as that would prevent going into sync mode.
     #[clap(long, default_value = "100", value_parser(RangedI64ValueParser::<usize>::new().range(10..100000)))]
-    pub(crate) sync_mode_threshold: usize,
+    pub sync_mode_threshold: usize,
 
     /// By default the node will attempt to resume a previously aborted sync
     /// process, whose blocks are stored in a temporary directory. Set this flag

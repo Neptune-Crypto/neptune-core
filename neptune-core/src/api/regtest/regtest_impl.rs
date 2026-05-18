@@ -1,4 +1,5 @@
 use tasm_lib::prelude::Digest;
+use tracing::info;
 
 use super::error::RegTestError;
 use crate::api::export::Timestamp;
@@ -87,6 +88,18 @@ impl RegTest {
         self.worker
             .set_self_composed_proposal(timestamp, seed)
             .await
+    }
+
+    /// Freeze state to prevent blocks and transactions from being shared with
+    /// peers.
+    pub async fn freeze(&mut self) {
+        self.worker.freeze().await;
+    }
+
+    /// Unfreeze state to allow blocks and transactions to be shared after a
+    /// freeze.
+    pub async fn unfreeze(&mut self) {
+        self.worker.unfreeze().await;
     }
 }
 
@@ -208,6 +221,7 @@ impl RegTestPrivate {
             .await;
 
         let block_hash = block.hash();
+        info!("Mined RegTest block of height {}", block.header().height);
 
         // inform main-loop.  to add to mempool and broadcast.
         //
@@ -230,6 +244,16 @@ impl RegTestPrivate {
         Self::wait_until_block_in_chain(&self.global_state_lock, block_hash).await?;
 
         Ok(block_hash)
+    }
+
+    async fn freeze(&mut self) {
+        let mut state = self.global_state_lock.lock_guard_mut().await;
+        state.net.freeze = true;
+    }
+
+    async fn unfreeze(&mut self) {
+        let mut state = self.global_state_lock.lock_guard_mut().await;
+        state.net.freeze = false;
     }
 
     // waits (polls) until block is found in canonical chain or 5 second timeout occurs.
