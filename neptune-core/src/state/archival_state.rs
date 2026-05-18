@@ -4116,6 +4116,20 @@ pub(super) mod tests {
         );
         assert_eq!(genesis.hash(), luca_3, "Luca of 1a and 1b is genesis");
 
+        // Test 1a to genesis
+        let (backwards_4, _, forwards_4) = archival_state
+            .find_path(mock_block_1_a.hash(), genesis.hash())
+            .await;
+        assert_eq!(
+            vec![mock_block_1_a.hash()],
+            backwards_4,
+            "Backwards path from 1a to genesis is 1a"
+        );
+        assert!(
+            forwards_4.is_empty(),
+            "Forwards from 1a to genesis is the empty list"
+        );
+
         Ok(())
     }
 
