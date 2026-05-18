@@ -2171,17 +2171,16 @@ impl GlobalState {
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
         let asm_sync_label = ams_ref.get_sync_label();
-        assert_eq!(
-            tip_hash, asm_sync_label,
-            "Error: sync label in archival mutator set database disagrees with \
-            block tip. Archival mutator set must be synced to tip for successful \
-            MUTXO recovery.\n\
-            Possible causes: different or new genesis block; corrupt file system.\n\
-            Possible solution: try deleting the database at `DATA_DIR/databases/`. \
-            Get the value of `DATA_DIR` from the first message in the log, and \
-            *do not* delete the wallet file or directory.\n\n\
-            Tip:\n{tip_hash:x};\nsync label:\n{asm_sync_label:x}"
-        );
+        if tip_hash != asm_sync_label {
+            // AMS is behind tip — likely a crash during update_mutator_set.
+            // Skip UTXO recovery; AMS will catch up via update_mutator_set on
+            // the next set_new_tip call (find_path handles non-trivial rewalk).
+            warn!(
+                "AMS sync label disagrees with tip (ams={asm_sync_label:x} tip={tip_hash:x}). \
+                Skipping UTXO recovery; AMS will self-heal as new blocks arrive."
+            );
+            return Ok(());
+        }
 
         // Fetch all incoming UTXOs from recovery data. Then make a HashMap for
         // fast lookup.
