@@ -581,6 +581,27 @@ impl ArchivalState {
         Ok(())
     }
 
+    /// Ensure internal consistency of archival state.
+    ///
+    /// Ensure that the entire archival state is consistent with the tip defined
+    /// by the block index database and the block it points to on disk.
+    ///
+    /// This method is only intended to be run on startup. It is intended to
+    /// be used to recover from a non-graceful shutdown of the node.
+    ///
+    /// It can fix an inconsistent archival state which can be produced for
+    /// example if the node is shut down after the block index database has been
+    /// updated and the block written to disk but before the rest of the
+    /// archival state update is finished.
+    pub(crate) async fn recover(&mut self) -> Result<()> {
+        let tip = self.get_tip().await;
+
+        // Since the sub-parts of the archival state handles reorganizations,
+        // all we have to do is to call the tip updater again. Then all parts
+        // will agree with the block index database.
+        self.set_new_tip(&tip).await
+    }
+
     /// Write a newly found block to database and to disk, without setting it as
     /// tip.
     ///
@@ -2295,6 +2316,7 @@ pub(super) mod tests {
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
+    use tracing::error;
     use tracing_test::traced_test;
 
     use super::*;
@@ -2328,6 +2350,85 @@ pub(super) mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared_tokio_runtime;
+
+    impl ArchivalState {
+        async fn is_consistent(&self, expected_tip: &Block) -> bool {
+            let expected_tip_digest = expected_tip.hash();
+
+            if expected_tip_digest != self.get_tip().await.hash() {
+                error!("Archival state must have expected tip");
+                return false;
+            }
+
+            if expected_tip_digest != self.archival_mutator_set.get_sync_label() {
+                error!("Archival state must have expected sync-label");
+                return false;
+            }
+
+            let expected_msa = expected_tip.mutator_set_accumulator_after().unwrap();
+            let msa_from_archive = self.archival_mutator_set.ams().accumulator().await;
+            if expected_msa != msa_from_archive {
+                error!("Archival mutator set must match that in expected tip");
+                return false;
+            }
+
+            if expected_msa.hash() != msa_from_archive.hash() {
+                error!("Archival mutator set hash must match that in expected tip");
+                return false;
+            }
+
+            if expected_tip_digest
+                != self
+                    .get_block(expected_tip_digest)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .hash()
+            {
+                error!("Expected block must be found in stored state");
+                return false;
+            }
+
+            if expected_tip_digest
+                != self
+                    .archival_block_mmr
+                    .ammr()
+                    .get_latest_leaf()
+                    .await
+                    .unwrap()
+            {
+                error!("Latest leaf in archival block MMR must match expected block");
+                return false;
+            }
+
+            // Verify that archival-block MMR matches that of block
+            {
+                let mut expected_archival_block_mmr_value =
+                    expected_tip.body().block_mmr_accumulator.clone();
+                expected_archival_block_mmr_value.append(expected_tip_digest);
+                if expected_archival_block_mmr_value
+                    != self.archival_block_mmr.ammr().to_accumulator_async().await
+                {
+                    error!("archival block-MMR must match that in tip after adding tip digest");
+                    return false;
+                }
+            }
+
+            // If UTXO index is maintained, check that
+            if let Some(utxo_index) = &self.utxo_index {
+                if !utxo_index.block_was_indexed(expected_tip_digest).await {
+                    error!("UTXO index has not processed tip");
+                    return false;
+                }
+            }
+
+            true
+        }
+
+        pub(crate) async fn assert_consistent(&self, expected_tip: &Block) {
+            assert!(self.is_consistent(expected_tip).await);
+        }
+    }
 
     pub(super) async fn make_test_archival_state(cli: &Args) -> ArchivalState {
         let data_dir: DataDirectory = unit_test_data_directory(cli.network).unwrap();
@@ -5536,6 +5637,130 @@ pub(super) mod tests {
                 .canonical_block_heights_with_puts(HashSet::new(), dummy_tx_output)
                 .await
                 .is_err());
+        }
+    }
+
+    mod recover {
+        use super::*;
+
+        async fn genesis_setup() -> (ArchivalState, Block, Network) {
+            let network = Network::Main;
+            let cli = Args {
+                network,
+                utxo_index: true,
+                ..Default::default()
+            };
+            let archive = make_test_archival_state(&cli).await;
+
+            let genesis = Block::genesis(network);
+
+            (archive, genesis, network)
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn recover_happy_case() {
+            let (mut archive, genesis, network) = genesis_setup().await;
+            archive.assert_consistent(&genesis).await;
+            archive.recover().await.unwrap();
+            archive.assert_consistent(&genesis).await;
+
+            let block1 = invalid_empty_block(&genesis, network);
+            archive.set_new_tip(&block1).await.unwrap();
+
+            // consistent before and after recover. From block 1.
+            archive.assert_consistent(&block1).await;
+            archive.recover().await.unwrap();
+            archive.assert_consistent(&block1).await;
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn recover_stored_block_one_ahead_rest() {
+            // Block is stored as tip. But no other part of the archival state
+            // has seen this block.
+
+            let (mut archive, genesis, network) = genesis_setup().await;
+            let block1 = invalid_empty_block(&genesis, network);
+            archive.write_block_as_tip(&block1).await.unwrap();
+
+            assert!(!archive.is_consistent(&block1).await);
+            assert!(!archive.is_consistent(&genesis).await);
+
+            // Recover everything but the block storage/block index DB:
+            // archival mutator set, archival block MMR, UTXO index.
+            archive.recover().await.unwrap();
+            assert!(archive.is_consistent(&block1).await);
+            assert!(!archive.is_consistent(&genesis).await);
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn recover_stored_block_two_ahead_rest() {
+            // Two blocks stored on disk and in block index DB. But other parts
+            // of the archival state have not seen these two blocks.
+
+            let (mut archive, genesis, network) = genesis_setup().await;
+            let block1 = invalid_empty_block(&genesis, network);
+            let block2 = invalid_empty_block(&block1, network);
+            archive.write_block_as_tip(&block1).await.unwrap();
+            archive.write_block_as_tip(&block2).await.unwrap();
+
+            assert!(!archive.is_consistent(&block2).await);
+            assert!(!archive.is_consistent(&block1).await);
+            assert!(!archive.is_consistent(&genesis).await);
+
+            archive.recover().await.unwrap();
+            assert!(archive.is_consistent(&block2).await);
+            assert!(!archive.is_consistent(&block1).await);
+            assert!(!archive.is_consistent(&genesis).await);
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn reorganization_one_deep() {
+            let (mut archive, genesis, network) = genesis_setup().await;
+
+            let block1a = invalid_empty_block_with_proof_size(&genesis, network, 12);
+            let block1b = invalid_empty_block_with_proof_size(&genesis, network, 13);
+
+            archive.set_new_tip(&block1a).await.unwrap();
+            archive.write_block_as_tip(&block1b).await.unwrap();
+
+            assert!(!archive.is_consistent(&block1b).await);
+            archive.recover().await.unwrap();
+            assert!(archive.is_consistent(&block1b).await);
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn reorganization_two_deep() {
+            let (mut archive, genesis, network) = genesis_setup().await;
+
+            let block1a = invalid_empty_block_with_proof_size(&genesis, network, 12);
+            let block2a = invalid_empty_block_with_proof_size(&block1a, network, 12);
+            let block1b = invalid_empty_block_with_proof_size(&genesis, network, 13);
+            let block2b = invalid_empty_block_with_proof_size(&block1b, network, 13);
+
+            archive.set_new_tip(&block1a).await.unwrap();
+            archive.set_new_tip(&block2a).await.unwrap();
+            archive.write_block_as_tip(&block1b).await.unwrap();
+            archive.write_block_as_tip(&block2b).await.unwrap();
+
+            assert!(!archive.is_consistent(&block2b).await);
+            archive.recover().await.unwrap();
+            assert!(archive.is_consistent(&block2b).await);
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn roll_back_one() {
+            let (mut archive, genesis, network) = genesis_setup().await;
+
+            let block1 = invalid_empty_block_with_proof_size(&genesis, network, 12);
+            let block2 = invalid_empty_block_with_proof_size(&block1, network, 12);
+
+            archive.set_new_tip(&block1).await.unwrap();
+            archive.set_new_tip(&block2).await.unwrap();
+            archive.write_block_as_tip(&block1).await.unwrap();
+
+            assert!(!archive.is_consistent(&block1).await);
+            archive.recover().await.unwrap();
+            assert!(archive.is_consistent(&block1).await);
         }
     }
 
