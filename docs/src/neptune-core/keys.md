@@ -1,6 +1,6 @@
 # Keys and Addresses
 
-`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present three types of keys are supported: `Generation`, `Secret`, and `Symmetric`.
+`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present three types of keys are supported: `Generation`, `EcHybrid`, and `Symmetric`.
 
 ## Abstraction layer
 
@@ -32,8 +32,6 @@ An equivalent API for obtaining the next unused spending key is available in the
 
 ## Available key types
 
-`Generation`, `Secret`, and `Symmetric` type keys are intended for different usages.
-
 ### `Generation` keys and addresses
 
 `Generation` keys are asymmetric keys, meaning that they use public-key cryptography to separate a secret key from a public key.
@@ -53,25 +51,27 @@ correct, it would be safe to put funds in a paper or metal wallet and ignore
 them for decades, perhaps until they are transferred to the original owner's
 children or grand-children.
 
-### `Secret` keys and addresses
+### `EcHybrid` keys and addresses
 
-Secret keys are implemented with aes-256-gcm and EC Diffie-Hellman key exchange.
+Elliptic curve hybrid keys are implemented with aes-256-gcm and EC Diffie-Hellman key exchange.
 
-Like `Generation` addresses, `Secret` addresses are post-quantum secure but only when the addresses
-are kept secret. In other words, an attacker that possesses a quantum computer *and* knows the address
-can read the UTXO notifications for a specific address and thus decrypt all amounts and UTXOs that
-were announced on-chain for this address.
+Like `Generation` addresses, EC hybrid addresses are post-quantum secure if used correctly. However,
+unlike `Generation` addresses they stop being post-quantum secure if the address is published, or
+shared between more parties than merely the sender and the receiver. In other words, an attacker that
+possesses a quantum computer *and* knows an `EcHybrid` address can read the UTXO notifications for
+that specific specific address and thus decrypt all amounts and UTXOs that were announced on-chain
+for this address. This attacker still cannot steal funds from the address.
 
-`Secret` addresses are intended to be seen by two parties: the sender and the receiver. If it is spread
-beyond that, then the privacy of this address is no longer post-quantum secure.
+`EcHybrid` addresses are intended to be seen by two parties: the sender and the receiver. If it is
+spread beyond that, then the privacy of this address is no longer post-quantum secure.
 
 Concretely the AES key used for the encryption of the notificaiton payload is the XOR of a value that
 can be read from the address and a value chosen by the sender. This value chosen by the sender is then
-shared with the receiver through a Diffie-Hellman key exchange protocol where the public key in the
-exchange protocol is read from the address.
+shared with the receiver through an elliptic curve Diffie-Hellman key exchange protocol where the
+public key in the exchange protocol is read from the address.
 
-The selling point for `Secret` addresses over `Generation` addresses is that `Secret` addresses are
-much shorter.
+The selling point for `EcHybrid` addresses over `Generation` addresses is that `EcHybrid` addresses
+are much shorter.
 
 
 ### `Symmetric` keys and addresses

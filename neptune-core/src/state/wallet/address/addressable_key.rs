@@ -15,7 +15,7 @@ use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::state::wallet::address::secret_address;
+use crate::state::wallet::address::elliptic_curve_hybrid;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
@@ -43,12 +43,12 @@ pub enum KeyType {
     /// [symmetric_key] built on aes-256-gcm
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
 
-    /// Secret address. Only post-quantum secure if address is kept private,
-    /// between sender and receiver.
+    /// Elliptic curve hybrid address. Only post-quantum secure if address is
+    /// kept private between sender and receiver.
     ///
-    /// If attacker has a quantum computer *and* knows the address, they can see
-    /// the entire transaction history of that address.
-    SecretAddress = secret_address::SECRET_ADDRESS_FLAG_U8,
+    /// If an attacker has a quantum computer *and* knows the address, they can
+    /// see the entire transaction history of that address.
+    EcHybrid = elliptic_curve_hybrid::ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG_U8,
 }
 
 impl std::fmt::Display for KeyType {
@@ -56,7 +56,7 @@ impl std::fmt::Display for KeyType {
         match self {
             Self::Generation => write!(f, "generation"),
             Self::Symmetric => write!(f, "symmetric"),
-            Self::SecretAddress => write!(f, "secret_address"),
+            Self::EcHybrid => write!(f, "ec_hybrid"),
         }
     }
 }
@@ -66,7 +66,7 @@ impl From<&ReceivingAddress> for KeyType {
         match addr {
             ReceivingAddress::Generation(_) => Self::Generation,
             ReceivingAddress::Symmetric(_) => Self::Symmetric,
-            ReceivingAddress::SecretAddress(_) => Self::SecretAddress,
+            ReceivingAddress::EcHybrid(_) => Self::EcHybrid,
         }
     }
 }
@@ -76,7 +76,7 @@ impl From<&SpendingKey> for KeyType {
         match addr {
             SpendingKey::Generation(_) => Self::Generation,
             SpendingKey::Symmetric(_) => Self::Symmetric,
-            SpendingKey::SecretAddress(_) => Self::SecretAddress,
+            SpendingKey::EcHybrid(_) => Self::EcHybrid,
         }
     }
 }
@@ -94,7 +94,7 @@ impl TryFrom<&Announcement> for KeyType {
         match common::key_type_from_announcement(pa) {
             Ok(kt) if kt == Self::Generation.into() => Ok(Self::Generation),
             Ok(kt) if kt == Self::Symmetric.into() => Ok(Self::Symmetric),
-            Ok(kt) if kt == Self::SecretAddress.into() => Ok(Self::SecretAddress),
+            Ok(kt) if kt == Self::EcHybrid.into() => Ok(Self::EcHybrid),
             _ => bail!("encountered Announcement of unknown type"),
         }
     }
@@ -106,7 +106,7 @@ impl KeyType {
         match self {
             Self::Generation => generation_address::GenerationReceivingAddress::get_hrp(network),
             Self::Symmetric => symmetric_key::SymmetricKey::get_hrp(network),
-            Self::SecretAddress => secret_address::SecretAddress::get_hrp(network),
+            Self::EcHybrid => elliptic_curve_hybrid::EcHybridAddress::get_hrp(network),
         }
     }
 }
@@ -116,14 +116,14 @@ impl KeyType {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum SpendingKey {
-    /// a key from [generation_address]
+    /// A key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),
 
-    /// a [symmetric_key]
+    /// A [symmetric_key]
     Symmetric(symmetric_key::SymmetricKey),
 
-    /// a secret address key
-    SecretAddress(secret_address::SecretAddressKey),
+    /// An elliptic curve hybrid key
+    EcHybrid(elliptic_curve_hybrid::EcHybridKey),
 }
 
 impl std::hash::Hash for SpendingKey {
@@ -144,9 +144,9 @@ impl From<symmetric_key::SymmetricKey> for SpendingKey {
     }
 }
 
-impl From<secret_address::SecretAddressKey> for SpendingKey {
-    fn from(key: secret_address::SecretAddressKey) -> Self {
-        Self::SecretAddress(key)
+impl From<elliptic_curve_hybrid::EcHybridKey> for SpendingKey {
+    fn from(key: elliptic_curve_hybrid::EcHybridKey) -> Self {
+        Self::EcHybrid(key)
     }
 }
 
@@ -167,7 +167,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.to_address().into(),
             Self::Symmetric(k) => k.into(),
-            Self::SecretAddress(k) => k.to_address().into(),
+            Self::EcHybrid(k) => k.to_address().into(),
         }
     }
 
@@ -178,9 +178,7 @@ impl SpendingKey {
                 generation_spending_key.lock_script_and_witness()
             }
             SpendingKey::Symmetric(symmetric_key) => symmetric_key.lock_script_and_witness(),
-            SpendingKey::SecretAddress(secret_address_key) => {
-                secret_address_key.lock_script_and_witness()
-            }
+            SpendingKey::EcHybrid(key) => key.lock_script_and_witness(),
         }
     }
 
@@ -203,7 +201,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.receiver_preimage(),
             Self::Symmetric(k) => k.receiver_preimage(),
-            Self::SecretAddress(k) => k.receiver_preimage(),
+            Self::EcHybrid(k) => k.receiver_preimage(),
         }
     }
 
@@ -224,7 +222,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.receiver_identifier(),
             Self::Symmetric(k) => k.receiver_identifier(),
-            Self::SecretAddress(k) => k.receiver_identifier(),
+            Self::EcHybrid(k) => k.receiver_identifier(),
         }
     }
 
@@ -241,7 +239,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.decrypt(ciphertext_bfes),
             Self::Symmetric(k) => k.decrypt(ciphertext_bfes).map_err(anyhow::Error::new),
-            Self::SecretAddress(k) => k.viewing_key().decrypt(ciphertext_bfes),
+            Self::EcHybrid(k) => k.viewing_key().decrypt(ciphertext_bfes),
         }
     }
 
@@ -330,7 +328,7 @@ mod tests {
                     generation_address::GenerationSpendingKey::derive_from_seed(seed).into()
                 }
                 KeyType::Symmetric => symmetric_key::SymmetricKey::from_seed(seed).into(),
-                KeyType::SecretAddress => secret_address::SecretAddressKey::from_seed(seed).into(),
+                KeyType::EcHybrid => elliptic_curve_hybrid::EcHybridKey::from_seed(seed).into(),
             }
         }
     }
@@ -348,10 +346,7 @@ mod tests {
             KeyType::from_str("generation").unwrap()
         );
         assert_eq!(KeyType::Symmetric, KeyType::from_str("symmetric").unwrap());
-        assert_eq!(
-            KeyType::SecretAddress,
-            KeyType::from_str("secret_address").unwrap()
-        );
+        assert_eq!(KeyType::EcHybrid, KeyType::from_str("ec_hybrid").unwrap());
     }
 
     #[test]

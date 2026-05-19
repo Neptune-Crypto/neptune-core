@@ -485,16 +485,16 @@ impl RustyWalletDatabase {
         self.tables.symmetric_key_counter.get()
     }
 
-    pub fn get_secret_address_key_counter(&self) -> u64 {
-        self.tables.secret_address_key_counter.get()
+    pub fn get_ec_hybrid_key_counter(&self) -> u64 {
+        self.tables.ech_key_counter.get()
     }
 
     pub async fn set_symmetric_key_counter(&mut self, counter: u64) {
         self.tables.symmetric_key_counter.set(counter).await;
     }
 
-    pub async fn set_secret_address_key_counter(&mut self, counter: u64) {
-        self.tables.secret_address_key_counter.set(counter).await;
+    pub async fn set_ec_hybrid_key_counter(&mut self, counter: u64) {
+        self.tables.ech_key_counter.set(counter).await;
     }
 
     /// retrieve the database schema version

@@ -126,7 +126,7 @@ mod tests {
     use neptune_cash::api::export::SpendingKey;
     use neptune_cash::api::export::SymmetricKey;
     use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
-    use neptune_cash::state::wallet::address::secret_address::SecretAddressKey;
+    use neptune_cash::state::wallet::address::elliptic_curve_hybrid::EcHybridKey;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use strum::IntoEnumIterator;
@@ -143,7 +143,7 @@ mod tests {
             } else if address_type == 1 {
                 GenerationSpendingKey::derive_from_seed(seed).into()
             } else if address_type == 2 {
-                SecretAddressKey::from_seed(seed).into()
+                EcHybridKey::from_seed(seed).into()
             } else {
                 unreachable!()
             };
