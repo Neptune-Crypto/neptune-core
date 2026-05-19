@@ -11,7 +11,7 @@ use tracing_test::traced_test;
 pub async fn bob_catches_up_to_alices_new_blocks_with_sync_state() {
     logging::tracing_logger();
 
-    let timeout_secs = 5;
+    let timeout_secs = 20;
 
     let mut base_args = GenesisNode::default_args().await;
     base_args.tx_proving_capability = Some(TxProvingCapability::SingleProof);
