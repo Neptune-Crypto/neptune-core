@@ -22,7 +22,8 @@ The `master` branch represents the tip of current development. It is an _integra
 
 The master branch of each crate should always build and should always pass all tests.
 
-At present, any team member with repo write access may directly commit to the `master` branch. However, as we get closer to a mainnet launch, `master` should/will become locked so that all changes must go through the pull-request process and be peer reviewed.
+At present, any team member with repo write access may directly commit to the `master` branch. However, it is encouraged to
+use pull requests for any new features or larger refactors of the code.
 
 ### topic branches
 
