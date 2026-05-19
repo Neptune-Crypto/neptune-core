@@ -11,6 +11,7 @@ pub mod elliptic_curve_hybrid;
 pub mod encrypted_utxo_notification;
 pub mod generation_address;
 mod receiving_address;
+pub mod secret_address;
 pub mod symmetric_key;
 
 pub use addressable_key::KeyType;
