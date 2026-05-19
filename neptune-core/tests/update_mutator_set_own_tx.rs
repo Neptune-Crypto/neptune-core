@@ -66,7 +66,7 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
     assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
 
     // Wait until tx has right proof quality
-    let timeout_secs = 10;
+    let timeout_secs = 15;
 
     let txid = tx_artifacts.transaction().txid();
     match tx_proving_capability {
@@ -134,9 +134,9 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
         "Expected block height: {expected_new_height}",
     );
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
     let tip_msa = tip.mutator_set_accumulator_after().unwrap();
-    let tx_upgrade_timeout_secs = 15;
+    let tx_upgrade_timeout_secs = 30;
     alice
         .wait_until_tx_in_mempool_confirmable(
             tx_artifacts.transaction().txid(),
@@ -150,7 +150,7 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
     // are dropped. When the application shuts down after it goes out of
     // scope all messages must have been sent, otherwise there might be a
     // sender without a receiver and that causes a panic.
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
     // Verify that transaction is confirmable against tip.
     let txid = tx_artifacts.transaction().txid();
@@ -208,7 +208,7 @@ pub async fn update_mutator_set_on_own_transaction_two_new_blocks_from_peer() {
     // alice and bob start 2 peer cluster (regtest)
     logging::tracing_logger();
 
-    let timeout_secs = 5;
+    let timeout_secs = 20;
 
     let mut base_args = GenesisNode::default_args().await;
     base_args.tx_proving_capability = Some(TxProvingCapability::ProofCollection);

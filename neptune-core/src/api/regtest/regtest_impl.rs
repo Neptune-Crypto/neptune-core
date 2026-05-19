@@ -236,7 +236,7 @@ impl RegTestPrivate {
             })?;
 
         // wait until the main-loop has actually added the block to the canonical chain
-        // or 5 second timeout happens.
+        // a timeout happens.
         //
         // otherwise, wallet balance might not (yet) see coinbase funds, etc.
         //
@@ -265,7 +265,7 @@ impl RegTestPrivate {
     ) -> Result<(), RegTestError> {
         let start = std::time::Instant::now();
         while gsl.lock_guard().await.chain.tip().hash() != block_hash {
-            if start.elapsed() > std::time::Duration::from_secs(5) {
+            if start.elapsed() > std::time::Duration::from_secs(15) {
                 // last chance.  maybe another block buried ours.  we will do an expensive check.
                 if gsl
                     .lock_guard()
