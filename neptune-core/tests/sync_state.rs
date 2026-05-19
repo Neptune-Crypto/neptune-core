@@ -16,7 +16,7 @@ pub async fn bob_catches_up_to_alices_new_blocks_with_sync_state() {
     let mut base_args = GenesisNode::default_args().await;
     base_args.tx_proving_capability = Some(TxProvingCapability::SingleProof);
     base_args.sync_mode_threshold = 11;
-    let [mut alice, bob] = GenesisNode::start_connected_cluster(
+    let [mut alice, mut bob] = GenesisNode::start_connected_cluster(
         &GenesisNode::cluster_id(None),
         2,
         Some(base_args),
@@ -57,5 +57,33 @@ pub async fn bob_catches_up_to_alices_new_blocks_with_sync_state() {
         .unwrap();
 
     bob.wait_until_sync_mode(timeout_secs).await.unwrap();
+    bob.wait_until_synced(timeout_secs).await.unwrap();
     bob.wait_until_block_height(16, timeout_secs).await.unwrap();
+
+    // Verify that block sharing still works, after syncing is complete.
+    alice
+        .gsl
+        .api_mut()
+        .regtest_mut()
+        .mine_blocks_to_wallet(3, false)
+        .await
+        .unwrap();
+    alice
+        .wait_until_block_height(19, timeout_secs)
+        .await
+        .unwrap();
+    bob.wait_until_block_height(19, timeout_secs).await.unwrap();
+
+    // Verify that block sharing works the other way too.
+    bob.gsl
+        .api_mut()
+        .regtest_mut()
+        .mine_blocks_to_wallet(2, false)
+        .await
+        .unwrap();
+    bob.wait_until_block_height(21, timeout_secs).await.unwrap();
+    alice
+        .wait_until_block_height(21, timeout_secs)
+        .await
+        .unwrap();
 }

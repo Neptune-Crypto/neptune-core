@@ -548,18 +548,38 @@ impl GenesisNode {
         Ok(())
     }
 
-    pub async fn wait_until_sync_mode(&self, timeout_secs: u16) -> anyhow::Result<()> {
+    // Generic wait function using a predicate closure
+    async fn wait_until_sync_status<F>(&self, timeout_secs: u16, predicate: F) -> anyhow::Result<()>
+    where
+        F: Fn(&SyncStatus) -> bool,
+    {
         let start = std::time::Instant::now();
-        while !matches!(
-            self.gsl.lock_guard().await.net.sync_status,
-            SyncStatus::Syncing(_),
-        ) {
-            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
-                anyhow::bail!("Sync status not reached after {} seconds", timeout_secs);
+        let timeout = std::time::Duration::from_secs(timeout_secs.into());
+
+        loop {
+            if predicate(&self.gsl.lock_guard().await.net.sync_status) {
+                return Ok(());
             }
+
+            if start.elapsed() > timeout {
+                anyhow::bail!(
+                    "Timeout reached after {} seconds waiting for status condition",
+                    timeout_secs
+                );
+            }
+
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-        Ok(())
+    }
+
+    pub async fn wait_until_sync_mode(&self, timeout_secs: u16) -> anyhow::Result<()> {
+        self.wait_until_sync_status(timeout_secs, |s| matches!(s, SyncStatus::Syncing(_)))
+            .await
+    }
+
+    pub async fn wait_until_synced(&self, timeout_secs: u16) -> anyhow::Result<()> {
+        self.wait_until_sync_status(timeout_secs, |s| *s == SyncStatus::Synced)
+            .await
     }
 
     fn hash_string_to_port_range(input: &str) -> u16 {
