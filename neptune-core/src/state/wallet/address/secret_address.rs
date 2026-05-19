@@ -33,10 +33,18 @@ pub const SECRET_ADDRESS_FLAG: BFieldElement = BFieldElement::new(SECRET_ADDRESS
 
 pub(crate) const SECRET_ADDRESS_HRP_PREFIX: &str = "nsec";
 
-fn receiver_id(aes_key: &[u8; 32]) -> BFieldElement {
-    let [e0, _, _, _, _] = Tip5::hash(aes_key).values();
+fn receiver_id(lock_postimage: [BFieldElement; 3], receiever_digest: Digest) -> BFieldElement {
+    let [e0, e1, e2] = lock_postimage;
+    let left = Digest::new([e0, e1, e2, SECRET_ADDRESS_FLAG, SECRET_ADDRESS_FLAG]);
+    let [f0, _, _, _, _] = Tip5::hash_pair(left, receiever_digest).values();
 
-    e0
+    f0
+}
+
+fn lock_postimage(unlock_key_preimage: Digest) -> [BFieldElement; 3] {
+    let [_, _, e2, e3, e4] = unlock_key_preimage.hash().values();
+
+    [e2, e3, e4]
 }
 
 /// Lightweight struct containing what is sent over the wire in case of RPC
@@ -67,8 +75,6 @@ pub struct SecretAddressKey {
     // many wallet operations faster.
     receiver_identifier: BFieldElement,
 
-    aes_key: [u8; 32],
-
     receiver_preimage: Digest,
 
     unlock_key_preimage: Digest,
@@ -81,37 +87,25 @@ impl SecretAddressKey {
         // The unlock preimage may not be linkable to any of the other fields,
         // except for the seed field.
         let unlock_key_preimage = Tip5::hash(&[SECRET_ADDRESS_FLAG, e0, e1, e2, e3, e4]);
-        let aes_key = Tip5::hash(&[e0, e1, e2, e3, e4, SECRET_ADDRESS_FLAG]);
 
         // receiver preimage must not be derivable from the the AES key since
         // that would leak if UTXOs received on this address were spent or not.
-        let receiver_preimage = Tip5::hash_pair(aes_key, seed);
+        let receiver_preimage = Tip5::hash_pair(unlock_key_preimage, seed);
 
-        let aes_key: [u8; 40] = aes_key.into();
-        let aes_key: [u8; 32] = aes_key
-            .into_iter()
-            .take(32)
-            .collect_vec()
-            .try_into()
-            .unwrap();
-        let receiver_identifier = receiver_id(&aes_key);
+        let lockscript_postimage = lock_postimage(unlock_key_preimage);
+        let receiver_identifier = receiver_id(lockscript_postimage, receiver_preimage.hash());
 
         Self {
             seed,
             receiver_identifier,
-            aes_key,
             receiver_preimage,
             unlock_key_preimage,
         }
     }
 
     pub fn to_address(&self) -> SecretAddress {
-        // let viewing_key = self.viewing_key();
-        // viewing_key.to_address()
-        let [_, _, e2, e3, e4] = self.unlock_key_preimage.hash().values();
-        let lock_postimage = [e2, e3, e4];
+        let lock_postimage = lock_postimage(self.unlock_key_preimage);
         SecretAddress {
-            aes_key: self.aes_key,
             receiver_digest: self.receiver_preimage.hash(),
             lock_postimage,
         }
@@ -136,9 +130,6 @@ impl SecretAddressKey {
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecretAddress {
-    /// The AES key used to encrypt the UTXO notification.
-    aes_key: [u8; 32],
-
     /// Post-image of the receiver preimage
     receiver_digest: Digest,
 
@@ -147,21 +138,30 @@ pub struct SecretAddress {
 }
 
 impl SecretAddress {
-    const RAW_SERIALIZATION_LENGTH: usize = 96;
+    const RAW_SERIALIZATION_LENGTH: usize = 64;
 
-    /// Manually serialize to exactly 96 bytes to avoid bincode overhead.
+    fn aes_key(&self) -> [u8; 32] {
+        let [e0, e1, e2] = self.lock_postimage;
+        let digest = Tip5::hash_pair(
+            self.receiver_digest,
+            Digest([e0, e1, e2, SECRET_ADDRESS_FLAG, bfe!(0)]),
+        );
+        let digest: [u8; 40] = digest.into();
+
+        digest.into_iter().take(32).collect_array().unwrap()
+    }
+
+    /// Manually serialize to exactly 64 bytes to avoid bincode overhead.
     ///
     /// Used to make the address as short as possible.
     fn to_raw_bytes(self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(Self::RAW_SERIALIZATION_LENGTH);
 
-        bytes.extend_from_slice(&self.aes_key);
-
-        // 2. Serialize Digest (40 bytes)
+        // 1. Serialize Digest (40 bytes)
         let digest: [u8; Digest::BYTES] = self.receiver_digest.into();
         bytes.extend_from_slice(&digest);
 
-        // 3. Serialize the 3 BFieldElements (24 bytes)
+        // 2. Serialize the 3 BFieldElements (24 bytes)
         for element in &self.lock_postimage {
             bytes.extend_from_slice(&element.value().to_le_bytes());
         }
@@ -169,29 +169,27 @@ impl SecretAddress {
         debug_assert_eq!(
             bytes.len(),
             Self::RAW_SERIALIZATION_LENGTH,
-            "Address payload must be exactly 96 bytes"
+            "Address payload must be exactly 64 bytes"
         );
 
         bytes
     }
 
-    /// Manually deserialize from exactly 96 bytes
+    /// Manually deserialize from exactly 64 bytes
     fn from_raw_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
         if bytes.len() != Self::RAW_SERIALIZATION_LENGTH {
             return Err("Invalid byte length for SecretAddress: expected exactly 96 bytes");
         }
 
-        let aes_key: [u8; 32] = bytes[0..32].to_vec().try_into().unwrap();
-
-        // 2. Parse Digest (bytes 32..72)
+        // 2. Parse Digest
         let mut digest_bytes = [0u8; Digest::BYTES];
-        digest_bytes.copy_from_slice(&bytes[32..72]);
+        digest_bytes.copy_from_slice(&bytes[0..Digest::BYTES]);
         let receiver_digest = Digest::try_from(digest_bytes).map_err(|_| "Invalid digest")?;
 
-        // 3. Parse 3 BFieldElements (bytes 72..96)
+        // 3. Parse 3 BFieldElements
         let mut lock_postimage_elements = Vec::with_capacity(3);
         for i in 0..3 {
-            let start = 72 + (i * BFieldElement::BYTES);
+            let start = Digest::BYTES + (i * BFieldElement::BYTES);
             let mut le_bytes = [0u8; BFieldElement::BYTES];
             le_bytes.copy_from_slice(&bytes[start..start + BFieldElement::BYTES]);
 
@@ -205,7 +203,6 @@ impl SecretAddress {
             .expect("Guaranteed to be exactly 3 elements");
 
         Ok(Self {
-            aes_key,
             receiver_digest,
             lock_postimage,
         })
@@ -239,7 +236,7 @@ impl SecretAddress {
     }
 
     pub fn receiver_id(&self) -> BFieldElement {
-        receiver_id(&self.aes_key)
+        receiver_id(self.lock_postimage, self.receiver_digest)
     }
 
     pub fn receiver_postimage(&self) -> Digest {
@@ -298,7 +295,7 @@ impl SecretAddress {
 
         let plaintext = bincode::serialize(payload).unwrap();
 
-        let cipher = Aes256Gcm::new(&self.aes_key.into());
+        let cipher = Aes256Gcm::new(&self.aes_key().into());
         let ciphertext = cipher.encrypt(aes_nonce, plaintext.as_ref()).unwrap();
 
         [vec![aes_nonce_bfe], common::bytes_to_bfes(&ciphertext)].concat()
@@ -309,13 +306,14 @@ impl SecretAddress {
         encrypted_bfes: &[BFieldElement],
     ) -> Result<(Utxo, Digest), anyhow::Error> {
         if encrypted_bfes.len() < 2 {
-            anyhow::bail!("Message too short to nonce and ciphertext");
+            anyhow::bail!("Message too short for nonce and ciphertext");
         }
 
         let aes_nonce_bfe = encrypted_bfes[0];
         let aes_nonce = [aes_nonce_bfe.value().to_be_bytes().to_vec(), vec![0u8; 4]].concat();
         let aes_nonce = Nonce::from_slice(&aes_nonce);
-        let cipher = Aes256Gcm::new(&self.aes_key.into());
+
+        let cipher = Aes256Gcm::new(&self.aes_key().into());
 
         let ciphertext = &encrypted_bfes[1..];
         let ciphertext = common::bfes_to_bytes(ciphertext)?;
@@ -357,7 +355,7 @@ mod tests {
     #[test]
     fn bech32_representation_is_unchanged() {
         assert_eq!(
-            "nsecm1r6gvlcgls2r6remt6avufem6zc4rag6sff8r6ua7q44ayam42yh0fkdkq25nyfezy2jv6r3z6nvcjlmxjm904gmx0z3zauq9mksw93c972864p0rstgj5tnhdtnt7765un063tem4qq0w0jpka44e8wtpg6z2y3z",
+            "nsecm10243hqsugd3nvmck0f3f49y75dku9lq4ym37lxx6vzl0p2l4kvthjcyzkkpy6f9v9gh8w6hxhaa4fexl4zhnh2qq7ulyrdmttjwukzs3nwpls",
             WalletEntropy::devnet_wallet()
                 .nth_secret_address_key(0)
                 .to_address()
@@ -367,7 +365,7 @@ mod tests {
 
     #[test]
     fn encryption_is_deterministic() {
-        let expected = "c55a3ddcd94285586879b1fa035d588b8451c738084d8c7edd5525bb38b3862badda141849ccba1ae730ef2d5ba2c1f996e72fca5389976cc0247aaca4e0bdbf08d7d7686f29abba87efa68ddcaa764da874135fe7840dac462700ce3c44c1566ff6943d5827114a544115443323d1e4c6";
+        let expected = "c55a3ddcd9428558684543463bce353b3cd5b698a3702cbea9c8293f4153c3dac232743d6004b8f88659688a2fa8737e6685dcee60920e7bdb906bc1c92a01478813568371d27e159ed66da07756f09a019d1776d82e2674ceaf441a34291e2bb35688641053cb0741d0b38520d7e57";
         let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
         let result = WalletEntropy::devnet_wallet()
             .nth_secret_address_key(0)
@@ -375,6 +373,21 @@ mod tests {
             .encrypt(&payload);
 
         assert_eq!(expected, result.iter().map(|x| format!("{x:x}")).join(""));
+    }
+
+    #[test]
+    fn no_crash_in_decryption() {
+        let address = SecretAddress::from_seed(Digest::default());
+        for i in 0..20 {
+            let msg = vec![bfe!(0); i];
+            assert!(address.decrypt(&msg).is_err());
+        }
+    }
+
+    #[test]
+    fn address_and_key_agree_on_receiver_id() {
+        let key = SecretAddressKey::from_seed(Digest::default());
+        assert_eq!(key.receiver_identifier(), key.to_address().receiver_id());
     }
 
     #[test]

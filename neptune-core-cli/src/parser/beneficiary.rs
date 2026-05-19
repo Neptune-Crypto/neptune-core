@@ -127,6 +127,7 @@ mod tests {
     use neptune_cash::api::export::SymmetricKey;
     use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
     use neptune_cash::state::wallet::address::elliptic_curve_hybrid::EcHybridKey;
+    use neptune_cash::state::wallet::address::secret_address::SecretAddressKey;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use strum::IntoEnumIterator;
@@ -136,14 +137,16 @@ mod tests {
 
     impl<'a> arbitrary::Arbitrary<'a> for Beneficiary {
         fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-            let address_type = usize::arbitrary(u)? % KeyType::iter().count();
             let seed = Digest::arbitrary(u)?;
+            let address_type = usize::arbitrary(u)? % KeyType::iter().count();
             let spending_key: SpendingKey = if address_type == 0 {
                 SymmetricKey::from_seed(seed).into()
             } else if address_type == 1 {
                 GenerationSpendingKey::derive_from_seed(seed).into()
             } else if address_type == 2 {
                 EcHybridKey::from_seed(seed).into()
+            } else if address_type == 3 {
+                SecretAddressKey::from_seed(seed).into()
             } else {
                 unreachable!()
             };

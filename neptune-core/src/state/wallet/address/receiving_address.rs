@@ -15,6 +15,10 @@ use crate::application::config::network::Network;
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::state::wallet::address::elliptic_curve_hybrid;
 use crate::state::wallet::address::elliptic_curve_hybrid::ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG;
+use crate::state::wallet::address::generation_address::GENERATION_FLAG;
+use crate::state::wallet::address::secret_address;
+use crate::state::wallet::address::secret_address::SECRET_ADDRESS_FLAG;
+use crate::state::wallet::address::symmetric_key::SYMMETRIC_KEY_FLAG;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::BFieldElement;
 
@@ -46,6 +50,13 @@ pub enum ReceivingAddress {
     /// computer, they can read the transaction history of all on-chain
     /// announced UTXOs.
     EcHybrid(elliptic_curve_hybrid::EcHybridAddress),
+
+    /// An address that should only be known by sender and receiver.
+    ///
+    /// Any attacker in possession of the address can decrypt all announcement
+    /// to the address and thus read the address' entire transaction history,
+    /// assuming onchain announcements are used.
+    Secret(secret_address::SecretAddress),
 }
 
 impl From<generation_address::GenerationReceivingAddress> for ReceivingAddress {
@@ -78,6 +89,12 @@ impl From<elliptic_curve_hybrid::EcHybridAddress> for ReceivingAddress {
     }
 }
 
+impl From<secret_address::SecretAddress> for ReceivingAddress {
+    fn from(value: secret_address::SecretAddress) -> Self {
+        Self::Secret(value)
+    }
+}
+
 impl TryFrom<ReceivingAddress> for generation_address::GenerationReceivingAddress {
     type Error = anyhow::Error;
 
@@ -97,14 +114,16 @@ impl ReceivingAddress {
             Self::Generation(a) => a.receiver_identifier(),
             Self::Symmetric(a) => a.receiver_identifier(),
             Self::EcHybrid(a) => a.receiver_id(),
+            Self::Secret(a) => a.receiver_id(),
         }
     }
 
     pub(crate) fn flag(&self) -> BFieldElement {
         match self {
-            ReceivingAddress::Generation(addr) => addr.flag(),
-            ReceivingAddress::Symmetric(addr) => addr.flag(),
+            ReceivingAddress::Generation(_) => GENERATION_FLAG,
+            ReceivingAddress::Symmetric(_) => SYMMETRIC_KEY_FLAG,
             ReceivingAddress::EcHybrid(_) => ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG,
+            ReceivingAddress::Secret(_) => SECRET_ADDRESS_FLAG,
         }
     }
 
@@ -131,6 +150,9 @@ impl ReceivingAddress {
             ReceivingAddress::EcHybrid(addr) => {
                 addr.generate_announcement(&utxo_notification_payload)
             }
+            ReceivingAddress::Secret(addr) => {
+                addr.generate_announcement(&utxo_notification_payload)
+            }
         }
     }
 
@@ -149,6 +171,9 @@ impl ReceivingAddress {
             ReceivingAddress::EcHybrid(addr) => {
                 addr.private_utxo_notification(&utxo_notification_payload, network)
             }
+            ReceivingAddress::Secret(addr) => {
+                addr.private_utxo_notification(&utxo_notification_payload, network)
+            }
         }
     }
 
@@ -159,6 +184,7 @@ impl ReceivingAddress {
             Self::Generation(a) => a.receiver_postimage(),
             Self::Symmetric(k) => k.receiver_postimage(),
             Self::EcHybrid(a) => a.receiver_postimage(),
+            Self::Secret(a) => a.receiver_postimage(),
         }
     }
 
@@ -172,6 +198,7 @@ impl ReceivingAddress {
             Self::Generation(a) => a.encrypt(utxo_notification_payload),
             Self::Symmetric(a) => a.encrypt(utxo_notification_payload),
             Self::EcHybrid(a) => a.encrypt(utxo_notification_payload),
+            Self::Secret(a) => a.encrypt(utxo_notification_payload),
         }
     }
 
@@ -190,6 +217,7 @@ impl ReceivingAddress {
             Self::Generation(k) => k.to_bech32m(network),
             Self::Symmetric(k) => k.to_bech32m(network),
             Self::EcHybrid(a) => Ok(a.to_bech32m(network)),
+            Self::Secret(a) => Ok(a.to_bech32m(network)),
         }
     }
 
@@ -229,6 +257,7 @@ impl ReceivingAddress {
             Self::Generation(k) => k.to_bech32m(network),
             Self::Symmetric(k) => k.to_display_bech32m(network),
             Self::EcHybrid(a) => Ok(a.to_bech32m(network)),
+            Self::Secret(a) => Ok(a.to_bech32m(network)),
         }
     }
 
@@ -276,6 +305,10 @@ impl ReceivingAddress {
             );
         }
 
+        if encoded.starts_with(secret_address::SECRET_ADDRESS_HRP_PREFIX) {
+            return Ok(secret_address::SecretAddress::from_bech32m(encoded, network)?.into());
+        }
+
         let key = symmetric_key::SymmetricKey::from_bech32m(encoded, network)?;
         Ok(key.into())
     }
@@ -293,6 +326,7 @@ impl ReceivingAddress {
             Self::Generation(x) => x.lock_script().hash(),
             Self::Symmetric(x) => x.lock_script().hash(),
             Self::EcHybrid(x) => x.lock_script().hash(),
+            Self::Secret(x) => x.lock_script().hash(),
         }
     }
 
@@ -315,6 +349,7 @@ mod tests {
     use crate::api::export::GenerationSpendingKey;
     use crate::api::export::SymmetricKey;
     use crate::state::wallet::address::elliptic_curve_hybrid::EcHybridKey;
+    use crate::state::wallet::address::secret_address::SecretAddress;
 
     fn address_from_seed(seed: Digest, key_type: KeyType) -> ReceivingAddress {
         match key_type {
@@ -323,6 +358,7 @@ mod tests {
                 .into(),
             KeyType::Symmetric => ReceivingAddress::Symmetric(SymmetricKey::from_seed(seed)),
             KeyType::EcHybrid => EcHybridKey::from_seed(seed).to_address().into(),
+            KeyType::SecretAddress => SecretAddress::from_seed(seed).into(),
         }
     }
 

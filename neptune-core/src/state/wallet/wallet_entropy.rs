@@ -72,6 +72,9 @@ impl WalletEntropy {
             }
             KeyType::Symmetric => ReceivingAddress::from(self.nth_symmetric_key(index)),
             KeyType::EcHybrid => ReceivingAddress::from(self.nth_ec_hybrid_key(index).to_address()),
+            KeyType::SecretAddress => {
+                ReceivingAddress::from(self.nth_secret_address_key(index).to_address())
+            }
         }
     }
 

@@ -83,10 +83,13 @@ mod tests {
 
         use super::*;
         use crate::api::export::ChangePolicy;
+        use crate::api::export::InputSelectionPriority;
         use crate::api::export::OutputFormat;
         use crate::api::export::Timestamp;
         use crate::api::export::TxProvingCapability;
         use crate::api::export::WalletEntropy;
+        use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
+        use crate::api::tx_initiation::builder::input_selector::SortOrder;
         use crate::application::config::cli_args;
         use crate::protocol::consensus::block::Block;
         use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
@@ -117,16 +120,29 @@ mod tests {
             };
 
             let timestamp = genesis.header().timestamp + Timestamp::months(9);
+            let oldest_first = InputSelectionPolicy::default()
+                .prioritize(InputSelectionPriority::ByAge(SortOrder::Descending));
             let tx = tx_with_n_outputs(
                 state.clone(),
                 2,
                 timestamp,
-                None,
+                Some(oldest_first),
                 Some(recipient_address),
                 Some(NativeCurrencyAmount::coins(8)),
             )
             .await
             .unwrap();
+
+            assert!(
+                2 <= tx
+                    .transaction
+                    .kernel
+                    .announcements
+                    .iter()
+                    .filter(|ann| KeyType::try_from(*ann).is_ok_and(|kt| kt == key_type))
+                    .count(),
+                "At least two of the announcements must be for key type {key_type}."
+            );
 
             state
                 .lock_guard_mut()
@@ -148,6 +164,7 @@ mod tests {
                 .get_wallet_status_for_tip()
                 .await
                 .confirmed_available_balance(height1, now);
+            println!("key_type: {key_type}");
             println!("new_liquid: {new_liquid}");
             let expected_liquid = NativeCurrencyAmount::coins(20)
                 + INITIAL_BLOCK_SUBSIDY
@@ -293,15 +310,14 @@ mod tests {
 
         /// tests bech32m serialize, deserialize for [ReceivingAddress]
         pub fn test_bech32m_conversion(receiving_address: ReceivingAddress) {
-            // 1. serialize address to bech32m
-            let encoded = receiving_address.to_bech32m(Network::Testnet(0)).unwrap();
+            for network in [Network::Main, Network::Testnet(0)] {
+                let encoded = receiving_address.to_bech32m(network).unwrap();
 
-            // 2. deserialize bech32m back into an address
-            let receiving_address_again =
-                ReceivingAddress::from_bech32m(&encoded, Network::Testnet(0)).unwrap();
+                let receiving_address_again =
+                    ReceivingAddress::from_bech32m(&encoded, network).unwrap();
 
-            // 3. verify both addresses match
-            assert_eq!(receiving_address, receiving_address_again);
+                assert_eq!(receiving_address, receiving_address_again);
+            }
         }
     }
 }

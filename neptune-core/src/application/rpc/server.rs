@@ -7091,6 +7091,7 @@ mod tests {
             use super::*;
             use crate::state::wallet::address::elliptic_curve_hybrid::EcHybridKey;
             use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+            use crate::state::wallet::address::secret_address::SecretAddressKey;
             use crate::state::wallet::address::symmetric_key::SymmetricKey;
             use crate::state::wallet::address::SpendingKey;
 
@@ -7186,6 +7187,9 @@ mod tests {
                     }
                     KeyType::Symmetric => SymmetricKey::from_seed(key_seed).into(),
                     KeyType::EcHybrid => EcHybridKey::from_seed(key_seed).to_address().into(),
+                    KeyType::SecretAddress => {
+                        SecretAddressKey::from_seed(key_seed).to_address().into()
+                    }
                 };
                 let output1: OutputFormat = (
                     external_receiving_address.clone(),

@@ -290,10 +290,6 @@ impl SymmetricKey {
         // nsk: neptune-symmetric-key
         format!("{HRP_PREFIX}{}", common::network_hrp_char(network))
     }
-
-    pub(super) fn flag(&self) -> BFieldElement {
-        SYMMETRIC_KEY_FLAG
-    }
 }
 
 #[cfg(test)]
