@@ -365,14 +365,17 @@ mod tests {
 
     #[test]
     fn encryption_is_deterministic() {
-        let expected = "c55a3ddcd9428558684543463bce353b3cd5b698a3702cbea9c8293f4153c3dac232743d6004b8f88659688a2fa8737e6685dcee60920e7bdb906bc1c92a01478813568371d27e159ed66da07756f09a019d1776d82e2674ceaf441a34291e2bb35688641053cb0741d0b38520d7e57";
+        let expected = "c55a3ddcd942855800000000000000684543463bce353b3cd5b698a3702cbea9c8293f4153c3dac232743d6004b8f88659688a2fa8737e66085dcee60920e7bd00b906bc1c92a01478813568371d27e159ed66da07756f09a019d1776d82e2674ceaf441a34291e2bb35688641053cb0741d0b38520d7e57";
         let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
         let result = WalletEntropy::devnet_wallet()
             .nth_secret_address_key(0)
             .to_address()
             .encrypt(&payload);
 
-        assert_eq!(expected, result.iter().map(|x| format!("{x:x}")).join(""));
+        assert_eq!(
+            expected,
+            result.iter().map(|bfe| format!("{bfe:016x}")).join("")
+        );
     }
 
     #[test]

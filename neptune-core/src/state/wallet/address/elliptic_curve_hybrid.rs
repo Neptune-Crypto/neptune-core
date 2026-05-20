@@ -507,14 +507,17 @@ mod tests {
 
     #[test]
     fn encryption_is_deterministic() {
-        let expected = "8921ea0be3e0b88a5a64d697ddb9f86b4e800e9e5ee6dd54963d6608d7820109f3dc8d359f638f68f9d26651e3b1fcd28276288c5801dad3d6339c549cc95fc0b6afc225cf4b13b6b3c37ab74c9de407af23f853a6ea4b46a2b61df786b13a60493aae9bd3ce736d29d84bf6288ef078a32d24e0bc44b789d528e744060c9c9c63efa8387eb17bec9500000000000000";
+        let expected = "0000000000000089021ea0be3e0b88a5a64d697ddb9f86b4e800e9e5ee6dd54963d6608d7820109f3dc8d359f638f68f9d26651e3b1fcd28276288c5801dad3d6339c549cc95fc0b6afc225cf4b13b6b3c37ab74c9de407af23f853a6ea4b46a02b61df786b13a60493aae9bd3ce736d29d84bf6288ef078a32d24e0bc44b789d528e744060c9c9c63efa8387eb17bec9500000000000000";
         let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
         let result = WalletEntropy::devnet_wallet()
             .nth_ec_hybrid_key(0)
             .to_address()
             .encrypt(&payload);
 
-        assert_eq!(expected, result.iter().map(|x| format!("{x:x}")).join(""));
+        assert_eq!(
+            expected,
+            result.iter().map(|bfe| format!("{bfe:016x}")).join("")
+        );
     }
 
     #[test]
