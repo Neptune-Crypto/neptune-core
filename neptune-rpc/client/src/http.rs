@@ -650,6 +650,14 @@ mod tests {
                 45,
                 gsl.lock_guard().await.wallet_state.key_counter(key_type)
             );
+            assert_eq!(
+                45,
+                gsl.lock_guard()
+                    .await
+                    .wallet_state
+                    .get_known_spending_keys(key_type)
+                    .count()
+            );
         }
     }
 
