@@ -44,8 +44,10 @@ pub enum KeyType {
     /// [symmetric_key] built on aes-256-gcm
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
 
-    /// Elliptic curve hybrid address. Only post-quantum secure if address is
-    /// kept private between sender and receiver.
+    /// Elliptic curve hybrid address.
+    ///
+    /// This address format should not be reused to request payments from
+    /// multiple parties.
     ///
     /// If an attacker has a quantum computer *and* knows the address, they can
     /// see the entire transaction history of that address.
@@ -53,6 +55,12 @@ pub enum KeyType {
 
     /// An address format that leaks transaction information to anyone who
     /// knows the address, if on-chain announcements are used.
+    ///
+    /// The notification encryption key is derived from the address through
+    /// symmetric crypto only.
+    ///
+    /// This address format should not be reused to request payments from
+    /// multiple parties.
     ///
     /// Attacker only needs to know the address in order to see the entire
     /// onchain transaction history of that address.

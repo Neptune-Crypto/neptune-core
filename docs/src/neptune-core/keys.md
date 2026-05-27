@@ -1,16 +1,16 @@
 # Keys and Addresses
 
-`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present three types of keys are supported: `Generation`, `EcHybrid`, and `Symmetric`.
+`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present four types of keys are supported: `Generation`, `Symmetric`, `EcHybrid`, and `Secret`.
 
 ## Abstraction layer
 
 Three `enum` are provided for working with keys and addresses:
 
-| enum                   | description                                      |
-|------------------------| -------------------------------------------------|
-| `KeyType`              | enumerates available key/address implementations |
-| `SpendingKey`          | enumerates key types and provides methods        |
-| `ReceivingAddress`     | enumerates address types and provides methods    |
+| enum               | description                                      |
+| ------------------ | ------------------------------------------------ |
+| `KeyType`          | enumerates available key/address implementations |
+| `SpendingKey`      | enumerates key types and provides methods        |
+| `ReceivingAddress` | enumerates address types and provides methods    |
 
 note: It was decided to use `enum` rather than traits because the enums can be
 used within our RPC layer while traits cannot.
@@ -51,9 +51,35 @@ correct, it would be safe to put funds in a paper or metal wallet and ignore
 them for decades, perhaps until they are transferred to the original owner's
 children or grand-children.
 
+### `Secret` keys and addresses
+
+A secret address is both a viewing key and an address. This means that anyone with knowledge of the
+address can decrypt all on-chain notifications of UTXOs sent to this address.
+
+On-chain payment notifications are aes-256-gcm encrypted with a key that can be read directly from
+the address. So anyone that sees the address can decrypt all UTXO notifications for this address.
+
+For this reason, `Secret` addresses should never be shared with more than one other party, as this
+would destroy privacy.
+
+A bad way of using `Secret` keys would be to request donations sent to a `Secret` key. If that was
+done, anyone would be able to see all amounts sent to this address, as long as on-chain payment
+notifications are used.
+
+`Secret` addresses are the shortest standard address format.
+
 ### `EcHybrid` keys and addresses
 
 Elliptic curve hybrid keys are implemented with aes-256-gcm and EC Diffie-Hellman key exchange.
+
+Like `Secret` addresses, ``EcHybrid` addresses should only be shared between two parties. For an
+adversary in possession of a strong enough quantum computer, the address becomes a viewing key if it
+is known to the attacker. In other words: knowledge of an address and possession of a powerful
+quantum computer allows for the decryption of all on-chain payment notifications sent to an
+`EcHybrid` address.
+
+`EcHybrid` addresses offer post-quantum theft-prevention but confidentiality only against classical
+adversaries, i.e. adversaries that do *not* possess a powerful quantum computer.
 
 Like `Generation` addresses, EC hybrid addresses are post-quantum secure if used correctly. However,
 unlike `Generation` addresses they stop being post-quantum secure if the address is published, or
@@ -62,16 +88,15 @@ possesses a quantum computer *and* knows an `EcHybrid` address can read the UTXO
 that specific specific address and thus decrypt all amounts and UTXOs that were announced on-chain
 for this address. This attacker still cannot steal funds from the address.
 
-`EcHybrid` addresses are intended to be seen by two parties: the sender and the receiver. If it is
-spread beyond that, then the privacy of this address is no longer post-quantum secure.
-
-Concretely the AES key used for the encryption of the notificaiton payload is the XOR of a value that
+Concretely the AES key used for the encryption of the notification payload is the XOR of a value that
 can be read from the address and a value chosen by the sender. This value chosen by the sender is then
 shared with the receiver through an elliptic curve Diffie-Hellman key exchange protocol where the
 public key in the exchange protocol is read from the address.
 
 The selling point for `EcHybrid` addresses over `Generation` addresses is that `EcHybrid` addresses
 are much shorter.
+
+Their advantage over `Secret` addresses is that they require a quantum computer to deanonymize.
 
 
 ### `Symmetric` keys and addresses
