@@ -44,6 +44,10 @@ impl From<&[LabelledInstruction]> for LockScript {
 impl LockScript {
     const BURN_ERROR: i128 = 1_000_300;
 
+    const PREIMAGE_ERROR_192_0: i128 = 1_000_301;
+    const PREIMAGE_ERROR_192_1: i128 = 1_000_302;
+    const PREIMAGE_ERROR_192_2: i128 = 1_000_303;
+
     pub fn new(program: Program) -> Self {
         Self { program }
     }
@@ -59,6 +63,52 @@ impl LockScript {
 
     pub fn hash(&self) -> Digest {
         self.program.hash()
+    }
+
+    pub fn hash_lock_from_after_image_192_bit_security(after_image: [BFieldElement; 3]) -> Self {
+        let push_spending_lock_after_image_to_stack = after_image
+            .iter()
+            .rev()
+            .map(|elem| triton_instr!(push elem.value()))
+            .collect_vec();
+
+        let instructions = triton_asm!(
+            push 0
+            push 0
+            push 0
+            push 0
+            push 0
+            divine 5
+            hash
+            pop 2
+
+            // _ e4 e3 e2
+
+            {&push_spending_lock_after_image_to_stack}
+            // _  e4 e3 e2 f4 f3 f2
+
+            pick 3
+            eq
+            assert error_id {Self::PREIMAGE_ERROR_192_0}
+            // _ e4 e3 f4 f3
+
+            pick 2
+            eq
+            assert error_id {Self::PREIMAGE_ERROR_192_1}
+            // _ e4 f4
+
+            eq
+            assert error_id {Self::PREIMAGE_ERROR_192_2}
+            // _
+
+            read_io 5
+
+            pop 5
+
+            halt
+        );
+
+        instructions.into()
     }
 
     /// Generate a lock script that verifies knowledge of a hash preimage, given

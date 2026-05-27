@@ -81,6 +81,7 @@ mod tests {
     use neptune_cash::api::export::KeyType;
     use neptune_cash::api::export::NativeCurrencyAmount;
     use neptune_cash::api::export::Network;
+    use neptune_cash::api::export::ReceivingAddress;
     use neptune_cash::api::export::TransactionKernelId;
     use neptune_cash::api::export::TxProvingCapability;
     use neptune_cash::application::json_rpc::core::api::ops::Namespace;
@@ -98,6 +99,7 @@ mod tests {
     use num_traits::Zero;
     use rand::distr::Alphanumeric;
     use rand::distr::SampleString;
+    use strum::IntoEnumIterator;
 
     use crate::http::HttpClient;
 
@@ -589,6 +591,74 @@ mod tests {
         )
         .await;
         assert!(client.unspent_utxos().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn can_bump_derivation_indices() {
+        let unsafe_rpc = true;
+        let network = Network::Main;
+        let wallet = WalletEntropy::devnet_wallet();
+        let (client, gsl) = start_pseudo_real_server(
+            network,
+            HashSet::from([Namespace::Personal, Namespace::Wallet]),
+            unsafe_rpc,
+            40610,
+            Some(wallet.clone()),
+        )
+        .await;
+
+        for key_type in KeyType::iter() {
+            client.set_derivation_index(key_type, 43).await.unwrap();
+
+            // Setting derivation index to 43 means all keys with index 0..=43
+            // are present in the wallet.
+            assert_eq!(
+                44,
+                gsl.lock_guard()
+                    .await
+                    .wallet_state
+                    .get_known_spending_keys(key_type)
+                    .count()
+            );
+
+            // Key counter tracks the derivation index of the *next* (not yet)
+            // added key.
+            assert_eq!(
+                44,
+                gsl.lock_guard().await.wallet_state.key_counter(key_type)
+            );
+
+            let next_address = client.generate_address(key_type).await.unwrap().address;
+
+            // Verify that new address passes as valid address
+            let valid = client.validate_address(next_address.clone()).await.unwrap();
+            assert_eq!(
+                valid.receiver_identifier.unwrap(),
+                valid.announcement_flags.unwrap().receiver_id.value()
+            );
+            assert_eq!(key_type.to_string(), valid.address_type.unwrap());
+
+            let next_address = ReceivingAddress::from_bech32m(&next_address, network).unwrap();
+            assert_eq!(
+                next_address.receiver_identifier().value(),
+                valid.receiver_identifier.unwrap()
+            );
+
+            assert_eq!(next_address, wallet.nth_receiving_address(44, key_type));
+
+            assert_eq!(
+                45,
+                gsl.lock_guard().await.wallet_state.key_counter(key_type)
+            );
+            assert_eq!(
+                45,
+                gsl.lock_guard()
+                    .await
+                    .wallet_state
+                    .get_known_spending_keys(key_type)
+                    .count()
+            );
+        }
     }
 
     async fn wait_until_tx_in_mempool_has_single_proof(

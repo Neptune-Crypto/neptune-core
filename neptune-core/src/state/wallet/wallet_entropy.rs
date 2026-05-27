@@ -14,8 +14,10 @@ use zeroize::ZeroizeOnDrop;
 use super::address::ReceivingAddress;
 use crate::api::export::KeyType;
 use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::state::wallet::address::elliptic_curve_hybrid;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::symmetric_key;
+use crate::state::wallet::address::viewing_address;
 use crate::state::wallet::secret_key_material::SecretKeyMaterial;
 
 /// The wallet's one source of randomness, from which all keys are derived.
@@ -69,6 +71,10 @@ impl WalletEntropy {
                 ReceivingAddress::from(self.nth_generation_spending_key(index).to_address())
             }
             KeyType::Symmetric => ReceivingAddress::from(self.nth_symmetric_key(index)),
+            KeyType::EcHybrid => ReceivingAddress::from(self.nth_ec_hybrid_key(index).to_address()),
+            KeyType::ViewingAddress => {
+                ReceivingAddress::from(self.nth_viewing_address_key(index).to_address())
+            }
         }
     }
 
@@ -109,6 +115,52 @@ impl WalletEntropy {
             .concat(),
         );
         symmetric_key::SymmetricKey::from_seed(key_seed)
+    }
+
+    pub fn nth_ec_hybrid_key(&self, index: u64) -> elliptic_curve_hybrid::EcHybridKey {
+        // All ECH keys can be derived from this master key, in case that would
+        // ever be useful.
+        let ech_master_key = Tip5::hash_varlen(
+            &[
+                self.secret_seed.0.encode(),
+                bfe_vec![elliptic_curve_hybrid::ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG],
+            ]
+            .concat(),
+        );
+
+        let key_seed = Tip5::hash_varlen(
+            &[
+                ech_master_key.encode(),
+                bfe_vec![
+                    elliptic_curve_hybrid::ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG,
+                    index
+                ],
+            ]
+            .concat(),
+        );
+
+        elliptic_curve_hybrid::EcHybridKey::from_seed(key_seed)
+    }
+
+    pub fn nth_viewing_address_key(&self, index: u64) -> viewing_address::ViewingAddressKey {
+        // All viewing address keys can be derived from this master key.
+        let view_master_key = Tip5::hash_varlen(
+            &[
+                self.secret_seed.0.encode(),
+                bfe_vec![viewing_address::VIEWING_ADDRESS_FLAG],
+            ]
+            .concat(),
+        );
+
+        let key_seed = Tip5::hash_varlen(
+            &[
+                view_master_key.encode(),
+                bfe_vec![viewing_address::VIEWING_ADDRESS_FLAG, index],
+            ]
+            .concat(),
+        );
+
+        viewing_address::ViewingAddressKey::from_seed(key_seed)
     }
 
     // note: legacy tests were written to call nth_generation_spending_key()

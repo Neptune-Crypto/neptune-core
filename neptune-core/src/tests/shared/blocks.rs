@@ -97,6 +97,7 @@ pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block
         .await
         .mining_rewards_address();
     let new_timestamp = parent.header().timestamp + Timestamp::minutes(9);
+    let new_timestamp = std::cmp::max(new_timestamp, child_no_pow.header().timestamp);
     let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
     guess_nonce(
         network,

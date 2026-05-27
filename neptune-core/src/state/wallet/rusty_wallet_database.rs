@@ -489,6 +489,22 @@ impl RustyWalletDatabase {
         self.tables.symmetric_key_counter.set(counter).await;
     }
 
+    pub fn get_ec_hybrid_key_counter(&self) -> u64 {
+        self.tables.ech_key_counter.get()
+    }
+
+    pub async fn set_ec_hybrid_key_counter(&mut self, counter: u64) {
+        self.tables.ech_key_counter.set(counter).await;
+    }
+
+    pub fn get_viewing_address_key_counter(&self) -> u64 {
+        self.tables.viewing_address_key_counter.get()
+    }
+
+    pub async fn set_viewing_address_key_counter(&mut self, counter: u64) {
+        self.tables.viewing_address_key_counter.set(counter).await;
+    }
+
     /// retrieve the database schema version
     pub fn schema_version(&self) -> u16 {
         self.tables.schema_version.get()

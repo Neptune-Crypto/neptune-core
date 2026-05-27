@@ -1,16 +1,16 @@
 # Keys and Addresses
 
-`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present two types of keys are supported: `Generation` and `Symmetric`.
+`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present four types of keys are supported: `Generation`, `Symmetric`, `EcHybrid`, and `ViewingAddress`.
 
 ## Abstraction layer
 
 Three `enum` are provided for working with keys and addresses:
 
-| enum                   | description                                      |
-|------------------------| -------------------------------------------------|
-| `KeyType`              | enumerates available key/address implementations |
-| `SpendingKey`          | enumerates key types and provides methods        |
-| `ReceivingAddress`     | enumerates address types and provides methods    |
+| enum               | description                                      |
+| ------------------ | ------------------------------------------------ |
+| `KeyType`          | enumerates available key/address implementations |
+| `SpendingKey`      | enumerates key types and provides methods        |
+| `ReceivingAddress` | enumerates address types and provides methods    |
 
 note: It was decided to use `enum` rather than traits because the enums can be
 used within our RPC layer while traits cannot.
@@ -27,14 +27,10 @@ For each key-type, the neptune-core wallet keeps a counter which tracks the late
 
 To obtain the next unused address for a given key type call the rpc method `next_receiving_address(key_type)`.
 
-(note: as of this writing it always returns the same address at index 0, but in the future it will work as described)
-
-An equivalent API for obtaining the next unused spending key is available in the neptune-core crate, but is not (yet?) exposed as an rpc API.
+An equivalent API for obtaining the next unused spending key is available in the neptune-core crate.
 
 
 ## Available key types
-
-`Generation` and `Symmetric` type keys are intended for different usages.
 
 ### `Generation` keys and addresses
 
@@ -54,6 +50,53 @@ unbreakable for at least a generation and hopefully many generations.  If
 correct, it would be safe to put funds in a paper or metal wallet and ignore
 them for decades, perhaps until they are transferred to the original owner's
 children or grand-children.
+
+### `ViewingAddress` keys and addresses
+
+A viewing address is both a viewing key and an address. This means that anyone with knowledge of the
+address can decrypt all on-chain notifications of UTXOs sent to this address.
+
+On-chain payment notifications are aes-256-gcm encrypted with a key that can be read directly from
+the address. So anyone that sees the address can decrypt all UTXO notifications for this address.
+
+For this reason, `ViewingAddress` addresses should never be shared with more than one other party, as this
+would destroy privacy.
+
+A bad way of using `ViewingAddress` keys would be to request donations sent to a `ViewingAddress`. If that was
+done, anyone would be able to see all amounts sent to this address, as long as on-chain payment
+notifications are used.
+
+`ViewingAddress` is the shortest standard address format.
+
+### `EcHybrid` keys and addresses
+
+Elliptic curve hybrid keys are implemented with aes-256-gcm and EC Diffie-Hellman key exchange.
+
+Like `ViewingAddress`, ``EcHybrid` addresses should only be shared between two parties. For an
+adversary in possession of a strong enough quantum computer, the address becomes a viewing key if it
+is known to the attacker. In other words: knowledge of an address and possession of a powerful
+quantum computer allows for the decryption of all on-chain payment notifications sent to an
+`EcHybrid` address.
+
+`EcHybrid` addresses offer post-quantum theft-prevention but confidentiality only against classical
+adversaries, i.e. adversaries that do *not* possess a powerful quantum computer.
+
+Like `Generation` addresses, EC hybrid addresses are post-quantum secure if used correctly. However,
+unlike `Generation` addresses they stop being post-quantum secure if the address is published, or
+shared between more parties than merely the sender and the receiver. In other words, an attacker that
+possesses a quantum computer *and* knows an `EcHybrid` address can read the UTXO notifications for
+that specific specific address and thus decrypt all amounts and UTXOs that were announced on-chain
+for this address. This attacker still cannot steal funds from the address.
+
+Concretely the AES key used for the encryption of the notification payload is the XOR of a value that
+can be read from the address and a value chosen by the sender. This value chosen by the sender is then
+shared with the receiver through an elliptic curve Diffie-Hellman key exchange protocol where the
+public key in the exchange protocol is read from the address.
+
+The selling point for `EcHybrid` addresses over `Generation` addresses is that `EcHybrid` addresses
+are much shorter.
+
+Their advantage over `ViewingAddress` addresses is that they require a quantum computer to deanonymize.
 
 
 ### `Symmetric` keys and addresses

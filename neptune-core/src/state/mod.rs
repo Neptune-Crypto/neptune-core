@@ -2900,6 +2900,14 @@ impl GlobalState {
     async fn set_new_tip_internal(&mut self, new_tip: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
+        let tx_kernel = new_tip.body().transaction_kernel();
+        debug!(
+            "Setting new tip. Tx kernel: Num inputs: {}; num ouputs: {}; num announcements: {}",
+            tx_kernel.inputs.len(),
+            tx_kernel.outputs.len(),
+            tx_kernel.announcements.len()
+        );
+
         debug!("Applying block to archival state.");
         self.chain
             .archival_state_mut()
@@ -5524,7 +5532,7 @@ mod tests {
             .next_unused_spending_key(KeyType::Generation)
             .await;
         let config_alice_and_bob = TxCreationConfig::default()
-            .recover_change_off_chain(genesis_key)
+            .recover_change_off_chain(genesis_key.clone())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_outputs_for_alice_and_bob =
             [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()].concat();

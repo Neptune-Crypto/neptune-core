@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::Network;
+use strum::IntoEnumIterator;
 
 /// Type for abbreviated addresses that clap can pase
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +41,7 @@ fn key_type_from_hrp(hrp: &str) -> Option<KeyType> {
         Network::TestnetMock,
         Network::Testnet(0),
     ] {
-        for key_type in KeyType::all_types() {
+        for key_type in KeyType::iter() {
             if hrp == key_type.get_hrp(network) {
                 return Some(key_type);
             }
@@ -109,14 +110,40 @@ impl FromStr for AbbreviatedAddress {
 #[cfg(test)]
 mod tests {
     use neptune_cash::api::export::Digest;
+    use neptune_cash::state::wallet::address::elliptic_curve_hybrid::EcHybridAddress;
     use neptune_cash::state::wallet::address::generation_address::GenerationReceivingAddress;
     use neptune_cash::state::wallet::address::symmetric_key::SymmetricKey;
+    use neptune_cash::state::wallet::address::viewing_address::ViewingAddress;
     use neptune_cash::state::wallet::address::ReceivingAddress;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
     use super::*;
+
+    #[proptest]
+    fn from_str_to_str_round_trip_viewing_address_standard(
+        #[strategy(arb::<Digest>())] digest: Digest,
+    ) {
+        let address = ViewingAddress::from_seed(digest);
+        let as_string = ReceivingAddress::from(address)
+            .to_display_bech32m_abbreviated(Network::Main)
+            .unwrap();
+        let from_string = AbbreviatedAddress::from_str(&as_string).unwrap();
+        let as_string_again = from_string.to_string(Network::Main);
+        prop_assert_eq!(as_string, as_string_again);
+    }
+
+    #[proptest]
+    fn from_str_to_str_round_trip_ech_standard(#[strategy(arb::<Digest>())] digest: Digest) {
+        let address = EcHybridAddress::from_seed(digest);
+        let as_string = ReceivingAddress::from(address)
+            .to_display_bech32m_abbreviated(Network::Main)
+            .unwrap();
+        let from_string = AbbreviatedAddress::from_str(&as_string).unwrap();
+        let as_string_again = from_string.to_string(Network::Main);
+        prop_assert_eq!(as_string, as_string_again);
+    }
 
     #[proptest]
     fn from_str_to_str_round_trip_generation_standard(#[strategy(arb::<Digest>())] digest: Digest) {

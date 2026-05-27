@@ -369,7 +369,7 @@ Since previous block: {elapsed_human}
 Difficulty threshold: {threshold}
           Difficulty: {target_difficulty}
            #inputs  : {num_inputs}
-           #outputs : {num_outputs}
+ #tx-kernel outputs : {num_outputs}
 "#
     );
 

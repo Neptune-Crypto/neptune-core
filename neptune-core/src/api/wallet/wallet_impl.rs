@@ -97,9 +97,6 @@ impl<'a> Wallet<'a> {
     /// because it requires much less space on the blockchain, which can also
     /// potentially lessen fees.
     ///
-    /// Note that by default `KeyType::Symmetric` is used for change outputs
-    /// and (composer) block rewards.
-    ///
     /// Be aware also that these considerations apply to each output `Utxo` of a
     /// transaction individually not the transaction as a whole.
     ///
@@ -136,9 +133,6 @@ impl<'a> Wallet<'a> {
     /// `KeyType::Symmetric` is provided as an option for self-owned payments
     /// because it requires much less space on the blockchain, which can also
     /// potentially lessen fees.
-    ///
-    /// Note that by default `KeyType::Symmetric` is used for change outputs
-    /// and (composer) block rewards.
     ///
     /// Be aware also that these considerations apply to each output `Utxo` of a
     /// transaction individually not the transaction as a whole.

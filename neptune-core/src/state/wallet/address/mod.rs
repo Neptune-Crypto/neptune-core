@@ -7,10 +7,12 @@
 mod addressable_key;
 pub mod announcement_flag;
 mod common;
+pub mod elliptic_curve_hybrid;
 pub mod encrypted_utxo_notification;
 pub mod generation_address;
 mod receiving_address;
 pub mod symmetric_key;
+pub mod viewing_address;
 
 pub use addressable_key::KeyType;
 pub use addressable_key::SpendingKey;
@@ -19,13 +21,12 @@ pub use receiving_address::ReceivingAddress;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use generation_address::GenerationReceivingAddress;
-    use generation_address::GenerationSpendingKey;
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::Rng;
-    use symmetric_key::SymmetricKey;
+    use strum::IntoEnumIterator;
     use test_strategy::proptest;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::application::config::network::Network;
@@ -35,64 +36,167 @@ mod tests {
     use crate::state::Digest;
     use crate::tests::shared::mock_tx::make_mock_transaction;
 
-    /// tests scanning for announced utxos with a symmetric key
     #[proptest]
-    fn scan_for_announced_utxos_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(SymmetricKey::from_seed(seed).into())
+    fn scan_for_announceed_utxos(#[strategy(arb())] seed: Digest) {
+        for key_type in KeyType::iter() {
+            let key = SpendingKey::from_seed(seed, key_type);
+            worker::scan_for_announced_utxos(key)
+        }
     }
 
-    /// tests scanning for announced utxos with an asymmetric (generation) key
-    #[proptest]
-    fn scan_for_announced_utxos_generation(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(GenerationSpendingKey::derive_from_seed(seed).into())
-    }
-
-    /// tests encrypting and decrypting with a symmetric key
-    #[proptest]
-    fn test_encrypt_decrypt_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(SymmetricKey::from_seed(seed).into())
-    }
-
-    /// tests encrypting and decrypting with an asymmetric (generation) key
-    #[proptest]
-    fn test_encrypt_decrypt_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(GenerationSpendingKey::derive_from_seed(seed).into())
+    /// tests encrypting and decrypting with all key types.
+    #[proptest(cases = 10)]
+    fn test_encrypt_decrypt(#[strategy(arb())] seed: Digest) {
+        for key_type in KeyType::iter() {
+            let key = SpendingKey::from_seed(seed, key_type);
+            worker::test_encrypt_decrypt(key);
+        }
     }
 
     /// tests keygen, sign, and verify with a symmetric key
-    #[proptest]
-    fn test_keygen_sign_verify_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::test_keypair_validity(
-            SymmetricKey::from_seed(seed).into(),
-            SymmetricKey::from_seed(seed).into(),
-        );
+    #[proptest(cases = 10)]
+    fn test_keygen_sign_verify(#[strategy(arb())] seed: Digest) {
+        for key_type in KeyType::iter() {
+            let key = SpendingKey::from_seed(seed, key_type);
+            worker::test_keypair_validity(key.clone(), key.to_address());
+        }
     }
 
-    /// tests keygen, sign, and verify with an asymmetric (generation) key
-    #[proptest]
-    fn test_keygen_sign_verify_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_keypair_validity(
-            GenerationSpendingKey::derive_from_seed(seed).into(),
-            GenerationReceivingAddress::derive_from_seed(seed).into(),
-        );
+    #[proptest(cases = 10)]
+    fn test_bech32m_conversion(#[strategy(arb())] seed: Digest) {
+        for key_type in KeyType::iter() {
+            let key = SpendingKey::from_seed(seed, key_type);
+            worker::test_bech32m_conversion(key.to_address());
+        }
     }
 
-    /// tests bech32m serialize, deserialize with a symmetric key
-    #[proptest]
-    fn test_bech32m_conversion_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(SymmetricKey::from_seed(seed).into());
-    }
-
-    /// tests bech32m serialize, deserialize with an asymmetric (generation) key
-    #[proptest]
-    fn test_bech32m_conversion_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(GenerationReceivingAddress::derive_from_seed(seed).into());
+    #[traced_test]
+    #[tokio::test]
+    async fn can_spend_from_address_type() {
+        for key_type in KeyType::iter() {
+            worker::can_spend_from_address_type(key_type).await;
+        }
     }
 
     mod worker {
+        use num_traits::CheckedSub;
+
         use super::*;
+        use crate::api::export::ChangePolicy;
+        use crate::api::export::InputSelectionPriority;
+        use crate::api::export::OutputFormat;
+        use crate::api::export::Timestamp;
+        use crate::api::export::TxProvingCapability;
+        use crate::api::export::WalletEntropy;
+        use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
+        use crate::api::tx_initiation::builder::input_selector::SortOrder;
+        use crate::application::config::cli_args;
+        use crate::protocol::consensus::block::Block;
+        use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+        use crate::protocol::consensus::consensus_rule_set::tests::tx_with_n_outputs;
         use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
+        use crate::state::mempool::upgrade_priority::UpgradePriority;
+        use crate::state::wallet::address::elliptic_curve_hybrid::EcHybridAddress;
+        use crate::tests::shared::blocks::next_block;
+        use crate::tests::shared::globalstate::mock_genesis_global_state;
+
+        pub(super) async fn can_spend_from_address_type(key_type: KeyType) {
+            let network = Network::Main;
+            let cli = cli_args::Args {
+                network,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                ..Default::default()
+            };
+
+            let wallet = WalletEntropy::devnet_wallet();
+            let genesis = Block::genesis(network);
+            let mut state = mock_genesis_global_state(2, wallet, cli).await;
+
+            let recipient_address = {
+                let mut state = state.global_state_lock.lock_guard_mut().await;
+                let recipient_key = state.wallet_state.next_unused_spending_key(key_type).await;
+                recipient_key.to_address()
+            };
+
+            let timestamp = genesis.header().timestamp + Timestamp::months(9);
+            let oldest_first = InputSelectionPolicy::default()
+                .prioritize(InputSelectionPriority::ByAge(SortOrder::Descending));
+            let tx = tx_with_n_outputs(
+                state.clone(),
+                2,
+                timestamp,
+                Some(oldest_first),
+                Some(recipient_address),
+                Some(NativeCurrencyAmount::coins(8)),
+            )
+            .await
+            .unwrap();
+
+            assert!(
+                2 <= tx
+                    .transaction
+                    .kernel
+                    .announcements
+                    .iter()
+                    .filter(|ann| KeyType::try_from(*ann).is_ok_and(|kt| kt == key_type))
+                    .count(),
+                "At least two of the announcements must be for key type {key_type}."
+            );
+
+            state
+                .lock_guard_mut()
+                .await
+                .mempool_insert(tx.transaction().to_owned(), UpgradePriority::Critical)
+                .await;
+
+            let block1 = next_block(state.clone(), genesis.clone()).await;
+            let now = block1.header().timestamp;
+            assert!(block1.is_valid(&genesis, now, network).await);
+
+            let height1 = block1.header().height;
+            state.set_new_tip(block1).await.unwrap();
+
+            // Verify that balance is set correctly
+            let new_liquid = state
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .confirmed_available_balance(height1, now);
+            println!("key_type: {key_type}");
+            println!("new_liquid: {new_liquid}");
+            let expected_liquid = NativeCurrencyAmount::coins(20)
+                + INITIAL_BLOCK_SUBSIDY
+                    .half()
+                    .checked_sub(&tx.transaction().kernel.fee.half())
+                    .unwrap();
+            println!("expected_liquid: {expected_liquid}");
+            assert_eq!(expected_liquid, new_liquid);
+
+            // Verify that received funds can be spent, from the address type.
+            // Make a big enough transaction that UTXOs received on this
+            // address type must be used.
+            let third_party_address = EcHybridAddress::from_seed(Digest::default());
+            let to_third_party = vec![OutputFormat::AddressAndAmount(
+                third_party_address.into(),
+                NativeCurrencyAmount::coins(82),
+            )];
+
+            let fee = NativeCurrencyAmount::coins(1);
+            let tx_from_address = state
+                .api_mut()
+                .tx_sender_mut()
+                .send(to_third_party, ChangePolicy::Burn, fee, timestamp, false)
+                .await
+                .unwrap();
+
+            assert!(
+                tx_from_address
+                    .is_valid(network, state.lock_guard().await.consensus_rule_set())
+                    .await
+            );
+        }
 
         /// this tests the generate_announcement() and
         /// scan_for_announced_utxos() methods with a [SpendingKey]
@@ -206,15 +310,14 @@ mod tests {
 
         /// tests bech32m serialize, deserialize for [ReceivingAddress]
         pub fn test_bech32m_conversion(receiving_address: ReceivingAddress) {
-            // 1. serialize address to bech32m
-            let encoded = receiving_address.to_bech32m(Network::Testnet(0)).unwrap();
+            for network in [Network::Main, Network::Testnet(0)] {
+                let encoded = receiving_address.to_bech32m(network).unwrap();
 
-            // 2. deserialize bech32m back into an address
-            let receiving_address_again =
-                ReceivingAddress::from_bech32m(&encoded, Network::Testnet(0)).unwrap();
+                let receiving_address_again =
+                    ReceivingAddress::from_bech32m(&encoded, network).unwrap();
 
-            // 3. verify both addresses match
-            assert_eq!(receiving_address, receiving_address_again);
+                assert_eq!(receiving_address, receiving_address_again);
+            }
         }
     }
 }
