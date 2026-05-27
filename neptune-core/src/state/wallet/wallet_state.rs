@@ -3815,6 +3815,39 @@ pub(crate) mod tests {
 
         use super::*;
 
+        /// tests that all keys and addresses are unique across key types
+        #[apply(shared_tokio_runtime)]
+        async fn keys_and_addresses_are_unique() {
+            let network = Network::Main;
+
+            let cli_args = cli_args::Args::default_with_network(network);
+            let mut wallet =
+                mock_genesis_wallet_state(WalletEntropy::new_random(), &cli_args).await;
+
+            let mut all_keys = vec![];
+            for key_type in KeyType::iter() {
+                for _ in 0..17 {
+                    let _ = wallet.next_unused_spending_key(key_type).await;
+                }
+
+                let known_keys = wallet
+                    .get_known_addressable_spending_keys(key_type)
+                    .collect_vec();
+
+                // Address with index 0 is present in wallet on initialization
+                assert_eq!(18, known_keys.len());
+                all_keys.extend(known_keys);
+            }
+
+            assert_eq!(18 * KeyType::iter().count(), all_keys.len());
+
+            assert!(all_keys.iter().all_unique());
+            let mut all_addresses = all_keys
+                .iter()
+                .map(|x| x.to_address().to_bech32m(network).unwrap());
+            assert!(all_addresses.all_unique());
+        }
+
         /// tests that all known keys are unique, for all key types.
         #[traced_test]
         #[apply(shared_tokio_runtime)]
