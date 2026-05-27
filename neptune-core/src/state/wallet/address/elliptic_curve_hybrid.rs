@@ -472,7 +472,7 @@ impl EcHybridAddress {
     }
 
     #[cfg(any(test, feature = "arbitrary-impls"))]
-    pub(crate) fn from_seed(seed: Digest) -> Self {
+    pub fn from_seed(seed: Digest) -> Self {
         let key = EcHybridKey::from_seed(seed);
         key.to_address()
     }

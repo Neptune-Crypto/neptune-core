@@ -16,8 +16,8 @@ use crate::api::export::KeyType;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::state::wallet::address::elliptic_curve_hybrid;
 use crate::state::wallet::address::generation_address;
-use crate::state::wallet::address::secret_address;
 use crate::state::wallet::address::symmetric_key;
+use crate::state::wallet::address::viewing_address;
 use crate::state::wallet::secret_key_material::SecretKeyMaterial;
 
 /// The wallet's one source of randomness, from which all keys are derived.
@@ -72,8 +72,8 @@ impl WalletEntropy {
             }
             KeyType::Symmetric => ReceivingAddress::from(self.nth_symmetric_key(index)),
             KeyType::EcHybrid => ReceivingAddress::from(self.nth_ec_hybrid_key(index).to_address()),
-            KeyType::SecretAddress => {
-                ReceivingAddress::from(self.nth_secret_address_key(index).to_address())
+            KeyType::ViewingAddress => {
+                ReceivingAddress::from(self.nth_viewing_address_key(index).to_address())
             }
         }
     }
@@ -142,25 +142,25 @@ impl WalletEntropy {
         elliptic_curve_hybrid::EcHybridKey::from_seed(key_seed)
     }
 
-    pub fn nth_secret_address_key(&self, index: u64) -> secret_address::SecretAddressKey {
-        // All secret address keys can be derived from this master key.
-        let seca_master_key = Tip5::hash_varlen(
+    pub fn nth_viewing_address_key(&self, index: u64) -> viewing_address::ViewingAddressKey {
+        // All viewing address keys can be derived from this master key.
+        let view_master_key = Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
-                bfe_vec![secret_address::SECRET_ADDRESS_FLAG],
+                bfe_vec![viewing_address::VIEWING_ADDRESS_FLAG],
             ]
             .concat(),
         );
 
         let key_seed = Tip5::hash_varlen(
             &[
-                seca_master_key.encode(),
-                bfe_vec![secret_address::SECRET_ADDRESS_FLAG, index],
+                view_master_key.encode(),
+                bfe_vec![viewing_address::VIEWING_ADDRESS_FLAG, index],
             ]
             .concat(),
         );
 
-        secret_address::SecretAddressKey::from_seed(key_seed)
+        viewing_address::ViewingAddressKey::from_seed(key_seed)
     }
 
     // note: legacy tests were written to call nth_generation_spending_key()

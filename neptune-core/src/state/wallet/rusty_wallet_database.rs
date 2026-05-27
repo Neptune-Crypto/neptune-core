@@ -497,12 +497,12 @@ impl RustyWalletDatabase {
         self.tables.ech_key_counter.set(counter).await;
     }
 
-    pub fn get_secret_address_key_counter(&self) -> u64 {
-        self.tables.secret_address_key_counter.get()
+    pub fn get_viewing_address_key_counter(&self) -> u64 {
+        self.tables.viewing_address_key_counter.get()
     }
 
-    pub async fn set_secret_address_key_counter(&mut self, counter: u64) {
-        self.tables.secret_address_key_counter.set(counter).await;
+    pub async fn set_viewing_address_key_counter(&mut self, counter: u64) {
+        self.tables.viewing_address_key_counter.set(counter).await;
     }
 
     /// retrieve the database schema version

@@ -1,6 +1,6 @@
 # Keys and Addresses
 
-`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present four types of keys are supported: `Generation`, `Symmetric`, `EcHybrid`, and `Secret`.
+`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present four types of keys are supported: `Generation`, `Symmetric`, `EcHybrid`, and `ViewingAddress`.
 
 ## Abstraction layer
 
@@ -51,28 +51,28 @@ correct, it would be safe to put funds in a paper or metal wallet and ignore
 them for decades, perhaps until they are transferred to the original owner's
 children or grand-children.
 
-### `Secret` keys and addresses
+### `ViewingAddress` keys and addresses
 
-A secret address is both a viewing key and an address. This means that anyone with knowledge of the
+A viewing address is both a viewing key and an address. This means that anyone with knowledge of the
 address can decrypt all on-chain notifications of UTXOs sent to this address.
 
 On-chain payment notifications are aes-256-gcm encrypted with a key that can be read directly from
 the address. So anyone that sees the address can decrypt all UTXO notifications for this address.
 
-For this reason, `Secret` addresses should never be shared with more than one other party, as this
+For this reason, `ViewingAddress` addresses should never be shared with more than one other party, as this
 would destroy privacy.
 
-A bad way of using `Secret` keys would be to request donations sent to a `Secret` key. If that was
+A bad way of using `ViewingAddress` keys would be to request donations sent to a `ViewingAddress`. If that was
 done, anyone would be able to see all amounts sent to this address, as long as on-chain payment
 notifications are used.
 
-`Secret` addresses are the shortest standard address format.
+`ViewingAddress` is the shortest standard address format.
 
 ### `EcHybrid` keys and addresses
 
 Elliptic curve hybrid keys are implemented with aes-256-gcm and EC Diffie-Hellman key exchange.
 
-Like `Secret` addresses, ``EcHybrid` addresses should only be shared between two parties. For an
+Like `ViewingAddress`, ``EcHybrid` addresses should only be shared between two parties. For an
 adversary in possession of a strong enough quantum computer, the address becomes a viewing key if it
 is known to the attacker. In other words: knowledge of an address and possession of a powerful
 quantum computer allows for the decryption of all on-chain payment notifications sent to an
@@ -96,7 +96,7 @@ public key in the exchange protocol is read from the address.
 The selling point for `EcHybrid` addresses over `Generation` addresses is that `EcHybrid` addresses
 are much shorter.
 
-Their advantage over `Secret` addresses is that they require a quantum computer to deanonymize.
+Their advantage over `ViewingAddress` addresses is that they require a quantum computer to deanonymize.
 
 
 ### `Symmetric` keys and addresses

@@ -28,14 +28,14 @@ use crate::state::wallet::address::common::network_hrp_char;
 use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
-pub(super) const SECRET_ADDRESS_FLAG_U8: u8 = 82;
-pub const SECRET_ADDRESS_FLAG: BFieldElement = BFieldElement::new(SECRET_ADDRESS_FLAG_U8 as u64);
+pub(super) const VIEWING_ADDRESS_FLAG_U8: u8 = 82;
+pub const VIEWING_ADDRESS_FLAG: BFieldElement = BFieldElement::new(VIEWING_ADDRESS_FLAG_U8 as u64);
 
-pub(crate) const SECRET_ADDRESS_HRP_PREFIX: &str = "nsec";
+pub(crate) const VIEWING_ADDRESS_HRP_PREFIX: &str = "nview";
 
 fn receiver_id(lock_postimage: [BFieldElement; 3], receiever_digest: Digest) -> BFieldElement {
     let [e0, e1, e2] = lock_postimage;
-    let left = Digest::new([e0, e1, e2, SECRET_ADDRESS_FLAG, SECRET_ADDRESS_FLAG]);
+    let left = Digest::new([e0, e1, e2, VIEWING_ADDRESS_FLAG, VIEWING_ADDRESS_FLAG]);
     let [f0, _, _, _, _] = Tip5::hash_pair(left, receiever_digest).values();
 
     f0
@@ -48,27 +48,27 @@ fn lock_postimage(unlock_key_preimage: Digest) -> [BFieldElement; 3] {
 }
 
 /// Lightweight struct containing what is sent over the wire in case of RPC
-/// serialization of an address.
+/// serialization of a key.
 #[derive(Serialize, Deserialize)]
-struct SecretAddressKeyDto {
+struct ViewingAddressKeyDto {
     seed: Digest,
 }
 
-impl From<SecretAddressKeyDto> for SecretAddressKey {
-    fn from(helper: SecretAddressKeyDto) -> Self {
-        SecretAddressKey::from_seed(helper.seed)
+impl From<ViewingAddressKeyDto> for ViewingAddressKey {
+    fn from(helper: ViewingAddressKeyDto) -> Self {
+        ViewingAddressKey::from_seed(helper.seed)
     }
 }
 
-impl From<SecretAddressKey> for SecretAddressKeyDto {
-    fn from(key: SecretAddressKey) -> Self {
-        SecretAddressKeyDto { seed: key.seed }
+impl From<ViewingAddressKey> for ViewingAddressKeyDto {
+    fn from(key: ViewingAddressKey) -> Self {
+        ViewingAddressKeyDto { seed: key.seed }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "SecretAddressKeyDto", into = "SecretAddressKeyDto")]
-pub struct SecretAddressKey {
+#[serde(from = "ViewingAddressKeyDto", into = "ViewingAddressKeyDto")]
+pub struct ViewingAddressKey {
     seed: Digest,
 
     // All fields are derivable from the seed. They are cached here to make
@@ -80,13 +80,13 @@ pub struct SecretAddressKey {
     unlock_key_preimage: Digest,
 }
 
-impl SecretAddressKey {
+impl ViewingAddressKey {
     pub fn from_seed(seed: Digest) -> Self {
         let [e0, e1, e2, e3, e4] = seed.values();
 
         // The unlock preimage may not be linkable to any of the other fields,
         // except for the seed field.
-        let unlock_key_preimage = Tip5::hash(&[SECRET_ADDRESS_FLAG, e0, e1, e2, e3, e4]);
+        let unlock_key_preimage = Tip5::hash(&[VIEWING_ADDRESS_FLAG, e0, e1, e2, e3, e4]);
 
         // receiver preimage must not be derivable from the the AES key since
         // that would leak if UTXOs received on this address were spent or not.
@@ -103,9 +103,9 @@ impl SecretAddressKey {
         }
     }
 
-    pub fn to_address(&self) -> SecretAddress {
+    pub fn to_address(&self) -> ViewingAddress {
         let lock_postimage = lock_postimage(self.unlock_key_preimage);
-        SecretAddress {
+        ViewingAddress {
             receiver_digest: self.receiver_preimage.hash(),
             lock_postimage,
         }
@@ -129,7 +129,7 @@ impl SecretAddressKey {
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SecretAddress {
+pub struct ViewingAddress {
     /// Post-image of the receiver preimage
     receiver_digest: Digest,
 
@@ -137,14 +137,14 @@ pub struct SecretAddress {
     lock_postimage: [BFieldElement; 3],
 }
 
-impl SecretAddress {
+impl ViewingAddress {
     const RAW_SERIALIZATION_LENGTH: usize = 64;
 
     fn aes_key(&self) -> [u8; 32] {
         let [e0, e1, e2] = self.lock_postimage;
         let digest = Tip5::hash_pair(
             self.receiver_digest,
-            Digest([e0, e1, e2, SECRET_ADDRESS_FLAG, bfe!(0)]),
+            Digest([e0, e1, e2, VIEWING_ADDRESS_FLAG, bfe!(0)]),
         );
         let digest: [u8; 40] = digest.into();
 
@@ -178,7 +178,7 @@ impl SecretAddress {
     /// Manually deserialize from exactly 64 bytes
     fn from_raw_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
         if bytes.len() != Self::RAW_SERIALIZATION_LENGTH {
-            return Err("Invalid byte length for SecretAddress: expected exactly 96 bytes");
+            return Err("Invalid byte length for ViewingAddress: expected exactly 96 bytes");
         }
 
         // 2. Parse Digest
@@ -218,7 +218,7 @@ impl SecretAddress {
 
         // human-readable part must be prefix plus one character for network
         ensure!(
-            hrp.len() == SECRET_ADDRESS_HRP_PREFIX.len() + 1,
+            hrp.len() == VIEWING_ADDRESS_HRP_PREFIX.len() + 1,
             "Wrong size for human-readable part",
         );
         ensure!(
@@ -244,7 +244,7 @@ impl SecretAddress {
     }
 
     pub(super) fn get_hrp(network: Network) -> String {
-        let mut hrp = SECRET_ADDRESS_HRP_PREFIX.to_string();
+        let mut hrp = VIEWING_ADDRESS_HRP_PREFIX.to_string();
 
         let network_byte = network_hrp_char(network);
         hrp.push(network_byte);
@@ -266,7 +266,7 @@ impl SecretAddress {
         utxo_notification_payload: &UtxoNotificationPayload,
     ) -> Announcement {
         let encrypted_utxo_notification = EncryptedUtxoNotification {
-            flag: SECRET_ADDRESS_FLAG,
+            flag: VIEWING_ADDRESS_FLAG,
             receiver_identifier: self.receiver_id(),
             ciphertext: self.encrypt(utxo_notification_payload),
         };
@@ -280,7 +280,7 @@ impl SecretAddress {
         network: Network,
     ) -> String {
         let encrypted_utxo_notification = EncryptedUtxoNotification {
-            flag: SECRET_ADDRESS_FLAG,
+            flag: VIEWING_ADDRESS_FLAG,
             receiver_identifier: self.receiver_id(),
             ciphertext: self.encrypt(utxo_notification_payload),
         };
@@ -329,14 +329,14 @@ impl SecretAddress {
     }
 
     #[cfg(any(test, feature = "arbitrary-impls"))]
-    pub(crate) fn from_seed(seed: Digest) -> Self {
-        let key = SecretAddressKey::from_seed(seed);
+    pub fn from_seed(seed: Digest) -> Self {
+        let key = ViewingAddressKey::from_seed(seed);
         key.to_address()
     }
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
-impl<'a> arbitrary::Arbitrary<'a> for SecretAddress {
+impl<'a> arbitrary::Arbitrary<'a> for ViewingAddress {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let seed = Digest::arbitrary(u)?;
         Ok(Self::from_seed(seed))
@@ -355,9 +355,9 @@ mod tests {
     #[test]
     fn bech32_representation_is_unchanged() {
         assert_eq!(
-            "nsecm10243hqsugd3nvmck0f3f49y75dku9lq4ym37lxx6vzl0p2l4kvthjcyzkkpy6f9v9gh8w6hxhaa4fexl4zhnh2qq7ulyrdmttjwukzs3nwpls",
+            "nviewm10243hqsugd3nvmck0f3f49y75dku9lq4ym37lxx6vzl0p2l4kvthjcyzkkpy6f9v9gh8w6hxhaa4fexl4zhnh2qq7ulyrdmttjwukzsn87z88",
             WalletEntropy::devnet_wallet()
-                .nth_secret_address_key(0)
+                .nth_viewing_address_key(0)
                 .to_address()
                 .to_bech32m(Network::Main)
         );
@@ -368,7 +368,7 @@ mod tests {
         let expected = "c55a3ddcd942855800000000000000684543463bce353b3cd5b698a3702cbea9c8293f4153c3dac232743d6004b8f88659688a2fa8737e66085dcee60920e7bd00b906bc1c92a01478813568371d27e159ed66da07756f09a019d1776d82e2674ceaf441a34291e2bb35688641053cb0741d0b38520d7e57";
         let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
         let result = WalletEntropy::devnet_wallet()
-            .nth_secret_address_key(0)
+            .nth_viewing_address_key(0)
             .to_address()
             .encrypt(&payload);
 
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn no_crash_in_decryption() {
-        let address = SecretAddress::from_seed(Digest::default());
+        let address = ViewingAddress::from_seed(Digest::default());
         for i in 0..20 {
             let msg = vec![bfe!(0); i];
             assert!(address.decrypt(&msg).is_err());
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn address_and_key_agree_on_receiver_id() {
-        let key = SecretAddressKey::from_seed(Digest::default());
+        let key = ViewingAddressKey::from_seed(Digest::default());
         assert_eq!(key.receiver_identifier(), key.to_address().receiver_id());
     }
 
@@ -406,7 +406,7 @@ mod tests {
 
         for str in [short_prefix, long_prefix] {
             assert!(
-                SecretAddress::from_bech32m(&str, network).is_err(),
+                ViewingAddress::from_bech32m(&str, network).is_err(),
                 "Invalid bech32 encoding must lead to error: {str}"
             );
         }
@@ -415,41 +415,44 @@ mod tests {
         for i in 0..10 {
             let as_ = "a".repeat(i);
             assert!(
-                SecretAddress::from_bech32m(&as_, network).is_err(),
+                ViewingAddress::from_bech32m(&as_, network).is_err(),
                 "Invalid bech32 encoding must lead to error 1"
             );
             assert!(
-                SecretAddress::from_bech32m(&format!("{SECRET_ADDRESS_HRP_PREFIX}1{as_}"), network)
-                    .is_err(),
+                ViewingAddress::from_bech32m(
+                    &format!("{VIEWING_ADDRESS_HRP_PREFIX}1{as_}"),
+                    network
+                )
+                .is_err(),
                 "Invalid bech32 encoding must lead to error 2"
             );
             assert!(
-                SecretAddress::from_bech32m(&format!("{SHORT_PREFIX}1{as_}"), network).is_err(),
+                ViewingAddress::from_bech32m(&format!("{SHORT_PREFIX}1{as_}"), network).is_err(),
                 "Invalid bech32 encoding must lead to error 3"
             );
         }
     }
 
     #[proptest(cases = 10)]
-    fn custom_serialization_consistency(#[strategy(arb())] address: SecretAddress) {
+    fn custom_serialization_consistency(#[strategy(arb())] address: ViewingAddress) {
         prop_assert_eq!(
             address,
-            SecretAddress::from_raw_bytes(&address.to_raw_bytes()).unwrap()
+            ViewingAddress::from_raw_bytes(&address.to_raw_bytes()).unwrap()
         );
     }
 
     #[proptest(cases = 10)]
-    fn bech32_consistency(#[strategy(arb())] address: SecretAddress) {
+    fn bech32_consistency(#[strategy(arb())] address: ViewingAddress) {
         let network = Network::Main;
         prop_assert_eq!(
             address,
-            SecretAddress::from_bech32m(&address.to_bech32m(network), network).unwrap()
+            ViewingAddress::from_bech32m(&address.to_bech32m(network), network).unwrap()
         );
     }
 
     #[test]
     fn encryption_roundtrip_unit() {
-        let address = SecretAddressKey::from_seed(Digest::default()).to_address();
+        let address = ViewingAddressKey::from_seed(Digest::default()).to_address();
 
         let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
         let encrypted_bfes = address.encrypt(&payload);
@@ -467,7 +470,7 @@ mod tests {
     #[proptest(cases = 10)]
     fn encryption_roundtrip_prop(
         #[strategy(arb())] payload: UtxoNotificationPayload,
-        #[strategy(arb())] address: SecretAddress,
+        #[strategy(arb())] address: ViewingAddress,
     ) {
         let encrypted_bfes = address.encrypt(&payload);
 
@@ -484,8 +487,8 @@ mod tests {
 
     #[test]
     fn decryption_fails_with_wrong_address() {
-        let alice_address = SecretAddressKey::from_seed(Digest::default()).to_address();
-        let bob_address = SecretAddressKey::from_seed(Digest::default().hash()).to_address();
+        let alice_address = ViewingAddressKey::from_seed(Digest::default()).to_address();
+        let bob_address = ViewingAddressKey::from_seed(Digest::default().hash()).to_address();
         let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
 
         // Bob's address is used to encrypt
