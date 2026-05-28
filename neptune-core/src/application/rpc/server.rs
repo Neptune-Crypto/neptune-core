@@ -4275,11 +4275,13 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        let timestamp = Timestamp::now();
+
         Ok(self
             .state
             .api()
             .tx_initiator()
-            .generate_tx_details(tx_inputs, tx_outputs, change_policy, fee)
+            .generate_tx_details(tx_inputs, tx_outputs, change_policy, fee, timestamp)
             .await?)
     }
 

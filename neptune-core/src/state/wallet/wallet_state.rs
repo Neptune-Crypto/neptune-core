@@ -78,7 +78,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-const CHANGE_KEY_TYPE: KeyType = KeyType::Symmetric;
+const CHANGE_KEY_TYPE: KeyType = KeyType::ViewingAddress;
 
 #[cfg(windows)]
 const LINE_ENDING: &str = "\r\n";
@@ -1933,10 +1933,10 @@ impl WalletState {
         let guesser_fee_outputs = self.scan_for_guesser_fee_utxos(block);
 
         debug!(
-            "\nNum known generation keys: {};\n \
-              Num known symmetric keys:  {};\n \
-              Num known ec hybrid keys:  {};\n \
-              Num known viewing address keys:  {};\n \
+            "\nNum known generation keys: {};\n\
+              Num known symmetric keys: {};\n\
+              Num known ec hybrid keys: {};\n\
+              Num known viewing address keys: {};\n \
               ",
             self.known_generation_keys.len(),
             self.known_symmetric_keys.len(),
@@ -4736,11 +4736,16 @@ pub(crate) mod tests {
                 NUM_FUTURE_KEYS,
             ))]
             mut future_ech_relative_indices: Vec<usize>,
-            #[strategy(collection::vec(arb(), 3 * NUM_FUTURE_KEYS))] mut utxo_vec: Vec<Utxo>,
-            #[strategy(collection::vec(arb(), 3 * NUM_FUTURE_KEYS))] mut sender_randomness_vec: Vec<
+            #[strategy(collection::vec(
+                0_usize..100,
+                NUM_FUTURE_KEYS,
+            ))]
+            mut future_viewing_relative_indices: Vec<usize>,
+            #[strategy(collection::vec(arb(), 4 * NUM_FUTURE_KEYS))] mut utxo_vec: Vec<Utxo>,
+            #[strategy(collection::vec(arb(), 4 * NUM_FUTURE_KEYS))] mut sender_randomness_vec: Vec<
                 Digest,
             >,
-            #[strategy(collection::vec(any::<bool>(), 3 * NUM_FUTURE_KEYS))] mut select_vec: Vec<
+            #[strategy(collection::vec(any::<bool>(), 4 * NUM_FUTURE_KEYS))] mut select_vec: Vec<
                 bool,
             >,
         ) {
@@ -4758,7 +4763,8 @@ pub(crate) mod tests {
 
             let generation_counter = wallet_state.wallet_db.get_generation_key_counter();
             let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter();
-            let secret_counter = wallet_state.wallet_db.get_ec_hybrid_key_counter();
+            let ech_counter = wallet_state.wallet_db.get_ec_hybrid_key_counter();
+            let viewing_counter = wallet_state.wallet_db.get_viewing_address_key_counter();
 
             future_generation_relative_indices.sort();
             let future_generation_keys = future_generation_relative_indices
@@ -4791,13 +4797,26 @@ pub(crate) mod tests {
             future_ech_relative_indices.sort();
             let future_ech_keys = future_ech_relative_indices
                 .into_iter()
-                .map(|relative_index| (relative_index, secret_counter + relative_index as u64))
+                .map(|relative_index| (relative_index, ech_counter + relative_index as u64))
                 .map(|(relative_index, absolute_index)| {
                     (
                         KeyType::EcHybrid,
                         relative_index,
                         absolute_index,
                         SpendingKey::from(wallet_secret.nth_ec_hybrid_key(absolute_index)),
+                    )
+                })
+                .collect_vec();
+            future_viewing_relative_indices.sort();
+            let future_viewing_keys = future_viewing_relative_indices
+                .into_iter()
+                .map(|relative_index| (relative_index, viewing_counter + relative_index as u64))
+                .map(|(relative_index, absolute_index)| {
+                    (
+                        KeyType::ViewingAddress,
+                        relative_index,
+                        absolute_index,
+                        SpendingKey::from(wallet_secret.nth_viewing_address_key(absolute_index)),
                     )
                 })
                 .collect_vec();
@@ -4817,6 +4836,7 @@ pub(crate) mod tests {
                 .into_iter()
                 .chain(future_symmetric_keys)
                 .chain(future_ech_keys)
+                .chain(future_viewing_keys)
             {
                 let utxo = utxo_vec.pop().unwrap();
                 let sender_randomness = sender_randomness_vec.pop().unwrap();

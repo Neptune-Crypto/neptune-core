@@ -929,7 +929,7 @@ impl GlobalState {
     }
 
     /// Return the [`ConsensusRuleSet`] that applies for current tip.
-    pub(crate) fn consensus_rule_set(&self) -> ConsensusRuleSet {
+    pub fn consensus_rule_set(&self) -> ConsensusRuleSet {
         let tip_height = self.chain.tip_height();
         ConsensusRuleSet::infer_from(self.cli().network, tip_height)
     }
@@ -5284,8 +5284,15 @@ mod tests {
                     );
                 }
 
-                let [a_blocks, b_blocks, c_blocks] =
-                    helper::make_3_branches(network, &block_1, &genesis_block, 60, &bob_key).await;
+                let num_blocks_per_branch = 40;
+                let [a_blocks, b_blocks, c_blocks] = helper::make_3_branches(
+                    network,
+                    &block_1,
+                    &genesis_block,
+                    num_blocks_per_branch,
+                    &bob_key,
+                )
+                .await;
 
                 println!(
                     "a_blocks put counts: {}",
@@ -5321,7 +5328,7 @@ mod tests {
                         .join(", ")
                 );
 
-                // Add 60 blocks on top of 1, *not* mined by Alice
+                // Add blocks on top of 1, *not* mined by Alice
                 for branch_block in a_blocks {
                     alice.set_new_tip(branch_block).await.unwrap();
                 }

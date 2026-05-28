@@ -469,7 +469,7 @@ pub struct Args {
     /// handy when the temp partition is too small or you want sync data to
     /// survive reboots. The directory is created if it doesn't exist.
     #[clap(long, value_name = "DIR")]
-    pub(crate) sync_dir: Option<PathBuf>,
+    pub sync_dir: Option<PathBuf>,
 
     /// Multiaddrs (or IPs) of nodes to connect to, e.g.:
     /// ```text

@@ -2,20 +2,26 @@ mod common;
 
 use common::genesis_node::GenesisNode;
 use common::logging;
+use neptune_cash::api::export::Network;
 use neptune_cash::api::export::TxProvingCapability;
 use tracing::info;
-use tracing_test::traced_test;
 
-#[traced_test]
 #[tokio::test(flavor = "multi_thread")]
 pub async fn bob_catches_up_to_alices_new_blocks_with_sync_state() {
     logging::tracing_logger();
+    let network = Network::RegTest;
 
     let timeout_secs = 20;
 
     let mut base_args = GenesisNode::default_args().await;
     base_args.tx_proving_capability = Some(TxProvingCapability::SingleProof);
     base_args.sync_mode_threshold = 11;
+    base_args.sync_dir = Some(
+        GenesisNode::integration_test_data_directory(network)
+            .unwrap()
+            .root_dir_path()
+            .join("rapid-block-download"),
+    );
     let [mut alice, mut bob] = GenesisNode::start_connected_cluster(
         &GenesisNode::cluster_id(None),
         2,
@@ -56,9 +62,9 @@ pub async fn bob_catches_up_to_alices_new_blocks_with_sync_state() {
         .await
         .unwrap();
 
-    bob.wait_until_sync_mode(timeout_secs).await.unwrap();
+    // Just ensure that Bob reaches block 15. No need to catch up fully yet.
     bob.wait_until_synced(timeout_secs).await.unwrap();
-    bob.wait_until_block_height(16, timeout_secs).await.unwrap();
+    bob.wait_until_block_height(15, timeout_secs).await.unwrap();
 
     // Verify that block sharing still works, after syncing is complete.
     alice

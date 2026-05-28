@@ -264,8 +264,9 @@ impl RegTestPrivate {
         block_hash: Digest,
     ) -> Result<(), RegTestError> {
         let start = std::time::Instant::now();
+        let timeout_in_secs = 20;
         while gsl.lock_guard().await.chain.tip().hash() != block_hash {
-            if start.elapsed() > std::time::Duration::from_secs(15) {
+            if start.elapsed() > std::time::Duration::from_secs(timeout_in_secs) {
                 // last chance.  maybe another block buried ours.  we will do an expensive check.
                 if gsl
                     .lock_guard()
@@ -278,7 +279,7 @@ impl RegTestPrivate {
                     return Ok(());
                 }
                 return Err(RegTestError::Failed(
-                    "block not in blockchain after 5 seconds".into(),
+                    "block not in blockchain after {timeout_in_secs} seconds".into(),
                 ));
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;

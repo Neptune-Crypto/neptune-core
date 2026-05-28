@@ -361,7 +361,7 @@ mod tests {
             .unwrap();
 
         let key_counter_prior = client
-            .derivation_index(KeyType::Symmetric)
+            .derivation_index(KeyType::ViewingAddress)
             .await
             .unwrap()
             .derivation_index;
@@ -406,7 +406,7 @@ mod tests {
         assert_eq!(
             key_counter_prior + 1,
             client
-                .derivation_index(KeyType::Symmetric)
+                .derivation_index(KeyType::ViewingAddress)
                 .await
                 .unwrap()
                 .derivation_index,

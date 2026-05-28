@@ -122,19 +122,20 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
         }
     }
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
     assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
 
-    let tip = alice.gsl.lock_guard().await.chain.tip().to_owned();
+    alice
+        .wait_until_block_height(expected_new_height, timeout_secs)
+        .await
+        .unwrap();
 
+    let tip = alice.gsl.lock_guard().await.chain.tip().to_owned();
     assert_eq!(
         BlockHeight::from(expected_new_height),
         tip.header().height,
         "Expected block height: {expected_new_height}",
     );
 
-    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
     let tip_msa = tip.mutator_set_accumulator_after().unwrap();
     let tx_upgrade_timeout_secs = 30;
     alice

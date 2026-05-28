@@ -32,6 +32,8 @@ pub const NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION: usize = 10;
 impl TransactionInitiator {
     /// Initiate a transaction that spends a batch of UTXOs to the node's own
     /// wallet, thereby reducing the total number of UTXOs under management.
+    ///
+    /// Returns the number of inputs consumed by the consolidating transaction.
     pub async fn consolidate(
         &mut self,
         max_num_inputs: usize,
@@ -90,7 +92,12 @@ impl TransactionInitiator {
             None => {
                 let mut state = self.global_state_lock.lock_guard_mut().await;
 
-                state.wallet_state.next_unused_symmetric_key().await.into()
+                state
+                    .wallet_state
+                    .next_unused_viewing_address_key()
+                    .await
+                    .to_address()
+                    .into()
             }
         };
 
@@ -117,7 +124,13 @@ impl TransactionInitiator {
             .await;
 
         let tx_details = self
-            .generate_tx_details(unlocked_inputs, outputs, ChangePolicy::ExactChange, fee)
+            .generate_tx_details(
+                unlocked_inputs,
+                outputs,
+                ChangePolicy::ExactChange,
+                fee,
+                timestamp,
+            )
             .await?;
 
         if tx_details.contains_lustrations() && !accept_lustrations {

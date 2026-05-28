@@ -5,13 +5,17 @@ use common::logging;
 use itertools::Itertools;
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::NativeCurrencyAmount;
+use neptune_cash::api::export::Network;
+use neptune_cash::api::export::ReceivingAddress;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::TransactionProofType;
 use neptune_cash::api::tx_initiation::consolidate::CONSOLIDATION_FEE_SP;
 use neptune_cash::api::tx_initiation::consolidate::NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION;
+use neptune_cash::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
+use neptune_cash::state::wallet::address::viewing_address::ViewingAddressKey;
 use num_traits::ops::checked::CheckedSub;
 use num_traits::Zero;
-use tracing_test::traced_test;
+use tasm_lib::twenty_first::tip5::Digest;
 
 /// Return a connected cluster where the Alice node has mining rewards.
 ///
@@ -64,7 +68,6 @@ async fn wallet_with_mining_rewards(num_blocks: u32, test_id: u8) -> (GenesisNod
 ///  6. Bob verifies the unconfirmed balance matches consolidation amount.
 ///
 #[tokio::test(flavor = "multi_thread")]
-#[traced_test]
 pub async fn consolidation_basic() {
     logging::tracing_logger();
     let timeout_secs = 5;
@@ -215,7 +218,6 @@ pub async fn consolidation_basic() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[traced_test]
 pub async fn consolidation_tx_with_lustration() {
     // Verify that consolidation transactions are correctly lustrated, and that
     // peers accept lustrated transactions into their mempools.
@@ -333,7 +335,95 @@ pub async fn consolidation_tx_with_lustration() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[traced_test]
+pub async fn can_spend_consolidated_utxos() {
+    logging::tracing_logger();
+    let timeout_secs = 10;
+    let network = Network::RegTest;
+
+    let num_blocks_mined = 3 + NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION as u32;
+    let (mut alice, _) = wallet_with_mining_rewards(num_blocks_mined, 3).await;
+
+    let balance_before = alice.gsl.api().wallet().balances(Timestamp::now()).await;
+    tracing::info!("Alice's balances before consolidation:\n{}", balance_before);
+
+    assert_eq!(
+        alice.gsl.lock_guard().await.chain.tip().header().height,
+        u64::from(num_blocks_mined).into()
+    );
+
+    let accept_lustrations = true;
+    let max_num_inputs = 3 * 4;
+    let num_consolidations = alice
+        .gsl
+        .api_mut()
+        .tx_initiator_mut()
+        .consolidate(
+            max_num_inputs,
+            None,
+            Timestamp::now() + Timestamp::months(37),
+            accept_lustrations,
+        )
+        .await
+        .unwrap();
+    assert_eq!(max_num_inputs, num_consolidations);
+
+    alice
+        .wait_until_n_txs_in_mempool(1, TransactionProofType::SingleProof, timeout_secs)
+        .await
+        .unwrap();
+
+    let include_mempool_txs = true;
+    alice
+        .gsl
+        .api_mut()
+        .regtest_mut()
+        .mine_blocks_to_wallet(1, include_mempool_txs)
+        .await
+        .unwrap();
+
+    let num_blocks_mined = 14;
+    alice
+        .wait_until_block_height(num_blocks_mined, timeout_secs)
+        .await
+        .unwrap();
+
+    let balance_after = alice.gsl.api().wallet().balances(Timestamp::now()).await;
+    tracing::info!("Alice's balances after consolidation:\n{}", balance_after);
+
+    // Everything, including transaction fee must go to Alice since she mined
+    // the transaction.
+    assert_eq!(
+        balance_before.confirmed_total + INITIAL_BLOCK_SUBSIDY,
+        balance_after.confirmed_total
+    );
+
+    let an_address: ReceivingAddress = ViewingAddressKey::from_seed(Digest::default())
+        .to_address()
+        .into();
+
+    // Create a transaction spending *all* UTXOs, including timelocked,
+    // by giving it a far future timestamp.
+    // Verify that this transaction is valid.
+    let tx_artifacts = alice
+        .gsl
+        .api_mut()
+        .tx_sender_mut()
+        .send(
+            vec![(an_address, balance_after.confirmed_total)],
+            Default::default(),
+            NativeCurrencyAmount::zero(),
+            Timestamp::now() + Timestamp::months(77),
+            accept_lustrations,
+        )
+        .await
+        .unwrap();
+    let consensus_rule_set = alice.gsl.lock_guard().await.consensus_rule_set();
+    assert!(tx_artifacts.is_valid(network, consensus_rule_set).await);
+
+    tracing::info!("tx sent! {}", tx_artifacts);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 pub async fn merge_consolidation_txs() {
     // check the the proof upgrading automatically merges two consolidation
     // transactions into one.
