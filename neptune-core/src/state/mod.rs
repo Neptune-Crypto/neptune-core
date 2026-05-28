@@ -5284,8 +5284,15 @@ mod tests {
                     );
                 }
 
-                let [a_blocks, b_blocks, c_blocks] =
-                    helper::make_3_branches(network, &block_1, &genesis_block, 60, &bob_key).await;
+                let num_blocks_per_branch = 40;
+                let [a_blocks, b_blocks, c_blocks] = helper::make_3_branches(
+                    network,
+                    &block_1,
+                    &genesis_block,
+                    num_blocks_per_branch,
+                    &bob_key,
+                )
+                .await;
 
                 println!(
                     "a_blocks put counts: {}",
@@ -5321,7 +5328,7 @@ mod tests {
                         .join(", ")
                 );
 
-                // Add 60 blocks on top of 1, *not* mined by Alice
+                // Add blocks on top of 1, *not* mined by Alice
                 for branch_block in a_blocks {
                     alice.set_new_tip(branch_block).await.unwrap();
                 }

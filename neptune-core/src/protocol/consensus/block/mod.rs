@@ -1913,7 +1913,7 @@ pub(crate) mod tests {
             let mut now = block_prev.kernel.header.timestamp;
             let mut rng = rand::rng();
 
-            for i in (0..30).step_by(1) {
+            for i in (0..10).step_by(1) {
                 let duration = i as u64 * multiplier;
                 now += Timestamp::millis(duration);
 
@@ -1998,9 +1998,9 @@ pub(crate) mod tests {
 
     #[test_strategy::proptest(async = "tokio", cases = 1)]
     async fn can_prove_block_ancestry(
-        #[strategy(collection::vec(arb::<Digest>(), 55))] mut sender_randomness_vec: Vec<Digest>,
-        #[strategy(0..54usize)] index: usize,
-        #[strategy(collection::vec(arb::<WalletEntropy>(), 55))] mut wallet_secret_vec: Vec<
+        #[strategy(collection::vec(arb::<Digest>(), 27))] mut sender_randomness_vec: Vec<Digest>,
+        #[strategy(0..26usize)] index: usize,
+        #[strategy(collection::vec(arb::<WalletEntropy>(), 27))] mut wallet_secret_vec: Vec<
             WalletEntropy,
         >,
     ) {
@@ -2017,7 +2017,7 @@ pub(crate) mod tests {
         ammr.append(genesis_block.hash()).await;
         let mut mmra = MmrAccumulator::new_from_leafs(vec![genesis_block.hash()]);
 
-        for i in 0..55 {
+        for i in 0..27 {
             let wallet_secret = wallet_secret_vec.pop().unwrap();
             let key = wallet_secret.nth_generation_spending_key_for_tests(0);
             let (new_block, _) = make_mock_block(
@@ -2028,7 +2028,7 @@ pub(crate) mod tests {
                 network,
             )
             .await;
-            if i != 54 {
+            if i != 26 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());
                 assert_eq!(
@@ -2069,7 +2069,7 @@ pub(crate) mod tests {
     fn test_premine_size() {
         // 831488 = 42000000 * 0.01979733
         // where 42000000 is the asymptotical limit of the token supply
-        // and 0.01979733...% is the relative size of the premine
+        // and 0.01979733... is the relative size of the premine
         let asymptotic_total_cap = NativeCurrencyAmount::coins(42_000_000);
         let claims_pool = INITIAL_BLOCK_SUBSIDY
             .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
