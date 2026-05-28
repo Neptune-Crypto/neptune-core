@@ -4807,6 +4807,7 @@ pub(crate) mod tests {
                     )
                 })
                 .collect_vec();
+            future_viewing_relative_indices.sort();
             let future_viewing_keys = future_viewing_relative_indices
                 .into_iter()
                 .map(|relative_index| (relative_index, viewing_counter + relative_index as u64))

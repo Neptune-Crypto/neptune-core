@@ -341,7 +341,7 @@ pub async fn can_spend_consolidated_utxos() {
     let network = Network::RegTest;
 
     let num_blocks_mined = 3 + NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION as u32;
-    let (mut alice, _) = wallet_with_mining_rewards(num_blocks_mined, 0).await;
+    let (mut alice, _) = wallet_with_mining_rewards(num_blocks_mined, 3).await;
 
     let balance_before = alice.gsl.api().wallet().balances(Timestamp::now()).await;
     tracing::info!("Alice's balances before consolidation:\n{}", balance_before);
