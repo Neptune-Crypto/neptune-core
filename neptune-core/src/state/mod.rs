@@ -929,7 +929,7 @@ impl GlobalState {
     }
 
     /// Return the [`ConsensusRuleSet`] that applies for current tip.
-    pub(crate) fn consensus_rule_set(&self) -> ConsensusRuleSet {
+    pub fn consensus_rule_set(&self) -> ConsensusRuleSet {
         let tip_height = self.chain.tip_height();
         ConsensusRuleSet::infer_from(self.cli().network, tip_height)
     }

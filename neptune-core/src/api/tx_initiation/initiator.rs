@@ -117,9 +117,10 @@ impl TransactionInitiator {
         outputs: TxOutputList,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
     ) -> Result<TransactionDetails, error::CreateTxError> {
         TransactionDetailsBuilder::new()
-            .timestamp(Timestamp::now())
+            .timestamp(timestamp)
             .inputs(inputs)
             .outputs(outputs)
             .fee(fee)

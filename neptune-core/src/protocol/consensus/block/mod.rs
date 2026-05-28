@@ -104,7 +104,7 @@ pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS: usize = 1 << 14;
 /// is time locked for this period.
 pub(crate) const MINING_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
 
-pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(128);
+pub const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(128);
 
 /// Blocks with timestamps too far into the future are invalid. Reject blocks
 /// whose timestamp exceeds now with this value or more.
