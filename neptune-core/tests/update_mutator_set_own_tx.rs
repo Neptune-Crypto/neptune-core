@@ -113,6 +113,11 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
             num_new_blocks,
             peer: mut bob,
         } => {
+            // Bob must have synced Alice's two blocks before he starts mining,
+            // so that he composes on top of the shared tip.
+            bob.wait_until_block_height(2u64, timeout_secs)
+                .await
+                .unwrap();
             bob.gsl
                 .api_mut()
                 .regtest_mut()
