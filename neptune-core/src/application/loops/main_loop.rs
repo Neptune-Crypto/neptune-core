@@ -2716,6 +2716,7 @@ mod tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
+                .wallet_entropy
                 .nth_spending_key(KeyType::Generation, 1);
             let third_party_address: ReceivingAddress =
                 GenerationReceivingAddress::derive_from_seed(Digest::default()).into();

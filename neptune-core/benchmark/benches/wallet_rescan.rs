@@ -38,6 +38,7 @@ mod rescan {
         let genesis = Block::genesis(network);
         let own_address = global_state
             .wallet_state
+            .wallet_entropy
             .nth_spending_key(KeyType::Generation, 102)
             .to_address();
 

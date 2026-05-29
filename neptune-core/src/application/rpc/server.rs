@@ -2411,6 +2411,7 @@ impl RPC for NeptuneRPCServer {
 
         Ok(state
             .wallet_state
+            .wallet_entropy
             .nth_spending_key(key_type, index)
             .to_address())
     }
@@ -3406,6 +3407,7 @@ impl RPC for NeptuneRPCServer {
                 .lock_guard()
                 .await
                 .wallet_state
+                .wallet_entropy
                 .nth_spending_key(key_type, derivation_index)]
         } else {
             self.state
