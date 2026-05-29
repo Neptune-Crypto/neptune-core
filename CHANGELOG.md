@@ -1,3 +1,58 @@
+## [0.11.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.10.2..v0.11.0) - 2026-05-29
+
+### ✨ Features
+
+- *(BlockBody)* Get number of AOCL leafs prior to block ([49c4f213](https://github.com/Neptune-Crypto/neptune-core/commit/49c4f213))
+- Recover inconsistent ArchivalState on startup ([346953c3](https://github.com/Neptune-Crypto/neptune-core/commit/346953c3))
+- Add viewing address ([77b0dd5c](https://github.com/Neptune-Crypto/neptune-core/commit/77b0dd5c))
+- Add elliptic curve hybrid address
+
+### 🐛 Bug Fixes
+
+- Restore use of `outgoing_randomness.dat` ([85f16944](https://github.com/Neptune-Crypto/neptune-core/commit/85f16944))
+- *(json_rpc)* Ensure address type as str matches key type ([0c55b52a](https://github.com/Neptune-Crypto/neptune-core/commit/0c55b52a))
+- Ensure no crash in address decoding ([278cce60](https://github.com/Neptune-Crypto/neptune-core/commit/278cce60))
+
+### 📚 Documentation
+
+- Encourage regression tests ([1613198d](https://github.com/Neptune-Crypto/neptune-core/commit/1613198d))
+- PR feedback on documentation of new address formats ([080e3bb6](https://github.com/Neptune-Crypto/neptune-core/commit/080e3bb6))
+
+### ♻️ Refactor
+
+- Add lustration status to BlockInfo ([8a730f3b](https://github.com/Neptune-Crypto/neptune-core/commit/8a730f3b))
+- Use viewing addresses for change and consolidation outputs ([d7098b33](https://github.com/Neptune-Crypto/neptune-core/commit/d7098b33))
+
+### ✅ Testing
+
+- Expand on idempotency-related tests for `set_new_tip` ([79195a97](https://github.com/Neptune-Crypto/neptune-core/commit/79195a97))
+- Integration test of sync mode ([c8ecf552](https://github.com/Neptune-Crypto/neptune-core/commit/c8ecf552))
+- Expand on integration test for sync mode ([1909da79](https://github.com/Neptune-Crypto/neptune-core/commit/1909da79))
+- Verify that bech32 encoding of address doesn't change ([b9fc17d9](https://github.com/Neptune-Crypto/neptune-core/commit/b9fc17d9))
+- Verify spends from all address types ([50b1f8ae](https://github.com/Neptune-Crypto/neptune-core/commit/50b1f8ae))
+- Verify encryption and address derivation doesn't change ([46455a63](https://github.com/Neptune-Crypto/neptune-core/commit/46455a63))
+- Verify `generate_address` adds key to known keys ([8d1841a4](https://github.com/Neptune-Crypto/neptune-core/commit/8d1841a4))
+- Verify all keys/addresses are unique across key types ([dd8edd19](https://github.com/Neptune-Crypto/neptune-core/commit/dd8edd19))
+- Speed up some slow tests ([76647f0a](https://github.com/Neptune-Crypto/neptune-core/commit/76647f0a))
+
+### ⚙️ Miscellaneous
+
+- Run flaky tests sequentially ([e7d47000](https://github.com/Neptune-Crypto/neptune-core/commit/e7d47000))
+- Cargo update ([a862b1c3](https://github.com/Neptune-Crypto/neptune-core/commit/a862b1c3))
+- Fix some flaky tests ([7cffb73d](https://github.com/Neptune-Crypto/neptune-core/commit/7cffb73d))
+- Fix one more flaky test ([a69d30f1](https://github.com/Neptune-Crypto/neptune-core/commit/a69d30f1))
+- Delete deprecated proptest failure seeds ([f7bfdba5](https://github.com/Neptune-Crypto/neptune-core/commit/f7bfdba5))
+- Cargo update ([cba4c9e8](https://github.com/Neptune-Crypto/neptune-core/commit/cba4c9e8))
+- Update release workflow files ([f18b4f7b](https://github.com/Neptune-Crypto/neptune-core/commit/f18b4f7b))
+- Upgrade to tasm-lib 3.0.0 ([64e1aeda](https://github.com/Neptune-Crypto/neptune-core/commit/64e1aeda))
+- Lowered default sync mode threshold from 1000 to 100 ([8febfb12](https://github.com/Neptune-Crypto/neptune-core/commit/8febfb12))
+
+### 🪢 Merge
+
+- Merge([#916](https://github.com/Neptune-Crypto/neptune-core/issues/916)): Neptune-Crypto/thv/private-addresses ([e265920c](https://github.com/Neptune-Crypto/neptune-core/commit/e265920c))
+- Merge([#930](https://github.com/Neptune-Crypto/neptune-core/issues/930)): Neptune-Crypto/thv/deprecate-symmetric-addresses ([deb6e68e](https://github.com/Neptune-Crypto/neptune-core/commit/deb6e68e))
+
+
 ## [0.10.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.10.1..vX.Y.Z) - 2026-05-05
 
 ### ✨ Features
