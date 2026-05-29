@@ -759,14 +759,13 @@ mod tests {
             .await;
         let address_gen = spending_key_gen.to_address();
 
-        // obtain next unused symmetric address from our wallet.
-        let spending_key_sym = global_state_lock
+        let spending_key_view = global_state_lock
             .lock_guard_mut()
             .await
             .wallet_state
-            .next_unused_spending_key(KeyType::Symmetric)
+            .next_unused_spending_key(KeyType::ViewingAddress)
             .await;
-        let address_sym = spending_key_sym.to_address();
+        let address_view = spending_key_view.to_address();
 
         let state = global_state_lock.lock_guard().await;
         let block_height = state.chain.tip().header().height;
@@ -775,7 +774,7 @@ mod tests {
 
         for (owned_utxo_notification_medium, address) in [
             (UtxoNotificationMedium::OffChain, address_gen.clone()),
-            (UtxoNotificationMedium::OnChain, address_sym.clone()),
+            (UtxoNotificationMedium::OnChain, address_view.clone()),
         ] {
             let utxo = Utxo::new_native_currency(address.lock_script_hash(), amount);
             let sender_randomness = state
@@ -788,7 +787,7 @@ mod tests {
                 address.clone(),
                 amount,
                 sender_randomness,
-                owned_utxo_notification_medium, // how to notify of utxos sent to myself
+                owned_utxo_notification_medium,
                 UtxoNotificationMedium::OnChain,
             );
 

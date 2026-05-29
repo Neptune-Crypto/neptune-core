@@ -4853,16 +4853,14 @@ mod tests {
         let _ = rpc_server.clone().own_instance_id(ctx, token).await;
         let _ = rpc_server.clone().block_height(ctx, token).await;
         let _ = rpc_server.clone().best_proposal(ctx, token).await;
-        let _ = rpc_server
-            .clone()
-            .latest_address(ctx, token, KeyType::Generation)
-            .await
-            .unwrap();
-        let _ = rpc_server
-            .clone()
-            .latest_address(ctx, token, KeyType::Symmetric)
-            .await
-            .unwrap();
+
+        for key_type in KeyType::iter() {
+            let _ = rpc_server
+                .clone()
+                .latest_address(ctx, token, key_type)
+                .await
+                .unwrap();
+        }
         let _ = rpc_server.clone().peer_info(ctx, token).await;
         let _ = rpc_server
             .clone()
@@ -6671,7 +6669,7 @@ mod tests {
                             token,
                             pay_to_bob_outputs,
                             ChangePolicy::recover_to_next_unused_key(
-                                KeyType::Symmetric,
+                                KeyType::ViewingAddress,
                                 UtxoNotificationMedium::OffChain,
                             ),
                             fee,
@@ -6818,6 +6816,14 @@ mod tests {
                     .clone()
                     .next_receiving_address(context::current(), bob_token, KeyType::Symmetric)
                     .await?;
+                let bob_view_addr = bob
+                    .clone()
+                    .next_receiving_address(context::current(), bob_token, KeyType::ViewingAddress)
+                    .await?;
+                let bob_ech_addr = bob
+                    .clone()
+                    .next_receiving_address(context::current(), bob_token, KeyType::EcHybrid)
+                    .await?;
 
                 let pay_to_self_outputs: Vec<OutputFormat> = [
                     (
@@ -6828,6 +6834,16 @@ mod tests {
                     (
                         bob_sym_addr,
                         NativeCurrencyAmount::coins(6),
+                        UtxoNotificationMedium::OffChain,
+                    ),
+                    (
+                        bob_view_addr,
+                        NativeCurrencyAmount::coins(1),
+                        UtxoNotificationMedium::OffChain,
+                    ),
+                    (
+                        bob_ech_addr,
+                        NativeCurrencyAmount::coins(2),
                         UtxoNotificationMedium::OffChain,
                     ),
                 ]
@@ -6844,7 +6860,7 @@ mod tests {
                         bob_token,
                         pay_to_self_outputs.clone(),
                         ChangePolicy::recover_to_next_unused_key(
-                            KeyType::Symmetric,
+                            KeyType::ViewingAddress,
                             UtxoNotificationMedium::OffChain,
                         ),
                         fee,
@@ -6913,8 +6929,10 @@ mod tests {
                         NativeCurrencyAmount::coins(64), // illiquid composer reward, block 1
                         NativeCurrencyAmount::coins(5),  // claimed via generation addr
                         NativeCurrencyAmount::coins(6),  // claimed via symmetric addr
-                        // 51 = (64 - 5 - 6 - 2 (fee))
-                        NativeCurrencyAmount::coins(51) // change (symmetric addr)
+                        NativeCurrencyAmount::coins(1),  // claimed via viewing addr
+                        NativeCurrencyAmount::coins(2),  // claimed via ech addr
+                        // 51 = (64 - 5 - 6 - 2 - 1 - 2 (fee))
+                        NativeCurrencyAmount::coins(48) // change (symmetric addr)
                     ],
                     bob.state
                         .lock_guard()
@@ -6954,7 +6972,9 @@ mod tests {
                     // -64 composer liquid spent
                     // +5 self-send via Generation
                     // +6 self-send via Symmetric
-                    // +51   change (less fee == 2)
+                    // +2 self-send via viewing key
+                    // +1 self-send via EC hybrid
+                    // +48   change (less fee == 2)
                     assert_eq!(
                         NativeCurrencyAmount::coins(62),
                         bob.confirmed_available_balance(context::current(), bob_token)
@@ -7245,7 +7265,7 @@ mod tests {
                         token,
                         outputs,
                         ChangePolicy::recover_to_next_unused_key(
-                            KeyType::Symmetric,
+                            KeyType::ViewingAddress,
                             UtxoNotificationMedium::OffChain,
                         ),
                         fee,

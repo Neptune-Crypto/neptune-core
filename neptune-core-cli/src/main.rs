@@ -879,7 +879,7 @@ async fn main() -> Result<()> {
                         amount,
                         notify_other,
                     )],
-                    ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, notify_self),
+                    ChangePolicy::recover_to_next_unused_key(KeyType::ViewingAddress, notify_self),
                     fee,
                     accept_lustrations,
                 )
@@ -941,7 +941,7 @@ async fn main() -> Result<()> {
                     token,
                     parsed_outputs,
                     ChangePolicy::recover_to_next_unused_key(
-                        KeyType::Symmetric,
+                        KeyType::ViewingAddress,
                         UtxoNotificationMedium::OnChain,
                     ),
                     fee,
@@ -996,7 +996,7 @@ async fn main() -> Result<()> {
                     token,
                     parsed_outputs,
                     ChangePolicy::recover_to_next_unused_key(
-                        KeyType::Symmetric,
+                        KeyType::ViewingAddress,
                         UtxoNotificationMedium::OnChain,
                     ),
                     fee,

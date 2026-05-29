@@ -336,7 +336,7 @@ pub(crate) mod tests {
 
     /// Send n outputs to the same address.
     ///
-    /// If no address is provided, the next symmetric address will be used.
+    /// If no address is provided, the next viewing address will be used.
     pub(crate) async fn tx_with_n_outputs(
         mut state: GlobalStateLock,
         num_outputs: usize,
@@ -350,7 +350,7 @@ pub(crate) mod tests {
             None => state
                 .api()
                 .wallet_mut()
-                .next_receiving_address(KeyType::Symmetric)
+                .next_receiving_address(KeyType::ViewingAddress)
                 .await
                 .unwrap(),
         };

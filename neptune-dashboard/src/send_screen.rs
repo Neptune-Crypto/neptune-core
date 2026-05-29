@@ -157,7 +157,7 @@ impl SendScreen {
                 token,
                 vec![OutputFormat::AddressAndAmount(valid_address, valid_amount)],
                 ChangePolicy::recover_to_next_unused_key(
-                    KeyType::Symmetric,
+                    KeyType::ViewingAddress,
                     UtxoNotificationMedium::OnChain,
                 ),
                 valid_fee,

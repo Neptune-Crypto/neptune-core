@@ -3114,7 +3114,7 @@ pub(super) mod tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .next_unused_spending_key(KeyType::Symmetric)
+            .next_unused_spending_key(KeyType::ViewingAddress)
             .await;
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key)

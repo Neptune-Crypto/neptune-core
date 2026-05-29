@@ -277,7 +277,7 @@ pub(crate) async fn send_coins(
         .inputs(unlocked_inputs)
         .outputs(outputs)
         .change_policy(ChangePolicy::RecoverToNextUnusedKey {
-            key_type: KeyType::Symmetric,
+            key_type: KeyType::ViewingAddress,
             medium: UtxoNotificationMedium::OnChain,
         })
         .timestamp(timestamp)

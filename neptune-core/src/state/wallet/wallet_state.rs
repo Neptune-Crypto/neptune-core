@@ -4518,7 +4518,7 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .nth_spending_key(KeyType::Symmetric, 0);
+                .nth_spending_key(KeyType::ViewingAddress, 0);
             let now =
                 genesis_block.header().timestamp + Timestamp::months(6) + Timestamp::minutes(5);
             let sender_randomness = rng().random();

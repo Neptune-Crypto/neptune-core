@@ -44,7 +44,7 @@ pub enum ChangePolicy {
 /// onchain utxo notifications.
 impl Default for ChangePolicy {
     fn default() -> Self {
-        Self::recover_to_next_unused_symmetric_key_onchain()
+        Self::recover_to_next_unused_viewing_key_onchain()
     }
 }
 
@@ -79,14 +79,16 @@ impl ChangePolicy {
         }
     }
 
-    /// instantiate `RecoverToNextUnusedKey` variant with symmetric key and onchain notification
-    pub fn recover_to_next_unused_symmetric_key_onchain() -> Self {
-        Self::recover_to_next_unused_key(KeyType::Symmetric, UtxoNotificationMedium::OnChain)
+    /// instantiate `RecoverToNextUnusedKey` variant with viewing key and
+    /// onchain notification.
+    pub fn recover_to_next_unused_viewing_key_onchain() -> Self {
+        Self::recover_to_next_unused_key(KeyType::ViewingAddress, UtxoNotificationMedium::OnChain)
     }
 
-    /// instantiate `RecoverToNextUnusedKey` variant with symmetric key and offchain notification
-    pub fn recover_to_next_unused_symmetric_key_offchain() -> Self {
-        Self::recover_to_next_unused_key(KeyType::Symmetric, UtxoNotificationMedium::OffChain)
+    /// instantiate `RecoverToNextUnusedKey` variant with viewing key and
+    /// offchain notification.
+    pub fn recover_to_next_unused_viewing_key_offchain() -> Self {
+        Self::recover_to_next_unused_key(KeyType::ViewingAddress, UtxoNotificationMedium::OffChain)
     }
 
     /// instantiate `RecoverToNextUnusedKey` variant

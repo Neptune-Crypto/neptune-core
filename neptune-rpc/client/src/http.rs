@@ -194,7 +194,7 @@ mod tests {
         )
         .await;
 
-        for key_type in [KeyType::Generation, KeyType::Symmetric] {
+        for key_type in KeyType::iter() {
             let old_index = client.derivation_index(key_type).await.unwrap();
             let _ = client.generate_address(key_type).await.unwrap();
             let new_index = client.derivation_index(key_type).await.unwrap();

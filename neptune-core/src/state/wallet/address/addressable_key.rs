@@ -385,6 +385,10 @@ mod tests {
         );
         assert_eq!(KeyType::Symmetric, KeyType::from_str("symmetric").unwrap());
         assert_eq!(KeyType::EcHybrid, KeyType::from_str("ec_hybrid").unwrap());
+        assert_eq!(
+            KeyType::ViewingAddress,
+            KeyType::from_str("viewing_address").unwrap()
+        );
     }
 
     #[test]
