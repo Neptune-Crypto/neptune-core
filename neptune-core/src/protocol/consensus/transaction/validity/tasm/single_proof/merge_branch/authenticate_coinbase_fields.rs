@@ -268,6 +268,7 @@ mod tests {
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithm;
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithmInitialState;
     use tasm_lib::traits::read_only_algorithm::ShadowedReadOnlyAlgorithm;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::prelude::Digest;
     use tasm_lib::triton_vm::prelude::Tip5;
@@ -484,7 +485,7 @@ mod tests {
             memory: &HashMap<BFieldElement, BFieldElement>,
             _nd_tokens: VecDeque<BFieldElement>,
             mut nd_digests: VecDeque<Digest>,
-        ) {
+        ) -> Result<(), RustShadowError> {
             let read_digest_from_memory = |alloc: StaticAllocation| {
                 let read_address = alloc.read_address();
                 Digest::new([
@@ -521,19 +522,30 @@ mod tests {
                     indexed_leafs: vec![(leaf_index as usize, leaf)],
                     authentication_structure,
                 };
-                assert!(merkle_auth_proof.verify(merkle_root));
+                if !merkle_auth_proof.verify(merkle_root) {
+                    return Err(RustShadowError::AssertionError(
+                        MerkleVerify::ROOT_MISMATCH_ERROR_ID,
+                    ));
+                }
+
+                Ok(())
             };
 
-            assert_coinbase_integrity(left_txk_mast_hash, &left_txk.coinbase);
-            assert_coinbase_integrity(right_txk_mast_hash, &right_txk.coinbase);
-            assert_coinbase_integrity(new_txk_mast_hash, &new_txk.coinbase);
+            assert_coinbase_integrity(left_txk_mast_hash, &left_txk.coinbase)?;
+            assert_coinbase_integrity(right_txk_mast_hash, &right_txk.coinbase)?;
+            assert_coinbase_integrity(new_txk_mast_hash, &new_txk.coinbase)?;
 
-            // Assert that right is not set
-            assert!(right_txk.coinbase.is_none());
+            if right_txk.coinbase.is_some() {
+                return Err(RustShadowError::AssertionError(RIGHT_INPUT_COINBASE_ERROR));
+            }
 
             let maybe_coinbase = &left_txk.coinbase;
 
-            assert_eq!(&new_txk.coinbase, maybe_coinbase);
+            if &new_txk.coinbase != maybe_coinbase {
+                return Err(RustShadowError::AssertionError(UNEQUAL_VALUE_ERROR));
+            }
+
+            Ok(())
         }
 
         fn pseudorandom_initial_state(

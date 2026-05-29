@@ -155,6 +155,7 @@ mod tests {
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
     use tasm_lib::InitVmState;
 
     use super::*;
@@ -191,7 +192,7 @@ mod tests {
             &self,
             stack: &mut Vec<BFieldElement>,
             memory: &mut std::collections::HashMap<BFieldElement, BFieldElement>,
-        ) {
+        ) -> Result<(), RustShadowError> {
             type CoinbaseAmount = Option<NativeCurrencyAmount>;
 
             let coinbase_ptr = stack.pop().unwrap();
@@ -215,11 +216,18 @@ mod tests {
 
             let coinbase_amount = coinbase.unwrap_or_else(NativeCurrencyAmount::zero);
 
-            assert!(!coinbase_amount.is_negative());
+            // assert!(!coinbase_amount.is_negative());
+            if coinbase_amount.is_negative() {
+                return Err(RustShadowError::AssertionError(
+                    Self::ILLEGAL_COINBASE_AMOUNT_ERROR,
+                ));
+            }
 
             for word in coinbase_amount.encode().into_iter().rev() {
                 stack.push(word)
             }
+
+            Ok(())
         }
 
         fn pseudorandom_initial_state(

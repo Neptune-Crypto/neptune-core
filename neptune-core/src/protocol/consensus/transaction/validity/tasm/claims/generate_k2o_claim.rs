@@ -136,6 +136,7 @@ mod tests {
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
 
     use super::*;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
@@ -152,7 +153,7 @@ mod tests {
             &self,
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
-        ) {
+        ) -> Result<(), RustShadowError> {
             // _ [txk_digest] garb0 garb1 *proof_collection
             let proof_collection_pointer = stack.pop().unwrap();
             let garb1 = stack.pop().unwrap();
@@ -186,6 +187,8 @@ mod tests {
             stack.push(garb1);
             stack.push(proof_collection_pointer);
             stack.push(claim_pointer);
+
+            Ok(())
         }
 
         fn pseudorandom_initial_state(

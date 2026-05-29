@@ -76,6 +76,7 @@ mod tests {
     use tasm_lib::traits::algorithm::AlgorithmInitialState;
     use tasm_lib::traits::algorithm::ShadowedAlgorithm;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
     use tasm_lib::triton_vm::proof::Claim;
 
     use super::*;
@@ -88,7 +89,7 @@ mod tests {
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
             _: &NonDeterminism,
-        ) {
+        ) -> Result<(), RustShadowError> {
             fn pop_digest(stack: &mut Vec<BFieldElement>) -> Digest {
                 Digest::new([
                     stack.pop().unwrap(),
@@ -119,6 +120,8 @@ mod tests {
                 single_proof_digest_location_isolated_run,
                 &single_proof_digest,
             );
+
+            Ok(())
         }
 
         fn pseudorandom_initial_state(

@@ -90,6 +90,7 @@ mod tests {
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithmInitialState;
     use tasm_lib::traits::read_only_algorithm::ShadowedReadOnlyAlgorithm;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
     use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
 
     use super::*;
@@ -135,7 +136,7 @@ mod tests {
             memory: &std::collections::HashMap<BFieldElement, BFieldElement>,
             _nd_tokens: std::collections::VecDeque<BFieldElement>,
             nd_digests: std::collections::VecDeque<Digest>,
-        ) {
+        ) -> Result<(), RustShadowError> {
             let _inputs_size = stack.pop().unwrap();
             let inputs_ptr = stack.pop().unwrap();
             let txk_digest = Digest::new([
@@ -156,7 +157,14 @@ mod tests {
                 indexed_leafs: vec![(TransactionKernelField::Inputs as usize, inputs_digest)],
                 authentication_structure: auth_path,
             };
-            assert!(mt_proof.verify(txk_digest));
+
+            if mt_proof.verify(txk_digest) {
+                Ok(())
+            } else {
+                Err(RustShadowError::VectorAssertionError(
+                    MerkleVerify::ROOT_MISMATCH_ERROR_ID,
+                ))
+            }
         }
 
         fn pseudorandom_initial_state(

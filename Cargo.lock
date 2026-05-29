@@ -5635,9 +5635,9 @@ dependencies = [
 
 [[package]]
 name = "tasm-lib"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9a5e07729ad666308a0ff4f88b6648a3a614a75e765a56cc114596b46830aba"
+checksum = "8ad81ba67623d9c739a1dfeed5f30bc23940547694e1663cc632b608d9cd47a0"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -5653,13 +5653,14 @@ dependencies = [
  "strum",
  "tasm-object-derive",
  "triton-vm",
+ "web-time",
 ]
 
 [[package]]
 name = "tasm-object-derive"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "197db2fc81afe909fbf22253b735c97ba61104973da4cc33f47c96f7c32609de"
+checksum = "5ce340ed33f1b8e870fad8e722a4e7743d196ab71c44aa4458b2a6bfba204e37"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6240,9 +6241,9 @@ dependencies = [
 
 [[package]]
 name = "triton-air"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3f4b7234e1f2d3f007de5091aa6777e665884ba2fd8bd24b8906c333b6f2b0d"
+checksum = "80e6cb58505a957367eab288c2d1c9357963b65d244c3868a518a7ffcdb6fe40"
 dependencies = [
  "arbitrary",
  "itertools",
@@ -6254,9 +6255,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-builder"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6be25fa09d751632643b05a81e573aa64ffa6cd290f55bcdf4cbd5bca88191e1"
+checksum = "13821f7d62aa84342a1bd2228b654f17b43a09e2e5feb27d3949c3398e842564"
 dependencies = [
  "itertools",
  "prettyplease",
@@ -6272,9 +6273,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-circuit"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "738e4be633fcef23e45d78a927163746fa72088e21b11cef669c85be7938b313"
+checksum = "f25b8d4522c9c763790315757349bc95c3ba01d3601da7ca1b967f962527de49"
 dependencies = [
  "arbitrary",
  "itertools",
@@ -6287,9 +6288,9 @@ dependencies = [
 
 [[package]]
 name = "triton-isa"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9b2dba9112d21ecefe8a0a64719221f50bffd585a21e6f2cbe3361e6adaf76c"
+checksum = "451e6fd5114efad0ce516b0fb238e08e69316da7710cf9c93242b0da8522c5a2"
 dependencies = [
  "arbitrary",
  "get-size2",
@@ -6306,9 +6307,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59233747518b17f9a4dcda7e176dc446e148fc760bdb864e2bd8934582ccde59"
+checksum = "ee696faa7d4b3ece4bda435894f416bbcbf097285fa301b1b47a0cf003c1a8e4"
 dependencies = [
  "arbitrary",
  "colored 3.1.1",
@@ -6333,6 +6334,7 @@ dependencies = [
  "triton-isa",
  "twenty-first",
  "unicode-width 0.2.2",
+ "web-time",
 ]
 
 [[package]]

@@ -121,6 +121,7 @@ mod tests {
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
 
     use super::*;
 
@@ -129,7 +130,7 @@ mod tests {
             &self,
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
-        ) {
+        ) -> Result<(), RustShadowError> {
             let output_len = stack.pop().unwrap().value() as usize;
             let input_len = stack.pop().unwrap().value() as usize;
 
@@ -177,6 +178,8 @@ mod tests {
                 .with_input(bfe_vec![0; input_len])
                 .with_output(bfe_vec![0; output_len]);
             assert_eq!(empty_claim, the_new_claim);
+
+            Ok(())
         }
 
         fn pseudorandom_initial_state(

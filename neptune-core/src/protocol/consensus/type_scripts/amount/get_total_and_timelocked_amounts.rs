@@ -108,6 +108,7 @@ mod test {
     use tasm_lib::traits::algorithm::AlgorithmInitialState;
     use tasm_lib::traits::algorithm::ShadowedAlgorithm;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::vm::NonDeterminism;
@@ -126,7 +127,7 @@ mod test {
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
             _nondeterminism: &NonDeterminism,
-        ) {
+        ) -> Result<(), RustShadowError> {
             let release_date = Timestamp(stack.pop().unwrap());
             let address = stack.pop().unwrap();
 
@@ -165,6 +166,8 @@ mod test {
             // The snippet uses static memory to pass this information on;
             // mimic that behavior here.
             memory.insert(STATIC_MEMORY_FIRST_ADDRESS, release_date.0);
+
+            Ok(())
         }
 
         fn pseudorandom_initial_state(

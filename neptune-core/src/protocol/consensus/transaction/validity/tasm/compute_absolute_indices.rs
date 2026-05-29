@@ -254,6 +254,7 @@ mod tests {
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
     use tasm_lib::triton_vm::prelude::BFieldElement;
 
     use super::*;
@@ -266,7 +267,7 @@ mod tests {
             &self,
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
-        ) {
+        ) -> Result<(), RustShadowError> {
             let item = pop_encodable::<Digest>(stack);
             let sender_randomness = pop_encodable::<Digest>(stack);
             let receiver_preimage = pop_encodable::<Digest>(stack);
@@ -287,7 +288,9 @@ mod tests {
             // Unused artifact left on memory address immediately below struct
             encode_to_memory(memory, free_page, &NUM_TRIALS);
 
-            stack.push(struct_pointer)
+            stack.push(struct_pointer);
+
+            Ok(())
         }
 
         fn pseudorandom_initial_state(

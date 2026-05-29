@@ -127,11 +127,14 @@ mod tests {
     use tasm_lib::traits::accessor::AccessorInitialState;
     use tasm_lib::traits::accessor::ShadowedAccessor;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::twenty_first::bfe;
 
     use super::*;
     use crate::tests::shared::pop_encodable;
+
+    const ADD_OVERFLOW_ERROR_CODE: i128 = 170;
 
     #[test]
     fn snippet_agrees_with_rust_shadowing() {
@@ -150,7 +153,6 @@ mod tests {
             // number cannot become positive through the addition of another
             // term, but the running sum is allowed to become negative, as that
             // is caught further out in the call graph.
-            const ADD_OVERFLOW_ERROR_CODE: i128 = 170;
 
             let utxo_amount = (NativeCurrencyAmount::max().to_nau() as u128 * 2) as i128;
             let coin_amount = NativeCurrencyAmount::max().to_nau();
@@ -219,7 +221,7 @@ mod tests {
             &self,
             stack: &mut Vec<BFieldElement>,
             memory: &HashMap<BFieldElement, BFieldElement>,
-        ) {
+        ) -> Result<(), RustShadowError> {
             let utxo_is_timelocked: bool = pop_encodable(stack);
             let utxo_amount: u128 = pop_encodable(stack);
             let timelocked_amount: u128 = pop_encodable(stack);
@@ -235,15 +237,23 @@ mod tests {
 
             let coin_amount = *u128::decode_from_memory(memory, coin_si_ptr + bfe!(3)).unwrap();
 
-            assert!(coin_amount <= NativeCurrencyAmount::max().to_nau().try_into().unwrap());
+            if coin_amount > NativeCurrencyAmount::max().to_nau().try_into().unwrap() {
+                return Err(RustShadowError::AssertionError(
+                    NativeCurrency::INVALID_COIN_AMOUNT,
+                ));
+            }
 
-            let utxo_amount = utxo_amount.checked_add(coin_amount).unwrap();
+            let Some(utxo_amount) = utxo_amount.checked_add(coin_amount) else {
+                return Err(RustShadowError::AssertionError(ADD_OVERFLOW_ERROR_CODE));
+            };
 
             push_encodable(stack, &coin_si_ptr);
             push_encodable(stack, &amount);
             push_encodable(stack, &timelocked_amount);
             push_encodable(stack, &utxo_amount);
             push_encodable(stack, &utxo_is_timelocked);
+
+            Ok(())
         }
 
         fn pseudorandom_initial_state(

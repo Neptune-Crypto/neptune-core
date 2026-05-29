@@ -97,6 +97,7 @@ mod tests {
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::traits::rust_shadow::RustShadowError;
 
     use super::*;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
@@ -136,7 +137,7 @@ mod tests {
             &self,
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
-        ) {
+        ) -> Result<(), RustShadowError> {
             let rrs_ptrs = (0..N).map(|_| stack.pop().unwrap()).collect_vec();
             let digests = rrs_ptrs
                 .into_iter()
@@ -153,6 +154,8 @@ mod tests {
             rust_shadowing_helper_functions::list::list_insert(digests_ptr, digests, memory);
 
             stack.push(digests_ptr);
+
+            Ok(())
         }
 
         fn pseudorandom_initial_state(
