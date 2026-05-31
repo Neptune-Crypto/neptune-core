@@ -284,6 +284,20 @@ pub struct AreBloomIndicesSetResponse {
     pub are_set: bool,
 }
 
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAreBloomIndicesSetRequest {
+    pub absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAreBloomIndicesSetResponse {
+    /// One entry per input set, in the same order as the request. `are_set[i]`
+    /// is `true` iff all indices of the `i`-th input set are set.
+    pub are_set: Vec<bool>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct CirculatingSupplyRequest {}

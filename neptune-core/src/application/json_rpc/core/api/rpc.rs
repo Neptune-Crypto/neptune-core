@@ -89,6 +89,9 @@ pub enum RpcError {
     #[error("Filtering conditions may not be empty")]
     EmptyFilteringConditions,
 
+    #[error("Too many absolute index sets requested: maximum is {max}, got {got}")]
+    TooManyAbsoluteIndexSets { max: usize, got: usize },
+
     // Common case errors
     #[error("Invalid address provided in arguments")]
     InvalidAddress,
@@ -125,6 +128,8 @@ pub enum RpcError {
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
+
+pub const MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS: usize = 1000;
 
 #[async_trait]
 pub trait RpcApi: Sync + Send {
@@ -336,6 +341,29 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: AreBloomIndicesSetRequest,
     ) -> RpcResult<AreBloomIndicesSetResponse>;
+
+    /// Batched form of [`Self::are_bloom_indices_set`]: for each absolute index
+    /// set, check whether all of its indices are set in the node's archival
+    /// mutator set, in a single request instead of one request per index set.
+    ///
+    /// The returned `are_set` vector corresponds element-by-element, and in the
+    /// same order, to the `absolute_index_sets` argument (duplicate inputs are
+    /// preserved). An empty input yields an empty response. At most 1000
+    /// absolute index sets may be requested at once.
+    async fn batch_are_bloom_indices_set(
+        &self,
+        absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+    ) -> RpcResult<BatchAreBloomIndicesSetResponse> {
+        self.batch_are_bloom_indices_set_call(BatchAreBloomIndicesSetRequest {
+            absolute_index_sets,
+        })
+        .await
+    }
+
+    async fn batch_are_bloom_indices_set_call(
+        &self,
+        request: BatchAreBloomIndicesSetRequest,
+    ) -> RpcResult<BatchAreBloomIndicesSetResponse>;
 
     async fn circulating_supply(&self) -> RpcResult<CirculatingSupplyResponse> {
         self.circulating_supply_call(CirculatingSupplyRequest {})

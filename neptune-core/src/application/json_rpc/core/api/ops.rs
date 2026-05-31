@@ -127,6 +127,9 @@ pub enum RpcMethods {
     AreBloomIndicesSet,
 
     #[namespace(Namespace::Archival)]
+    BatchAreBloomIndicesSet,
+
+    #[namespace(Namespace::Archival)]
     CirculatingSupply,
 
     #[namespace(Namespace::Archival)]
