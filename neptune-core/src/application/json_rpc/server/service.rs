@@ -404,6 +404,32 @@ impl RpcApi for RpcServer {
         })
     }
 
+    async fn batch_are_bloom_indices_set_call(
+        &self,
+        request: BatchAreBloomIndicesSetRequest,
+    ) -> RpcResult<BatchAreBloomIndicesSetResponse> {
+        let got = request.absolute_index_sets.len();
+        if got > MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS {
+            return Err(RpcError::TooManyAbsoluteIndexSets {
+                max: MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS,
+                got,
+            });
+        }
+
+        // Acquire the state lock once for the whole batch — instead of once per
+        // index set, as repeated single-set requests would — and evaluate every
+        // index set against the same archival mutator set snapshot.
+        let state = self.state.lock_guard().await;
+        let ams = state.chain.archival_state().archival_mutator_set.ams();
+
+        let mut are_set = Vec::with_capacity(request.absolute_index_sets.len());
+        for absolute_index_set in request.absolute_index_sets {
+            are_set.push(ams.absolute_index_set_was_applied(absolute_index_set).await);
+        }
+
+        Ok(BatchAreBloomIndicesSetResponse { are_set })
+    }
+
     async fn circulating_supply_call(
         &self,
         _request: CirculatingSupplyRequest,
@@ -1764,6 +1790,7 @@ pub mod tests {
     use crate::application::json_rpc::core::api::ops::Namespace;
     use crate::application::json_rpc::core::api::rpc::RpcApi;
     use crate::application::json_rpc::core::api::rpc::RpcError;
+    use crate::application::json_rpc::core::api::rpc::MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS;
     use crate::application::json_rpc::core::model::common::RpcBlockSelector;
     use crate::application::json_rpc::core::model::message::BlockHeightsByFlagsRequest;
     use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
@@ -1790,6 +1817,7 @@ pub mod tests {
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::BFieldElement;
     use crate::Block;
 
@@ -1824,6 +1852,141 @@ pub mod tests {
         assert_eq!(
             BlockHeight::genesis(),
             rpc_server.height().await.unwrap().height
+        );
+    }
+
+    /// Test for the `archival::batchAreBloomIndicesSet` endpoint: a batch query
+    /// returns one result per input set, in the same order (duplicates
+    /// preserved), and agrees with the single-set `are_bloom_indices_set`
+    /// endpoint element-by-element.
+    #[apply(shared_tokio_runtime)]
+    async fn batch_are_bloom_indices_set_matches_single_set() {
+        let mut rpc_server = test_rpc_server().await;
+        let network = rpc_server.state.cli().network;
+
+        // Have the devnet wallet spend the premine into the rpc_server's wallet.
+        // Once the resulting block is applied, the spent premine input's absolute
+        // index set is "set", while the freshly received output's set is not.
+        let mut cli = cli_args::Args::default_with_network(Network::Main);
+        cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
+        let mut devnet_node =
+            mock_genesis_global_state(0, WalletEntropy::devnet_wallet(), cli).await;
+
+        let rpc_address = rpc_server
+            .state
+            .api()
+            .wallet()
+            .next_receiving_address(KeyType::Generation)
+            .await
+            .unwrap();
+        let mock_amount = NativeCurrencyAmount::coins_from_str("1").unwrap();
+        let devnet_artifacts = devnet_node
+            .api_mut()
+            .tx_sender_mut()
+            .send(
+                vec![OutputFormat::AddressAndAmount(rpc_address, mock_amount)],
+                Default::default(),
+                mock_amount,
+                network.launch_date() + Timestamp::months(3),
+                true,
+            )
+            .await
+            .unwrap();
+
+        let block_1 = invalid_block_with_transaction(
+            &Block::genesis(network),
+            devnet_artifacts.transaction().clone(),
+        );
+        rpc_server.state.set_new_tip(block_1.clone()).await.unwrap();
+
+        // An absolute index set that *is* applied: the spent premine input.
+        let applied_set = block_1.kernel.body.transaction_kernel.inputs[0].absolute_indices;
+
+        // An absolute index set that is *not* applied: the unspent UTXO our
+        // wallet just received (its indices are only set once it is spent).
+        let wallet_status = rpc_server
+            .state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await;
+        let SyncedUtxo {
+            aocl_leaf_index,
+            utxo,
+            sender_randomness,
+            receiver_preimage,
+            ..
+        } = &wallet_status.synced_unspent(None).next().unwrap();
+        let not_applied_set = AbsoluteIndexSet::compute(
+            Tip5::hash(utxo),
+            *sender_randomness,
+            *receiver_preimage,
+            *aocl_leaf_index,
+        );
+
+        // Sanity-check the single-set endpoint.
+        assert!(
+            rpc_server
+                .are_bloom_indices_set(applied_set)
+                .await
+                .unwrap()
+                .are_set
+        );
+        assert!(
+            !rpc_server
+                .are_bloom_indices_set(not_applied_set)
+                .await
+                .unwrap()
+                .are_set
+        );
+
+        // Empty input -> empty output.
+        assert!(rpc_server
+            .batch_are_bloom_indices_set(vec![])
+            .await
+            .unwrap()
+            .are_set
+            .is_empty());
+
+        // The batch endpoint preserves input order and duplicates.
+        let inputs = vec![applied_set, not_applied_set, applied_set];
+        let are_set = rpc_server
+            .batch_are_bloom_indices_set(inputs.clone())
+            .await
+            .unwrap()
+            .are_set;
+        assert_eq!(vec![true, false, true], are_set);
+        assert_eq!(inputs.len(), are_set.len());
+
+        // The batch endpoint agrees with the single-set endpoint element-wise.
+        for set in inputs {
+            let single = rpc_server.are_bloom_indices_set(set).await.unwrap().are_set;
+            let batched = rpc_server
+                .batch_are_bloom_indices_set(vec![set])
+                .await
+                .unwrap()
+                .are_set;
+            assert_eq!(vec![single], batched);
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn batch_are_bloom_indices_set_rejects_too_many_index_sets() {
+        let rpc_server = test_rpc_server().await;
+        let got = MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS + 1;
+        let absolute_index_set = AbsoluteIndexSet::new([0_u128; NUM_TRIALS as usize]);
+
+        let err = rpc_server
+            .batch_are_bloom_indices_set(vec![absolute_index_set; got])
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            RpcError::TooManyAbsoluteIndexSets {
+                max: MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS,
+                got
+            },
+            err
         );
     }
 
