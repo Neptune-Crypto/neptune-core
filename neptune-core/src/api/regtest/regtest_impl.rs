@@ -256,7 +256,7 @@ impl RegTestPrivate {
         state.net.freeze = false;
     }
 
-    // waits (polls) until block is found in canonical chain or 5 second timeout occurs.
+    // waits (polls) until block is found in canonical chain or a timeout occurs.
     //
     // note: temporary until listener approach is implemented.
     async fn wait_until_block_in_chain(
@@ -278,9 +278,9 @@ impl RegTestPrivate {
                 {
                     return Ok(());
                 }
-                return Err(RegTestError::Failed(
-                    "block not in blockchain after {timeout_in_secs} seconds".into(),
-                ));
+                return Err(RegTestError::Failed(format!(
+                    "block not in blockchain after {timeout_in_secs} seconds"
+                )));
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
