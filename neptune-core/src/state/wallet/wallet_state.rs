@@ -385,7 +385,11 @@ impl WalletState {
         // the derivation index with which they were derived. So we derive a few
         // keys to have a bit of margin.
         let premine_keys = (0..NUM_PREMINE_KEYS)
-            .map(|n| wallet_state.nth_spending_key(KeyType::Generation, n as u64))
+            .map(|n| {
+                wallet_state
+                    .wallet_entropy
+                    .nth_spending_key(KeyType::Generation, n as u64)
+            })
             .collect_vec();
 
         // The wallet state has to be initialized with the genesis block, so
@@ -1202,31 +1206,10 @@ impl WalletState {
         }
     }
 
-    /// Get the nth derived spending key of a given type.
-    pub fn nth_spending_key(&self, key_type: KeyType, derivation_index: u64) -> SpendingKey {
-        match key_type {
-            KeyType::Generation => self
-                .wallet_entropy
-                .nth_generation_spending_key(derivation_index)
-                .into(),
-            KeyType::Symmetric => self
-                .wallet_entropy
-                .nth_symmetric_key(derivation_index)
-                .into(),
-            KeyType::EcHybrid => self
-                .wallet_entropy
-                .nth_ec_hybrid_key(derivation_index)
-                .into(),
-            KeyType::ViewingAddress => self
-                .wallet_entropy
-                .nth_viewing_address_key(derivation_index)
-                .into(),
-        }
-    }
-
     /// Return the next next immediate spending key for change ouputs.
     pub(crate) fn future_change_key(&self) -> SpendingKey {
-        self.nth_spending_key(CHANGE_KEY_TYPE, self.key_counter(CHANGE_KEY_TYPE))
+        self.wallet_entropy
+            .nth_spending_key(CHANGE_KEY_TYPE, self.key_counter(CHANGE_KEY_TYPE))
     }
 
     /// Increment the key counter for the keys used for change, without
@@ -4518,6 +4501,7 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
+                .wallet_entropy
                 .nth_spending_key(KeyType::ViewingAddress, 0);
             let now =
                 genesis_block.header().timestamp + Timestamp::months(6) + Timestamp::minutes(5);

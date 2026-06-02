@@ -4438,11 +4438,13 @@ mod tests {
                     .lock_guard_mut()
                     .await
                     .wallet_state
+                    .wallet_entropy
                     .nth_spending_key(KeyType::Generation, 102);
                 let sym_key = alice
                     .lock_guard_mut()
                     .await
                     .wallet_state
+                    .wallet_entropy
                     .nth_spending_key(KeyType::Symmetric, 103);
                 let third_party_address =
                     GenerationReceivingAddress::derive_from_seed(Digest::default());
@@ -4642,16 +4644,19 @@ mod tests {
                     .lock_guard_mut()
                     .await
                     .wallet_state
+                    .wallet_entropy
                     .nth_spending_key(KeyType::Generation, 102);
                 let own_genkey_b = alice
                     .lock_guard_mut()
                     .await
                     .wallet_state
+                    .wallet_entropy
                     .nth_spending_key(KeyType::Generation, 232);
                 let own_symkey = alice
                     .lock_guard_mut()
                     .await
                     .wallet_state
+                    .wallet_entropy
                     .nth_spending_key(KeyType::Symmetric, 103);
 
                 alice

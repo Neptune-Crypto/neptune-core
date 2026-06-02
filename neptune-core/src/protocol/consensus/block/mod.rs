@@ -2242,6 +2242,7 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
+                .wallet_entropy
                 .nth_spending_key(KeyType::Generation, 0);
             let output_to_self = TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(1),

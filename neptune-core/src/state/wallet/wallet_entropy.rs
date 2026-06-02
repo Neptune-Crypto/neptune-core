@@ -13,6 +13,7 @@ use zeroize::ZeroizeOnDrop;
 
 use super::address::ReceivingAddress;
 use crate::api::export::KeyType;
+use crate::api::export::SpendingKey;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::state::wallet::address::elliptic_curve_hybrid;
 use crate::state::wallet::address::generation_address;
@@ -75,6 +76,16 @@ impl WalletEntropy {
             KeyType::ViewingAddress => {
                 ReceivingAddress::from(self.nth_viewing_address_key(index).to_address())
             }
+        }
+    }
+
+    /// Get the nth derived spending key of a given type.
+    pub fn nth_spending_key(&self, key_type: KeyType, derivation_index: u64) -> SpendingKey {
+        match key_type {
+            KeyType::Generation => self.nth_generation_spending_key(derivation_index).into(),
+            KeyType::Symmetric => self.nth_symmetric_key(derivation_index).into(),
+            KeyType::EcHybrid => self.nth_ec_hybrid_key(derivation_index).into(),
+            KeyType::ViewingAddress => self.nth_viewing_address_key(derivation_index).into(),
         }
     }
 
