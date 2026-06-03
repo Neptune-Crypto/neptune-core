@@ -688,7 +688,7 @@ impl Block {
     }
 
     pub fn premine_utxos() -> Vec<Utxo> {
-        // August 11, 2025, 12:00 PM UTC
+        // August 11, 2025, 12:00 PM UTC. Six months after 1st launch.
         let premine_release_date = Timestamp(BFieldElement::new(1754913600000u64));
 
         let mut utxos = vec![];

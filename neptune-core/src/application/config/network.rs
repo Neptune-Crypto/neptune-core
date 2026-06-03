@@ -14,28 +14,28 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 )]
 #[non_exhaustive]
 pub enum Network {
-    /// Main net. Feature-complete. Fixed launch date.
+    /// Main net. Feature-complete: Uses real PoW mining and real proofs.
     #[default]
     Main,
 
     /// Public test network that utilizes mock proofs and difficulty resets so
-    /// that mining is possible without high-end hardware.  Intended for staging
-    /// of release candidates prior to release and for the community to try out
-    /// release candidates and report issues.
+    /// that mining is possible without high-end hardware.
     TestnetMock,
 
-    /// Network for individual unit and integration tests. The timestamp for the
-    /// RegTest genesis block is set to now, rounded down to the first block of
-    /// seven days. As a result, there is a small probability that tests fail
-    /// because they generate the genesis block twice on two opposite sides of a
-    /// round timestamp. You probably shouldn't use `RegTest` for unit tests, as
-    /// this will invalidate the stored proofs when the rounded timestamp
-    /// changes.
+    /// Network for individual unit and integration tests. Uses mock proofs so
+    /// tests can be run without relying on expensive-to-compute cryptographic
+    /// proof.
+    ///
+    /// This network is considered local and is intended for integration testing
+    /// on local network.
     RegTest,
 
-    /// Feature-complete (or as feature-complete as possible) test network separate
-    /// from whichever network is currently running. For integration tests involving
-    /// multiple nodes over a network.
+    /// Feature-complete
+    ///
+    /// For integration tests involving multiple nodes over a network.
+    ///
+    /// All these networks are considered global and are intended for
+    /// integration testing without the risk of losing real money.
     Testnet(u8),
 }
 
@@ -103,10 +103,6 @@ impl Network {
     /// minimum time between blocks.
     ///
     /// Blocks spaced apart by less than this amount of time are not valid.
-    ///
-    /// - for regtest: 1 milli
-    /// - for testnet-mock: 100 milli
-    /// - for mainnet and others: 60 seconds
     pub fn minimum_block_time(&self) -> Timestamp {
         match *self {
             Self::RegTest => Timestamp::millis(1),
@@ -116,9 +112,6 @@ impl Network {
     }
 
     /// desired/average time between blocks.
-    ///
-    /// - for regtest: 100 milliseconds.
-    /// - for mainnet and others: 588000 milliseconds equals 9.8 minutes.
     pub fn target_block_interval(&self) -> Timestamp {
         match *self {
             Self::RegTest => Timestamp::millis(100),
