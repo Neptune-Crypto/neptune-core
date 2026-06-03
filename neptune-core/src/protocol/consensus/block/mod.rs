@@ -454,8 +454,6 @@ impl Block {
             .map(|(_receiving_address, amount)| *amount)
             .sum();
 
-        let mut ms_update = MutatorSetUpdate::default();
-        let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut genesis_tx_outputs = vec![];
         for ((receiving_address, _amount), utxo) in
             premine_distribution.iter().zip(Self::premine_utxos())
@@ -469,11 +467,14 @@ impl Block {
 
             // Add pre-mine UTXO to MutatorSet
             let addition_record = commit(utxo_digest, bad_randomness, receiver_digest);
-            ms_update.additions.push(addition_record);
-            genesis_mutator_set.add(&addition_record);
 
             // Add pre-mine UTXO + commitment to coinbase transaction
             genesis_tx_outputs.push(addition_record)
+        }
+
+        let mut genesis_mutator_set = MutatorSetAccumulator::default();
+        for addition_record in &genesis_tx_outputs {
+            genesis_mutator_set.add(addition_record);
         }
 
         let genesis_txk = TransactionKernelProxy {
