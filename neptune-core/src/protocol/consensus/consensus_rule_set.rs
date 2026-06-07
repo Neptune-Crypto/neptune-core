@@ -35,6 +35,14 @@ pub const BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET: BlockHeight =
 pub const BLOCK_HEIGHT_HARDFORK_BETA_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(3_669));
 
+/// Height of the first block after hard fork gamma, which fixes the June 2026
+/// soundness issue.
+//
+// Exact height to be decided. Once decided, be sure to remove surplus lines
+// from neptune-core/src/assets/main/checkpoint.dat as well!
+pub const BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(41_830u64));
+
 /// Enumerates all possible sets of consensus rules.
 ///
 /// Specifically, this enum captures *differences* between consensus rules,
@@ -212,14 +220,6 @@ impl ConsensusRuleSet {
         }
     }
 
-    pub(crate) fn first_tvmv1_block(network: Network) -> BlockHeight {
-        match network {
-            Network::Main => BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET,
-            Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET,
-            _ => BlockHeight::genesis(),
-        }
-    }
-
     pub(crate) fn first_lustration_block(network: Network) -> BlockHeight {
         match network {
             Network::Main => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
@@ -232,6 +232,13 @@ impl ConsensusRuleSet {
                 // a good reason for it.
                 20u64.into()
             }
+        }
+    }
+
+    pub(crate) fn latest_checkpoint(network: Network) -> BlockHeight {
+        match network {
+            Network::Main => BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET.previous().unwrap(),
+            _ => BlockHeight::genesis(),
         }
     }
 

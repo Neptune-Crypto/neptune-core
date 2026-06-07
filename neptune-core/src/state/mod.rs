@@ -3361,7 +3361,7 @@ impl GlobalState {
         let mut num_stored_blocks = 0;
         let mut predecessor = self.chain.tip().clone();
         let network = self.cli.network;
-        let ignore_invalid_threshold = ConsensusRuleSet::first_tvmv1_block(network);
+        let canon_threshold = ConsensusRuleSet::latest_checkpoint(network);
 
         for block_file_path in block_file_paths {
             let blocks = ArchivalState::blocks_from_file_without_record(&block_file_path).await?;
@@ -3396,12 +3396,9 @@ impl GlobalState {
                         .await;
 
                     if let Err(error) = validity {
-                        // Skip/ignore invalid blocks instead of returning an
-                        // error -- iff they are based on a deprecated version
-                        // of Triton VM's proof system. Otherwise, this function
-                        // cannot handle orphaned blocks prior to TVM proof
-                        // version 1.
-                        if block_height < ignore_invalid_threshold {
+                        // Skip/ignore invalid blocks that were explicitly
+                        // canonized.
+                        if block_height <= canon_threshold {
                             continue;
                         }
 

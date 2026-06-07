@@ -188,7 +188,7 @@ pub async fn initialize(
         info!("Successfully imported {num_blocks_read} blocks.");
     }
 
-    // Roll back blocks if necessary.
+    // If current tip is invalid, roll back to most recent checkpoint.
     let tip = global_state_lock.lock_guard().await.chain.tip().to_owned();
     if !tip.header().height.is_genesis()
         && tip.validate_block_proof(cli_args.network).await.is_err()
@@ -197,9 +197,7 @@ pub async fn initialize(
         let mut state = global_state_lock.lock_guard_mut().await;
 
         // Rollback to threshold -- or to Genesis block if needed
-        let threshold = ConsensusRuleSet::first_tvmv1_block(cli_args.network)
-            .previous()
-            .unwrap_or_default();
+        let threshold = ConsensusRuleSet::latest_checkpoint(cli_args.network);
         let checkpoint = state
             .chain
             .archival_state()
