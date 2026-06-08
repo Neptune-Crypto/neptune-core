@@ -5635,9 +5635,9 @@ dependencies = [
 
 [[package]]
 name = "tasm-lib"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ad81ba67623d9c739a1dfeed5f30bc23940547694e1663cc632b608d9cd47a0"
+checksum = "260cd1626b2eec4d2f1e1c3eed3767121623ad77604a664686537586f0617409"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -5658,9 +5658,9 @@ dependencies = [
 
 [[package]]
 name = "tasm-object-derive"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ce340ed33f1b8e870fad8e722a4e7743d196ab71c44aa4458b2a6bfba204e37"
+checksum = "15dd761491ad0b1d74321fa174e4c85c1bd77e32ed4fc0b700f9e920ea8fd6a4"
 dependencies = [
  "proc-macro2",
  "quote",
