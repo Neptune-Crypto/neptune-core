@@ -3128,7 +3128,7 @@ impl GlobalState {
                         child_height.into(),
                         tip_height.next().into(),
                     )
-                    .await,
+                    .await?,
             );
             block_pairs.push((
                 p.try_into()

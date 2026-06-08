@@ -273,7 +273,8 @@ impl PeerLoopHandler {
                     block.header().height.into(),
                     anchor.num_leafs(),
                 )
-                .await;
+                .await
+                .ok()?;
             let block: TransferBlock = block.try_into().unwrap();
             ret.push((block, mmr_mp));
         }
