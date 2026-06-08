@@ -104,6 +104,8 @@ fn system_time_diff_seconds(peer: SystemTime, own: SystemTime) -> u128 {
 
 /// Initial check if incoming connection is allowed. Performed prior to the
 /// sending of the handshake.
+///
+/// Returns false if the transaction should be rejected.
 pub(crate) fn precheck_incoming_connection_is_allowed(
     cli: &cli_args::Args,
     connecting_ip: IpAddr,

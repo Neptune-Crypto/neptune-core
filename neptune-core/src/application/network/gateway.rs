@@ -19,6 +19,8 @@ use libp2p::swarm::ToSwarm;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 
+use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
+use crate::application::loops::connect_to_peers::precheck_incoming_connection_is_allowed;
 use crate::application::network::actor::NetworkActor;
 use crate::application::network::handshake::HandshakeResult;
 use crate::application::network::handshake::HandshakeUpgrade;
@@ -373,6 +375,14 @@ impl NetworkBehaviour for StreamGateway {
             let upgraded_peers = self.upgraded_peers.lock().unwrap();
             if upgraded_peers.contains(&peer) {
                 return Err(libp2p::swarm::ConnectionDenied::new("already upgraded"));
+            }
+        }
+
+        if let Some(incoming) = multiaddr_to_socketaddr(remote_addr) {
+            let incoming = incoming.ip();
+            let allow = precheck_incoming_connection_is_allowed(self.global_state.cli(), incoming);
+            if !allow {
+                return Err(libp2p::swarm::ConnectionDenied::new("IP failed precheck"));
             }
         }
 
