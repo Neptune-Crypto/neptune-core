@@ -281,6 +281,19 @@ impl ProofCollection {
             return false;
         }
 
+        // There must be exactly one halting proof per collected script hash.
+        // The verification loops below use `zip`, which silently truncates to the
+        // shorter operand; without this guard a prover could submit fewer (e.g.
+        // zero) `*_scripts_halt` proofs than `*_script_hashes` and have the
+        // surplus lock-/type-script checks skipped while `verify` still returns
+        // `true`. Reject the (attacker-controlled) length mismatch as invalid
+        // here rather than via `zip_eq`, which would panic on untrusted input.
+        if self.lock_scripts_halt.len() != self.lock_script_hashes.len()
+            || self.type_scripts_halt.len() != self.type_script_hashes.len()
+        {
+            return false;
+        }
+
         // compile claims
         let removal_records_integrity_claim =
             Claim::about_program(&RemovalRecordsIntegrity.program())
@@ -550,6 +563,51 @@ pub mod tests {
                 }
             }
         }
+    }
+
+    /// Regression test for the `.zip()` truncation bug (opus48_neptune_cash7.md):
+    /// `verify` must reject a collection whose `*_scripts_halt` proof count
+    /// differs from its `*_script_hashes` count. Before the length guard, `zip`
+    /// silently truncated to the shorter side, so a collection with zero halting
+    /// proofs but non-empty hashes was accepted — skipping every lock-script
+    /// (spend authorization) and type-script (value conservation) check.
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn verify_rejects_halt_proof_count_mismatch() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let txk = primitive_witness.kernel.mast_hash();
+
+        // RegTest accepts valid mock proofs, so a well-formed mock collection
+        // verifies. This isolates the length guard as the sole reason a mutated
+        // collection is rejected.
+        let network = Network::RegTest;
+        let valid = ProofCollection::produce_mock(&primitive_witness, true);
+        assert!(!valid.lock_script_hashes.is_empty());
+        assert!(!valid.type_script_hashes.is_empty());
+        assert!(
+            valid.verify(txk, network).await,
+            "sanity: a well-formed valid-mock collection must verify"
+        );
+
+        // Drop the lock-script halting proofs (the part needing the spender's key).
+        let mut missing_lock_proofs = valid.clone();
+        missing_lock_proofs.lock_scripts_halt.clear();
+        assert!(
+            !missing_lock_proofs.verify(txk, network).await,
+            "non-empty lock_script_hashes with no lock_scripts_halt must be rejected"
+        );
+
+        // Drop the type-script halting proofs (value conservation).
+        let mut missing_type_proofs = valid.clone();
+        missing_type_proofs.type_scripts_halt.clear();
+        assert!(
+            !missing_type_proofs.verify(txk, network).await,
+            "non-empty type_script_hashes with no type_scripts_halt must be rejected"
+        );
     }
 
     #[proptest(cases = 5)]
