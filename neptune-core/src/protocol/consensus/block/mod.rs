@@ -966,10 +966,11 @@ impl Block {
                     }
 
                     let aocl_threshold = parent.max_lustrating_aocl_leaf_index;
-                    let lustration_result = self
-                        .body()
-                        .transaction_kernel
-                        .verified_lustration_amount(aocl_threshold);
+                    let lustration_result =
+                        self.body().transaction_kernel.verified_lustration_amount(
+                            aocl_threshold,
+                            consensus_rule_set.fix_lustration_double_counting(),
+                        );
                     let verified_lustrated_amt = match lustration_result {
                         Ok(amount) => amount,
                         // 2.o

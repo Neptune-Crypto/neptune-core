@@ -633,7 +633,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         let leaf_prefix = match consensus_rule_set {
             ConsensusRuleSet::Reboot => auth_paths.commit(),
             ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::TvmProofVersion1 => parent_digest,
-            ConsensusRuleSet::HardforkBeta => {
+            ConsensusRuleSet::HardforkBeta | ConsensusRuleSet::HardforkGamma => {
                 if !meets_threshold {
                     return Err(PowValidationError::ThresholdNotMet);
                 }

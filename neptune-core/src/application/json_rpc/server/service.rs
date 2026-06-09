@@ -653,9 +653,10 @@ impl RpcApi for RpcServer {
 
         let lustration_status = self.state.lock_guard().await.chain.lustration_status();
         if let Some(lustration_status) = lustration_status {
-            let lustrated = transaction
-                .kernel
-                .verified_lustration_amount(lustration_status.max_lustrating_aocl_leaf_index);
+            let lustrated = transaction.kernel.verified_lustration_amount(
+                lustration_status.max_lustrating_aocl_leaf_index,
+                consensus_rule_set.fix_lustration_double_counting(),
+            );
 
             let Ok(lustrated) = lustrated else {
                 return Err(RpcError::SubmitTransaction(

@@ -1673,6 +1673,7 @@ impl PeerLoopHandler {
                         .expect("Lustration status of tip must be parseable after hardfork");
                     match transaction.kernel.verified_lustration_amount(
                         lustration_status.max_lustrating_aocl_leaf_index,
+                        consensus_rule_set.fix_lustration_double_counting(),
                     ) {
                         Ok(amt) => {
                             if amt > lustration_status.counter {
@@ -2767,6 +2768,7 @@ mod tests {
         use crate::protocol::consensus::block::difficulty_control::Difficulty;
         use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
         use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
+        use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
         use crate::tests::shared::blocks::next_block;
@@ -4293,7 +4295,12 @@ mod tests {
                 ConsensusRuleSet::TvmProofVersion1,
                 ConsensusRuleSet::HardforkBeta,
             );
-            for (init_block_height, start_rules, end_rules) in [hf_alpha, hf_beta] {
+            let hf_gamma = (
+                BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET.previous().unwrap(),
+                ConsensusRuleSet::HardforkBeta,
+                ConsensusRuleSet::HardforkGamma,
+            );
+            for (init_block_height, start_rules, end_rules) in [hf_alpha, hf_beta, hf_gamma] {
                 let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
                     init_block_height,
                     Difficulty::MINIMUM,
