@@ -86,6 +86,16 @@ pub enum TritonProofVersion {
     V1,
 }
 
+impl TritonProofVersion {
+    /// The version value used in Triton VM's claim
+    pub(crate) fn version(&self) -> u32 {
+        match self {
+            TritonProofVersion::V0 => 0,
+            TritonProofVersion::V1 => 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LustrationRule {
     Initial(LustrationStatus),
@@ -102,7 +112,7 @@ impl ConsensusRuleSet {
     /// planned hard or soft forks that activate at a given height. The first
     /// argument is necessary because the forks can activate at different
     /// heights based on the network.
-    pub(crate) fn infer_from(network: Network, block_height: BlockHeight) -> Self {
+    pub fn infer_from(network: Network, block_height: BlockHeight) -> Self {
         let first_lustration_block = Self::first_lustration_block(network);
         match network {
             Network::Main => {
@@ -184,7 +194,11 @@ impl ConsensusRuleSet {
     /// logic of historical blocks. Otherwise, a huge rollback would be needed.
     /// Cf.:
     /// https://talk.neptune.cash/t/small-bug-in-lustration-counter-update-logic/286
-    pub(crate) fn fix_lustration_double_counting(&self) -> bool {
+    ///
+    /// # Panics
+    /// - If called on a consensus rule set that does not require lustration.
+    pub fn fix_lustration_double_counting(&self) -> bool {
+        // TODO: Move this boolean to LustrationRule
         match self {
             ConsensusRuleSet::Reboot => unreachable!("Lustration not active"),
             ConsensusRuleSet::HardforkAlpha => unreachable!("Lustration not active"),
@@ -194,7 +208,8 @@ impl ConsensusRuleSet {
         }
     }
 
-    pub(crate) fn triton_proof_version(&self) -> TritonProofVersion {
+    /// The proof version used by this consensus rule set.
+    pub fn triton_proof_version(&self) -> TritonProofVersion {
         if cfg!(test) {
             // Only test with v1 since we would otherwise need to depend on two
             // different versions of Triton VM.
@@ -267,6 +282,7 @@ impl ConsensusRuleSet {
     pub(crate) fn latest_checkpoint(network: Network) -> BlockHeight {
         match network {
             Network::Main => BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET.previous().unwrap(),
+            Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET.previous().unwrap(),
             _ => BlockHeight::genesis(),
         }
     }
@@ -643,20 +659,51 @@ pub(crate) mod tests {
 
     #[test]
     fn lustration_counter_has_expected_initial_value() {
-        let first_lustration_rule = ConsensusRuleSet::lustration_rule(
-            Network::Main,
+        let network = Network::Main;
+        let first_lustration = ConsensusRuleSet::lustration_rule(
+            network,
             BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
             100_000,
         )
         .unwrap();
-        let LustrationRule::Initial(lustration_status) = first_lustration_rule else {
+        let LustrationRule::Initial(first_lustration) = first_lustration else {
             panic!("First lustration rule must be of type 'initial'");
         };
 
         // premine + redemption pool + miner rewards up to hard fork activation
-        let expected = NativeCurrencyAmount::coins(8423168);
-        assert_eq!(expected, lustration_status.counter);
-        assert_eq!(100_000, lustration_status.max_lustrating_aocl_leaf_index);
+        assert_eq!(
+            NativeCurrencyAmount::coins(8_423_168),
+            first_lustration.counter
+        );
+        assert_eq!(100_000, first_lustration.max_lustrating_aocl_leaf_index);
+
+        let second_lustration = ConsensusRuleSet::lustration_rule(
+            network,
+            BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET,
+            200_000,
+        )
+        .unwrap();
+        let LustrationRule::Initial(second_lustration) = second_lustration else {
+            panic!("Restarted lustration rule must be of type 'initial'");
+        };
+        assert_eq!(
+            NativeCurrencyAmount::coins(8_871_168),
+            second_lustration.counter
+        );
+        assert_eq!(200_000, second_lustration.max_lustrating_aocl_leaf_index);
+
+        assert!(
+            matches!(
+                ConsensusRuleSet::lustration_rule(
+                    network,
+                    BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET.next(),
+                    200_000,
+                )
+                .unwrap(),
+                LustrationRule::Updated { .. },
+            ),
+            "Updated lustration rule must follow initial"
+        );
     }
 
     #[test]
@@ -666,11 +713,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn future_and_past_lustration_rule() {
+        let dummy_count = 55647;
+        let network = Network::Main;
+        assert!(
+            ConsensusRuleSet::lustration_rule(network, 10_000u64.into(), dummy_count).is_none()
+        );
+        assert!(matches!(
+            ConsensusRuleSet::lustration_rule(network, 100_000u64.into(), dummy_count).unwrap(),
+            LustrationRule::Updated { .. }
+        ));
+    }
+
+    #[test]
     fn expected_use_parent_difficulty() {
         assert!(ConsensusRuleSet::Reboot.use_parent_difficulty());
         assert!(ConsensusRuleSet::HardforkAlpha.use_parent_difficulty());
         assert!(ConsensusRuleSet::TvmProofVersion1.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkBeta.use_parent_difficulty());
+        assert!(!ConsensusRuleSet::HardforkGamma.use_parent_difficulty());
     }
 
     #[test]
@@ -1007,7 +1068,7 @@ pub(crate) mod tests {
     #[traced_test]
     #[test]
     fn allow_non_zero_version() {
-        // Start well into hardfork beta
+        // Start well into hardfork gamma
         let init_block_heigth = BlockHeight::from(59998u64);
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
             init_block_heigth,
@@ -1035,7 +1096,7 @@ pub(crate) mod tests {
                     .await
             );
 
-            let consensus_rule_set = ConsensusRuleSet::HardforkBeta;
+            let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
             assert_eq!(
                 consensus_rule_set,
                 ConsensusRuleSet::infer_from(network, valid_successor.header().height)

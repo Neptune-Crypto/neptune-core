@@ -594,7 +594,8 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     let (appendix, proof) = {
         let block_proof_witness = BlockProofWitness::produce(primitive_witness);
         let appendix = block_proof_witness.appendix();
-        let claim = BlockProgram::claim(&body, &appendix);
+        let consensus_rules = ConsensusRuleSet::infer_from(network, header.height);
+        let claim = BlockProgram::claim(&body, &appendix, consensus_rules);
         cache_true_claims([claim.clone()]).await;
         (appendix, BlockProof::SingleProof(Proof::invalid()))
     };

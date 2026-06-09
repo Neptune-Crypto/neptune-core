@@ -3399,6 +3399,8 @@ impl GlobalState {
                         // Skip/ignore invalid blocks that were explicitly
                         // canonized.
                         if block_height <= canon_threshold {
+                            debug!("Invalid block: {error}");
+                            debug!("Skipping invalid block of height {block_height} prior to checkpoint");
                             continue;
                         }
 

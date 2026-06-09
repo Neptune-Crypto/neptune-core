@@ -110,7 +110,7 @@ pub(crate) enum TransactionConfirmabilityError {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) enum TransactionLustrationError {
+pub enum TransactionLustrationError {
     InvalidAoclRangeForIndexSet,
     MissingLustrationAnnouncement,
 }
@@ -230,7 +230,8 @@ impl TransactionKernel {
     }
 
     /// Check if a transaction lustrates (reveals) all the required amounts, and
-    /// if it does, return the lustrated amount.
+    /// if it does, return the amount that the lustration counter should be
+    /// decreased with, if this transaction is mined.
     ///
     /// Returns an error if the lustration rule defined by the AOCL leaf index
     /// threshold is not followed. The threshold defines the *last* AOCL leaf
@@ -241,7 +242,7 @@ impl TransactionKernel {
     ///
     /// Note that an `Ok` result only confirms these specific rules are met;
     /// it does not guarantee the overall validity of the block or transaction.
-    pub(crate) fn verified_lustration_amount(
+    pub fn verified_lustration_amount(
         &self,
         max_lustrating_aocl_leaf_index: u64,
         fix_lustration_double_counting: bool,
@@ -252,7 +253,8 @@ impl TransactionKernel {
                 return Err(TransactionLustrationError::InvalidAoclRangeForIndexSet);
             };
 
-            if input_index_lower_end <= max_lustrating_aocl_leaf_index {
+            let must_lustrate = input_index_lower_end <= max_lustrating_aocl_leaf_index;
+            if must_lustrate {
                 required_lustrations.push(input.absolute_indices);
             }
         }

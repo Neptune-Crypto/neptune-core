@@ -16,6 +16,7 @@ use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::debug;
 
@@ -24,6 +25,7 @@ use crate::application::config::network::Network;
 use crate::protocol::consensus::block::block_body::BlockBody;
 use crate::protocol::consensus::block::block_body::BlockBodyField;
 use crate::protocol::consensus::block::BlockAppendix;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
@@ -42,19 +44,49 @@ impl BlockProgram {
     const ILLEGAL_FEE: i128 = 1_000_210;
     const PROOF_SIZE_INDICATOR_TOO_BIG: i128 = 1_000_211;
 
-    pub fn claim(block_body: &BlockBody, appendix: &BlockAppendix) -> Claim {
-        Claim::new(Self.hash())
+    pub fn claim(
+        block_body: &BlockBody,
+        appendix: &BlockAppendix,
+        _consensus_rule_set: ConsensusRuleSet,
+    ) -> Claim {
+        let (program_hash, proof_version) = {
+            #[cfg(test)]
+            {
+                (Self.hash(), _consensus_rule_set.triton_proof_version())
+            }
+
+            #[cfg(not(test))]
+            {
+                const PRE_HF_GAMMA_PROGRAM_HASH: &str =
+                "72d46afed8a1bf162814a432cf1ebe0f16a1cdb84bd339badc6fbd499172c3474c285dd0d5ba4e0c";
+                let hash = match _consensus_rule_set {
+                    ConsensusRuleSet::Reboot
+                    | ConsensusRuleSet::HardforkAlpha
+                    | ConsensusRuleSet::TvmProofVersion1
+                    | ConsensusRuleSet::HardforkBeta => {
+                        Digest::try_from_hex(PRE_HF_GAMMA_PROGRAM_HASH).unwrap()
+                    }
+                    ConsensusRuleSet::HardforkGamma => Self.hash(),
+                };
+
+                (hash, _consensus_rule_set.triton_proof_version())
+            }
+        };
+        Claim::new(program_hash)
             .with_input(block_body.mast_hash().reversed().values().to_vec())
             .with_output(appendix.claims_as_output())
+            .about_version(proof_version.version())
     }
 
     pub(crate) async fn verify(
-        block_body: &BlockBody,
+        body: &BlockBody,
         appendix: &BlockAppendix,
         proof: &Proof,
         network: Network,
     ) -> bool {
-        let claim = Self::claim(block_body, appendix);
+        let block_height = body.block_mmr_accumulator.num_leafs();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height.into());
+        let claim = Self::claim(body, appendix, consensus_rule_set);
         let proof_clone = proof.clone();
 
         debug!("** Calling triton_vm::verify to verify block proof ...");

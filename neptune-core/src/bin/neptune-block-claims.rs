@@ -13,6 +13,7 @@ use neptune_cash::application::config::cli_args;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::protocol::consensus::block::validity::block_program::BlockProgram;
 use neptune_cash::protocol::consensus::block::Block;
+use neptune_cash::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_cash::state::archival_state::ArchivalState;
 
 #[derive(Parser, Debug, Clone)]
@@ -39,7 +40,8 @@ fn main() {
 
 async fn print_block_claims(max_height: u64, network: Option<Network>) {
     // Initialize archival state.
-    let cli_args = cli_args::Args::default_with_network(network.unwrap_or_default());
+    let network = network.unwrap_or_default();
+    let cli_args = cli_args::Args::default_with_network(network);
     let genesis = Block::genesis(cli_args.network);
     let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)
         .expect("data directory exists");
@@ -68,7 +70,8 @@ async fn print_block_claims(max_height: u64, network: Option<Network>) {
             _ => break,
         };
 
-        let claim = BlockProgram::claim(block.body(), block.appendix());
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height.into());
+        let claim = BlockProgram::claim(block.body(), block.appendix(), consensus_rule_set);
         let claim_bytes = bincode::serialize(&claim).expect("can serialize claim");
         let claim_hex = claim_bytes.into_iter().map(|b| format!("{b:02x}")).join("");
         println!("{block_height} {claim_hex}",);

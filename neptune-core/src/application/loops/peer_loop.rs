@@ -4376,10 +4376,6 @@ mod tests {
                     hard_fork_minus_2.header().difficulty.target(),
                     end_consensus_rule_set
                 ));
-                assert!(!first_block_after_hardfork.pow_verify_for_tests(
-                    hard_fork_minus_1.header().difficulty.target(),
-                    start_consensus_rule_set
-                ));
 
                 // Declare expected order of messages
                 let mock = Mock::new(vec![

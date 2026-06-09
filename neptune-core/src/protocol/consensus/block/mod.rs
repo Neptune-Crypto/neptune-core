@@ -236,7 +236,8 @@ impl Block {
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
-            let claim = BlockProgram::claim(&body, &appendix);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
+            let claim = BlockProgram::claim(&body, &appendix, consensus_rule_set);
 
             let proof = ProofBuilder::new()
                 .program(BlockProgram.program())

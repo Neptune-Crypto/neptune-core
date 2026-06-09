@@ -15,6 +15,7 @@ use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::api::export::AdditionRecord;
+use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::prelude::twenty_first;
 use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
@@ -177,7 +178,13 @@ impl BlockBody {
     /// Includes the guesser reward outputs in this number.
     pub(crate) fn max_aocl_leaf_index(&self) -> u64 {
         const NUMBER_TO_INDEX_OFFSET: u64 = 1;
-        self.mutator_set_accumulator.aocl.num_leafs() + NUM_GUESSER_FEE_OUTPUTS
+        let height: BlockHeight = self.block_mmr_accumulator.num_leafs().into();
+        let num_guesser_fee_outputs = if height.is_genesis() {
+            0
+        } else {
+            NUM_GUESSER_FEE_OUTPUTS
+        };
+        self.mutator_set_accumulator.aocl.num_leafs() + num_guesser_fee_outputs
             - NUMBER_TO_INDEX_OFFSET
     }
 
@@ -286,6 +293,16 @@ mod tests {
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
+
+    #[test]
+    fn max_aocl_leaf_index_genesis() {
+        let genesis = Block::genesis(Network::Main);
+        assert_eq!(
+            genesis.body().mutator_set_accumulator.aocl.num_leafs() - 1,
+            genesis.body().max_aocl_leaf_index(),
+            "Genesis block does not contain guesser rewards"
+        );
+    }
 
     #[proptest(cases = 4)]
     fn aocl_leaf_count_and_index_consistency(
