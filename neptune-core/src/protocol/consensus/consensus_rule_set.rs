@@ -213,18 +213,12 @@ impl ConsensusRuleSet {
 
     /// The proof version used by this consensus rule set.
     pub fn triton_proof_version(&self) -> TritonProofVersion {
-        if cfg!(test) {
-            // Only test with v1 since we would otherwise need to depend on two
-            // different versions of Triton VM.
-            TritonProofVersion::V1
-        } else {
-            match self {
-                ConsensusRuleSet::Reboot => TritonProofVersion::V0,
-                ConsensusRuleSet::HardforkAlpha => TritonProofVersion::V0,
-                ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
-                ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
-                ConsensusRuleSet::HardforkGamma => TritonProofVersion::V2,
-            }
+        match self {
+            ConsensusRuleSet::Reboot => TritonProofVersion::V0,
+            ConsensusRuleSet::HardforkAlpha => TritonProofVersion::V0,
+            ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
+            ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
+            ConsensusRuleSet::HardforkGamma => TritonProofVersion::V2,
         }
     }
 
@@ -276,8 +270,9 @@ impl ConsensusRuleSet {
             Network::Main => BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET,
             Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_BETA_TESTNET,
             // Using block height one means that all blocks must lustrate,
-            // except for the genesis block, and that only AOCL leafs
-            // indistinguishable from premine AOCLs must lustrate.
+            // except for the genesis block and block 1, and that only AOCL
+            // leafs indistinguishable from premine AOCLs and those produced in
+            // block 1 must lustrate.
             _ => BlockHeight::genesis().next(),
         }
     }
@@ -735,6 +730,35 @@ pub(crate) mod tests {
         assert!(ConsensusRuleSet::TvmProofVersion1.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkBeta.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkGamma.use_parent_difficulty());
+    }
+
+    #[test]
+    fn expected_tvm_proof_versions() {
+        assert_eq!(0, ConsensusRuleSet::Reboot.triton_proof_version().version());
+        assert_eq!(
+            0,
+            ConsensusRuleSet::HardforkAlpha
+                .triton_proof_version()
+                .version()
+        );
+        assert_eq!(
+            1,
+            ConsensusRuleSet::TvmProofVersion1
+                .triton_proof_version()
+                .version()
+        );
+        assert_eq!(
+            1,
+            ConsensusRuleSet::HardforkBeta
+                .triton_proof_version()
+                .version()
+        );
+        assert_eq!(
+            2,
+            ConsensusRuleSet::HardforkGamma
+                .triton_proof_version()
+                .version(),
+        );
     }
 
     #[test]

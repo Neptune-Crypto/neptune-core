@@ -52,7 +52,7 @@ impl BlockProgram {
         let (program_hash, proof_version) = {
             #[cfg(test)]
             {
-                (Self.hash(), _consensus_rule_set.triton_proof_version())
+                (Self.hash(), tasm_lib::triton_vm::proof::CURRENT_VERSION)
             }
 
             #[cfg(not(test))]
@@ -69,13 +69,13 @@ impl BlockProgram {
                     ConsensusRuleSet::HardforkGamma => Self.hash(),
                 };
 
-                (hash, _consensus_rule_set.triton_proof_version())
+                (hash, _consensus_rule_set.triton_proof_version().version())
             }
         };
         Claim::new(program_hash)
             .with_input(block_body.mast_hash().reversed().values().to_vec())
             .with_output(appendix.claims_as_output())
-            .about_version(proof_version.version())
+            .about_version(proof_version)
     }
 
     pub(crate) async fn verify(
