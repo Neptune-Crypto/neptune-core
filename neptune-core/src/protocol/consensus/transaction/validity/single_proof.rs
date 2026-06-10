@@ -306,19 +306,19 @@ pub(crate) fn single_proof_claim(
             "9ed47e4aff83681ce46618c59971cc5eca2ef5a063b3f35828946f4810295871338072751af633e0";
         const SINGLE_PROOF_PROGRAM_DIGEST_PRE_HF_GAMMA: &str =
             "151b31a62b85f6c4e1c792c7c1e7934ecc44430eb1209e816a47a7f0d2c10d1002f74f8cda8e4f8a";
-        match _consensus_rule_set {
+        let claim = match _consensus_rule_set {
             ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
                 Claim::new(Digest::try_from_hex(V0_SINGLE_PROOF_PROGRAM_DIGEST).unwrap())
-                    .about_version(0)
                     .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
             }
             ConsensusRuleSet::TvmProofVersion1 | ConsensusRuleSet::HardforkBeta => {
                 Claim::new(Digest::try_from_hex(SINGLE_PROOF_PROGRAM_DIGEST_PRE_HF_GAMMA).unwrap())
-                    .about_version(1)
                     .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
             }
             ConsensusRuleSet::HardforkGamma => SingleProof::claim(tx_kernel_mast_hash),
-        }
+        };
+
+        claim.about_version(_consensus_rule_set.triton_proof_version().version())
     }
 
     #[cfg(test)]
@@ -1328,6 +1328,6 @@ pub(crate) mod tests {
 
     test_program_snapshot!(
         SingleProof,
-        "2fa284f79754a321d970f25d70f3ab66926da61f9a04d43024420e411fa2b16cc6e728a9c6822c8f"
+        "84cd252bc1bbed5c8518fe5d1f21e7e8324c905b2c1f7859bfda3d8eb18384035b5c1b6db8e1fae8"
     );
 }
