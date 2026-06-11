@@ -1715,8 +1715,8 @@ impl GlobalState {
         while let Some(mutxo) = stream.next().await {
             if is_archival {
                 // if archival, don't assume presence of membership proofs.
-                if max_confirmed_in_block.is_none() {
-                    let (hash, _, height) = mutxo.confirmed_in_block;
+                let (hash, _, height) = mutxo.confirmed_in_block;
+                if max_confirmed_in_block.is_none_or(|x| x < height) {
                     if self
                         .chain
                         .archival_state()
@@ -1728,9 +1728,18 @@ impl GlobalState {
                 }
 
                 // Only spends with known blocks are counted.
-                if let MonitoredUtxoSpentStatus::SpentIn { block_height, .. } = mutxo.spent {
-                    if max_spent_in_block.is_none()
-                        || max_spent_in_block.is_some_and(|x| x < block_height)
+                if let MonitoredUtxoSpentStatus::SpentIn {
+                    block_height,
+                    block_hash,
+                    ..
+                } = mutxo.spent
+                {
+                    if max_spent_in_block.is_none_or(|x| x < block_height)
+                        && self
+                            .chain
+                            .archival_state()
+                            .is_canonical_block(block_hash, block_height)
+                            .await
                     {
                         max_spent_in_block = Some(block_height);
                     }
@@ -1751,8 +1760,7 @@ impl GlobalState {
                     if mutxo
                         .get_membership_proof_for_block(current_tip_digest)
                         .is_some()
-                        && (max_spent_in_block.is_none()
-                            || max_spent_in_block.is_some_and(|x| x < block_height))
+                        && max_spent_in_block.is_none_or(|x| x < block_height)
                     {
                         max_spent_in_block = Some(block_height);
                     }
