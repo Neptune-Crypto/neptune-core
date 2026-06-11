@@ -7,7 +7,6 @@
 
 use clap::Parser;
 use itertools::Itertools;
-use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::Network;
 use neptune_cash::application::config::cli_args;
 use neptune_cash::application::config::data_directory::DataDirectory;
@@ -19,6 +18,7 @@ use neptune_cash::state::archival_state::ArchivalState;
 #[derive(Parser, Debug, Clone)]
 #[clap()]
 struct CliArg {
+    min_height: u64,
     max_height: u64,
     network: Option<Network>,
 }
@@ -31,15 +31,20 @@ fn main() {
         .expect("Could not create tokio runtime");
 
     let CliArg {
+        min_height,
         max_height,
         network,
     } = CliArg::parse();
 
-    tokio_runtime.block_on(print_block_claims(max_height, network));
+    tokio_runtime.block_on(print_block_claims(min_height, max_height, network));
 }
 
-async fn print_block_claims(max_height: u64, network: Option<Network>) {
+async fn print_block_claims(min_height: u64, max_height: u64, network: Option<Network>) {
     // Initialize archival state.
+
+    // Runtime information is printed to stderr to allow the user to pipe stdout
+    // into a file containing all claims.
+    eprintln!("Writing claims in range ({min_height}..={max_height}) to std out");
     let network = network.unwrap_or_default();
     let cli_args = cli_args::Args::default_with_network(network);
     let genesis = Block::genesis(cli_args.network);
@@ -51,7 +56,7 @@ async fn print_block_claims(max_height: u64, network: Option<Network>) {
     // For all canonical blocks:
     let tip = archival_state.get_tip().await;
     let tip_height = tip.header().height.value();
-    for block_height in BlockHeight::genesis().value()..=max_height {
+    for block_height in min_height..=max_height {
         let block = match block_height {
             0 => genesis.clone(),
             bh if (1..tip_height).contains(&bh) => {
@@ -69,6 +74,10 @@ async fn print_block_claims(max_height: u64, network: Option<Network>) {
             bh if bh == tip_height => tip.clone(),
             _ => break,
         };
+
+        if block_height.is_multiple_of(100) {
+            eprintln!("Handling {block_height}");
+        }
 
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height.into());
         let claim = BlockProgram::claim(block.body(), block.appendix(), consensus_rule_set);
