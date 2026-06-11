@@ -44,6 +44,7 @@ impl BlockProgram {
     const ILLEGAL_FEE: i128 = 1_000_210;
     const PROOF_SIZE_INDICATOR_TOO_BIG: i128 = 1_000_211;
 
+    #[allow(clippy::used_underscore_binding)]
     pub fn claim(
         block_body: &BlockBody,
         appendix: &BlockAppendix,

@@ -274,6 +274,7 @@ impl SingleProof {
 //
 // This function calls SingleProof::produce but with the correct merge
 // version.
+#[allow(clippy::used_underscore_binding)]
 pub(crate) async fn produce_single_proof(
     primitive_witness: &PrimitiveWitness,
     triton_vm_job_queue: Arc<TritonVmJobQueue>,
@@ -295,6 +296,7 @@ pub(crate) async fn produce_single_proof(
 /// Not to be confused with SingleProofWitness::claim
 ///
 /// Consensus rule set refers to the rule set for which the claim must be valid.
+#[allow(clippy::used_underscore_binding)]
 pub(crate) fn single_proof_claim(
     tx_kernel_mast_hash: Digest,
     _consensus_rule_set: ConsensusRuleSet,

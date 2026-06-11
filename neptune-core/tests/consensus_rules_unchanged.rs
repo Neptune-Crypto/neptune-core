@@ -49,7 +49,7 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
         "12e6e69d7447691dba85c462c9b214274064ea1dd8835c2dd731618add0320588706d4cc0b000000";
 
     let expected_blk_files = ["blk0.dat"];
-    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec()).await;
+    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec());
     let block_file_paths =
         ArchivalState::read_block_file_names_from_directory(&test_data_dir).unwrap();
     let blocks = ArchivalState::blocks_from_file_without_record(&block_file_paths[0])
@@ -80,7 +80,7 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
     logging::tracing_logger();
 
     let expected_blk_files = ["blk0.dat", "blk1.dat"];
-    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec()).await;
+    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec());
 
     let network = Network::Main;
     let cli = GenesisNode::default_args_with_network_and_devnet_wallet(network).await;
@@ -123,7 +123,7 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
         .is_ok());
 }
 
-async fn ensure_blocks_in_test_data_dir(blk_file_names: Vec<&str>) -> PathBuf {
+fn ensure_blocks_in_test_data_dir(blk_file_names: Vec<&str>) -> PathBuf {
     // Are the required blk files present on disk? If not, fetch them
     // from a server.
     let test_data_dir = test_helper_data_dir();

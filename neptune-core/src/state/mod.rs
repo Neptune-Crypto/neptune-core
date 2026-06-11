@@ -1716,15 +1716,14 @@ impl GlobalState {
             if is_archival {
                 // if archival, don't assume presence of membership proofs.
                 let (hash, _, height) = mutxo.confirmed_in_block;
-                if max_confirmed_in_block.is_none_or(|x| x < height) {
-                    if self
+                if max_confirmed_in_block.is_none_or(|x| x < height)
+                    && self
                         .chain
                         .archival_state()
                         .is_canonical_block(hash, height)
                         .await
-                    {
-                        max_confirmed_in_block = Some(height);
-                    }
+                {
+                    max_confirmed_in_block = Some(height);
                 }
 
                 // Only spends with known blocks are counted.

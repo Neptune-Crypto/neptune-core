@@ -196,7 +196,7 @@ impl ConsensusRuleSet {
     /// Must be false for some block heights due to consensus-preservation
     /// logic of historical blocks. Otherwise, a huge rollback would be needed.
     /// Cf.:
-    /// https://talk.neptune.cash/t/small-bug-in-lustration-counter-update-logic/286
+    /// <https://talk.neptune.cash/t/small-bug-in-lustration-counter-update-logic/286>
     ///
     /// # Panics
     /// - If called on a consensus rule set that does not require lustration.
