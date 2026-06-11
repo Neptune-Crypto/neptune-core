@@ -9,10 +9,12 @@ use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::Timestamp;
+use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::protocol::consensus::block::Block;
 use neptune_cash::state::archival_state::ArchivalState;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tracing::info;
 
 use crate::common::fetch_files::test_helper_data_dir;
 use crate::common::fetch_files::try_fetch_file_from_server;
@@ -48,8 +50,9 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
     const BLOCK2B_HASH: &str =
         "12e6e69d7447691dba85c462c9b214274064ea1dd8835c2dd731618add0320588706d4cc0b000000";
 
+    let network = Network::Testnet(0);
     let expected_blk_files = ["blk0.dat"];
-    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec());
+    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network).await;
     let block_file_paths =
         ArchivalState::read_block_file_names_from_directory(&test_data_dir).unwrap();
     let blocks = ArchivalState::blocks_from_file_without_record(&block_file_paths[0])
@@ -73,16 +76,50 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
     assert_eq!(BLOCK1_HASH, block2b.header().prev_block_digest.to_hex());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn gamma_hardfork_on_tesnet() {
+    // Verify that blocks spanning consensus rule change on testnet are
+    // considered valid.
+    logging::tracing_logger();
+
+    // Add checkpoint. Otherwise pre-hf blocks blocks fail
+    let network = Network::Testnet(0);
+    ArchivalState::accept_checkpoint(network).await;
+
+    let expected_blk_files = ["blk36.dat"];
+    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network).await;
+    let block_file_paths =
+        ArchivalState::read_block_file_names_from_directory(&test_data_dir).unwrap();
+    let block_file_paths: Vec<_> = block_file_paths
+        .into_iter()
+        .filter(|x| x.to_string_lossy().contains("blk36"))
+        .collect();
+    let blocks = ArchivalState::blocks_from_file_without_record(&block_file_paths[0])
+        .await
+        .unwrap();
+
+    let now = Timestamp::now();
+    let mut latest = blocks[0].clone();
+    for block in blocks.into_iter().skip(1) {
+        info!(
+            "Checking validity of testnet block of height {}",
+            block.header().height
+        );
+        assert!(block.is_valid(&latest, now, network).await);
+        latest = block;
+    }
+}
+
 /// test: Verify that first ~250 blocks on main net are still considered valid,
 /// and that a global state can be restored from it.
 #[tokio::test(flavor = "multi_thread")]
 async fn can_restore_from_real_mainnet_data_with_reorganizations() {
     logging::tracing_logger();
 
-    let expected_blk_files = ["blk0.dat", "blk1.dat"];
-    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec());
-
     let network = Network::Main;
+    let expected_blk_files = ["blk0.dat", "blk1.dat"];
+    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network).await;
+
     let cli = GenesisNode::default_args_with_network_and_devnet_wallet(network).await;
     let mut alice = GenesisNode::start_node(cli).await.unwrap();
 
@@ -123,10 +160,13 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
         .is_ok());
 }
 
-fn ensure_blocks_in_test_data_dir(blk_file_names: Vec<&str>) -> PathBuf {
+async fn ensure_blocks_in_test_data_dir(blk_file_names: Vec<&str>, network: Network) -> PathBuf {
     // Are the required blk files present on disk? If not, fetch them
     // from a server.
-    let test_data_dir = test_helper_data_dir();
+    let test_data_dir = test_helper_data_dir().join(format!("{network}"));
+    DataDirectory::create_dir_if_not_exists(test_data_dir.as_path())
+        .await
+        .unwrap();
     for file_name in blk_file_names {
         let mut path = test_data_dir.clone();
         path.push(file_name);

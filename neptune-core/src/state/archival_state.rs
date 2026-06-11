@@ -2276,7 +2276,7 @@ impl ArchivalState {
 
     /// Populate the true claims cache with the claims derived from the blocks
     /// defined by the checkpoint as valid.
-    async fn accept_checkpoint(network: Network) {
+    pub async fn accept_checkpoint(network: Network) {
         const CHECKPOINT_MAIN: &str = include_str!("../assets/main/checkpoint.dat");
         const CHECKPOINT_TESTNET0: &str = include_str!("../assets/testnet-0/checkpoint.dat");
         let checkpoint = match network {
