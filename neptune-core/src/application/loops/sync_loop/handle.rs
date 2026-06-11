@@ -39,6 +39,7 @@ impl SyncLoopHandle {
             resume_if_possible,
             sync_dir,
             block_validator,
+            network,
         )
         .await
         .unwrap();

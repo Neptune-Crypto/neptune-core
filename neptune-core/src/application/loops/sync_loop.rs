@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 use crate::api::export::BlockHeight;
+use crate::api::export::Network;
 use crate::application::loops::sync_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::MainToSync;
@@ -92,9 +93,10 @@ impl SyncLoop {
         resume_if_possible: bool,
         sync_dir: Option<PathBuf>,
         block_validator: BlockValidator,
+        network: Network,
     ) -> Result<(Self, Sender<MainToSync>, Receiver<SyncToMain>), RapidBlockDownloadError> {
         let mut download_state =
-            RapidBlockDownload::new(target_height, resume_if_possible, sync_dir).await?;
+            RapidBlockDownload::new(target_height, resume_if_possible, sync_dir, network).await?;
         download_state.fast_forward(genesis_block.header().height);
         let (main_to_sync_sender, main_to_sync_receiver) =
             mpsc::channel::<MainToSync>(SYNC_LOOP_CHANNEL_CAPACITY);
