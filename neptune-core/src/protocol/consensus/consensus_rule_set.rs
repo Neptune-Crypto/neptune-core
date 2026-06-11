@@ -51,10 +51,6 @@ pub const BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET: BlockHeight =
 /// across
 ///  - networks, and
 ///  - hard and soft forks triggered by blocks.
-///
-/// Consensus logic not captured by this encapsulation lives on
-/// [`Transaction::is_valid`][super::transaction::Transaction::is_valid] and
-/// ultimately [`Block::is_valid`][super::block::Block::is_valid].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter, Default, strum::Display)]
 pub enum ConsensusRuleSet {
     /// First rule set after reboot
