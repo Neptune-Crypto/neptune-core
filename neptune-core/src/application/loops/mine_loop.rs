@@ -366,7 +366,7 @@ fn guess_worker(
                 Time: {timestamp_standard} ({timestamp})
 Since previous block: {elapsed_human}
               Digest: {hash:x}
-Difficulty threshold: {threshold}
+Difficulty threshold: {threshold:x}
           Difficulty: {target_difficulty}
            #inputs  : {num_inputs}
  #tx-kernel outputs : {num_outputs}
