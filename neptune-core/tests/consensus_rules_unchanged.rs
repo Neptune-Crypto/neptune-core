@@ -5,12 +5,15 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use common::logging;
+use itertools::Itertools;
 use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::application::config::data_directory::DataDirectory;
+use neptune_cash::protocol::consensus::block::validity::block_program::BlockProgram;
 use neptune_cash::protocol::consensus::block::Block;
+use neptune_cash::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_cash::state::archival_state::ArchivalState;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
@@ -52,7 +55,8 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
 
     let network = Network::Testnet(0);
     let expected_blk_files = ["blk0.dat"];
-    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network).await;
+    let test_data_dir =
+        ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network, None).await;
     let block_file_paths =
         ArchivalState::read_block_file_names_from_directory(&test_data_dir).unwrap();
     let blocks = ArchivalState::blocks_from_file_without_record(&block_file_paths[0])
@@ -86,8 +90,8 @@ async fn gamma_hardfork_on_tesnet() {
     let network = Network::Testnet(0);
     ArchivalState::accept_checkpoint(network).await;
 
-    let expected_blk_files = ["blk36.dat"];
-    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network).await;
+    let blk_file = ["blk36.dat"];
+    let test_data_dir = ensure_blocks_in_test_data_dir(blk_file.to_vec(), network, None).await;
     let block_file_paths =
         ArchivalState::read_block_file_names_from_directory(&test_data_dir).unwrap();
     let block_file_paths: Vec<_> = block_file_paths
@@ -110,6 +114,41 @@ async fn gamma_hardfork_on_tesnet() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn blockprogram_claim_has_not_changed_40068_hf_beta() {
+    logging::tracing_logger();
+
+    let network = Network::Main;
+
+    let blk_file = ["blk343.dat"];
+    let test_data_dir =
+        ensure_blocks_in_test_data_dir(blk_file.to_vec(), network, Some("hf-beta-claims-check"))
+            .await;
+    let block_file_paths =
+        ArchivalState::read_block_file_names_from_directory(&test_data_dir).unwrap();
+    let block_file_paths: Vec<_> = block_file_paths
+        .into_iter()
+        .filter(|x| x.to_string_lossy().contains("blk343"))
+        .collect();
+    let blocks = ArchivalState::blocks_from_file_without_record(&block_file_paths[0])
+        .await
+        .unwrap();
+    let block = &blocks[0];
+    let claim = BlockProgram::claim(
+        block.body(),
+        block.appendix(),
+        ConsensusRuleSet::HardforkBeta,
+    );
+
+    let claim_bytes = bincode::serialize(&claim).expect("can serialize claim");
+    let claim_hex = claim_bytes.into_iter().map(|b| format!("{b:02x}")).join("");
+
+    // Expected value read from a v0.11.0 node -- using HF-beta rule set.
+    assert_eq!(
+        "72d46afed8a1bf162814a432cf1ebe0f16a1cdb84bd339badc6fbd499172c3474c285dd0d5ba4e0c0100000005000000000000006180a65eecef10ca257f9b1f92e6c521578eadc3d897cd76dcf30de61f6cc640369f3a5ad21eb19d05000000000000007563640e9b1cf5d28f3885c5235146974738b6ae88d72d485caf07ca076220a03a0f276f41b6d772",
+        claim_hex);
+}
+
 /// test: Verify that first ~250 blocks on main net are still considered valid,
 /// and that a global state can be restored from it.
 #[tokio::test(flavor = "multi_thread")]
@@ -118,7 +157,8 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
 
     let network = Network::Main;
     let expected_blk_files = ["blk0.dat", "blk1.dat"];
-    let test_data_dir = ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network).await;
+    let test_data_dir =
+        ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network, None).await;
 
     let cli = GenesisNode::default_args_with_network_and_devnet_wallet(network).await;
     let mut alice = GenesisNode::start_node(cli).await.unwrap();
@@ -160,10 +200,19 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
         .is_ok());
 }
 
-async fn ensure_blocks_in_test_data_dir(blk_file_names: Vec<&str>, network: Network) -> PathBuf {
+/// Fetch required files for testing, and return the directory.
+async fn ensure_blocks_in_test_data_dir(
+    blk_file_names: Vec<&str>,
+    network: Network,
+    sub_directory: Option<&str>,
+) -> PathBuf {
     // Are the required blk files present on disk? If not, fetch them
     // from a server.
-    let test_data_dir = test_helper_data_dir().join(format!("{network}"));
+    let mut test_data_dir = test_helper_data_dir().join(format!("{network}"));
+    if let Some(sub_dir) = sub_directory {
+        test_data_dir = test_data_dir.join(sub_dir);
+    }
+
     DataDirectory::create_dir_if_not_exists(test_data_dir.as_path())
         .await
         .unwrap();
