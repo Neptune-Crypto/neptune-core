@@ -439,19 +439,18 @@ pub async fn helper(
             "Can't find the UTXO in the AOCL of the given block."
         ))
     } else {
-        let sent = future::join_all(
-            txoutputs_and_leafs_ix.iter().map(|(_, aocl_leaf_ix)| {
-                state.lock_async(|gs| {
-                    gs.chain
-                        .archival_state()
-                        .archival_mutator_set
-                        .ams()
-                        .aocl
-                        .prove_membership_relative_to_smaller_mmr(*aocl_leaf_ix, block_aocl_numleafs)
-                        .boxed()
-                })
+        let sent = future::join_all(txoutputs_and_leafs_ix.iter().map(|(_, aocl_leaf_ix)| {
+            state.lock_async(|gs| {
+                gs.chain
+                    .archival_state()
+                    .archival_mutator_set
+                    .ams()
+                    .aocl
+                    .prove_membership_relative_to_smaller_mmr(*aocl_leaf_ix, block_aocl_numleafs)
+                    .boxed()
             })
-        ).await
+        }))
+        .await
         .into_iter()
         .zip(txoutputs_and_leafs_ix)
         .map(|(aocl_membership_proof, (tx_output, aocl_leaf_ix))| {
@@ -494,9 +493,7 @@ pub async fn helper(
 
         Ok((
             block_digest,
-            claims
-                .zip(future::join_all(proofs).await)
-                .collect(),
+            claims.zip(future::join_all(proofs).await).collect(),
         ))
     }
 }
