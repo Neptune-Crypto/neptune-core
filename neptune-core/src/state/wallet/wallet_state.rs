@@ -3751,7 +3751,7 @@ pub(crate) mod tests {
                 send_amt1,
                 NativeCurrencyAmount::coins(1),
                 now,
-                change_key,
+                change_key.clone(),
                 rng.random(),
             )
             .await
@@ -3773,7 +3773,7 @@ pub(crate) mod tests {
                 send_amt2,
                 NativeCurrencyAmount::coins(1),
                 now,
-                change_key,
+                change_key.clone(),
                 rng.random(),
             )
             .await
@@ -4321,7 +4321,7 @@ pub(crate) mod tests {
                 NativeCurrencyAmount::coins(19),
                 NativeCurrencyAmount::coins(1),
                 timestamp,
-                change_key,
+                change_key.clone(),
                 rand::rng().random(),
             )
             .await

@@ -11,6 +11,9 @@
 mod spec;
 
 use anyhow::anyhow;
+use futures::{future, FutureExt};
+use itertools::Itertools;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
@@ -23,10 +26,12 @@ use tasm_lib::twenty_first::prelude::{Mmr, MmrMembershipProof};
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::{field as rustfield, mmr};
 
+use super::ProofOfTransfer;
 use crate::api::export::{NativeCurrencyAmount, Utxo};
+use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::protocol::consensus::type_scripts;
 use crate::protocol::proof_abstractions::{tasm::program::TritonProgram, SecretWitness};
-use crate::util_types::ProofOfTransfer;
+use crate::state::wallet::transaction_output::TxOutput;
 
 const ERROR_AOCL_PROOF_VERIFICATION_FAILED: i128 = 1_000_521;
 
@@ -332,6 +337,8 @@ impl TritonProgram for ProofOfTransfer {
 /// - hashed sender randomness to distinguish similar transfers,
 /// - the AOCL of the block used for the argument.
 ///
+/// # details
+///
 /// Other info is hidden in the proof, such as the exact UTXO that were spent and the exact
 /// block height at which the transfer was
 /// confirmed. The native coin is indicated by the indices (`tx_ix` & `utxo_ix`) of the sent txs
@@ -339,104 +346,159 @@ impl TritonProgram for ProofOfTransfer {
 /// as canonical). *Probably you will want to pass `block` along a successfull result so that a verifier
 /// won't need to search it by the AOCL digest from `Claim`.*
 ///
+/// The addresses are disclosed as the components constraining the address.
+///
+/// # verification & data
 /// The relevant data is taken from this node DB.
 /// During verification from the same block the same data will be pulled.
 ///
 /// # Panics.
 /// When `tx_ix` is out of its bound. <https://github.com/Neptune-Crypto/neptune-core/issues/816#issuecomment-4161003883>
-///
-/// # details
-/// the addresses are disclosed as the components constraining the address
 pub async fn helper(
     state: crate::state::GlobalStateLock,
-    tx_ix: u64,
-    utxo_ix: usize,
-    block: Digest,
-) -> anyhow::Result<(Claim, crate::api::export::NeptuneProof)> {
-    let block = state
-        .lock_async(|s| futures::FutureExt::boxed(s.chain.archival_state().get_block(block)))
+    tx_ix: Option<u64>,
+    utxo_ix: Option<usize>,
+    block_digest: Option<Digest>,
+) -> anyhow::Result<(
+    Digest,
+    Vec<(
+        Claim,
+        Result<
+            crate::api::export::NeptuneProof,
+            crate::api::tx_initiation::error::CreateProofError,
+        >,
+    )>,
+)> {
+    tracing::trace![
+        "Read-lock the global state. Until the leafs indicies are positioned for the block."
+    ];
+    let gs_lock = state.lock_guard().await;
+
+    let block_digest = block_digest.unwrap_or_else(|| gs_lock.chain.tip_hash());
+    let block = gs_lock
+        .chain
+        .archival_state()
+        .get_block(block_digest)
         .await?
         .ok_or(anyhow!("no canonical block with the given digest"))?;
 
-    let block_aocl = block
-        .mutator_set_accumulator_after()
-        .expect("only a mined block")
-        .aocl;
+    let block_aocl_handle = tokio::task::spawn_blocking(move || {
+        block
+            .mutator_set_accumulator_after()
+            .expect("canonical block")
+            .aocl
+    });
+
+    let sent_txs = gs_lock.wallet_state.wallet_db.sent_transactions();
+    let tx_ix_last = sent_txs
+        .len()
+        .await
+        .checked_sub(1)
+        .ok_or_else(|| anyhow!["current wallet has no sent transactions"])?;
+    let tx_sent = sent_txs.get(tx_ix.unwrap_or(tx_ix_last)).await;
+    let tx_outputs = if let Some(utxo_ix) = utxo_ix {
+        vec![tx_sent.tx_outputs.get(utxo_ix).ok_or(anyhow![
+            "sent tx *output* index is out of bounds".to_string()
+        ])?]
+    } else {
+        tx_sent
+            .tx_outputs
+            .iter()
+            .filter(|o| !o.is_change())
+            .collect()
+    };
+
+    let block_aocl = block_aocl_handle.await?;
     let block_aocl_numleafs = block_aocl.num_leafs();
 
-    tracing::trace!["Read-lock the global state. Until the membership proof is computed for proving the transfer."];
-    let gs_lock = state.lock_guard().await;
-
-    let tx_sent = crate::application::database::storage::storage_vec::traits::StorageVecBase::get(
-        gs_lock.wallet_state.wallet_db.sent_transactions(),
-        tx_ix,
-    )
-    .await;
-    let tx_output = tx_sent.tx_outputs.get(utxo_ix).ok_or(anyhow![
-        "sent tx *output* index is out of bounds".to_string()
-    ])?;
-
-    let utxo = tx_output.utxo();
-    let sender_randomness = tx_output.sender_randomness();
-    let additionrec = tx_output.addition_record();
-
-    let aocl_archival = &gs_lock
+    let canoncommitments: HashMap<Digest, &TxOutput> = tx_outputs
+        .iter()
+        .map(|o| (o.addition_record().canonical_commitment, *o))
+        .collect();
+    let leaf_range_inclusive = gs_lock
         .chain
         .archival_state()
         .archival_mutator_set
         .ams()
-        .aocl;
-
-    let aocl_leaf_ix = aocl_archival
+        .aocl
         .get_leaf_range_inclusive_async(0..=(block_aocl_numleafs - 1))
-        .await
-        .iter()
-        .position(|leaf| *leaf == additionrec.canonical_commitment)
-        .ok_or(anyhow!(
-            "Can't find the UTXO in the AOCL of the given block".to_string()
-        ))? as u64;
-    let aocl_membership_proof = aocl_archival
-        .prove_membership_relative_to_smaller_mmr(aocl_leaf_ix, block_aocl_numleafs)
         .await;
+    let txoutputs_and_leafs_ix: Vec<(&TxOutput, u64)> = leaf_range_inclusive
+        .iter()
+        .positions(|leaf| canoncommitments.keys().contains(leaf))
+        .map(|ix| (canoncommitments[&leaf_range_inclusive[ix]], ix as u64))
+        .collect();
 
     drop(gs_lock);
-    tracing::trace!["Unlocked reading the global state. Computed the membership proof."];
+    tracing::trace![
+        "Unlocked reading the global state. Positioned the leafs indicies for the block."
+    ];
 
-    let sent = crate::util_types::ProofOfTransfer::new(
-        claim_outputs(
-            claim_inputs(
-                tasm_lib::triton_vm::proof::Claim::new(hash()),
-                tx_output.receiver_digest(),
-                // TODO `ProofOfTransfer` ignores time locks yet
-                utxo.release_date().unwrap_or_default(),
-            ),
-            sender_randomness.hash(),
-            block_aocl.bag_peaks(),
-            utxo.lock_script_hash(),
-            tx_output.native_currency_amount(),
-        ),
-        block_aocl,
-        sender_randomness,
-        aocl_leaf_ix,
-        utxo,
-        aocl_membership_proof,
-    );
+    if txoutputs_and_leafs_ix.is_empty() {
+        Err(anyhow!(
+            "Can't find the UTXO in the AOCL of the given block."
+        ))
+    } else {
+        let sent = future::join_all(
+            txoutputs_and_leafs_ix.iter().map(|(_, aocl_leaf_ix)| {
+                state.lock_async(|gs| {
+                    gs.chain
+                        .archival_state()
+                        .archival_mutator_set
+                        .ams()
+                        .aocl
+                        .prove_membership_relative_to_smaller_mmr(*aocl_leaf_ix, block_aocl_numleafs)
+                        .boxed()
+                })
+            })
+        ).await
+        .into_iter()
+        .zip(txoutputs_and_leafs_ix)
+        .map(|(aocl_membership_proof, (tx_output, aocl_leaf_ix))| {
+            let utxo = tx_output.utxo();
+            let sender_randomness = tx_output.sender_randomness();
 
-    let claim = sent.claim();
+            crate::util_types::ProofOfTransfer::new(
+                claim_outputs(
+                    claim_inputs(
+                        tasm_lib::triton_vm::proof::Claim::new(hash()),
+                        tx_output.receiver_digest(),
+                        // TODO `ProofOfTransfer` ignores time locks yet
+                        utxo.release_date().unwrap_or_default(),
+                    ),
+                    sender_randomness.hash(),
+                    block_aocl.bag_peaks(),
+                    utxo.lock_script_hash(),
+                    tx_output.native_currency_amount(),
+                ),
+                block_aocl.clone(),
+                sender_randomness,
+                aocl_leaf_ix,
+                utxo,
+                aocl_membership_proof,
+            )
+        });
 
-    let proof = crate::protocol::proof_abstractions::tasm::program::TritonProgram::prove(
-        &sent,
-        claim.clone(),
-        sent.nondeterminism(),
-        crate::application::triton_vm_job_queue::vm_job_queue(),
-        crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder::new()
-            .proving_capability(crate::state::transaction::tx_proving_capability::TxProvingCapability::SingleProof)
-            .proof_type(crate::api::export::TransactionProofType::SingleProof)
-            .job_priority(crate::api::export::TritonVmJobPriority::Normal)
-            .build(),
-    ).await?;
+        let claims = sent.clone().map(|item| item.claim());
 
-    Ok((claim, proof))
+        let proofs = sent.zip(claims.clone()).map(|(sent, claim)| async move {
+            crate::protocol::proof_abstractions::tasm::program::TritonProgram::prove(
+                &sent,
+                claim,
+                sent.nondeterminism(),
+                crate::application::triton_vm_job_queue::vm_job_queue(),
+                Default::default(),
+            )
+            .await
+        });
+
+        Ok((
+            block_digest,
+            claims
+                .zip(future::join_all(proofs).await)
+                .collect(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -464,8 +526,14 @@ mod tests {
         fee_percent: f64,
         rness: Randomness<0, 2>,
     ) -> (
+        // TxCreationArtifacts,
         GlobalStateLock,
+        // crate::api::export::GenerationSpendingKey,
+        // [crate::protocol::consensus::block::Block; 3],
         Digest,
+        // MmrAccumulator,
+        // MmrMembershipProof,
+        // u64,
         super::ProofOfTransfer,
         super::Claim,
     ) {
@@ -580,13 +648,23 @@ mod tests {
             .await
             .unwrap();
 
-        (gs_lock, block_after_digest, sent, claim)
+        (
+            // tx,
+            gs_lock,
+            // key,
+            // [block_1, block_with_tx, block_after],
+            block_after_digest,
+            // witness_aocl,
+            // aocl_leaf_index,
+            sent,
+            claim,
+        )
     }
 
     mod thetritonprogram {
         use super::super::ERROR_AOCL_PROOF_VERIFICATION_FAILED;
         use super::setup_funded_wallet_with_mined_tx;
-        use crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification;
+        use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
         use crate::protocol::proof_abstractions::tasm::program::TritonError;
         use crate::protocol::proof_abstractions::SecretWitness;
         use crate::tests::shared::Randomness;
@@ -594,7 +672,11 @@ mod tests {
         use proptest::test_runner::RngSeed;
         use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
-        #[test_strategy::proptest(async = "tokio", rng_seed = RngSeed::Fixed(0))]
+        #[test_strategy::proptest(
+            async = "tokio", 
+            // cases = 2, 
+            rng_seed = RngSeed::Fixed(0)
+        )]
         async fn property_test_happy_path(
             #[strategy(0.0..=1.0)] spend_percent: f64,
             #[strategy(0.0..=1.0)] fee_percent: f64,
@@ -623,7 +705,11 @@ mod tests {
         }
 
         // Consolidated negative test: AOCL proof verification failure.
-        #[test_strategy::proptest(async = "tokio", rng_seed = RngSeed::Fixed(0))]
+        #[test_strategy::proptest(
+            async = "tokio", 
+            // cases = 2, 
+            rng_seed = RngSeed::Fixed(0)
+        )]
         async fn aocl_proof_verification_failed(
             #[strategy(0.0..=1.0)] spend_percent: f64,
             #[strategy(0.0..=1.0)] fee_percent: f64,
@@ -667,7 +753,6 @@ mod tests {
         use super::setup_funded_wallet_with_mined_tx;
         use tasm_lib::prelude::Digest;
         use tasm_lib::triton_vm::prelude::BFieldCodec;
-        use tasm_lib::triton_vm::proof::Claim;
 
         // Test helper function - happy path.
         #[tokio::test]
@@ -677,13 +762,7 @@ mod tests {
 
             // Test the helper function with valid parameters.
             // Use `block_after_digest` since that's the block that should be canonical and contain the transaction.
-            let result: anyhow::Result<(Claim, crate::api::export::NeptuneProof)> = helper(
-                gs_lock.clone(),
-                0, // tx_ix
-                0, // utxo_ix
-                block_after_digest,
-            )
-            .await;
+            let result = helper(gs_lock.clone(), None, None, Some(block_after_digest)).await;
 
             // Now this should succeed! We have canonical blocks AND sent transaction in wallet.
             assert!(
@@ -691,15 +770,17 @@ mod tests {
                 "helper should succeed with valid setup: {:?}",
                 result.err().unwrap()
             );
+            let mut result = result.unwrap();
+            assert_eq!(result.1.len(), 1);
 
-            let (claim, proof) = result.unwrap();
+            let (claim, proof) = result.1.pop().unwrap();
 
             // Verify the claim has expected structure.
             assert!(!claim.input.is_empty(), "claim should have inputs");
             assert!(!claim.output.is_empty(), "claim should have outputs");
 
-            // Verify the proof is valid (NeptuneProof should have content).
-            let proof_data = proof.encode();
+            // Verify the proof is valid (`NeptuneProof` should have content).
+            let proof_data = proof.unwrap().encode();
             assert!(!proof_data.is_empty(), "proof should have elements");
 
             println!("🎉 SUCCESS! Helper function works perfectly!");
@@ -716,11 +797,10 @@ mod tests {
             let (gs_lock, _block_after_digest, _sent, _claim) =
                 setup_funded_wallet_with_mined_tx(0.5, 0.1, Default::default()).await;
 
-            // Test with non-existent block digest
+            // Test with non-existent block digest.
             let fake_block_digest =
                 Digest::new([tasm_lib::triton_vm::prelude::BFieldElement::new(1); 5]);
-            let result: anyhow::Result<(Claim, crate::api::export::NeptuneProof)> =
-                helper(gs_lock.clone(), 0, 0, fake_block_digest).await;
+            let result = helper(gs_lock.clone(), None, None, Some(fake_block_digest)).await;
 
             assert!(
                 result.is_err(),
@@ -742,15 +822,18 @@ mod tests {
             let (gs_lock, block_after_digest, _sent, _claim) =
                 setup_funded_wallet_with_mined_tx(0.5, 0.1, Default::default()).await;
 
-            // Try helper function - it should succeed with our fixes
-            let result = helper(gs_lock.clone(), 0, 0, block_after_digest).await;
+            // Try helper function - it should succeed with our fixes.
+            let result = helper(gs_lock.clone(), None, None, Some(block_after_digest)).await;
 
-            // Check if we got success or acceptable error (channel issues can happen in tests)
+            // Check if we got success or acceptable error (channel issues can happen in tests).
             match result {
-                Ok((claim, proof)) => {
-                    // Success case - verify results
+                Ok(mut result) => {
+                    assert_eq!(result.1.len(), 1, "expected exactly one claim-proof pair");
+                    let (claim, proof) = result.1.pop().unwrap();
+
+                    // Success case - verify results.
                     assert!(!claim.input.is_empty(), "claim should have inputs");
-                    let proof_data = proof.encode();
+                    let proof_data = proof.unwrap().encode();
                     assert!(!proof_data.is_empty(), "proof should not be empty");
 
                     println!("🎉 EVIDENCE: Helper function is working perfectly!");
@@ -782,6 +865,8 @@ mod tests {
         }
 
         // Test helper function - invalid transaction index.
+        //
+        // see docs of proving method in RPC API
         #[should_panic(
             expected = "Out-of-bounds. Got 1 but length was 1. persisted vector name: sent_transactions"
         )]
@@ -790,12 +875,12 @@ mod tests {
             let (gs_lock, block_after_digest, _sent, _claim) =
                 setup_funded_wallet_with_mined_tx(0.5, 0.1, Default::default()).await;
 
-            // Test with invalid transaction index (we only have 1 transaction, so index 1 is invalid)
-            let result: anyhow::Result<(Claim, crate::api::export::NeptuneProof)> = helper(
+            // Test with invalid transaction index (we only have 1 transaction, so index `1` is invalid).
+            let result = helper(
                 gs_lock.clone(),
-                1, // invalid tx_ix (we only have 0)
-                0,
-                block_after_digest,
+                Some(1), // invalid `tx_ix` (we only have `0`)
+                None,
+                Some(block_after_digest),
             )
             .await;
 
@@ -809,18 +894,18 @@ mod tests {
             );
         }
 
-        // Test helper function - invalid UTXO index
+        // Test helper function - invalid UTXO index.
         #[tokio::test]
         async fn test_helper_invalid_utxo_index() {
             let (gs_lock, block_after_digest, _sent, _claim) =
                 setup_funded_wallet_with_mined_tx(0.5, 0.1, Default::default()).await;
 
-            // Test with invalid UTXO index
-            let result: anyhow::Result<(Claim, crate::api::export::NeptuneProof)> = helper(
+            // Test with invalid UTXO index.
+            let result = helper(
                 gs_lock.clone(),
-                0,
-                999, // invalid utxo_ix
-                block_after_digest,
+                Some(0),
+                Some(999), // invalid `utxo_ix`
+                Some(block_after_digest),
             )
             .await;
 

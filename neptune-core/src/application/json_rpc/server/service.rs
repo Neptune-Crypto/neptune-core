@@ -1327,35 +1327,37 @@ impl RpcApi for RpcServer {
         &self,
         request: ProveAnTransferRequest,
     ) -> RpcResult<ProveAnTransferResponse> {
-        if request.tx_ix
-            < self
-                .state
-                .lock_async(|gs| {
-                    crate::application::database::storage::storage_vec::traits::StorageVecBase::len(
-                        gs.wallet_state.wallet_db.sent_transactions(),
-                    )
-                })
-                .await
-        {
-            let (claim, proof) = crate::util_types::proof_of_transfer::helper(
-                self.state.clone(),
-                request.tx_ix,
-                request.utxo_ix,
-                request.block,
-            )
-            .await
-            .map_err(|e| {
-                RpcError::Server(JsonError::Custom {
-                    code: -32603,
-                    message: format!("Failed to prove transfer: {}", e),
-                    data: None,
-                })
-            })?;
+        if request.tx_ix.is_some()
+            && request.tx_ix.unwrap() >= self
+            .state
+            .lock_async(|gs| {
+                crate::application::database::storage::storage_vec::traits::StorageVecBase::len(
+                    gs.wallet_state.wallet_db.sent_transactions(),
+                )
+            }).await {return Err(RpcError::SentTxIndexOutOfBounds)}
 
-            Ok(ProveAnTransferResponse { claim, proof })
-        } else {
-            Err(RpcError::SentTxIndexOutOfBounds)
-        }
+        let (block, data) = crate::util_types::proof_of_transfer::helper(
+            self.state.clone(),
+            request.tx_ix,
+            request.utxo_ix,
+            request.block,
+        )
+        .await
+        .map_err(|e| {
+            RpcError::Server(JsonError::Custom {
+                code: -32603,
+                message: format!("Failed to prove transfer: {}", e),
+                data: None,
+            })
+        })?;
+
+        Ok(ProveAnTransferResponse {
+            block,
+            data: data
+                .into_iter()
+                .map(|(claim, proof)| (claim, proof.map_err(|e| e.to_string())))
+                .collect(),
+        })
     }
 
     async fn triton_verify_call(
@@ -1803,7 +1805,6 @@ pub mod tests {
     use crate::api::export::AnnouncementFlag;
     use crate::api::export::KeyType;
     use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::NeptuneProof;
     use crate::api::export::Network;
     use crate::api::export::OutputFormat;
     use crate::api::export::Timestamp;
@@ -3072,9 +3073,9 @@ pub mod tests {
         // test that the method exists and can be called (even if it fails due to no data)
         let result = rpc_server
             .prove_an_transfer_call(ProveAnTransferRequest {
-                tx_ix: 0,
-                utxo_ix: 0,
-                block: tasm_lib::prelude::Digest::default(),
+                tx_ix: Some(0),
+                utxo_ix: Some(0),
+                block: Some(tasm_lib::prelude::Digest::default()),
             })
             .await;
 
@@ -3098,9 +3099,9 @@ pub mod tests {
 
         // verify request/response types work correctly
         let request = ProveAnTransferRequest {
-            tx_ix: 42,
-            utxo_ix: 7,
-            block: tasm_lib::prelude::Digest::default(),
+            tx_ix: Some(42),
+            utxo_ix: Some(7),
+            block: Some(tasm_lib::prelude::Digest::default()),
         };
 
         // verify the request can be serialized/deserialized (basic JSON-RPC compatibility)
@@ -3113,13 +3114,16 @@ pub mod tests {
 
         // verify response type works
         let response = ProveAnTransferResponse {
-            claim: tasm_lib::triton_vm::proof::Claim {
-                program_digest: tasm_lib::prelude::Digest::default(),
-                version: 1,
-                input: vec![],
-                output: vec![],
-            },
-            proof: NeptuneProof::invalid(),
+            block: request.block.unwrap(),
+            data: vec![(
+                tasm_lib::triton_vm::proof::Claim {
+                    program_digest: tasm_lib::prelude::Digest::default(),
+                    version: 1,
+                    input: vec![],
+                    output: vec![],
+                },
+                Ok(crate::api::export::NeptuneProof::invalid()),
+            )],
         };
 
         let serialized_response = serde_json::to_string(&response).unwrap();
@@ -3127,10 +3131,13 @@ pub mod tests {
             serde_json::from_str(&serialized_response).unwrap();
 
         assert_eq!(
-            response.claim.program_digest,
-            deserialized_response.claim.program_digest
+            response.data[0].0.program_digest,
+            deserialized_response.data[0].0.program_digest
         );
-        assert_eq!(response.claim.version, deserialized_response.claim.version);
+        assert_eq!(
+            response.data[0].0.version,
+            deserialized_response.data[0].0.version
+        );
     }
 
     #[apply(shared_tokio_runtime)]
@@ -3162,9 +3169,9 @@ pub mod tests {
         // TODO: Add more comprehensive test with real transaction data once API access is sorted out
         let result = rpc_server
             .prove_an_transfer_call(ProveAnTransferRequest {
-                tx_ix: 0,                 // First transaction in the block
-                utxo_ix: 0,               // First UTXO
-                block: Digest::default(), // Use default digest for now
+                tx_ix: Some(0),                                    // First transaction in the block
+                utxo_ix: Some(0),                                  // First UTXO
+                block: Some(tasm_lib::prelude::Digest::default()), // Use default digest for now
             })
             .await;
 
@@ -3248,9 +3255,9 @@ pub mod tests {
         let fake_block = Digest::new([tasm_lib::triton_vm::prelude::BFieldElement::new(1); 5]);
         let result = rpc_server
             .prove_an_transfer_call(ProveAnTransferRequest {
-                tx_ix: 999,
-                utxo_ix: 999,
-                block: fake_block,
+                tx_ix: Some(999),
+                utxo_ix: Some(999),
+                block: Some(fake_block),
             })
             .await;
 
@@ -3272,9 +3279,9 @@ pub mod tests {
 
         let result_ = rpc_server
             .prove_an_transfer_call(ProveAnTransferRequest {
-                tx_ix: 0,
-                utxo_ix: 999,
-                block: genesis_hash,
+                tx_ix: Some(0),
+                utxo_ix: Some(999),
+                block: Some(genesis_hash),
             })
             .await;
 

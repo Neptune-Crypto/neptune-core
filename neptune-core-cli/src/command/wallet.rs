@@ -1,5 +1,7 @@
 pub(crate) mod quarry;
 
+use std::path::PathBuf;
+
 use clap::Parser;
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::Network;
@@ -62,7 +64,30 @@ pub(crate) enum WalletCommand {
     /// list known coins
     ListCoins,
 
-    /// claim an off-chain utxo-transfer.
+    /// Prove a transfer from the current wallet.
+    ///
+    /// TODO finish usage explanation \
+    /// Without arguments/options the most recent sent transfer is
+    /// used and the current tip block is taken as the proving block. In this case ...all UTXO...
+    ProveAnTransfer {
+        #[clap(long)]
+        tx_ix: Option<u64>,
+
+        #[clap(long)]
+        utxo_ix: Option<usize>,
+
+        #[clap(long)]
+        block: Option<neptune_cash::api::export::Digest>,
+    },
+
+    VerifyProof {
+        #[clap(long, value_parser)]
+        claim: PathBuf,
+        #[clap(long, value_parser)]
+        proof: PathBuf,
+    },
+
+    /// claim an off-chain utxo-transfer
     ClaimUtxo {
         #[clap(subcommand)]
         format: ClaimUtxoFormat,

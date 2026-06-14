@@ -563,16 +563,19 @@ pub struct ClaimUtxoResponse {
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct ProveAnTransferRequest {
-    pub tx_ix: u64,
-    pub utxo_ix: usize,
-    pub block: Digest,
+    pub tx_ix: Option<u64>,
+    pub utxo_ix: Option<usize>,
+    pub block: Option<Digest>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProveAnTransferResponse {
-    pub claim: tasm_lib::triton_vm::proof::Claim,
-    pub proof: NeptuneProof,
+    pub block: Digest,
+    pub data: Vec<(
+        tasm_lib::triton_vm::proof::Claim,
+        Result<NeptuneProof, String>,
+    )>,
 }
 
 /* Mining */

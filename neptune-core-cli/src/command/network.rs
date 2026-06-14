@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 
 use clap::Parser;
-use libp2p::Multiaddr;
+use multiaddr::Multiaddr;
 
 /// Network Command -- a command related to the peer-to-peer or networking
 /// layers.

@@ -15,7 +15,7 @@ use crate::protocol::proof_abstractions::tasm::builtins::tasmlib_io_write_to_std
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
-impl crate::protocol::proof_abstractions::tasm::program::tests::TritonProgramSpecification
+impl crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification
     for super::ProofOfTransfer
 {
     /* TODO

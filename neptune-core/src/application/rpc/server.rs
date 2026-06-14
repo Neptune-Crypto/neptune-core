@@ -139,7 +139,6 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ResponseMsMembershipProofPrivacyPreserving;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::proof_of_transfer;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -2201,10 +2200,10 @@ pub trait RPC {
     /// ```
     async fn prove_transfer(
         token: auth::Token,
-        tx_ix: u64,
-        utxo_ix: usize,
-        block: Digest,
-    ) -> RpcResult<(Claim, NeptuneProof)>;
+        tx_ix: Option<u64>,
+        utxo_ix: Option<usize>,
+        block: Option<Digest>,
+    ) -> RpcResult<ProvingTransferOutput>;
 
     /// Triton VM `verify`.
     async fn triton_verify(
@@ -2213,6 +2212,8 @@ pub trait RPC {
         proof: NeptuneProof,
     ) -> RpcResult<bool>;
 }
+/// a lint
+type ProvingTransferOutput = (Digest, Vec<(Claim, Result<NeptuneProof, String>)>);
 
 #[derive(Clone)]
 pub(crate) struct NeptuneRPCServer {
@@ -4692,10 +4693,10 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: ::tarpc::context::Context,
         token: auth::Token,
-        tx_ix: u64,
-        utxo_ix: usize,
-        block: Digest,
-    ) -> RpcResult<(Claim, NeptuneProof)> {
+        tx_ix: Option<u64>,
+        utxo_ix: Option<usize>,
+        block: Option<Digest>,
+    ) -> RpcResult<(Digest, Vec<(Claim, Result<NeptuneProof, String>)>)> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -4708,15 +4709,25 @@ impl RPC for NeptuneRPCServer {
             .await;
         drop(gs_lock);
 
-        if l > tx_ix {
-            proof_of_transfer::helper(self.state, tx_ix, utxo_ix, block)
-                .await
-                .map_err(RpcError::from)
-        } else {
-            Err(RpcError::Failed(
-                "sent *tx* index is out of bounds".to_string(),
-            ))
+        if let Some(tx_ix) = tx_ix {
+            if tx_ix >= l {
+                return Err(RpcError::Failed(
+                    "sent *tx* index is out of bounds".to_string(),
+                ));
+            }
         }
+
+        crate::util_types::proof_of_transfer::helper(self.state, tx_ix, utxo_ix, block)
+            .await
+            .map_err(RpcError::from)
+            .map(|(block, data)| {
+                (
+                    block,
+                    data.into_iter()
+                        .map(|(claim, proof)| (claim, proof.map_err(|e| e.to_string())))
+                        .collect(),
+                )
+            })
     }
 
     // Documented in trait. Do not add doc-comment.

@@ -7,12 +7,14 @@ use std::io::stdout;
 use std::io::Write;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
@@ -22,8 +24,10 @@ use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
 use neptune_cash::api::export::BlockHeight;
+use neptune_cash::api::export::NeptuneProof;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+use neptune_cash::application::config::data_directory;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::rpc::auth;
@@ -79,6 +83,9 @@ struct Config {
     /// neptune-core data directory containing wallet and blockchain state
     #[clap(long)]
     data_dir: Option<PathBuf>,
+
+    #[clap(long)]
+    network: Option<Network>,
 
     #[clap(subcommand)]
     command: Command,
@@ -482,6 +489,78 @@ async fn main() -> Result<()> {
             let list = client.list_own_coins(ctx, token).await??;
             let now = Timestamp::now();
             println!("{}", CoinWithPossibleTimeLock::report(&list, now));
+        }
+        Command::Wallet(WalletCommand::ProveAnTransfer {
+            tx_ix,
+            utxo_ix,
+            block,
+        }) => {
+            let mut ctx = ctx;
+            ctx.deadline += Duration::from_mins(3); // default deadline can be too restrictive for proving, the number is chosen by @skaunov purely arbitrary
+            let (block, proofs) = client
+                .prove_transfer(ctx, token, tx_ix, utxo_ix, block)
+                .await??;
+
+            println!("Proving was done using the block <{block:x}>.");
+            println!["{} proofs have been generated", proofs.len()];
+            if proofs.iter().any(|(_, result)| result.is_err()) {
+                println!("Not all succesfully though. Read the output.")
+            }
+            for (claim, proof) in proofs {
+                // TODO Would check `claim` format here, but feel irrelevant until <https://github.com/Neptune-Crypto/neptune-core/issues/850>.
+                let proof = proof.map_err(|e| anyhow::anyhow!(e))?;
+
+                let id = claim.output[1].to_string();
+
+                let path_proving =
+                    DataDirectory::get(args.data_dir.clone(), args.network.unwrap_or_default())?
+                        .root_dir_path()
+                        .join(Path::new(data_directory::DIRNAME_PROVING));
+                data_directory::DataDirectory::create_dir_if_not_exists(&path_proving).await?;
+
+                let path =
+                    path_proving.join(Path::new(["transfer_", &id, ".proof"].concat().as_str()));
+
+                let path_proof = path.clone();
+                let path_proof = path_proof.display();
+                println!["Saving to {path_proof}..."];
+
+                let proof = tokio::task::spawn_blocking(move || {
+                    std::fs::write(path, rmp_serde::to_vec(&proof)?).map_err(|e| anyhow!(e))
+                });
+
+                let path =
+                    path_proving.join(Path::new(["transfer_", &id, ".json"].concat().as_str()));
+                tokio::fs::write(path.clone(), serde_json::to_vec(&claim)?).await?;
+                proof.await??;
+
+                println!["Saved both files: "];
+                println!["- <{}> -- the claim, and ", path.display()];
+                println!["- <{path_proof}> -- the proof."];
+            }
+        }
+        Command::Wallet(WalletCommand::VerifyProof { claim, proof }) => {
+            let proof = tokio::task::spawn_blocking(move || {
+                rmp_serde::from_slice::<NeptuneProof>(&std::fs::read(&proof)?)
+                    .map_err(|e| anyhow!(e))
+            });
+
+            if client
+                .triton_verify(
+                    ctx,
+                    token,
+                    serde_json::from_slice::<neptune_cash::api::export::Claim>(
+                        &tokio::fs::read(&claim).await?,
+                    )?,
+                    proof.await??,
+                )
+                .await??
+            {
+                println!["Well, it's verified!"];
+                println!["**Remember to check the claim meticulously, including the AOCL digest pertains to canonical block!**"];
+            } else {
+                println!["Too **bad:** this proof does not proves this claim."]
+            }
         }
         Command::Blockchain(BlockchainCommand::Network) => {
             // we already queried the network above.
