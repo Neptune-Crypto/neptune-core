@@ -2152,7 +2152,7 @@ pub trait RPC {
     /// # }
     async fn shutdown(token: auth::Token) -> RpcResult<bool>;
 
-    /// A wrapper around [`proof_of_transfer::helper`] (see the docs on it).
+    /// A wrapper around [`crate::util_types::proof_of_transfer::helper`] (see the docs on it).
     ///
     /// For verification see `triton_verify` in this API.
     ///
