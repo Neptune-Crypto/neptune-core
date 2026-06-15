@@ -3,6 +3,7 @@ use num_traits::Zero;
 use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
+use crate::api::export::Timestamp;
 use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
@@ -44,6 +45,10 @@ pub const BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET: BlockHeight =
 /// soundness issue, on test net.
 pub const BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(4_650));
+
+/// Transactions that are more than three days older than the block are
+/// disallowed. Only enforced from hardfork gamma and onwards.
+pub const TX_BACKDATING_LIMIT: Timestamp = Timestamp::days(3);
 
 /// Enumerates all possible sets of consensus rules.
 ///
@@ -183,6 +188,16 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => true,
             ConsensusRuleSet::HardforkGamma => true,
+        }
+    }
+
+    pub(crate) fn transaction_backdating_threshold(&self) -> Option<Timestamp> {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta => None,
+            ConsensusRuleSet::HardforkGamma => Some(TX_BACKDATING_LIMIT),
         }
     }
 

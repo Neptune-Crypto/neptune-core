@@ -878,7 +878,13 @@ impl Block {
         }
 
         // 2.f)
-        if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
+        let tx_timestamp = self.body().transaction_kernel.timestamp;
+        let block_timestamp = self.header().timestamp;
+        if tx_timestamp > block_timestamp
+            || consensus_rule_set
+                .transaction_backdating_threshold()
+                .is_some_and(|limit| block_timestamp - tx_timestamp > limit)
+        {
             return Err(BlockValidationError::TransactionTimestamp);
         }
 
