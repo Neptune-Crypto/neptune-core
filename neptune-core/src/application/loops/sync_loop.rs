@@ -186,6 +186,10 @@ impl SyncLoop {
                         SuccessorsToSync::BlockValidationError => {
                             tracing::error!("Block validation error occurred during syncing. Possible cause: a reorg happened while syncing. Terminating sync loop.");
                         }
+                        SuccessorsToSync::BlockPowError => {
+                            tracing::error!("Block PoW check failed during syncing. Terminating sync loop.");
+                            break;
+                        },
                     }
 
                     // Start a new successors subtask, but only if it makes
@@ -816,6 +820,12 @@ impl SyncLoop {
                 let _ = return_channel
                     .send(SuccessorsToSync::BlockValidationError)
                     .await;
+                return;
+            }
+
+            // check PoW
+            if !block_validator.check_pow(&successor, &tip) {
+                let _ = return_channel.send(SuccessorsToSync::BlockPowError).await;
                 return;
             }
 

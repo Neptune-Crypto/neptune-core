@@ -59,4 +59,5 @@ pub(crate) enum SuccessorsToSync {
     RapidBlockDownloadError,
     SendError,
     BlockValidationError,
+    BlockPowError,
 }
