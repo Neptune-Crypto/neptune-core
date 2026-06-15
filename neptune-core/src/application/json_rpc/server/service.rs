@@ -3079,23 +3079,8 @@ pub mod tests {
             })
             .await;
 
-        // We expect this to fail since there's no actual transaction data,
-        // but the method should be callable and return a proper error
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            crate::application::json_rpc::core::api::rpc::RpcError::Server(json_err) => {
-                match json_err {
-                    crate::application::json_rpc::core::model::json::JsonError::Custom {
-                        message,
-                        ..
-                    } => {
-                        assert!(message.contains("Failed to prove transfer"));
-                    }
-                    _ => panic!("Expected Custom error"),
-                }
-            }
-            _ => panic!("Expected Server error"),
-        }
+        // We expect this to fail since there's no actual transaction data, but the method should be callable and return a proper error.
+        assert_eq!(result.unwrap_err(), RpcError::SentTxIndexOutOfBounds);
 
         // verify request/response types work correctly
         let request = ProveAnTransferRequest {
@@ -3255,8 +3240,8 @@ pub mod tests {
         let fake_block = Digest::new([tasm_lib::triton_vm::prelude::BFieldElement::new(1); 5]);
         let result = rpc_server
             .prove_an_transfer_call(ProveAnTransferRequest {
-                tx_ix: Some(999),
-                utxo_ix: Some(999),
+                tx_ix: None,
+                utxo_ix: None,
                 block: Some(fake_block),
             })
             .await;
