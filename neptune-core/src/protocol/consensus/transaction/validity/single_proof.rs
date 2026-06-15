@@ -1034,10 +1034,8 @@ pub(crate) mod tests {
     }
 
     mod merge_tests {
-        use crate::protocol::consensus::{
-            consensus_rule_set::ConsensusRuleSet,
-            transaction::validity::tasm::single_proof::merge_branch::tests::deterministic_merge_witness_with_coinbase,
-        };
+        use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::tests::deterministic_merge_witness_with_coinbase;
+        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 
         use super::*;
 

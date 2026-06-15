@@ -64,7 +64,7 @@ use crate::protocol::peer::PositivePeerSanction;
 use crate::protocol::peer::SyncChallenge;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
+use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::sync_status::SyncStatus;
 use crate::state::GlobalState;
@@ -1646,7 +1646,7 @@ impl PeerLoopHandler {
 
                 // 6. Ignore if transaction is too old
                 let now = self.now();
-                if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
+                if tx_timestamp < now - MEMPOOL_TX_THRESHOLD_AGE {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
                     return Ok(KEEP_CONNECTION_ALIVE);

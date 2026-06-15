@@ -76,8 +76,8 @@ use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
-// 72 hours in secs
-pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
+/// Transactions with a timestamp older than this are removed from the mempool.
+pub const MEMPOOL_TX_THRESHOLD_AGE: Timestamp = Timestamp::hours(10);
 
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
@@ -1170,7 +1170,7 @@ impl Mempool {
     ///
     /// Computes in O(n)
     pub(super) fn prune_stale_transactions(&mut self) -> Vec<MempoolEvent> {
-        let cutoff = Timestamp::now() - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
+        let cutoff = Timestamp::now() - MEMPOOL_TX_THRESHOLD_AGE;
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
             cutoff < transaction.kernel.timestamp
