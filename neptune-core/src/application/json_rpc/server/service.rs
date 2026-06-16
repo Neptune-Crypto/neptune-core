@@ -45,6 +45,7 @@ use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_output::TxOutput;
@@ -685,6 +686,10 @@ impl RpcApi for RpcServer {
 
         let timestamp = transaction.kernel.timestamp;
         let now = Timestamp::now();
+        if timestamp < now - MEMPOOL_TX_THRESHOLD_AGE {
+            return Err(RpcError::SubmitTransaction(SubmitTransactionError::TooOld));
+        }
+
         if timestamp >= now + FUTUREDATING_LIMIT {
             return Err(RpcError::SubmitTransaction(
                 SubmitTransactionError::FutureDated,
