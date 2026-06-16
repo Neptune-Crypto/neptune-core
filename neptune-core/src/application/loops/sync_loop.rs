@@ -310,6 +310,17 @@ impl SyncLoop {
                             // without going through the tip-successors subtask.
                             // Save valuable setup-time.
                             if self.tip.header().height.next() == block.header().height {
+                                // validate and check PoW
+                                if !self.block_validator.verify(&block, &self.tip).await {
+                                    tracing::error!("Got invalid block. Terminating sync loop");
+                                    break;
+                                }
+
+                                if !self.block_validator.check_pow(&block, &self.tip) {
+                                    tracing::error!("Got block without PoW. Terminating sync loop");
+                                    break;
+                                }
+
                                 tracing::debug!("chain extension is one ahead of current tip; sending directly to main loop.");
                                 if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block.to_owned()).await {
                                     tracing::error!("Could not send tip-successor to main loop. Terminating sync loop.");
