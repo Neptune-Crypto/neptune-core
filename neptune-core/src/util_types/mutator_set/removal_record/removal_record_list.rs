@@ -583,6 +583,14 @@ impl RemovalRecordList {
                 } else if *tree_height < 2 * Self::ENCODING_TREE_HEIGHT_OFFSET {
                     // ignore chunk
                     let tree_height = *tree_height - Self::ENCODING_TREE_HEIGHT_OFFSET;
+
+                    // Verify that tree heights are sorted correctly
+                    if let Some(previous) = tree_heights.last() {
+                        if *previous > tree_height {
+                            return Err(RemovalRecordListUnpackError::IncorrectlySortedTreeHeights);
+                        }
+                    }
+
                     tree_heights.push(tree_height);
                     authentication_structures
                         .push(mmr_authentication_path.authentication_path.clone());
@@ -794,10 +802,6 @@ impl RemovalRecordList {
                 sparse_mmr.insert((*tree_height, node_index), *node_hash);
             }
         }
-
-        assert!(sparse_mmr
-            .values()
-            .all(|v| v.to_hex().chars().take(8).collect::<String>() != "be450642"));
 
         // populate sparse MMR by completing families with parents whenever both
         // children are already present
@@ -2247,26 +2251,29 @@ mod tests {
         #[test]
         fn no_panic_on_decending_tree_heights() {
             let empty = Chunk::empty_chunk();
-            let removal_record = RemovalRecord {
-                absolute_indices: AbsoluteIndexSet::new_raw(0, [0; NUM_TRIALS as usize]),
-                target_chunks: ChunkDictionary {
-                    dictionary: vec![
-                        // Tree heights: [5,3] unique, descending
-                        (5, (MmrMembershipProof::new(vec![]), empty.clone())), // tree height 5
-                        (3, (MmrMembershipProof::new(vec![]), empty.clone())), // tree height 3
-                    ],
-                },
-            };
 
-            // Per the no-crash contract this must return Err, not panic.
-            let res = RemovalRecordList::try_unpack(vec![removal_record]);
-            assert!(
-                matches!(
-                    res,
-                    Err(RemovalRecordListUnpackError::IncorrectlySortedTreeHeights)
-                ),
-                "Must return expected error on incorrectly sorted tree heights"
-            );
+            for offset in [0, RemovalRecordList::ENCODING_TREE_HEIGHT_OFFSET] {
+                let removal_record = RemovalRecord {
+                    absolute_indices: AbsoluteIndexSet::new_raw(0, [0; NUM_TRIALS as usize]),
+                    target_chunks: ChunkDictionary {
+                        dictionary: vec![
+                            // Tree heights: [5,3] unique, descending
+                            (offset + 5, (MmrMembershipProof::new(vec![]), empty.clone())), // tree height 5
+                            (offset + 3, (MmrMembershipProof::new(vec![]), empty.clone())), // tree height 3
+                        ],
+                    },
+                };
+
+                // Per the no-crash contract this must return Err, not panic.
+                let res = RemovalRecordList::try_unpack(vec![removal_record]);
+                assert!(
+                    matches!(
+                        res,
+                        Err(RemovalRecordListUnpackError::IncorrectlySortedTreeHeights)
+                    ),
+                    "Must return expected error on incorrectly sorted tree heights"
+                );
+            }
         }
 
         #[test]
