@@ -48,11 +48,7 @@ track-lock-location = []
 track-lock-time = []
 
 # implements arbitrary::Arbitrary for various types
-arbitrary-impls = [
-    "dep:arbitrary",
-    "dep:proptest-arbitrary-interop",
-    "dep:proptest",
-]
+arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest"]
 
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]
@@ -111,7 +107,7 @@ tarpc = { version = "^0.34", features = [
     "serde-transport-json",
     "tcp",
 ] }
-tasm-lib = "4.0.0"
+tasm-lib = "6.0.0"
 tiny-bip39 = "1.0"
 tokio = { version = "1.47", features = [
     "fs",
@@ -126,12 +122,7 @@ tokio = { version = "1.47", features = [
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
 tokio-util = { version = "0.7", features = ["codec", "rt", "compat"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = [
-    "std",
-    "env-filter",
-    "time",
-    "fmt",
-] }
+tracing-subscriber = { version = "0.3", features = ["std", "env-filter", "time", "fmt"] }
 tracing-test = "0.2"
 zeroize = "1.8.1"
 rs-leveldb = "0.1.5"
@@ -180,10 +171,7 @@ whoami = "2.0.0"
 # arbitrary implementations and specfications. The next line says, for
 # integration tests we want to rely on whatever is public in crate neptune cash
 # *when feature flags "arbitrary-impls" and "spec" are enabled*.
-neptune-cash = { path = "../neptune-core", features = [
-    "arbitrary-impls",
-    "spec",
-] }
+neptune-cash = { path = "../neptune-core", features = ["arbitrary-impls", "spec"] }
 
 # note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]
 # because they are optional deps but required for unit tests.
