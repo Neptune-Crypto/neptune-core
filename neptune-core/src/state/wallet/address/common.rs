@@ -144,6 +144,11 @@ pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
         }
     }
 
+    ensure!(
+        claimed_length <= bytes.len(),
+        "Claimed length cannot exceed actual length when decoding bytes"
+    );
+
     Ok(bytes[0..claimed_length].to_vec())
 }
 
@@ -178,6 +183,25 @@ pub(super) mod tests {
         let bytes_again = bfes_to_bytes(&bfes).unwrap();
 
         assert_eq!(byte_vec, bytes_again);
+    }
+
+    #[test]
+    fn no_crash_empty_bfes() {
+        let _res = bfes_to_bytes(&[]);
+    }
+
+    #[test]
+    fn no_crash_in_bfes_to_bytes() {
+        for claimed_length in 0..20 {
+            for payload_length in 0..12 {
+                let byte_vec = vec![0; payload_length];
+                let mut bfes = bytes_to_bfes(&byte_vec);
+                bfes[0] = bfe!(claimed_length);
+
+                // Ensure no crash
+                let _res = bfes_to_bytes(&bfes);
+            }
+        }
     }
 
     #[test]
