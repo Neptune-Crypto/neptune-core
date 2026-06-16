@@ -74,12 +74,17 @@ use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 /// The most valuable synced SingleProof-backed transaction in the mempool will
 /// be included in the block. If mempool is empty a dummy transaction will be
 /// merged with the coinbase transaction to set the merge bit.
-pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block) -> Block {
+pub(crate) async fn next_block(
+    global_state_lock: GlobalStateLock,
+    parent: Block,
+    coinbase_timestamp: Option<Timestamp>,
+) -> Block {
     let network = global_state_lock.cli().network;
+    let coinbase_timestamp = coinbase_timestamp.unwrap_or(parent.header().timestamp);
     let (child_no_pow, _) = compose_block_helper(
         parent.clone(),
         global_state_lock.clone(),
-        parent.header().timestamp,
+        coinbase_timestamp,
         TritonVmProofJobOptions::default(),
     )
     .await

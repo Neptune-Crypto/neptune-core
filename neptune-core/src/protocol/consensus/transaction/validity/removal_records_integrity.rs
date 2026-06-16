@@ -1053,11 +1053,13 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::api::export::Network;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::transaction::TransactionKernelModifier;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
+    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -1329,13 +1331,15 @@ mod tests {
 
     #[test]
     fn removal_records_coinbase_tx_cannot_have_inputs() {
+        let network = Network::Main;
         let mut test_runner = TestRunner::deterministic();
 
         // Illegal transaction bc it has inputs *and* coinbase.
+        let timestamp = network.launch_date() + Timestamp::months(12);
         let [bad_primitive_witness] =
             PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
                 [(1, 1, 1)],
-                Some((NativeCurrencyAmount::coins(1), 0)),
+                Some((NativeCurrencyAmount::coins(1), 0, timestamp)),
             )
             .new_tree(&mut test_runner)
             .unwrap()

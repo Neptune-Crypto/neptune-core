@@ -2169,7 +2169,6 @@ mod tests {
 
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_months = now + Timestamp::months(7);
-        let in_eight_months = now + Timestamp::months(8);
         let config_bob = TxCreationConfig::default()
             .recover_change_on_chain(bob_spending_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
@@ -2259,7 +2258,7 @@ mod tests {
         let (coinbase_transaction, _expected_utxo) = make_coinbase_transaction_from_state_lock(
             light_state.tip(),
             &bob,
-            in_eight_months,
+            in_seven_months,
             TritonVmJobPriority::Normal.into(),
         )
         .await
@@ -2277,7 +2276,7 @@ mod tests {
         let block_2 = Block::block_template_invalid_proof(
             &block_1,
             block_transaction,
-            in_eight_months,
+            in_seven_months,
             None,
             network,
         );

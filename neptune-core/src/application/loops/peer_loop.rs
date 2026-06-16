@@ -4364,8 +4364,13 @@ mod tests {
 
                 let hard_fork_minus_1 = *guesser_rx.await.unwrap().block;
 
-                let first_block_after_hardfork =
-                    next_block(state_lock.clone(), hard_fork_minus_1.clone()).await;
+                let cb_timestamp = hard_fork_minus_1.header().timestamp + Timestamp::minutes(12);
+                let first_block_after_hardfork = next_block(
+                    state_lock.clone(),
+                    hard_fork_minus_1.clone(),
+                    Some(cb_timestamp),
+                )
+                .await;
 
                 // Verify assumption about block height of hardfork
                 assert!(hard_fork_minus_1.pow_verify_for_tests(

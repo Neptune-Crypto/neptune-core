@@ -2773,7 +2773,7 @@ pub(crate) mod tests {
             let (transaction, _) = make_coinbase_transaction_from_state_lock(
                 &blocks[i - 1],
                 &alice,
-                launch_date,
+                now,
                 TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
             )
             .await

@@ -887,7 +887,7 @@ pub(crate) mod tests {
             );
 
             // hard fork minus 1
-            let block_c = next_block(bob.clone(), block_b.clone()).await;
+            let block_c = next_block(bob.clone(), block_b.clone(), None).await;
             assert!(
                 block_c
                     .is_valid(&block_b, block_c.header().timestamp, network)
@@ -909,7 +909,7 @@ pub(crate) mod tests {
             );
 
             // 1st block after hard fork!
-            let block_d = next_block(bob.clone(), block_c.clone()).await;
+            let block_d = next_block(bob.clone(), block_c.clone(), None).await;
             assert!(
                 block_d
                     .is_valid(&block_c, block_d.header().timestamp, network)
@@ -931,7 +931,7 @@ pub(crate) mod tests {
             );
 
             // 2nd block after hard fork
-            let block_e = next_block(bob.clone(), block_d.clone()).await;
+            let block_e = next_block(bob.clone(), block_d.clone(), None).await;
             assert!(
                 block_e
                     .is_valid(&block_d, block_e.header().timestamp, network)
@@ -953,7 +953,7 @@ pub(crate) mod tests {
             );
 
             // 3rd block after hard fork
-            let block_f = next_block(bob.clone(), block_e.clone()).await;
+            let block_f = next_block(bob.clone(), block_e.clone(), None).await;
             assert!(
                 block_f
                     .is_valid(&block_e, block_f.header().timestamp, network)
@@ -986,7 +986,7 @@ pub(crate) mod tests {
                 .unwrap();
 
             // Create block, with above transaction
-            let block_g = next_block(bob.clone(), block_f.clone()).await;
+            let block_g = next_block(bob.clone(), block_f.clone(), None).await;
             assert!(
                 block_g
                     .is_valid(&block_f, block_g.header().timestamp, network)
@@ -1233,7 +1233,7 @@ pub(crate) mod tests {
             );
 
             // hard fork minus 1
-            let minus1 = next_block(bob.clone(), minus2.clone()).await;
+            let minus1 = next_block(bob.clone(), minus2.clone(), None).await;
             assert!(
                 minus1
                     .is_valid(&minus2, minus1.header().timestamp, network)
@@ -1282,7 +1282,7 @@ pub(crate) mod tests {
                 .await;
 
             // Next: Mine a block that activates hardfork beta
-            let hf = next_block(bob.clone(), minus1.clone()).await;
+            let hf = next_block(bob.clone(), minus1.clone(), None).await;
             assert!(hf.is_valid(&minus1, hf.header().timestamp, network).await);
             assert!(hf.has_proof_of_work(network, minus1.header()));
             assert!(!hf.pow_verify_for_tests(
@@ -1378,7 +1378,7 @@ pub(crate) mod tests {
                 .await
                 .mempool_insert(tx0.transaction().to_owned(), UpgradePriority::Critical)
                 .await;
-            let plus1 = next_block(bob.clone(), hf.clone()).await;
+            let plus1 = next_block(bob.clone(), hf.clone(), None).await;
             assert!(plus1.is_valid(&hf, plus1.header().timestamp, network).await);
             assert!(plus1.has_proof_of_work(network, hf.header()));
             assert!(!plus1.pow_verify_for_tests(
@@ -1436,7 +1436,7 @@ pub(crate) mod tests {
                 .await
                 .mempool_insert(tx1.transaction().to_owned(), UpgradePriority::Critical)
                 .await;
-            let plus2 = next_block(bob.clone(), plus1.clone()).await;
+            let plus2 = next_block(bob.clone(), plus1.clone(), None).await;
             assert!(
                 plus2
                     .is_valid(&plus1, plus2.header().timestamp, network)
@@ -1501,7 +1501,7 @@ pub(crate) mod tests {
                 .await
                 .mempool_insert(tx2.transaction().to_owned(), UpgradePriority::Critical)
                 .await;
-            let plus3 = next_block(bob.clone(), plus2.clone()).await;
+            let plus3 = next_block(bob.clone(), plus2.clone(), None).await;
             assert!(
                 plus3
                     .is_valid(&plus2, plus3.header().timestamp, network)
@@ -1607,7 +1607,7 @@ pub(crate) mod tests {
             );
 
             // hard fork minus 1
-            let minus1 = next_block(bob.clone(), minus2.clone()).await;
+            let minus1 = next_block(bob.clone(), minus2.clone(), None).await;
             assert!(
                 minus1
                     .is_valid(&minus2, minus1.header().timestamp, network)
@@ -1652,7 +1652,7 @@ pub(crate) mod tests {
                 .await;
 
             // Next: Mine a block that activates hardfork
-            let hf = next_block(bob.clone(), minus1.clone()).await;
+            let hf = next_block(bob.clone(), minus1.clone(), None).await;
             assert!(hf.is_valid(&minus1, hf.header().timestamp, network).await);
             assert!(hf.has_proof_of_work(network, minus1.header()));
             assert!(hf.pow_verify_for_tests(
@@ -1761,7 +1761,7 @@ pub(crate) mod tests {
                 .await
                 .mempool_insert(tx0.transaction().to_owned(), UpgradePriority::Critical)
                 .await;
-            let plus1 = next_block(bob.clone(), hf.clone()).await;
+            let plus1 = next_block(bob.clone(), hf.clone(), None).await;
             assert!(plus1.is_valid(&hf, plus1.header().timestamp, network).await);
             assert!(plus1.has_proof_of_work(network, hf.header()));
             assert!(!plus1.pow_verify_for_tests(
@@ -1823,7 +1823,7 @@ pub(crate) mod tests {
                 .await
                 .mempool_insert(tx1.transaction().to_owned(), UpgradePriority::Critical)
                 .await;
-            let plus2 = next_block(bob.clone(), plus1.clone()).await;
+            let plus2 = next_block(bob.clone(), plus1.clone(), None).await;
             assert!(
                 plus2
                     .is_valid(&plus1, plus2.header().timestamp, network)
@@ -1892,7 +1892,7 @@ pub(crate) mod tests {
                 .await
                 .mempool_insert(tx2.transaction().to_owned(), UpgradePriority::Critical)
                 .await;
-            let plus3 = next_block(bob.clone(), plus2.clone()).await;
+            let plus3 = next_block(bob.clone(), plus2.clone(), None).await;
             assert!(
                 plus3
                     .is_valid(&plus2, plus3.header().timestamp, network)
