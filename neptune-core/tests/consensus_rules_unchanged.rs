@@ -105,11 +105,14 @@ async fn gamma_hardfork_on_tesnet() {
     let now = Timestamp::now();
     let mut latest = blocks[0].clone();
     for block in blocks.into_iter().skip(1) {
-        info!(
-            "Checking validity of testnet block of height {}",
-            block.header().height
+        let height = block.header().height;
+        let hash = block.hash();
+        info!("Checking validity of testnet block of height {height}; hash: {hash:x}",);
+        assert!(
+            block.is_valid(&latest, now, network).await,
+            "height {height}; hash: {hash:x} must be valid"
         );
-        assert!(block.is_valid(&latest, now, network).await);
+        assert!(block.has_proof_of_work(network, latest.header()));
         latest = block;
     }
 }
