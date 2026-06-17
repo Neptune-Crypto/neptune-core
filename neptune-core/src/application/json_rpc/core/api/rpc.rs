@@ -133,6 +133,7 @@ pub enum RpcError {
 pub type RpcResult<T> = Result<T, RpcError>;
 
 pub const MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS: usize = 1000;
+pub const MAX_UTXO_ORIGIN_ABSOLUTE_INDEX_SETS: usize = 1000;
 
 #[async_trait]
 pub trait RpcApi: Sync + Send {
@@ -328,6 +329,20 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: FindUtxoOriginRequest,
     ) -> RpcResult<FindUtxoOriginResponse>;
+
+    async fn utxo_origin_from_absolute_indices(
+        &self,
+        absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+    ) -> RpcResult<UtxoOriginFromAbsoluteIndicesResponse> {
+        self.utxo_origin_from_absolute_indices_call(UtxoOriginFromAbsoluteIndicesRequest {
+            absolute_index_sets,
+        })
+        .await
+    }
+    async fn utxo_origin_from_absolute_indices_call(
+        &self,
+        request: UtxoOriginFromAbsoluteIndicesRequest,
+    ) -> RpcResult<UtxoOriginFromAbsoluteIndicesResponse>;
 
     /// Check if indices in an absolute index set are set in the node's archival
     /// mutator set. Can be used to check  if a UTXO is spent without having to

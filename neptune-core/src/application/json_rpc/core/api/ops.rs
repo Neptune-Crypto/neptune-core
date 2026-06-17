@@ -124,6 +124,9 @@ pub enum RpcMethods {
     FindUtxoOrigin,
 
     #[namespace(Namespace::Archival)]
+    UtxoOriginFromAbsoluteIndices,
+
+    #[namespace(Namespace::Archival)]
     AreBloomIndicesSet,
 
     #[namespace(Namespace::Archival)]

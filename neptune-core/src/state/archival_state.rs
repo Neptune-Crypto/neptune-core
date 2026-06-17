@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::DerefMut;
@@ -845,18 +846,18 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
-    /// Return the block digest of the block in which an AOCL leaf with
-    /// specified index is contained.
-    pub(crate) async fn canonical_block_digest_of_aocl_index(
+    /// Return the canonical block digest and block height of the block in
+    /// which an AOCL leaf with specified index is contained.
+    async fn canonical_block_info_of_aocl_index(
         &self,
         aocl_leaf_index: u64,
-    ) -> Result<Option<Digest>> {
+    ) -> Result<Option<(Digest, BlockHeight)>> {
         // Is AOCL leaf contained in genesis block? Special-case this, as
         // genesis block does not have a block record.
         let genesis_tx: TransactionKernelProxy =
             self.genesis_block.body().transaction_kernel.clone().into();
         if aocl_leaf_index < genesis_tx.outputs.len().try_into().unwrap() {
-            return Ok(Some(self.genesis_block.hash()));
+            return Ok(Some((self.genesis_block.hash(), BlockHeight::genesis())));
         }
 
         let (mut record, mut block_hash) = match self
@@ -899,7 +900,7 @@ impl ArchivalState {
                 // Look above current height
                 min_block_height = record.block_header.height.next();
             } else {
-                return Ok(Some(block_hash));
+                return Ok(Some((block_hash, record.block_header.height)));
             };
 
             let new_guess_height = BlockHeight::arithmetic_mean(min_block_height, max_block_height);
@@ -914,6 +915,97 @@ impl ArchivalState {
                 .await;
             record = self.get_block_record(block_hash).await.unwrap();
         }
+    }
+
+    /// Return the block digest of the block in which an AOCL leaf with
+    /// specified index is contained.
+    pub(crate) async fn canonical_block_digest_of_aocl_index(
+        &self,
+        aocl_leaf_index: u64,
+    ) -> Result<Option<Digest>> {
+        Ok(self
+            .canonical_block_info_of_aocl_index(aocl_leaf_index)
+            .await?
+            .map(|(block_digest, _)| block_digest))
+    }
+
+    /// Returns some block info about all blocks in which the UTXO, identified
+    /// by its absolute indices, could have originated.
+    ///
+    /// The fuzzy timestamp of the absolute index set is used to calculate the
+    /// range of blocks in which the UTXO could have been mined.
+    ///
+    /// Only blocks on the current canonical chain are considered.
+    ///
+    /// Never loads a block from disk, so performance is good.
+    pub(crate) async fn utxo_origin_blocks_from_absolute_index_sets(
+        &self,
+        absolute_index_sets: impl IntoIterator<Item = AbsoluteIndexSet>,
+    ) -> Result<Vec<(Digest, BlockHeader, u64, u64)>> {
+        let num_aocl_leafs = self.archival_mutator_set.ams().aocl.num_leafs().await;
+
+        if num_aocl_leafs == 0 {
+            return Ok(vec![]);
+        }
+
+        let last_aocl_index = num_aocl_leafs - 1;
+        let mut block_heights = BTreeSet::new();
+        for absolute_index_set in absolute_index_sets {
+            let (range_start, range_end) = absolute_index_set.aocl_range()?;
+
+            if range_start > last_aocl_index {
+                continue;
+            }
+
+            let capped_range_end = std::cmp::min(range_end, last_aocl_index);
+            let Some((_, start_block_height)) =
+                self.canonical_block_info_of_aocl_index(range_start).await?
+            else {
+                continue;
+            };
+            let Some((_, end_block_height)) = self
+                .canonical_block_info_of_aocl_index(capped_range_end)
+                .await?
+            else {
+                continue;
+            };
+
+            for height in start_block_height.value()..=end_block_height.value() {
+                block_heights.insert(BlockHeight::from(height));
+            }
+        }
+
+        let mut block_infos = Vec::with_capacity(block_heights.len());
+        for height in block_heights {
+            let block_hash = self
+                .archival_block_mmr
+                .ammr()
+                .try_get_leaf(height.value())
+                .await
+                .expect("Canonical block height must have a block digest");
+            let (header, min_aocl_index, max_aocl_index) =
+                if block_hash == self.genesis_block.hash() {
+                    (
+                        *self.genesis_block.header(),
+                        0,
+                        self.genesis_block.body().max_aocl_leaf_index(),
+                    )
+                } else {
+                    let record = self
+                        .get_block_record(block_hash)
+                        .await
+                        .expect("Block record of canonical hash must exist");
+                    (
+                        record.block_header,
+                        record.min_aocl_index,
+                        record.max_aocl_index(),
+                    )
+                };
+
+            block_infos.push((block_hash, header, min_aocl_index, max_aocl_index));
+        }
+
+        Ok(block_infos)
     }
 
     /// Returns the 1st block containing this addition record. Returns
