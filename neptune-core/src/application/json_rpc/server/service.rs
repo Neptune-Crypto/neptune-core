@@ -24,6 +24,7 @@ use crate::api::export::TransactionProof;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::application::database::storage::storage_vec::traits::StorageVecStream;
 use crate::application::json_rpc::core::api::rpc::*;
+use crate::application::json_rpc::core::model::block::header::RpcBlockHeader;
 use crate::application::json_rpc::core::model::block::header::TransactionKernelWithPriority;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
@@ -384,6 +385,39 @@ impl RpcApi for RpcServer {
         Ok(FindUtxoOriginResponse {
             block: block.map(|block| block.hash()),
         })
+    }
+
+    async fn utxo_origin_from_absolute_indices_call(
+        &self,
+        request: UtxoOriginFromAbsoluteIndicesRequest,
+    ) -> RpcResult<UtxoOriginFromAbsoluteIndicesResponse> {
+        let got = request.absolute_index_sets.len();
+        if got > MAX_UTXO_ORIGIN_ABSOLUTE_INDEX_SETS {
+            return Err(RpcError::TooManyAbsoluteIndexSets {
+                max: MAX_UTXO_ORIGIN_ABSOLUTE_INDEX_SETS,
+                got,
+            });
+        }
+
+        let state = self.state.lock_guard().await;
+        let block_infos = state
+            .chain
+            .archival_state()
+            .utxo_origin_blocks_from_absolute_index_sets(request.absolute_index_sets)
+            .await
+            .map_err(|_| RpcError::Server(JsonError::InvalidParams))?
+            .into_iter()
+            .map(
+                |(block_hash, header, min_aocl_index, max_aocl_index)| BlockAoclInfo {
+                    header: RpcBlockHeader::from(&header),
+                    block_hash,
+                    min_aocl_index,
+                    max_aocl_index,
+                },
+            )
+            .collect();
+
+        Ok(UtxoOriginFromAbsoluteIndicesResponse { block_infos })
     }
 
     async fn are_bloom_indices_set_call(

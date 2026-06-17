@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::DerefMut;
@@ -904,6 +905,94 @@ impl ArchivalState {
                 .await;
             record = self.get_block_record(block_hash).await.unwrap();
         }
+    }
+
+    /// Returns the inclusive range of AOCL leaf indices added by the specified
+    /// block.
+    ///
+    /// Panics if the block digest is not known.
+    async fn block_aocl_index_range(&self, block_digest: Digest) -> (u64, u64) {
+        if block_digest == self.genesis_block.hash() {
+            let genesis_tx: TransactionKernelProxy =
+                self.genesis_block.body().transaction_kernel.clone().into();
+            let num_genesis_outputs = u64::try_from(genesis_tx.outputs.len())
+                .expect("Number of genesis outputs must fit in u64");
+            return (0, num_genesis_outputs.saturating_sub(1));
+        }
+
+        let record = self
+            .get_block_record(block_digest)
+            .await
+            .expect("Canonical block digest must have a known block record");
+        (record.min_aocl_index, record.max_aocl_index())
+    }
+
+    pub(crate) async fn utxo_origin_blocks_from_absolute_index_sets(
+        &self,
+        absolute_index_sets: impl IntoIterator<Item = AbsoluteIndexSet>,
+    ) -> Result<Vec<(Digest, BlockHeader, u64, u64)>> {
+        let aocl_leaf_count = self.archival_mutator_set.ams().aocl.num_leafs().await;
+
+        if aocl_leaf_count == 0 {
+            return Ok(vec![]);
+        }
+
+        let last_aocl_index = aocl_leaf_count - 1;
+        let mut block_heights = BTreeSet::new();
+        for absolute_index_set in absolute_index_sets {
+            let (range_start, range_end) = absolute_index_set.aocl_range()?;
+
+            if range_start > last_aocl_index {
+                continue;
+            }
+
+            let capped_range_end = range_end.min(last_aocl_index);
+            let Some(start_block_hash) = self
+                .canonical_block_digest_of_aocl_index(range_start)
+                .await?
+            else {
+                continue;
+            };
+            let Some(end_block_hash) = self
+                .canonical_block_digest_of_aocl_index(capped_range_end)
+                .await?
+            else {
+                continue;
+            };
+
+            let start_header = self
+                .get_block_header(start_block_hash)
+                .await
+                .expect("Canonical block digest must have a known block header");
+            let end_header = self
+                .get_block_header(end_block_hash)
+                .await
+                .expect("Canonical block digest must have a known block header");
+
+            for height in start_header.height.value()..=end_header.height.value() {
+                block_heights.insert(BlockHeight::from(height));
+            }
+        }
+
+        let mut block_infos = Vec::with_capacity(block_heights.len());
+        for height in block_heights {
+            let block_hash = self
+                .archival_block_mmr
+                .ammr()
+                .try_get_leaf(height.value())
+                .await
+                .expect("Canonical block height must have a block digest");
+            let header = self
+                .get_block_header(block_hash)
+                .await
+                .expect("Canonical block digest must have a known block header");
+
+            let (min_aocl_index, max_aocl_index) = self.block_aocl_index_range(block_hash).await;
+
+            block_infos.push((block_hash, header, min_aocl_index, max_aocl_index));
+        }
+
+        Ok(block_infos)
     }
 
     /// Returns the 1st block containing this addition record. Returns

@@ -272,6 +272,27 @@ pub struct FindUtxoOriginResponse {
     pub block: Option<Digest>,
 }
 
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct UtxoOriginFromAbsoluteIndicesRequest {
+    pub absolute_index_sets: Vec<RpcAbsoluteIndexSet>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockAoclInfo {
+    pub header: RpcBlockHeader,
+    pub block_hash: Digest,
+    pub min_aocl_index: u64,
+    pub max_aocl_index: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UtxoOriginFromAbsoluteIndicesResponse {
+    pub block_infos: Vec<BlockAoclInfo>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct AreBloomIndicesSetRequest {
