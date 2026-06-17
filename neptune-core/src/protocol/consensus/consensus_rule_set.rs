@@ -75,7 +75,8 @@ pub enum ConsensusRuleSet {
 
     /// Fix June 2026 soundness issue in recursive proof verifier upstream in
     /// tasm-lib. Fix June 2026 soundness issue in Triton VM's
-    /// sponge_mem_absorb instruction.
+    /// sponge_mem_absorb instruction, as well as other under-constrained trace
+    /// values.
     ///
     /// Also restarts the lustration counting since all past proofs have been
     /// found to be unsound.
@@ -86,7 +87,7 @@ pub enum ConsensusRuleSet {
 pub enum TritonProofVersion {
     V0,
     V1,
-    V4,
+    V5,
 }
 
 impl TritonProofVersion {
@@ -95,7 +96,7 @@ impl TritonProofVersion {
         match self {
             TritonProofVersion::V0 => 0,
             TritonProofVersion::V1 => 1,
-            TritonProofVersion::V4 => 4,
+            TritonProofVersion::V5 => 5,
         }
     }
 }
@@ -229,7 +230,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkAlpha => TritonProofVersion::V0,
             ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
-            ConsensusRuleSet::HardforkGamma => TritonProofVersion::V4,
+            ConsensusRuleSet::HardforkGamma => TritonProofVersion::V5,
         }
     }
 
@@ -765,7 +766,7 @@ pub(crate) mod tests {
                 .version()
         );
         assert_eq!(
-            4,
+            5,
             ConsensusRuleSet::HardforkGamma
                 .triton_proof_version()
                 .version(),
