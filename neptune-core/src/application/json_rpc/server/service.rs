@@ -18,7 +18,6 @@ use crate::api::export::KeyType;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::OutputFormat;
 use crate::api::export::ReceivingAddress;
-use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
@@ -685,7 +684,7 @@ impl RpcApi for RpcServer {
         }
 
         let timestamp = transaction.kernel.timestamp;
-        let now = Timestamp::now();
+        let now = self.now();
         if timestamp < now - MEMPOOL_TX_THRESHOLD_AGE {
             return Err(RpcError::SubmitTransaction(SubmitTransactionError::TooOld));
         }
@@ -1137,7 +1136,7 @@ impl RpcApi for RpcServer {
             .ok_or(RpcError::BadConfirmationCount)?
             .into();
 
-        let now = Timestamp::now();
+        let now = self.now();
         let wallet_status = self
             .state
             .lock_guard()
@@ -1273,7 +1272,7 @@ impl RpcApi for RpcServer {
         };
         let fee: NativeCurrencyAmount = request.fee.into();
         let transparent = false;
-        let now = Timestamp::now();
+        let now = self.now();
 
         // Do *not* hold any lock here as tx initiator grabs its own locks.
         // Holding locks here can lead to deadlocks.
@@ -1404,7 +1403,8 @@ impl RpcApi for RpcServer {
         // Since block comes from external source, we need to check validity.
         let network = self.state.cli().network;
         let tip = self.state.lock_guard().await.chain.tip().clone();
-        if !template.is_valid(&tip, Timestamp::now(), network).await {
+        let now = self.now();
+        if !template.is_valid(&tip, now, network).await {
             return Err(RpcError::SubmitBlock(SubmitBlockError::InvalidBlock));
         }
 
@@ -1782,6 +1782,7 @@ pub mod tests {
     use tasm_lib::prelude::Tip5;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::bfe_vec;
+    use tracing_test::traced_test;
 
     use crate::api::export::Announcement;
     use crate::api::export::AnnouncementFlag;
@@ -2228,13 +2229,21 @@ pub mod tests {
         }
     }
 
+    #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn remote_wallets_behave_correctly() {
-        let mut rpc_server = test_rpc_server().await;
-        let network = rpc_server.state.cli().network;
+        let network = Network::Main;
+        let rpc_cli = cli_args::Args::default_with_network(network);
+        let mut rpc_server = test_rpc_server_with_cli_args_and_wallet(
+            rpc_cli,
+            WalletEntropy::new_pseudorandom([0u8; 32]),
+        )
+        .await;
+        let mock_now = network.launch_date() + Timestamp::months(3);
+        rpc_server = rpc_server.with_mock_time(mock_now);
 
         // Prepare a transaction to our wallet coming from devnet wallet.
-        let mut cli = cli_args::Args::default_with_network(Network::Main);
+        let mut cli = cli_args::Args::default_with_network(network);
         cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
         let mut devnet_node =
             mock_genesis_global_state(0, WalletEntropy::devnet_wallet(), cli).await;
@@ -2255,7 +2264,7 @@ pub mod tests {
                 vec![OutputFormat::AddressAndAmount(rpc_address, mock_amount)],
                 Default::default(),
                 mock_amount,
-                network.launch_date() + Timestamp::months(3),
+                mock_now,
                 accept_lustrations,
             )
             .await
@@ -2336,9 +2345,9 @@ pub mod tests {
             .create_transaction(
                 Default::default(),
                 mock_amount,
-                network.launch_date() + Timestamp::months(3) + Timestamp::minutes(3),
+                mock_now + Timestamp::minutes(1),
                 tx_creation_config,
-                ConsensusRuleSet::infer_from(network, block_1.header().height),
+                ConsensusRuleSet::infer_from(network, block_2.header().height),
             )
             .await
             .unwrap();
@@ -2749,8 +2758,6 @@ pub mod tests {
     }
 
     mod send {
-        use tracing_test::traced_test;
-
         use super::*;
         use crate::api::export::UtxoTriple;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;

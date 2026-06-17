@@ -1327,6 +1327,6 @@ pub(crate) mod tests {
 
     test_program_snapshot!(
         SingleProof,
-        "84cd252bc1bbed5c8518fe5d1f21e7e8324c905b2c1f7859bfda3d8eb18384035b5c1b6db8e1fae8"
+        "8eac5716e146cb72f04eb43115f64234c37a447fda526535fedc7fd1b1c458ef65071f2a921837e8"
     );
 }

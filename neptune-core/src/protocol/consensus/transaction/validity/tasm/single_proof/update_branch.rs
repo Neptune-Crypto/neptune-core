@@ -679,7 +679,6 @@ pub(crate) mod tests {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use strum::EnumCount;
-    use tasm_lib::triton_vm::prelude::*;
 
     use super::*;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;

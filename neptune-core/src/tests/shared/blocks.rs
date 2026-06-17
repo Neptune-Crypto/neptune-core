@@ -503,12 +503,14 @@ pub(crate) async fn invalid_empty_block1_with_guesser_fraction(
 }
 
 pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {
-    let tx = crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash(
-        vec![],
-        vec![],
-        predecessor.mutator_set_accumulator_after().unwrap().hash(),
-    );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    let tx =
+        crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash_and_timestamp(
+            vec![],
+            vec![],
+            predecessor.mutator_set_accumulator_after().unwrap().hash(),
+            timestamp,
+        );
     let tx = BlockTransaction::upgrade(tx);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }

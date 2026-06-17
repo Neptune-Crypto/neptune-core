@@ -637,6 +637,6 @@ pub(crate) mod tests {
 
     test_program_snapshot!(
         BlockProgram,
-        "1a4df646ce2b7d671d8b370870d91e2f0e0421b6cccb29e047109b823657ef31e86258586a699ad9"
+        "934bfa3ef9399b029e1399aef701309824ea4cb1333f2fcad98cf94ab69b8dee9fb4b4b4420ac4da"
     );
 }
