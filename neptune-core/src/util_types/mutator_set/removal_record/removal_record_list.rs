@@ -62,6 +62,8 @@ pub(crate) enum RemovalRecordListUnpackError {
     IllegalTreeHeight { tree_height: u64 },
     #[error("List of tree heights contains duplicates.")]
     DuplicateTreeHeights,
+    #[error("Incorrectly sorted tree heights.")]
+    IncorrectlySortedTreeHeights,
     #[error("removal records are mutually inconsistent: {0}")]
     Inconsistency(RemovalRecordListInconsistency),
 }
@@ -548,6 +550,8 @@ impl RemovalRecordList {
     fn decode_from_vec(
         removal_records: Vec<RemovalRecord>,
     ) -> Result<RemovalRecordList, RemovalRecordListUnpackError> {
+        // This function is not allowed to panic as it's run on untrusted
+        // input.
         let mut index_sets = vec![];
         let mut authentication_structures = vec![];
         let mut chunks = vec![];
@@ -559,6 +563,13 @@ impl RemovalRecordList {
                 removal_record.target_chunks.iter()
             {
                 if *tree_height < Self::ENCODING_TREE_HEIGHT_OFFSET {
+                    // Verify that tree heights are sorted correctly
+                    if let Some(previous) = tree_heights.last() {
+                        if *previous > *tree_height {
+                            return Err(RemovalRecordListUnpackError::IncorrectlySortedTreeHeights);
+                        }
+                    }
+
                     // use both authentication structure and chunk
                     tree_heights.push(*tree_height);
                     authentication_structures
@@ -572,6 +583,14 @@ impl RemovalRecordList {
                 } else if *tree_height < 2 * Self::ENCODING_TREE_HEIGHT_OFFSET {
                     // ignore chunk
                     let tree_height = *tree_height - Self::ENCODING_TREE_HEIGHT_OFFSET;
+
+                    // Verify that tree heights are sorted correctly
+                    if let Some(previous) = tree_heights.last() {
+                        if *previous > tree_height {
+                            return Err(RemovalRecordListUnpackError::IncorrectlySortedTreeHeights);
+                        }
+                    }
+
                     tree_heights.push(tree_height);
                     authentication_structures
                         .push(mmr_authentication_path.authentication_path.clone());
@@ -650,6 +669,8 @@ impl RemovalRecordList {
 
     /// Decompress a [`Vec`] of [`RemovalRecord`]s as packed by [`Self::pack`].
     /// Returns an error if the packing is invalid.
+    ///
+    /// Never panics, so this function is safe to run on untrusted input.
     pub(crate) fn try_unpack(
         removal_records: Vec<RemovalRecord>,
     ) -> Result<Vec<RemovalRecord>, RemovalRecordListUnpackError> {
@@ -781,10 +802,6 @@ impl RemovalRecordList {
                 sparse_mmr.insert((*tree_height, node_index), *node_hash);
             }
         }
-
-        assert!(sparse_mmr
-            .values()
-            .all(|v| v.to_hex().chars().take(8).collect::<String>() != "be450642"));
 
         // populate sparse MMR by completing families with parents whenever both
         // children are already present
@@ -2232,6 +2249,34 @@ mod tests {
         }
 
         #[test]
+        fn no_panic_on_decending_tree_heights() {
+            let empty = Chunk::empty_chunk();
+
+            for offset in [0, RemovalRecordList::ENCODING_TREE_HEIGHT_OFFSET] {
+                let removal_record = RemovalRecord {
+                    absolute_indices: AbsoluteIndexSet::new_raw(0, [0; NUM_TRIALS as usize]),
+                    target_chunks: ChunkDictionary {
+                        dictionary: vec![
+                            // Tree heights: [5,3] unique, descending
+                            (offset + 5, (MmrMembershipProof::new(vec![]), empty.clone())), // tree height 5
+                            (offset + 3, (MmrMembershipProof::new(vec![]), empty.clone())), // tree height 3
+                        ],
+                    },
+                };
+
+                // Per the no-crash contract this must return Err, not panic.
+                let res = RemovalRecordList::try_unpack(vec![removal_record]);
+                assert!(
+                    matches!(
+                        res,
+                        Err(RemovalRecordListUnpackError::IncorrectlySortedTreeHeights)
+                    ),
+                    "Must return expected error on incorrectly sorted tree heights"
+                );
+            }
+        }
+
+        #[test]
         fn too_many_chunks() {
             let absolute_indices_with_one_chunk_idx =
                 AbsoluteIndexSet::new_raw(0, [0; NUM_TRIALS as usize]);
@@ -2463,9 +2508,6 @@ mod tests {
             // Ensure no crash.
             let _ = RemovalRecordList::try_unpack(removal_records); // no crash
         }
-
-        #[proptest]
-        fn try_unpack_repeated_tree_height() {}
 
         #[proptest]
         fn removal_record_list_is_inconsistent_or_convert_to_vec_succeeds(

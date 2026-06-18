@@ -383,6 +383,13 @@ pub mod tests {
     fn try_load_proof_from_disk(claim: &Claim) -> Option<Proof> {
         let file_path = proof_path(claim);
         let file_contents = try_load_file_from_disk(&file_path)?;
+        assert!(
+            !file_contents.is_empty(),
+            "proof file is empty: {}\n\
+             Probably left behind by an interrupted download or proving run. \
+             Delete the file and re-run the test to re-fetch or re-prove.",
+            file_path.display()
+        );
 
         let mut proof_data = vec![];
         for ch in file_contents.chunks(8) {
@@ -412,7 +419,9 @@ pub mod tests {
                 debug!(" - Loaded proof from disk: {name}.");
                 assert!(
                     triton_vm::verify(Stark::default(), claim, &proof),
-                    "proof loaded from disk is invalid"
+                    "proof loaded from disk is invalid: {}\n\
+                     Delete the file and re-run the test to re-fetch or re-prove.",
+                    proof_path(claim).display()
                 );
                 proof
             }

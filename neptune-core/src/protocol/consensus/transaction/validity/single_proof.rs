@@ -5,7 +5,6 @@ use std::sync::OnceLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::consensus_rule_set::TritonProofVersion;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::triton_vm::prelude::*;
 use itertools::Itertools;
@@ -275,37 +274,56 @@ impl SingleProof {
 //
 // This function calls SingleProof::produce but with the correct merge
 // version.
+#[allow(clippy::used_underscore_binding)]
 pub(crate) async fn produce_single_proof(
     primitive_witness: &PrimitiveWitness,
     triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
-    consensus_rule_set: ConsensusRuleSet,
+    _consensus_rule_set: ConsensusRuleSet,
 ) -> Result<Proof, CreateProofError> {
-    match consensus_rule_set.triton_proof_version() {
-        TritonProofVersion::V0 => Err(CreateProofError::DeprecatedTritonVmVersion),
-        TritonProofVersion::V1 => {
+    #[cfg(not(test))]
+    match _consensus_rule_set {
+        ConsensusRuleSet::HardforkGamma => {
             SingleProof::produce(primitive_witness, triton_vm_job_queue, proof_job_options).await
         }
+        _ => Err(CreateProofError::DeprecatedConsensusRules),
     }
+
+    #[cfg(test)]
+    SingleProof::produce(primitive_witness, triton_vm_job_queue, proof_job_options).await
 }
 
 /// Not to be confused with SingleProofWitness::claim
 ///
 /// Consensus rule set refers to the rule set for which the claim must be valid.
+#[allow(clippy::used_underscore_binding)]
 pub(crate) fn single_proof_claim(
     tx_kernel_mast_hash: Digest,
-    consensus_rule_set: ConsensusRuleSet,
+    _consensus_rule_set: ConsensusRuleSet,
 ) -> Claim {
-    const V0_SINGLE_PROOF_PROGRAM_DIGEST: &str =
-        "9ed47e4aff83681ce46618c59971cc5eca2ef5a063b3f35828946f4810295871338072751af633e0";
-    match consensus_rule_set.triton_proof_version() {
-        TritonProofVersion::V0 => {
-            Claim::new(Digest::try_from_hex(V0_SINGLE_PROOF_PROGRAM_DIGEST).unwrap())
-                .about_version(0)
-                .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
-        }
-        TritonProofVersion::V1 => SingleProof::claim(tx_kernel_mast_hash),
+    #[cfg(not(test))]
+    {
+        const V0_SINGLE_PROOF_PROGRAM_DIGEST: &str =
+            "9ed47e4aff83681ce46618c59971cc5eca2ef5a063b3f35828946f4810295871338072751af633e0";
+        const SINGLE_PROOF_PROGRAM_DIGEST_PRE_HF_GAMMA: &str =
+            "151b31a62b85f6c4e1c792c7c1e7934ecc44430eb1209e816a47a7f0d2c10d1002f74f8cda8e4f8a";
+        let claim = match _consensus_rule_set {
+            ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
+                Claim::new(Digest::try_from_hex(V0_SINGLE_PROOF_PROGRAM_DIGEST).unwrap())
+                    .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
+            }
+            ConsensusRuleSet::TvmProofVersion1 | ConsensusRuleSet::HardforkBeta => {
+                Claim::new(Digest::try_from_hex(SINGLE_PROOF_PROGRAM_DIGEST_PRE_HF_GAMMA).unwrap())
+                    .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
+            }
+            ConsensusRuleSet::HardforkGamma => SingleProof::claim(tx_kernel_mast_hash),
+        };
+
+        claim.about_version(_consensus_rule_set.triton_proof_version().version())
     }
+
+    #[cfg(test)]
+    SingleProof::claim(tx_kernel_mast_hash)
 }
 
 pub(crate) fn produce_single_proof_mock(valid_mock: bool) -> Proof {
@@ -1016,10 +1034,8 @@ pub(crate) mod tests {
     }
 
     mod merge_tests {
-        use crate::protocol::consensus::{
-            consensus_rule_set::ConsensusRuleSet,
-            transaction::validity::tasm::single_proof::merge_branch::tests::deterministic_merge_witness_with_coinbase,
-        };
+        use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::tests::deterministic_merge_witness_with_coinbase;
+        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 
         use super::*;
 
@@ -1311,6 +1327,6 @@ pub(crate) mod tests {
 
     test_program_snapshot!(
         SingleProof,
-        "151b31a62b85f6c4e1c792c7c1e7934ecc44430eb1209e816a47a7f0d2c10d1002f74f8cda8e4f8a"
+        "54389bce28ce2eee0e8b554be47542b1da1f8f56179f0367e01d11bb5f136ac82a507451ca93b5bc"
     );
 }

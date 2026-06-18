@@ -42,23 +42,17 @@ impl VersionString {
             return false;
         };
 
-        // All alphanet and betanet versions are incompatible with each other.
-        // Alpha and betanet have versions "0.0.n". Alpha and betanet are
-        // incompatible with all other versions.
-        if own.major == 0 && own.minor == 0 || other.major == 0 && other.minor == 0 {
-            return own == other;
-        }
-
-        // Cannot connect two different versions on either side of 0.5.
+        // Cannot connect two different versions on either side of 0.12.0
         if own.major == 0 && other.major == 0 {
-            let own_is_less = own.minor <= 5;
-            let other_is_more = other.minor > 5;
+            const LATEST_HARDFORK_V: u64 = 12;
+            let own_is_less = own.minor < LATEST_HARDFORK_V;
+            let other_is_more = other.minor >= LATEST_HARDFORK_V;
             if own_is_less && other_is_more {
                 return false;
             }
 
-            let own_is_more = own.minor > 5;
-            let other_is_less = other.minor <= 5;
+            let own_is_more = own.minor >= LATEST_HARDFORK_V;
+            let other_is_less = other.minor < LATEST_HARDFORK_V;
             if own_is_more && other_is_less {
                 return false;
             }
@@ -270,37 +264,39 @@ pub(crate) mod test {
 
     #[test]
     fn malformed_version_from_peer_doesnt_crash() {
-        let version_numbers = ["potato", "&&&&"];
+        let too_long = str::repeat("a", 100);
+        let version_numbers = ["potato", "&&&&", "", &too_long];
         for b in version_numbers {
             assert!(!VersionString::versions_are_compatible(
-                VersionString::new_from_str("0.1.0"),
+                VersionString::new_from_str("0.12.0"),
                 VersionString::new_from_str(b)
             ));
         }
     }
 
     #[test]
-    fn v0_5_0_and_0_6_0_are_incompatible() {
+    fn v0_11_0_and_0_12_0_are_incompatible() {
         assert!(!VersionString::versions_are_compatible(
-            VersionString::new_from_str("0.6.0"),
-            VersionString::new_from_str("0.5.0")
+            VersionString::new_from_str("0.12.0"),
+            VersionString::new_from_str("0.11.0")
         ));
         assert!(!VersionString::versions_are_compatible(
-            VersionString::new_from_str("0.5.0"),
-            VersionString::new_from_str("0.6.0")
+            VersionString::new_from_str("0.11.0"),
+            VersionString::new_from_str("0.12.0")
         ));
     }
 
     #[test]
-    fn versions_are_compatible_for_all_versions_above_0_6_() {
+    fn versions_are_compatible_for_all_versions_above_0_12_() {
         let version_numbers = [
-            "0.6.0",
-            "0.6.1",
-            "0.6.99",
-            "0.7.0",
-            "1.2.0",
-            "2.2.0",
-            "3.2.0",
+            "0.12.0",
+            "0.12.1",
+            "0.12.99",
+            "0.12.0",
+            "0.13.0",
+            "1.12.0",
+            "2.12.0",
+            "3.12.0",
             "9999.99999.9999",
         ];
         for a in version_numbers {

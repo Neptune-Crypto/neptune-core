@@ -33,6 +33,8 @@ impl TransactionInitiator {
     /// Initiate a transaction that spends a batch of UTXOs to the node's own
     /// wallet, thereby reducing the total number of UTXOs under management.
     ///
+    /// Prioritizes the spending of the oldest UTXOs first.
+    ///
     /// Returns the number of inputs consumed by the consolidating transaction.
     pub async fn consolidate(
         &mut self,

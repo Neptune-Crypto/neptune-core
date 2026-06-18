@@ -40,12 +40,26 @@ impl BlockValidator {
         Self::Production { network }
     }
 
+    /// Use the abstract block validator to check block validity.
     pub(crate) async fn verify(&self, successor: &Block, predecessor: &Block) -> bool {
         match self {
             BlockValidator::Production { network } => {
                 let timestamp = Timestamp::now();
 
                 successor.is_valid(predecessor, timestamp, *network).await
+            }
+
+            #[cfg(test)]
+            BlockValidator::Test => true,
+        }
+    }
+
+    /// Use the abstract block validator to check that the block has a valid PoW
+    /// hash.
+    pub(crate) fn check_pow(&self, successor: &Block, predecessor: &Block) -> bool {
+        match self {
+            BlockValidator::Production { network } => {
+                successor.has_proof_of_work(*network, predecessor.header())
             }
 
             #[cfg(test)]

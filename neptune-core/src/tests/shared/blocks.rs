@@ -74,12 +74,17 @@ use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 /// The most valuable synced SingleProof-backed transaction in the mempool will
 /// be included in the block. If mempool is empty a dummy transaction will be
 /// merged with the coinbase transaction to set the merge bit.
-pub(crate) async fn next_block(global_state_lock: GlobalStateLock, parent: Block) -> Block {
+pub(crate) async fn next_block(
+    global_state_lock: GlobalStateLock,
+    parent: Block,
+    coinbase_timestamp: Option<Timestamp>,
+) -> Block {
     let network = global_state_lock.cli().network;
+    let coinbase_timestamp = coinbase_timestamp.unwrap_or(parent.header().timestamp);
     let (child_no_pow, _) = compose_block_helper(
         parent.clone(),
         global_state_lock.clone(),
-        parent.header().timestamp,
+        coinbase_timestamp,
         TritonVmProofJobOptions::default(),
     )
     .await
@@ -498,12 +503,14 @@ pub(crate) async fn invalid_empty_block1_with_guesser_fraction(
 }
 
 pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {
-    let tx = crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash(
-        vec![],
-        vec![],
-        predecessor.mutator_set_accumulator_after().unwrap().hash(),
-    );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    let tx =
+        crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash_and_timestamp(
+            vec![],
+            vec![],
+            predecessor.mutator_set_accumulator_after().unwrap().hash(),
+            timestamp,
+        );
     let tx = BlockTransaction::upgrade(tx);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
@@ -594,7 +601,8 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     let (appendix, proof) = {
         let block_proof_witness = BlockProofWitness::produce(primitive_witness);
         let appendix = block_proof_witness.appendix();
-        let claim = BlockProgram::claim(&body, &appendix);
+        let consensus_rules = ConsensusRuleSet::infer_from(network, header.height);
+        let claim = BlockProgram::claim(&body, &appendix, consensus_rules);
         cache_true_claims([claim.clone()]).await;
         (appendix, BlockProof::SingleProof(Proof::invalid()))
     };

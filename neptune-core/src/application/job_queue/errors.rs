@@ -7,7 +7,7 @@ pub enum JobHandleError {
     JobCancelled,
 
     // see comment for PanicInfo below
-    #[error("the job panicked during processing")]
+    #[error("the job panicked during processing: {0:?}")]
     JobPanicked(PanicInfo),
 
     #[error("channel send error cancelling job")]
@@ -195,8 +195,9 @@ impl JobHandleError {
 // 2. The Mutex makes the panic info `Sync`.
 // 3. PanicInfo makes the mutex private to guarantee lock() can never be called
 //    on it by code outside this module.
-// 4. lock() is never called inside this module.
-// 5. Since lock() is never called:
+// 4. Inside this module the lock is only held by `panic_message()` and the
+//    `Debug` impl, neither of which can panic while holding the guard.
+// 5. Since no thread can panic while holding the lock:
 //    a. the mutex can never be poisoned.
 //    b. Mutex::into_inner() is guaranteed to succeed.
 //
@@ -209,8 +210,25 @@ impl JobHandleError {
 //
 // std::sync::Exclusive seems a better fit, but is not yet in stable rust as
 // of rust 1.86.0.
-#[derive(Debug)]
 pub struct PanicInfo(Mutex<Box<dyn std::any::Any + Send + 'static>>);
+
+impl std::fmt::Debug for PanicInfo {
+    /// Shows the panic message when the payload is a string (the common case),
+    /// so that `unwrap()`s and logs of [`JobHandleError`] surface the original
+    /// panic message instead of an opaque `Any`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = self.0.try_lock().ok().and_then(|guard| {
+            guard
+                .downcast_ref::<&'static str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| guard.downcast_ref::<String>().cloned())
+        });
+        match message {
+            Some(message) => write!(f, "PanicInfo({message:?})"),
+            None => write!(f, "PanicInfo(<non-string panic payload>)"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]

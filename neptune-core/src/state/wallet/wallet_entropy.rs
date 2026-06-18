@@ -260,7 +260,12 @@ impl WalletEntropy {
 
     /// Convert a secret seed phrase (list of 18 valid BIP-39 words) to a
     /// [`WalletEntropy`] object
-    pub fn from_phrase(phrase: &[String]) -> Result<Self> {
+    pub fn from_phrase<I, T>(phrase: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = T>,
+        T: AsRef<str>,
+    {
+        // Note: See the caveat below about SecretKeyMaterial
         let key = SecretKeyMaterial::from_phrase(phrase)?;
         Ok(Self::new(key))
     }

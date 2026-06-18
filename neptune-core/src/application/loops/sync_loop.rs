@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 use crate::api::export::BlockHeight;
+use crate::api::export::Network;
 use crate::application::loops::sync_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::MainToSync;
@@ -92,9 +93,10 @@ impl SyncLoop {
         resume_if_possible: bool,
         sync_dir: Option<PathBuf>,
         block_validator: BlockValidator,
+        network: Network,
     ) -> Result<(Self, Sender<MainToSync>, Receiver<SyncToMain>), RapidBlockDownloadError> {
         let mut download_state =
-            RapidBlockDownload::new(target_height, resume_if_possible, sync_dir).await?;
+            RapidBlockDownload::new(target_height, resume_if_possible, sync_dir, network).await?;
         download_state.fast_forward(genesis_block.header().height);
         let (main_to_sync_sender, main_to_sync_receiver) =
             mpsc::channel::<MainToSync>(SYNC_LOOP_CHANNEL_CAPACITY);
@@ -184,6 +186,10 @@ impl SyncLoop {
                         SuccessorsToSync::BlockValidationError => {
                             tracing::error!("Block validation error occurred during syncing. Possible cause: a reorg happened while syncing. Terminating sync loop.");
                         }
+                        SuccessorsToSync::BlockPowError => {
+                            tracing::error!("Block PoW check failed during syncing. Terminating sync loop.");
+                            break;
+                        },
                     }
 
                     // Start a new successors subtask, but only if it makes
@@ -304,6 +310,17 @@ impl SyncLoop {
                             // without going through the tip-successors subtask.
                             // Save valuable setup-time.
                             if self.tip.header().height.next() == block.header().height {
+                                // validate and check PoW
+                                if !self.block_validator.verify(&block, &self.tip).await {
+                                    tracing::error!("Got invalid block. Terminating sync loop");
+                                    break;
+                                }
+
+                                if !self.block_validator.check_pow(&block, &self.tip) {
+                                    tracing::error!("Got block without PoW. Terminating sync loop");
+                                    break;
+                                }
+
                                 tracing::debug!("chain extension is one ahead of current tip; sending directly to main loop.");
                                 if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block.to_owned()).await {
                                     tracing::error!("Could not send tip-successor to main loop. Terminating sync loop.");
@@ -814,6 +831,12 @@ impl SyncLoop {
                 let _ = return_channel
                     .send(SuccessorsToSync::BlockValidationError)
                     .await;
+                return;
+            }
+
+            // check PoW
+            if !block_validator.check_pow(&successor, &tip) {
+                let _ = return_channel.send(SuccessorsToSync::BlockPowError).await;
                 return;
             }
 

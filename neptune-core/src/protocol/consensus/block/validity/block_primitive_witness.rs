@@ -96,6 +96,8 @@ impl BlockPrimitiveWitness {
             self.network,
         );
 
+        let consensus_rule_set = ConsensusRuleSet::infer_from(self.network, header.height);
+
         let max_aocl_leaf_index = self.max_aocl_leaf_index();
         match ConsensusRuleSet::lustration_rule(self.network, header.height, max_aocl_leaf_index) {
             Some(LustrationRule::Initial(lustration_status)) => {
@@ -107,7 +109,10 @@ impl BlockPrimitiveWitness {
                 let lustrated_in_this_block = self
                     .transaction
                     .kernel
-                    .verified_lustration_amount(parent_aocl_threshold)
+                    .verified_lustration_amount(
+                        parent_aocl_threshold,
+                        consensus_rule_set.fix_lustration_double_counting(),
+                    )
                     .expect("Transaction used for block proposal must lustrate correctly");
                 let new_counter = parent_lustration_status.counter.checked_sub(&lustrated_in_this_block).expect("Transaction used for block proposal may not generate a negative lustration counter");
                 let new_lustration_status = LustrationStatus {

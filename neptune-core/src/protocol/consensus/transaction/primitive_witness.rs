@@ -1162,29 +1162,36 @@ mod tests {
         pub(crate) fn arbitrary_tuple_with_matching_mutator_sets<const N: usize>(
             param_sets: [(usize, usize, usize); N],
         ) -> BoxedStrategy<[PrimitiveWitness; N]> {
-            (arb::<Option<NativeCurrencyAmount>>(), 0..N)
-                .prop_flat_map(move |(mut maybe_coinbase, coinbase_index)| {
-                    // Force coinbase to be non-negative, if set
-                    maybe_coinbase = maybe_coinbase.map(|x| x.abs());
+            (
+                arb::<Option<NativeCurrencyAmount>>(),
+                0..N,
+                arb::<Timestamp>(),
+            )
+                .prop_flat_map(
+                    move |(mut maybe_coinbase, coinbase_index, coinbase_timestamp)| {
+                        // Force coinbase to be non-negative, if set
+                        maybe_coinbase = maybe_coinbase.map(|x| x.abs());
 
-                    Self::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
-                        param_sets,
-                        maybe_coinbase.map(|coinbase| (coinbase, coinbase_index)),
-                    )
-                })
+                        Self::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
+                            param_sets,
+                            maybe_coinbase
+                                .map(|coinbase| (coinbase, coinbase_index, coinbase_timestamp)),
+                        )
+                    },
+                )
                 .boxed()
         }
 
         /// Arbitrary with:
         /// (num inputs, num outputs, num pub announcements) and optional
-        /// coinbase.
+        /// coinbase, with timestamp.
         pub(crate) fn arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase<
             const N: usize,
         >(
             param_sets: [(usize, usize, usize); N],
-            coinbase_and_index: Option<(NativeCurrencyAmount, usize)>,
+            coinbase_index_timestamp: Option<(NativeCurrencyAmount, usize, Timestamp)>,
         ) -> BoxedStrategy<[PrimitiveWitness; N]> {
-            if let Some((_, index)) = coinbase_and_index {
+            if let Some((_, index, _)) = coinbase_index_timestamp {
                 // assert that index lies in the range [0;N)
                 assert!(index < N);
             }
@@ -1255,13 +1262,17 @@ mod tests {
                         });
 
                         let coinbase = |i: usize| {
-                            coinbase_and_index.and_then(|(coinbase, index)| {
+                            coinbase_index_timestamp.and_then(|(coinbase, index, _)| {
                                 if index == i {
                                     Some(coinbase)
                                 } else {
                                     None
                                 }
                             })
+                        };
+                        let timestamps = match coinbase_index_timestamp {
+                            None => timestamps,
+                            Some((_, _, ts)) => [ts; N],
                         };
 
                         for i in 0..N {
@@ -1364,7 +1375,7 @@ mod tests {
                                         output_utxos_,
                                     )| {
                                         let maybe_coinbase =
-                                            coinbase_and_index.and_then(|(cb, i)| {
+                                            coinbase_index_timestamp.and_then(|(cb, i, _)| {
                                                 if index == i {
                                                     Some(cb)
                                                 } else {
@@ -1409,22 +1420,25 @@ mod tests {
                 (0..total_num_outputs),
                 (0..total_num_announcements),
                 NativeCurrencyAmount::arbitrary_non_negative(),
+                arb::<Timestamp>(),
             )
-                .prop_flat_map(move |(num_outputs, num_announcements, coinbase_amount)| {
-                    let parameter_sets = [
-                        (
-                            0,
-                            total_num_outputs - num_outputs,
-                            total_num_announcements - num_announcements,
-                        ),
-                        (num_inputs, num_outputs, num_announcements),
-                    ];
-                    Self::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
-                        parameter_sets,
-                        Some((coinbase_amount, 0)),
-                    )
-                    .prop_map(|primwit| (primwit[0].clone(), primwit[1].clone()))
-                })
+                .prop_flat_map(
+                    move |(num_outputs, num_announcements, coinbase_amount, timestamp)| {
+                        let parameter_sets = [
+                            (
+                                0,
+                                total_num_outputs - num_outputs,
+                                total_num_announcements - num_announcements,
+                            ),
+                            (num_inputs, num_outputs, num_announcements),
+                        ];
+                        Self::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
+                            parameter_sets,
+                            Some((coinbase_amount, 0, timestamp)),
+                        )
+                        .prop_map(|primwit| (primwit[0].clone(), primwit[1].clone()))
+                    },
+                )
                 .boxed()
         }
 

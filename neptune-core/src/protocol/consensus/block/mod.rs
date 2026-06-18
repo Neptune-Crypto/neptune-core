@@ -236,7 +236,8 @@ impl Block {
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
-            let claim = BlockProgram::claim(&body, &appendix);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
+            let claim = BlockProgram::claim(&body, &appendix, consensus_rule_set);
 
             let proof = ProofBuilder::new()
                 .program(BlockProgram.program())
@@ -877,7 +878,13 @@ impl Block {
         }
 
         // 2.f)
-        if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
+        let tx_timestamp = self.body().transaction_kernel.timestamp;
+        let block_timestamp = self.header().timestamp;
+        if tx_timestamp > block_timestamp
+            || consensus_rule_set
+                .transaction_backdating_threshold()
+                .is_some_and(|limit| block_timestamp - tx_timestamp > limit)
+        {
             return Err(BlockValidationError::TransactionTimestamp);
         }
 
@@ -966,10 +973,11 @@ impl Block {
                     }
 
                     let aocl_threshold = parent.max_lustrating_aocl_leaf_index;
-                    let lustration_result = self
-                        .body()
-                        .transaction_kernel
-                        .verified_lustration_amount(aocl_threshold);
+                    let lustration_result =
+                        self.body().transaction_kernel.verified_lustration_amount(
+                            aocl_threshold,
+                            consensus_rule_set.fix_lustration_double_counting(),
+                        );
                     let verified_lustrated_amt = match lustration_result {
                         Ok(amount) => amount,
                         // 2.o
@@ -2765,7 +2773,7 @@ pub(crate) mod tests {
             let (transaction, _) = make_coinbase_transaction_from_state_lock(
                 &blocks[i - 1],
                 &alice,
-                launch_date,
+                now,
                 TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
             )
             .await

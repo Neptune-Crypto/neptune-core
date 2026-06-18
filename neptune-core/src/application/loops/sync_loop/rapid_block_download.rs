@@ -6,6 +6,7 @@ use rand::RngCore;
 use tokio::fs;
 
 use crate::api::export::BlockHeight;
+use crate::api::export::Network;
 use crate::application::loops::sync_loop::SynchronizationBitMask;
 use crate::protocol::consensus::block::Block;
 
@@ -25,18 +26,20 @@ pub(crate) struct RapidBlockDownload {
 
     /// User-specified sync directory, if any.
     sync_dir: Option<PathBuf>,
+
+    network: Network,
 }
 
 impl RapidBlockDownload {
     /// The base directory for unprocessed blocks.
     ///
     /// Either take the `sync_dir` supplied by the user or, if none, ask the OS for a storage directory. The "base" indicates that the blocks are actually stored in a random subdirectory of this one -- random so as to avoid collisions.
-    fn base_storage_dir(sync_dir: &Option<PathBuf>) -> PathBuf {
+    fn base_storage_dir(sync_dir: &Option<PathBuf>, network: Network) -> PathBuf {
         if let Some(dir) = sync_dir {
             dir.clone()
         } else {
             let suffix = format!(
-                "rapid-block-download-{}/",
+                "rapid-block-download-{}-{network}/",
                 whoami::username().unwrap_or("".to_string())
             );
             std::env::temp_dir().join(suffix)
@@ -53,21 +56,23 @@ impl RapidBlockDownload {
         target_height: BlockHeight,
         resume_if_possible: bool,
         sync_dir: Option<PathBuf>,
+        network: Network,
     ) -> Result<Self, RapidBlockDownloadError> {
-        let storage_dir = match Self::try_resume_directory(resume_if_possible, &sync_dir).await {
-            Some(d) => d,
-            None => {
-                tracing::debug!(
-                    "No existing storage directory for syncing found, creating new one."
-                );
-                let storage_dir =
-                    Self::base_storage_dir(&sync_dir).join(format!("{}/", rng().next_u64()));
-                tokio::fs::create_dir_all(&storage_dir)
-                    .await
-                    .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
-                storage_dir
-            }
-        };
+        let storage_dir =
+            match Self::try_resume_directory(resume_if_possible, &sync_dir, network).await {
+                Some(d) => d,
+                None => {
+                    tracing::debug!(
+                        "No existing storage directory for syncing found, creating new one."
+                    );
+                    let storage_dir = Self::base_storage_dir(&sync_dir, network)
+                        .join(format!("{}/", rng().next_u64()));
+                    tokio::fs::create_dir_all(&storage_dir)
+                        .await
+                        .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
+                    storage_dir
+                }
+            };
 
         let mut index_to_filename = HashMap::new();
         let mut coverage = SynchronizationBitMask::new(1, target_height.next().value());
@@ -111,6 +116,7 @@ impl RapidBlockDownload {
             index_to_filename,
             target_height,
             sync_dir,
+            network,
         })
     }
 
@@ -122,12 +128,13 @@ impl RapidBlockDownload {
     async fn try_resume_directory(
         resume_if_possible: bool,
         sync_dir: &Option<PathBuf>,
+        network: Network,
     ) -> Option<PathBuf> {
         if !resume_if_possible {
             return None;
         }
 
-        let base_dir = Self::base_storage_dir(sync_dir);
+        let base_dir = Self::base_storage_dir(sync_dir, network);
         let mut info = tokio::fs::read_dir(&base_dir)
             .await
             .inspect_err(|e| {
@@ -210,7 +217,7 @@ impl RapidBlockDownload {
             );
             error_directories.push(self.block_storage_dir.clone());
         }
-        let base = Self::base_storage_dir(&self.sync_dir);
+        let base = Self::base_storage_dir(&self.sync_dir, self.network);
         if let Err(e) = tokio::fs::remove_dir(&base).await {
             tracing::warn!(
                 "failed to remove storage directory '{}' for rapid block download: {e}",
@@ -390,7 +397,7 @@ mod tests {
         let high = 200;
         tip.set_header_height(high.into());
         let mut rapid_block_download =
-            RapidBlockDownload::new(BlockHeight::from(high), false, None)
+            RapidBlockDownload::new(BlockHeight::from(high), false, None, Network::Main)
                 .await
                 .unwrap();
 
@@ -446,7 +453,7 @@ mod tests {
         let high = 200;
         tip.set_header_height(high.into());
         let mut rapid_block_download =
-            RapidBlockDownload::new(BlockHeight::from(high), false, None)
+            RapidBlockDownload::new(BlockHeight::from(high), false, None, Network::Main)
                 .await
                 .unwrap();
 
@@ -475,6 +482,7 @@ mod tests {
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn can_resume_block_download_from_saved_incomplete_state() {
+        let network = Network::Main;
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
         let low = 100;
@@ -482,7 +490,7 @@ mod tests {
         tip.set_header_height(high.into());
 
         let mut rapid_block_download_a =
-            RapidBlockDownload::new(BlockHeight::from(high), false, None)
+            RapidBlockDownload::new(BlockHeight::from(high), false, None, network)
                 .await
                 .unwrap();
         rapid_block_download_a.fast_forward(BlockHeight::from(low));
@@ -505,7 +513,7 @@ mod tests {
 
         // setup new rapid block download state
         let mut rapid_block_download_b =
-            RapidBlockDownload::new(BlockHeight::from(high), true, None)
+            RapidBlockDownload::new(BlockHeight::from(high), true, None, network)
                 .await
                 .unwrap();
         rapid_block_download_b.fast_forward(BlockHeight::from(low));
@@ -549,6 +557,7 @@ mod tests {
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn can_resume_block_download_from_saved_overcomplete_state() {
+        let network = Network::Main;
         let mut rng = rng();
         let mut tip = rng.random::<Block>();
         let low = 100;
@@ -557,7 +566,7 @@ mod tests {
         tip.set_header_height(first_high.into());
 
         let mut rapid_block_download_a =
-            RapidBlockDownload::new(BlockHeight::from(first_high), false, None)
+            RapidBlockDownload::new(BlockHeight::from(first_high), false, None, network)
                 .await
                 .unwrap();
         rapid_block_download_a.fast_forward(BlockHeight::from(low));
@@ -572,7 +581,7 @@ mod tests {
 
         // setup new rapid block download state
         let mut rapid_block_download_b =
-            RapidBlockDownload::new(BlockHeight::from(second_high), true, None)
+            RapidBlockDownload::new(BlockHeight::from(second_high), true, None, network)
                 .await
                 .unwrap();
         rapid_block_download_b.fast_forward(BlockHeight::from(low));
@@ -590,7 +599,7 @@ mod tests {
         let mut rng = rng();
         let high = 200;
         let mut rapid_block_download =
-            RapidBlockDownload::new(BlockHeight::from(high), false, None)
+            RapidBlockDownload::new(BlockHeight::from(high), false, None, Network::Main)
                 .await
                 .unwrap();
 
@@ -632,7 +641,7 @@ mod tests {
             let mut rng = StdRng::seed_from_u64(seed);
             let mut high = 200;
             let mut rapid_block_download =
-                RapidBlockDownload::new(BlockHeight::from(high), false, None)
+                RapidBlockDownload::new(BlockHeight::from(high), false, None, Network::Main)
                     .await
                     .unwrap();
 

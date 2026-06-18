@@ -88,6 +88,9 @@ pub(crate) async fn compose_block_helper(
     )
     .await?;
 
+    // Block timestamp must be at least that of the transaction. So don't use
+    // coinbase timestamp here, but rather the actual timestamp from the
+    // created transaction.
     let block_timestamp = transaction.kernel.timestamp;
     let compose_result = Block::compose(
         latest_block,
@@ -366,7 +369,7 @@ fn guess_worker(
                 Time: {timestamp_standard} ({timestamp})
 Since previous block: {elapsed_human}
               Digest: {hash:x}
-Difficulty threshold: {threshold}
+Difficulty threshold: {threshold:x}
           Difficulty: {target_difficulty}
            #inputs  : {num_inputs}
  #tx-kernel outputs : {num_outputs}
@@ -554,7 +557,7 @@ pub(crate) async fn create_block_transaction(
 pub(crate) async fn create_block_transaction_from(
     predecessor_block: &Block,
     mut global_state_lock: GlobalStateLock,
-    timestamp: Timestamp,
+    coinbase_timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
 ) -> Result<(BlockTransaction, Vec<ExpectedUtxo>)> {
@@ -584,7 +587,7 @@ pub(crate) async fn create_block_transaction_from(
     let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
         predecessor_block,
         composer_parameters.clone(),
-        timestamp,
+        coinbase_timestamp,
         vm_job_queue.clone(),
         job_options.clone(),
         new_rules,
@@ -675,7 +678,7 @@ pub(crate) async fn create_block_transaction_from(
         info!("Creating nop transaction to set merge bit through a merge");
         let nop = TransactionDetails::nop(
             predecessor_block_ms,
-            timestamp,
+            coinbase_timestamp,
             global_state_lock.cli().network,
         );
         let nop = PrimitiveWitness::from_transaction_details(&nop);

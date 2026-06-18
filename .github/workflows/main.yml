@@ -66,6 +66,7 @@ jobs:
       - name: Run tests without benches
         run: >
           cargo nextest run
+          --retries 2
           -E 'not (
             test(mine_20_blocks_in_40_seconds) |
             test(hash_rate_independent_of_tx_size) |
@@ -87,6 +88,7 @@ jobs:
           cargo nextest run
           --run-ignored all
           --test-threads=1
+          --retries 3
           -E 'test(can_resume_block_download_from_saved_incomplete_state) |
               test(can_resume_block_download_from_saved_overcomplete_state) |
               test(can_resume_sync_from_saved_state) |

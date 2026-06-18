@@ -73,7 +73,7 @@ impl ArchivalState {
     /// Returned list is sorted chronologically, assuming normal operations,
     /// normal storage of blocks. Specifically, `blk2.dat` will be returned before
     /// `blk10.dat`.
-    pub(crate) fn read_block_file_names_from_directory(directory: &Path) -> Result<Vec<PathBuf>> {
+    pub fn read_block_file_names_from_directory(directory: &Path) -> Result<Vec<PathBuf>> {
         let file_names = Self::file_names(directory)?;
         let file_names = Self::sorted_blk_file_names(file_names)?;
 
@@ -97,7 +97,7 @@ impl ArchivalState {
     ///
     /// Provides no validation that the blocks are valid, have enough PoW, or
     /// are stored in order in the file.
-    pub(crate) async fn blocks_from_file_without_record(path: &PathBuf) -> Result<Vec<Block>> {
+    pub async fn blocks_from_file_without_record(path: &PathBuf) -> Result<Vec<Block>> {
         let block_file = tokio::fs::OpenOptions::new().read(true).open(path).await?;
         let file_size = block_file.metadata().await?.len();
 

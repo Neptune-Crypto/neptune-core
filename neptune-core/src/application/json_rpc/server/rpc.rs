@@ -4,6 +4,7 @@ use tokio::sync::mpsc;
 use tracing::error;
 use tracing::warn;
 
+use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::api::ops::Namespace;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::state::GlobalStateLock;
@@ -25,6 +26,9 @@ pub struct RpcServer {
     /// should be set to false, because otherwise the node is exposed to
     /// malicious behavior.
     pub(crate) unrestricted: bool,
+
+    #[cfg(test)]
+    pub(crate) mock_time: Option<Timestamp>,
 }
 
 impl RpcServer {
@@ -36,6 +40,26 @@ impl RpcServer {
             state,
             to_main_tx,
             unrestricted,
+
+            #[cfg(test)]
+            mock_time: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_mock_time(mut self, time: Timestamp) -> Self {
+        self.mock_time = Some(time);
+        self
+    }
+
+    pub(crate) fn now(&self) -> Timestamp {
+        #[cfg(test)]
+        {
+            self.mock_time.unwrap_or(Timestamp::now())
+        }
+        #[cfg(not(test))]
+        {
+            Timestamp::now()
         }
     }
 
