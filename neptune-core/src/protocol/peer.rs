@@ -160,7 +160,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
             NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
             NegativePeerSanction::BlockProposalNotFound => -1,
-            NegativePeerSanction::InvalidBlockProposal => -3,
+            NegativePeerSanction::InvalidBlockProposal => -1,
             NegativePeerSanction::RequestForUnknownBlock => -5,
             NegativePeerSanction::RequestForGenesisBlock => -100,
             NegativePeerSanction::UnwantedMessage => -1,
