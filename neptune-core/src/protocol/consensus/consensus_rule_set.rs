@@ -37,9 +37,9 @@ pub const BLOCK_HEIGHT_HARDFORK_BETA_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(3_669));
 
 /// Height of the first block after hard fork gamma, which fixes the June 2026
-/// soundness issue, on main net.
+/// soundness issues, on main net.
 pub const BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(41_500u64));
+    BlockHeight::new(BFieldElement::new(40_300u64));
 
 /// Height of the first block after hard fork gamma, which fixes the June 2026
 /// soundness issue, on test net.
@@ -697,7 +697,7 @@ pub(crate) mod tests {
             panic!("Restarted lustration rule must be of type 'initial'");
         };
         assert_eq!(
-            NativeCurrencyAmount::coins(8_871_168),
+            NativeCurrencyAmount::coins(8_717_568),
             second_lustration.counter
         );
         assert_eq!(200_000, second_lustration.max_lustrating_aocl_leaf_index);
@@ -1603,7 +1603,7 @@ pub(crate) mod tests {
 
             bob.set_new_tip(minus2.clone()).await.unwrap();
             assert_eq!(
-                41_498u64,
+                40_298u64,
                 bob.lock_guard().await.chain.tip().header().height.value()
             );
 
@@ -1621,7 +1621,7 @@ pub(crate) mod tests {
             ));
             bob.set_new_tip(minus1.clone()).await.unwrap();
             assert_eq!(
-                41_499u64,
+                40_299u64,
                 bob.lock_guard().await.chain.tip().header().height.value()
             );
 
@@ -1675,7 +1675,7 @@ pub(crate) mod tests {
             );
 
             // premine + redemption pool + miner rewards up to hard fork activation
-            let expected_counter_after_activation = NativeCurrencyAmount::coins(8_871_168);
+            let expected_counter_after_activation = NativeCurrencyAmount::coins(8_717_568);
             assert_eq!(
                 hf_lustration_status.counter, expected_counter_after_activation,
                 "Lustration status must have expected value"
@@ -1847,7 +1847,7 @@ pub(crate) mod tests {
             assert_eq!(
                 hf_lustration_status.max_lustrating_aocl_leaf_index,
                 plus2_lustration_status.max_lustrating_aocl_leaf_index,
-                "AOCL threshold must be unchanged once HF-beta is activated"
+                "AOCL threshold must be unchanged once HF-gamma is activated"
             );
             assert_eq!(
                 plus1_lustration_status
