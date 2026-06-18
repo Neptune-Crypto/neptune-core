@@ -123,22 +123,30 @@
                         <Component Id='binary0' Guid='*'>
                             <File
                                 Id='exe0'
-                                Name='neptune-block-claims.exe'
+                                Name='neptune-blk-info.exe'
                                 DiskId='1'
-                                Source='$(var.CargoTargetBinDir)\neptune-block-claims.exe'
+                                Source='$(var.CargoTargetBinDir)\neptune-blk-info.exe'
                                 KeyPath='yes'/>
                         </Component>
                         <Component Id='binary1' Guid='*'>
                             <File
                                 Id='exe1'
-                                Name='neptune-core.exe'
+                                Name='neptune-block-claims.exe'
                                 DiskId='1'
-                                Source='$(var.CargoTargetBinDir)\neptune-core.exe'
+                                Source='$(var.CargoTargetBinDir)\neptune-block-claims.exe'
                                 KeyPath='yes'/>
                         </Component>
                         <Component Id='binary2' Guid='*'>
                             <File
                                 Id='exe2'
+                                Name='neptune-core.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\neptune-core.exe'
+                                KeyPath='yes'/>
+                        </Component>
+                        <Component Id='binary3' Guid='*'>
+                            <File
+                                Id='exe3'
                                 Name='neptune-prover.exe'
                                 DiskId='1'
                                 Source='$(var.CargoTargetBinDir)\neptune-prover.exe'
@@ -168,6 +176,7 @@
             <ComponentRef Id='binary0'/>
             <ComponentRef Id='binary1'/>
             <ComponentRef Id='binary2'/>
+            <ComponentRef Id='binary3'/>
 
             <Feature
                 Id='Environment'
