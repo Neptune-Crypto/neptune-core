@@ -2187,12 +2187,12 @@ pub trait RPC {
     /// #
     /// // from the current wallet
     /// // the index of the sent tx containing the transfer to prove
-    /// let tx_ix: u64 = 0xAAAAAAA;
+    /// let tx_ix: Option<u64> = Some(0xAAAAAAA);
     /// // the index of the UTXO with that transfer inside this tx
-    /// let utxo_ix = 0xAA;
+    /// let utxo_ix = Some(0xAA);
     /// /* The digest of a block after spending (verifiers must check this block as canonical). For better privacy a recent block can be chosen, if the need is to show
     /// when it was already took place --- choose a block by its timestamp accordingly, up to the block which first confirmed the tx (including). */
-    /// let block: Digest = Digest::try_from_hex("AAAAAAAA")?;
+    /// let block = Some(Digest::try_from_hex("AAAAAAAA")?);
     /// // get the claim and a proof
     /// let (claim, proof) = client.prove_transfer(context::current(), token, tx_ix, utxo_ix, block).await??;
     /// # Ok(())
