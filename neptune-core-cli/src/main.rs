@@ -506,7 +506,7 @@ async fn main() -> Result<()> {
             if proofs.iter().any(|(_, result)| result.is_err()) {
                 println!("Not all succesfully though. Read the output.")
             }
-            for (claim, proof) in proofs {
+            for (i, (claim, proof)) in proofs.into_iter().enumerate() {
                 // TODO Would check `claim` format here, but feel irrelevant until <https://github.com/Neptune-Crypto/neptune-core/issues/850>.
                 let proof = proof.map_err(|e| anyhow::anyhow!(e))?;
 
@@ -518,8 +518,11 @@ async fn main() -> Result<()> {
                         .join(Path::new(data_directory::DIRNAME_PROVING));
                 data_directory::DataDirectory::create_dir_if_not_exists(&path_proving).await?;
 
-                let path =
-                    path_proving.join(Path::new(["transfer_", &id, ".proof"].concat().as_str()));
+                let path = path_proving.join(Path::new(
+                    ["transfer_", &id, "_", &i.to_string(), ".proof"]
+                        .concat()
+                        .as_str(),
+                ));
 
                 let path_proof = path.clone();
                 let path_proof = path_proof.display();
