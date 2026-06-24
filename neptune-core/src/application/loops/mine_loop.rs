@@ -703,7 +703,23 @@ pub(crate) async fn create_block_transaction_from(
             .mempool_insert(nop.clone(), UpgradePriority::Irrelevant)
             .await;
 
-        transactions_to_merge = vec![nop];
+        // Did a transaction appear in the mempool *while* we built the nop
+        // if so, use that one!
+        let txs_from_mempool = global_state_lock
+            .lock_guard()
+            .await
+            .mempool
+            .get_transactions_for_block_composition(
+                block_capacity_for_transactions,
+                Some(max_num_mergers),
+            );
+
+        transactions_to_merge = if txs_from_mempool.is_empty() || old_rules != new_rules {
+            vec![nop]
+        } else {
+            info!("Found synced transaction in mempool after building nop. Using mempool transaction instead!");
+            txs_from_mempool
+        };
     }
 
     let num_merges = transactions_to_merge.len();

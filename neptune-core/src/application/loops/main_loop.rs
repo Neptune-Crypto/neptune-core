@@ -1432,7 +1432,11 @@ impl MainLoopHandler {
                 .proof_upgrader_task
                 .as_ref()
                 .is_some_and(|x| !x.is_finished());
+            let vm_job_queue = vm_job_queue();
+            let busy = vm_job_queue.num_queued_jobs() > 0;
+
             global_state.cli().tx_proof_upgrading
+                && !busy
                 && global_state.net.sync_anchor.is_none()
                 && global_state.proving_capability() == TxProvingCapability::SingleProof
                 && !previous_upgrade_task_is_still_running
@@ -1497,12 +1501,24 @@ impl MainLoopHandler {
         main_loop_state: &mut MutableMainLoopState,
         update_jobs: Vec<MempoolUpdateJob>,
     ) {
-        // job completion of the spawned task is communicated through the
-        // `update_mempool_txs_handle` channel.
         let vm_job_queue = vm_job_queue();
-        if let Some(handle) = main_loop_state.update_mempool_txs_handle.as_ref() {
+        let num_queued_job = vm_job_queue.num_queued_jobs();
+
+        // Don't do anything if there are already too many jobs in the queue.
+        // A later block will hopefully update the transaction in question, or
+        // the current-running job will self correct.
+        if num_queued_job > 2 {
+            warn!(
+                "Not updating mempool txs since job queue \
+                   already contains {num_queued_job} jobs"
+            );
+            return;
+        }
+
+        if let Some(handle) = main_loop_state.update_mempool_txs_handle.take() {
             handle.abort();
         }
+
         let (update_sender, update_receiver) =
             mpsc::channel::<Vec<MempoolUpdateJobResult>>(TX_UPDATER_CHANNEL_CAPACITY);
 
