@@ -836,18 +836,18 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
-    /// Return the block digest of the block in which an AOCL leaf with
-    /// specified index is contained.
-    pub(crate) async fn canonical_block_digest_of_aocl_index(
+    /// Return the canonical block digest and block height of the block in
+    /// which an AOCL leaf with specified index is contained.
+    async fn canonical_block_info_of_aocl_index(
         &self,
         aocl_leaf_index: u64,
-    ) -> Result<Option<Digest>> {
+    ) -> Result<Option<(Digest, BlockHeight)>> {
         // Is AOCL leaf contained in genesis block? Special-case this, as
         // genesis block does not have a block record.
         let genesis_tx: TransactionKernelProxy =
             self.genesis_block.body().transaction_kernel.clone().into();
         if aocl_leaf_index < genesis_tx.outputs.len().try_into().unwrap() {
-            return Ok(Some(self.genesis_block.hash()));
+            return Ok(Some((self.genesis_block.hash(), BlockHeight::genesis())));
         }
 
         let (mut record, mut block_hash) = match self
@@ -890,7 +890,7 @@ impl ArchivalState {
                 // Look above current height
                 min_block_height = record.block_header.height.next();
             } else {
-                return Ok(Some(block_hash));
+                return Ok(Some((block_hash, record.block_header.height)));
             };
 
             let new_guess_height = BlockHeight::arithmetic_mean(min_block_height, max_block_height);
@@ -907,26 +907,22 @@ impl ArchivalState {
         }
     }
 
-    /// Returns the inclusive range of AOCL leaf indices added by the specified
-    /// block.
-    ///
-    /// Panics if the block digest is not known.
-    async fn block_aocl_index_range(&self, block_digest: Digest) -> (u64, u64) {
-        if block_digest == self.genesis_block.hash() {
-            let genesis_tx: TransactionKernelProxy =
-                self.genesis_block.body().transaction_kernel.clone().into();
-            let num_genesis_outputs = u64::try_from(genesis_tx.outputs.len())
-                .expect("Number of genesis outputs must fit in u64");
-            return (0, num_genesis_outputs.saturating_sub(1));
-        }
-
-        let record = self
-            .get_block_record(block_digest)
-            .await
-            .expect("Canonical block digest must have a known block record");
-        (record.min_aocl_index, record.max_aocl_index())
+    /// Return the block digest of the block in which an AOCL leaf with
+    /// specified index is contained.
+    pub(crate) async fn canonical_block_digest_of_aocl_index(
+        &self,
+        aocl_leaf_index: u64,
+    ) -> Result<Option<Digest>> {
+        Ok(self
+            .canonical_block_info_of_aocl_index(aocl_leaf_index)
+            .await?
+            .map(|(block_digest, _)| block_digest))
     }
 
+    /// Returns AOCL index ranges for canonical blocks that could have created
+    /// any of the requested absolute index sets.
+    ///
+    /// Only blocks on the current canonical chain are considered.
     pub(crate) async fn utxo_origin_blocks_from_absolute_index_sets(
         &self,
         absolute_index_sets: impl IntoIterator<Item = AbsoluteIndexSet>,
@@ -947,29 +943,19 @@ impl ArchivalState {
             }
 
             let capped_range_end = range_end.min(last_aocl_index);
-            let Some(start_block_hash) = self
-                .canonical_block_digest_of_aocl_index(range_start)
-                .await?
+            let Some((_, start_block_height)) =
+                self.canonical_block_info_of_aocl_index(range_start).await?
             else {
                 continue;
             };
-            let Some(end_block_hash) = self
-                .canonical_block_digest_of_aocl_index(capped_range_end)
+            let Some((_, end_block_height)) = self
+                .canonical_block_info_of_aocl_index(capped_range_end)
                 .await?
             else {
                 continue;
             };
 
-            let start_header = self
-                .get_block_header(start_block_hash)
-                .await
-                .expect("Canonical block digest must have a known block header");
-            let end_header = self
-                .get_block_header(end_block_hash)
-                .await
-                .expect("Canonical block digest must have a known block header");
-
-            for height in start_header.height.value()..=end_header.height.value() {
+            for height in start_block_height.value()..=end_block_height.value() {
                 block_heights.insert(BlockHeight::from(height));
             }
         }
@@ -982,12 +968,28 @@ impl ArchivalState {
                 .try_get_leaf(height.value())
                 .await
                 .expect("Canonical block height must have a block digest");
-            let header = self
-                .get_block_header(block_hash)
-                .await
-                .expect("Canonical block digest must have a known block header");
-
-            let (min_aocl_index, max_aocl_index) = self.block_aocl_index_range(block_hash).await;
+            let (header, min_aocl_index, max_aocl_index) =
+                if block_hash == self.genesis_block.hash() {
+                    let genesis_tx: TransactionKernelProxy =
+                        self.genesis_block.body().transaction_kernel.clone().into();
+                    let num_genesis_outputs = u64::try_from(genesis_tx.outputs.len())
+                        .expect("Number of genesis outputs must fit in u64");
+                    (
+                        *self.genesis_block.header(),
+                        0,
+                        num_genesis_outputs.saturating_sub(1),
+                    )
+                } else {
+                    let record = self
+                        .get_block_record(block_hash)
+                        .await
+                        .expect("Block record of canonical hash must exist");
+                    (
+                        record.block_header,
+                        record.min_aocl_index,
+                        record.max_aocl_index(),
+                    )
+                };
 
             block_infos.push((block_hash, header, min_aocl_index, max_aocl_index));
         }
