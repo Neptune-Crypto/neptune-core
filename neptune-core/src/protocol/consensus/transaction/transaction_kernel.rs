@@ -110,7 +110,7 @@ pub(crate) enum TransactionConfirmabilityError {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) enum TransactionLustrationError {
+pub enum TransactionLustrationError {
     InvalidAoclRangeForIndexSet,
     MissingLustrationAnnouncement,
 }
@@ -230,7 +230,8 @@ impl TransactionKernel {
     }
 
     /// Check if a transaction lustrates (reveals) all the required amounts, and
-    /// if it does, return the lustrated amount.
+    /// if it does, return the amount that the lustration counter should be
+    /// decreased with, if this transaction is mined.
     ///
     /// Returns an error if the lustration rule defined by the AOCL leaf index
     /// threshold is not followed. The threshold defines the *last* AOCL leaf
@@ -241,9 +242,10 @@ impl TransactionKernel {
     ///
     /// Note that an `Ok` result only confirms these specific rules are met;
     /// it does not guarantee the overall validity of the block or transaction.
-    pub(crate) fn verified_lustration_amount(
+    pub fn verified_lustration_amount(
         &self,
         max_lustrating_aocl_leaf_index: u64,
+        fix_lustration_double_counting: bool,
     ) -> Result<NativeCurrencyAmount, TransactionLustrationError> {
         let mut required_lustrations = vec![];
         for input in &self.inputs {
@@ -251,7 +253,8 @@ impl TransactionKernel {
                 return Err(TransactionLustrationError::InvalidAoclRangeForIndexSet);
             };
 
-            if input_index_lower_end <= max_lustrating_aocl_leaf_index {
+            let must_lustrate = input_index_lower_end <= max_lustrating_aocl_leaf_index;
+            if must_lustrate {
                 required_lustrations.push(input.absolute_indices);
             }
         }
@@ -276,7 +279,15 @@ impl TransactionKernel {
             let implied_index_set = lustration.absolute_index_set();
             let was_present = required_lustrations.remove(&implied_index_set);
             if was_present {
-                acc_amount += lustration.utxo.get_native_currency_amount();
+                // Hardfork-beta double counts lustrations that happen close
+                // to the barrier. This bug was fixed in hardfork-gamma. Cf.:
+                // https://talk.neptune.cash/t/small-bug-in-lustration-counter-update-logic/
+                // https://web.archive.org/web/20260609105401/https://talk.neptune.cash/t/small-bug-in-lustration-counter-update-logic/286
+                let is_before_barrier =
+                    lustration.aocl_leaf_index <= max_lustrating_aocl_leaf_index;
+                if is_before_barrier || !fix_lustration_double_counting {
+                    acc_amount += lustration.utxo.get_native_currency_amount();
+                }
             }
         }
 
@@ -794,7 +805,10 @@ pub mod tests {
             let kernel = &primitive_witness.kernel;
             assert_eq!(
                 Ok(NativeCurrencyAmount::zero()),
-                kernel.verified_lustration_amount(kernel.lowest_aocl_leaf_index().unwrap() - 1)
+                kernel.verified_lustration_amount(
+                    kernel.lowest_aocl_leaf_index().unwrap() - 1,
+                    false
+                )
             );
         }
 
@@ -808,11 +822,11 @@ pub mod tests {
             let min_aocl_leaf_index = kernel.lowest_aocl_leaf_index().unwrap();
             assert_eq!(
                 Err(TransactionLustrationError::MissingLustrationAnnouncement),
-                kernel.verified_lustration_amount(min_aocl_leaf_index)
+                kernel.verified_lustration_amount(min_aocl_leaf_index, false)
             );
             assert_eq!(
                 Err(TransactionLustrationError::MissingLustrationAnnouncement),
-                kernel.verified_lustration_amount(min_aocl_leaf_index + 1)
+                kernel.verified_lustration_amount(min_aocl_leaf_index + 1, false)
             );
         }
 
@@ -824,7 +838,7 @@ pub mod tests {
             let kernel = &primitive_witness.kernel;
             assert_eq!(
                 Ok(NativeCurrencyAmount::zero()),
-                kernel.verified_lustration_amount(u64::MAX)
+                kernel.verified_lustration_amount(u64::MAX, false)
             );
         }
 
@@ -875,7 +889,7 @@ pub mod tests {
             let no_lustration = one_input_kernel(&mut test_runner, false);
             assert_eq!(
                 Err(TransactionLustrationError::MissingLustrationAnnouncement),
-                no_lustration.verified_lustration_amount(u64::MAX)
+                no_lustration.verified_lustration_amount(u64::MAX, false)
             );
 
             // Then add lustration, and verify that Ok(amount) is returned.
@@ -887,7 +901,7 @@ pub mod tests {
             );
             assert_eq!(
                 Ok(NativeCurrencyAmount::coins(12)),
-                with_lustration.verified_lustration_amount(u64::MAX)
+                with_lustration.verified_lustration_amount(u64::MAX, false)
             );
 
             // Modify the announcement such that it no longer correctly
@@ -895,7 +909,7 @@ pub mod tests {
             with_lustration.announcements[0].message[15] = bfe!(u64::MAX);
             assert_eq!(
                 Err(TransactionLustrationError::MissingLustrationAnnouncement),
-                with_lustration.verified_lustration_amount(u64::MAX)
+                with_lustration.verified_lustration_amount(u64::MAX, false)
             );
         }
     }

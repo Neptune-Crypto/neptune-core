@@ -1709,6 +1709,9 @@ impl ArchivalState {
 
     /// Returns true iff the (block height, block hash) pair represents a block
     /// in the canonical chain.
+    ///
+    /// Returns false if the block has a higher height than the current tip.
+    /// Canonicity is defined as all direct ancestors of the current tip.
     pub(crate) async fn is_canonical_block(
         &self,
         block_hash: Digest,
@@ -2362,7 +2365,7 @@ impl ArchivalState {
 
     /// Populate the true claims cache with the claims derived from the blocks
     /// defined by the checkpoint as valid.
-    async fn accept_checkpoint(network: Network) {
+    pub async fn accept_checkpoint(network: Network) {
         const CHECKPOINT_MAIN: &str = include_str!("../assets/main/checkpoint.dat");
         const CHECKPOINT_TESTNET0: &str = include_str!("../assets/testnet-0/checkpoint.dat");
         let checkpoint = match network {
@@ -4086,6 +4089,27 @@ pub(super) mod tests {
                 .unwrap()
                 .is_none());
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn is_canonical_block_false_on_future_blocks() {
+        let network = Network::Main;
+        let mut archival_state =
+            make_test_archival_state(&Args::default_with_network(network)).await;
+        let block_1 = invalid_empty_block(archival_state.genesis_block(), network);
+        archival_state.set_new_tip(&block_1).await.unwrap();
+        let genesis = archival_state.genesis_block().clone();
+        archival_state.set_new_tip(&genesis).await.unwrap();
+        assert!(
+            !archival_state
+                .is_canonical_block(block_1.hash(), block_1.header().height)
+                .await
+        );
+        assert!(
+            archival_state
+                .is_canonical_block(genesis.hash(), genesis.header().height)
+                .await
+        );
     }
 
     #[traced_test]

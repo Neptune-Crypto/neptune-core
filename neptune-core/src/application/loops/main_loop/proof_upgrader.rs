@@ -957,7 +957,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
         .collect_vec();
     jobs.sort_by_key(|job| job.upgrade_incentive());
 
-    jobs.first().cloned()
+    jobs.last().cloned()
 }
 
 #[cfg(test)]

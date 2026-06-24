@@ -46,6 +46,9 @@ pub enum SubmitTransactionError {
     #[error("Transaction is future-dated")]
     FutureDated,
 
+    #[error("Transaction timestamp is too old")]
+    TooOld,
+
     #[error("Transaction not confirmable relative to the mutator set")]
     NotConfirmable,
 

@@ -41,7 +41,7 @@ pub fn derive_receiver_id(seed: Digest) -> BFieldElement {
 pub fn deterministically_derive_seed_and_nonce(
     payload: &UtxoNotificationPayload,
 ) -> ([u8; 32], BFieldElement) {
-    let combined = Tip5::hash_pair(payload.sender_randomness, payload.utxo.lock_script_hash());
+    let combined = Tip5::hash_pair(payload.sender_randomness, Tip5::hash(&payload.utxo));
     let [e0, e1, e2, e3, e4] = combined.values();
     let e0: [u8; 8] = e0.into();
     let e1: [u8; 8] = e1.into();
@@ -108,18 +108,26 @@ pub fn bytes_to_bfes(bytes: &[u8]) -> Vec<BFieldElement> {
 
 /// Decodes a slice of BFieldElements to a vec of bytes. This method
 /// computes the inverse of `bytes_to_bfes`.
+///
+/// Fails if the number of bytes exceed 8*10^6.
 pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
+    const MAX_DECODED_LENGTH: usize = BFieldElement::BYTES * 1_000_000;
     ensure!(!bfes.is_empty(), "Cannot decode empty byte stream");
 
-    let length = bfes[0].value() as usize;
+    let claimed_length = bfes[0].value() as usize;
     ensure!(
-        length <= size_of_val(bfes),
+        claimed_length <= size_of_val(bfes),
         "Cannot decode byte stream shorter than length indicated. \
-        BFE slice length: {}, indicated byte stream length: {length}",
+        BFE slice length: {}, indicated byte stream length: {claimed_length}",
         bfes.len(),
     );
 
-    let mut bytes: Vec<u8> = Vec::with_capacity(length);
+    ensure!(
+        claimed_length <= MAX_DECODED_LENGTH,
+        "Claimed length must not exceed {MAX_DECODED_LENGTH}"
+    );
+
+    let mut bytes: Vec<u8> = Vec::with_capacity(claimed_length);
     let mut skip_top = false;
     for bfe in bfes.iter().skip(1) {
         let bfe_bytes = bfe.value().to_be_bytes();
@@ -136,7 +144,12 @@ pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
         }
     }
 
-    Ok(bytes[0..length].to_vec())
+    ensure!(
+        claimed_length <= bytes.len(),
+        "Claimed length cannot exceed actual length when decoding bytes"
+    );
+
+    Ok(bytes[0..claimed_length].to_vec())
 }
 
 // note: copied from twenty_first::math::lattice::kem::shake256()
@@ -173,6 +186,25 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn no_crash_empty_bfes() {
+        let _res = bfes_to_bytes(&[]);
+    }
+
+    #[test]
+    fn no_crash_in_bfes_to_bytes() {
+        for claimed_length in 0..20 {
+            for payload_length in 0..12 {
+                let byte_vec = vec![0; payload_length];
+                let mut bfes = bytes_to_bfes(&byte_vec);
+                bfes[0] = bfe!(claimed_length);
+
+                // Ensure no crash
+                let _res = bfes_to_bytes(&bfes);
+            }
+        }
+    }
+
+    #[test]
     fn test_conversion_variable_length() {
         let mut rng = rand::rng();
         for _ in 0..1000 {
@@ -184,6 +216,16 @@ pub(super) mod tests {
 
             assert_eq!(byte_vec, bytes_again);
         }
+    }
+
+    #[test]
+    fn too_long_msg() {
+        let byte_vec: Vec<u8> = vec![0; 10_000_000];
+        let bfes = bytes_to_bfes(&byte_vec);
+        assert!(
+            bfes_to_bytes(&bfes).is_err(),
+            "Must fail if trying to decode too many bytes."
+        );
     }
 
     #[test]

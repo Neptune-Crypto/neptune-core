@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn encryption_is_deterministic() {
-        let expected = "c55a3ddcd942855800000000000000684543463bce353b3cd5b698a3702cbea9c8293f4153c3dac232743d6004b8f88659688a2fa8737e66085dcee60920e7bd00b906bc1c92a01478813568371d27e159ed66da07756f09a019d1776d82e2674ceaf441a34291e2bb35688641053cb0741d0b38520d7e57";
+        let expected = "a48b4c4777fc3e7600000000000000684b69e67664182b3828ed19dba3f6c55f54110284018e51e4808d037c9955668b282c60d8724be77f09a77201b8c4de1600e50068ff095748555fcb9c41e94815ae402977aefd6c4f40497b2e9b50b09fd945625d382a03c1a077adee2cc2f4b664f0f31d6380c975";
         let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
         let result = WalletEntropy::devnet_wallet()
             .nth_viewing_address_key(0)

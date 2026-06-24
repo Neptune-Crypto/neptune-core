@@ -542,6 +542,6 @@ mod tests {
 
     test_program_snapshot!(
         KernelToOutputs,
-        "7b5cdf881ba64ef4d74245da25f4beb1c4b416922af46eacaa17ebc328021e0249a9301505c3223f"
+        "74e12c483cfd1c57a76bfaafa2ea2b92177103367b9cdc0ab2bd3491c051599fbbaef1b77cc00c75"
     );
 }

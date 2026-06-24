@@ -1715,22 +1715,30 @@ impl GlobalState {
         while let Some(mutxo) = stream.next().await {
             if is_archival {
                 // if archival, don't assume presence of membership proofs.
-                if max_confirmed_in_block.is_none() {
-                    let (hash, _, height) = mutxo.confirmed_in_block;
-                    if self
+                let (hash, _, height) = mutxo.confirmed_in_block;
+                if max_confirmed_in_block.is_none_or(|x| x < height)
+                    && self
                         .chain
                         .archival_state()
                         .is_canonical_block(hash, height)
                         .await
-                    {
-                        max_confirmed_in_block = Some(height);
-                    }
+                {
+                    max_confirmed_in_block = Some(height);
                 }
 
                 // Only spends with known blocks are counted.
-                if let MonitoredUtxoSpentStatus::SpentIn { block_height, .. } = mutxo.spent {
-                    if max_spent_in_block.is_none()
-                        || max_spent_in_block.is_some_and(|x| x < block_height)
+                if let MonitoredUtxoSpentStatus::SpentIn {
+                    block_height,
+                    block_hash,
+                    ..
+                } = mutxo.spent
+                {
+                    if max_spent_in_block.is_none_or(|x| x < block_height)
+                        && self
+                            .chain
+                            .archival_state()
+                            .is_canonical_block(block_hash, block_height)
+                            .await
                     {
                         max_spent_in_block = Some(block_height);
                     }
@@ -1751,8 +1759,7 @@ impl GlobalState {
                     if mutxo
                         .get_membership_proof_for_block(current_tip_digest)
                         .is_some()
-                        && (max_spent_in_block.is_none()
-                            || max_spent_in_block.is_some_and(|x| x < block_height))
+                        && max_spent_in_block.is_none_or(|x| x < block_height)
                     {
                         max_spent_in_block = Some(block_height);
                     }
@@ -3361,7 +3368,7 @@ impl GlobalState {
         let mut num_stored_blocks = 0;
         let mut predecessor = self.chain.tip().clone();
         let network = self.cli.network;
-        let ignore_invalid_threshold = ConsensusRuleSet::first_tvmv1_block(network);
+        let canon_threshold = ConsensusRuleSet::latest_checkpoint(network);
 
         for block_file_path in block_file_paths {
             let blocks = ArchivalState::blocks_from_file_without_record(&block_file_path).await?;
@@ -3396,12 +3403,11 @@ impl GlobalState {
                         .await;
 
                     if let Err(error) = validity {
-                        // Skip/ignore invalid blocks instead of returning an
-                        // error -- iff they are based on a deprecated version
-                        // of Triton VM's proof system. Otherwise, this function
-                        // cannot handle orphaned blocks prior to TVM proof
-                        // version 1.
-                        if block_height < ignore_invalid_threshold {
+                        // Skip/ignore invalid blocks that were explicitly
+                        // canonized.
+                        if block_height <= canon_threshold {
+                            debug!("Invalid block: {error}");
+                            debug!("Skipping invalid block of height {block_height} prior to checkpoint");
                             continue;
                         }
 

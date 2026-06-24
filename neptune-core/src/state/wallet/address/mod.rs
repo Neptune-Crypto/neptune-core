@@ -150,7 +150,7 @@ mod tests {
                 .mempool_insert(tx.transaction().to_owned(), UpgradePriority::Critical)
                 .await;
 
-            let block1 = next_block(state.clone(), genesis.clone()).await;
+            let block1 = next_block(state.clone(), genesis.clone(), Some(timestamp)).await;
             let now = block1.header().timestamp;
             assert!(block1.is_valid(&genesis, now, network).await);
 

@@ -1221,8 +1221,8 @@ mod tests {
         let mut own_handshake = state.get_own_handshakedata();
 
         // Set reported versions to something incompatible
-        VersionString::new_from_str("0.0.3").clone_into(&mut own_handshake.version);
-        VersionString::new_from_str("0.0.0").clone_into(&mut other_handshake.version);
+        VersionString::new_from_str("0.12.3").clone_into(&mut own_handshake.version);
+        VersionString::new_from_str("0.10.2").clone_into(&mut other_handshake.version);
 
         let peer_address = get_dummy_socket_address(55);
         let connection_status = check_if_connection_is_allowed(

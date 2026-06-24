@@ -1,12 +1,15 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use anyhow::ensure;
+
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
+use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::bound_time_diff::BoundTimeDiff;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
 /// Newtype for [`TransactionKernel`] where removal records are packed. For use
@@ -55,6 +58,17 @@ impl From<BlockOrRegularTransactionKernel> for TransactionKernel {
                 block_transaction_kernel.0
             }
             BlockOrRegularTransactionKernel::Regular(transaction_kernel) => transaction_kernel,
+        }
+    }
+}
+
+impl Deref for BlockOrRegularTransactionKernel {
+    type Target = TransactionKernel;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Block(kernel) => kernel,
+            Self::Regular(kernel) => kernel,
         }
     }
 }
@@ -171,6 +185,13 @@ impl BlockTransaction {
         #[expect(unused_variables, reason = "anticipate future fork")]
         consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<BlockTransaction> {
+        let cb_ts = coinbase.kernel().timestamp;
+        let other_ts = other.kernel.timestamp;
+        let diff = std::cmp::max(cb_ts, other_ts) - std::cmp::min(cb_ts, other_ts);
+        ensure!(
+            diff <= BoundTimeDiff::MAX_TIMESTAMP_DIFF,
+            "Time difference may not be too big when merging with coinbase transactions"
+        );
         let merge_witness = MergeWitness::for_composition(coinbase, other, shuffle_seed);
         let tx = MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await?;
 

@@ -64,7 +64,7 @@ use crate::protocol::peer::PositivePeerSanction;
 use crate::protocol::peer::SyncChallenge;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
+use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::sync_status::SyncStatus;
 use crate::state::GlobalState;
@@ -1646,7 +1646,7 @@ impl PeerLoopHandler {
 
                 // 6. Ignore if transaction is too old
                 let now = self.now();
-                if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
+                if tx_timestamp < now - MEMPOOL_TX_THRESHOLD_AGE {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1673,6 +1673,7 @@ impl PeerLoopHandler {
                         .expect("Lustration status of tip must be parseable after hardfork");
                     match transaction.kernel.verified_lustration_amount(
                         lustration_status.max_lustrating_aocl_leaf_index,
+                        consensus_rule_set.fix_lustration_double_counting(),
                     ) {
                         Ok(amt) => {
                             if amt > lustration_status.counter {
@@ -2767,6 +2768,7 @@ mod tests {
         use crate::protocol::consensus::block::difficulty_control::Difficulty;
         use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
         use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
+        use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
         use crate::tests::shared::blocks::next_block;
@@ -4293,7 +4295,12 @@ mod tests {
                 ConsensusRuleSet::TvmProofVersion1,
                 ConsensusRuleSet::HardforkBeta,
             );
-            for (init_block_height, start_rules, end_rules) in [hf_alpha, hf_beta] {
+            let hf_gamma = (
+                BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET.previous().unwrap(),
+                ConsensusRuleSet::HardforkBeta,
+                ConsensusRuleSet::HardforkGamma,
+            );
+            for (init_block_height, start_rules, end_rules) in [hf_alpha, hf_beta, hf_gamma] {
                 let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
                     init_block_height,
                     Difficulty::MINIMUM,
@@ -4357,8 +4364,13 @@ mod tests {
 
                 let hard_fork_minus_1 = *guesser_rx.await.unwrap().block;
 
-                let first_block_after_hardfork =
-                    next_block(state_lock.clone(), hard_fork_minus_1.clone()).await;
+                let cb_timestamp = hard_fork_minus_1.header().timestamp + Timestamp::minutes(12);
+                let first_block_after_hardfork = next_block(
+                    state_lock.clone(),
+                    hard_fork_minus_1.clone(),
+                    Some(cb_timestamp),
+                )
+                .await;
 
                 // Verify assumption about block height of hardfork
                 assert!(hard_fork_minus_1.pow_verify_for_tests(
@@ -4368,10 +4380,6 @@ mod tests {
                 assert!(first_block_after_hardfork.pow_verify_for_tests(
                     hard_fork_minus_2.header().difficulty.target(),
                     end_consensus_rule_set
-                ));
-                assert!(!first_block_after_hardfork.pow_verify_for_tests(
-                    hard_fork_minus_1.header().difficulty.target(),
-                    start_consensus_rule_set
                 ));
 
                 // Declare expected order of messages

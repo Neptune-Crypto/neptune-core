@@ -1,3 +1,89 @@
+Note: (!) indicates a breaking change.
+
+## [0.12.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.11.0..v0.12.0) - 2026-06-18
+
+### 🔱 Fork
+
+- (!) Canonize blocks ([25594255](https://github.com/Neptune-Crypto/neptune-core/commit/25594255))
+- (!) Bump tasm-lib dependency ([91129de7](https://github.com/Neptune-Crypto/neptune-core/commit/91129de7))
+- (!) Hardfork-gamma ([97e41de4](https://github.com/Neptune-Crypto/neptune-core/commit/97e41de4))
+
+### ✨ Features
+
+- *(json_rpc)* Add archival batch_are_bloom_indices_set endpoint ([d465eb5d](https://github.com/Neptune-Crypto/neptune-core/commit/d465eb5d))
+- *(job_queue)* Surface panic message in JobHandleError output ([1d7b5384](https://github.com/Neptune-Crypto/neptune-core/commit/1d7b5384))
+- Add binary to inspect blk files ([8bbfe1a4](https://github.com/Neptune-Crypto/neptune-core/commit/8bbfe1a4))
+
+### 🐛 Bug Fixes
+
+- *(`proof_collection.rs`)* Check zip operands' lengths ([#936](https://github.com/Neptune-Crypto/neptune-core/issues/936)) ([4ca090dc](https://github.com/Neptune-Crypto/neptune-core/commit/4ca090dc))
+- Prepare for beta->gamma transition ([e55bcf68](https://github.com/Neptune-Crypto/neptune-core/commit/e55bcf68))
+- Fix proof version in main net checkpoint ([576ba355](https://github.com/Neptune-Crypto/neptune-core/commit/576ba355))
+- Version in BlockProgram ([15110f46](https://github.com/Neptune-Crypto/neptune-core/commit/15110f46))
+- *(RemovalRecordsList)* Don't panic on incorrectly sorted tree heights ([e1e20625](https://github.com/Neptune-Crypto/neptune-core/commit/e1e20625))
+- *(RemovalRecordList)* Ensure no crash on unpacking ([bc3c507d](https://github.com/Neptune-Crypto/neptune-core/commit/bc3c507d))
+- Limit length of decoded message ([551d855e](https://github.com/Neptune-Crypto/neptune-core/commit/551d855e))
+- *(wallet)* Check spends for canonicity ([852425b6](https://github.com/Neptune-Crypto/neptune-core/commit/852425b6))
+- Allow simultaneous syncing on different networks ([b0c7b962](https://github.com/Neptune-Crypto/neptune-core/commit/b0c7b962))
+- Disallow excessive transaction back-dating ([7b78a84f](https://github.com/Neptune-Crypto/neptune-core/commit/7b78a84f))
+- *(sync_loop)* Check PoW of each downloaded block ([b8d95930](https://github.com/Neptune-Crypto/neptune-core/commit/b8d95930))
+- *(sync_loop)* Check block validity and pow in shortcut ([92d61272](https://github.com/Neptune-Crypto/neptune-core/commit/92d61272))
+- *(address)* Ensure that decoding cannot crash ([a3e8636b](https://github.com/Neptune-Crypto/neptune-core/commit/a3e8636b))
+- *(address)* Use entire payload when generating encryption seed and nonce ([c608a955](https://github.com/Neptune-Crypto/neptune-core/commit/c608a955))
+
+### 📚 Documentation
+
+- Fix some deprecated comments concerning network types ([9e7fdcec](https://github.com/Neptune-Crypto/neptune-core/commit/9e7fdcec))
+- Remove deprecated note about `ConsensusRuleSet` ([3109783c](https://github.com/Neptune-Crypto/neptune-core/commit/3109783c))
+
+### ♻️ Refactor
+
+- Move `nth_spending_key` from WalletState to WalletEntropy ([53e0141d](https://github.com/Neptune-Crypto/neptune-core/commit/53e0141d))
+- *(SingleProof)* Disallow big time updates on merge ([d4c1b207](https://github.com/Neptune-Crypto/neptune-core/commit/d4c1b207))
+- *(network)* Prevent HF-gamma incompatible nodes from connecting ([e2534fdc](https://github.com/Neptune-Crypto/neptune-core/commit/e2534fdc))
+- Roll back to 40,300 ([91c51a29](https://github.com/Neptune-Crypto/neptune-core/commit/91c51a29))
+- Reduce severity of invalid block prop violation ([29070540](https://github.com/Neptune-Crypto/neptune-core/commit/29070540))
+
+### ✅ Testing
+
+- Fix flaky two_new_blocks_from_peer; fix block-wait error string ([ce34053f](https://github.com/Neptune-Crypto/neptune-core/commit/ce34053f))
+- Panic with file path on empty cached proof files ([3a48051e](https://github.com/Neptune-Crypto/neptune-core/commit/3a48051e))
+- Verify that future blocks are not canonical ([be2160a7](https://github.com/Neptune-Crypto/neptune-core/commit/be2160a7))
+- Change PoW test to use gamma consensus rules ([ebfce2b6](https://github.com/Neptune-Crypto/neptune-core/commit/ebfce2b6))
+- Verify validity of testnet-0 HF-gamma activation blocks ([6893596e](https://github.com/Neptune-Crypto/neptune-core/commit/6893596e))
+- Verify that BlockProgram claims haven't changed ([7a60c6fc](https://github.com/Neptune-Crypto/neptune-core/commit/7a60c6fc))
+- Fix tests after restricting timestamp diff for coinbase ([8daa089a](https://github.com/Neptune-Crypto/neptune-core/commit/8daa089a))
+- Fix snapshot tests after consensus upgrades ([a5d2448d](https://github.com/Neptune-Crypto/neptune-core/commit/a5d2448d))
+- Improved assert string on test failure ([da3fa849](https://github.com/Neptune-Crypto/neptune-core/commit/da3fa849))
+
+### 🎨 Styling
+
+- Remove unecessary declaration in genesis block ([f0fb02a4](https://github.com/Neptune-Crypto/neptune-core/commit/f0fb02a4))
+- *(wallet)* Generalize interface of seed phrase functions ([e0337958](https://github.com/Neptune-Crypto/neptune-core/commit/e0337958))
+
+### ⚙️ Miscellaneous
+
+- Cargo update ([396d3120](https://github.com/Neptune-Crypto/neptune-core/commit/396d3120))
+- Upgrade tasm-lib dependency ([a1707df7](https://github.com/Neptune-Crypto/neptune-core/commit/a1707df7))
+- Make clippy + fmt happy ([b44f7790](https://github.com/Neptune-Crypto/neptune-core/commit/b44f7790))
+- Retry failing tests ([8653854b](https://github.com/Neptune-Crypto/neptune-core/commit/8653854b))
+- Upgrade tasm-lib dependency ([a74d2859](https://github.com/Neptune-Crypto/neptune-core/commit/a74d2859))
+- Upgrade tasm-lib dependency ([179c7458](https://github.com/Neptune-Crypto/neptune-core/commit/179c7458))
+- Update release workflow files ([856dafa9](https://github.com/Neptune-Crypto/neptune-core/commit/856dafa9))
+
+### 🪵 Log
+
+- Display self-mined block's difficulty threshold with hex ([5fb9940d](https://github.com/Neptune-Crypto/neptune-core/commit/5fb9940d))
+
+### 🚥 Developer Experience
+
+- Increase flexibity of block claims printer ([c5e15f6c](https://github.com/Neptune-Crypto/neptune-core/commit/c5e15f6c))
+
+### 🪢 Merge
+
+- Merge([#931](https://github.com/Neptune-Crypto/neptune-core/issues/931)): zeokin/test/harden-flaky-update-mutator-set-tests ([15cbce41](https://github.com/Neptune-Crypto/neptune-core/commit/15cbce41))
+
+
 ## [0.11.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.10.2..v0.11.0) - 2026-05-29
 
 ### ✨ Features

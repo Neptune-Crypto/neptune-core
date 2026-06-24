@@ -71,8 +71,9 @@ pub enum BlockValidationError {
     ///      the old mutator set accumulator to the new one.
     #[error("mutator set must evolve in accordance with transaction")]
     MutatorSetUpdateIntegrity,
-    ///   2.f) transaction timestamp <= block timestamp
-    #[error("transaction timestamp must not exceed block timestamp")]
+    ///   2.f) transaction timestamp <= block timestamp, and not more than 3
+    ///        days in the past
+    #[error("transaction timestamp must not exceed block timestamp, nor be too old")]
     TransactionTimestamp,
     ///   2.g) transaction coinbase <= block subsidy, and not negative.
     #[error("coinbase cannot exceed block subsidy")]
@@ -170,6 +171,7 @@ mod tests {
     use crate::protocol::consensus::block::BlockProof;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
+    use crate::protocol::consensus::consensus_rule_set::TX_BACKDATING_LIMIT;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::proof_abstractions::verifier::cache_true_claims;
@@ -473,12 +475,18 @@ mod tests {
             .mutator_set_hash(b_prev.mutator_set_accumulator_after().unwrap().hash())
             .modify(b_new.kernel.body.transaction_kernel.clone());
         b_new.kernel.body.transaction_kernel = new_kernel;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
         b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
             b_new.body(),
-            ConsensusRuleSet::infer_from(network, b_new.header().height),
+            consensus_rule_set,
         ));
 
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         prop_assert_eq!(
             BlockValidationError::MutatorSetUpdateIntegrity,
@@ -500,11 +508,51 @@ mod tests {
             TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
         tx_kernel_ts.timestamp = Timestamp(bfe![ts_kernel]);
         b_new.kernel.body.transaction_kernel = tx_kernel_ts.into_kernel();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
         b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
             b_new.body(),
-            ConsensusRuleSet::infer_from(network, b_prev.header().height),
+            consensus_rule_set,
         ));
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
+
+        prop_assert_eq!(
+            BlockValidationError::TransactionTimestamp,
+            b_new.validate(&b_prev, ts, network).await.err().unwrap()
+        );
+    }
+
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+    async fn block_with_transaction_timestamp_too_small_fails_2f(
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+    ) {
+        let network = Network::Main;
+        let (b_prev, ts, rness) = s;
+        let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+        prop_assume!(consensus_rule_set
+            .transaction_backdating_threshold()
+            .is_some());
+
+        let mut tx_kernel_ts =
+            TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
+        tx_kernel_ts.timestamp =
+            b_new.header().timestamp - TX_BACKDATING_LIMIT - Timestamp::minutes(1);
+        b_new.kernel.body.transaction_kernel = tx_kernel_ts.into_kernel();
+        b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
+            b_new.body(),
+            consensus_rule_set,
+        ));
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         prop_assert_eq!(
             BlockValidationError::TransactionTimestamp,
@@ -527,11 +575,17 @@ mod tests {
             TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
         tx_kernel_big_coinbase.coinbase = Some(too_big_coinbase);
         b_new.kernel.body.transaction_kernel = tx_kernel_big_coinbase.into_kernel();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
         b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
             b_new.body(),
-            ConsensusRuleSet::infer_from(network, b_prev.header().height),
+            consensus_rule_set,
         ));
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         prop_assert_eq!(
             BlockValidationError::CoinbaseTooBig,
@@ -553,11 +607,17 @@ mod tests {
         tx_kernel_neg_coinbase.coinbase = Some(-NativeCurrencyAmount::one_nau());
 
         b_new.kernel.body.transaction_kernel = tx_kernel_neg_coinbase.into_kernel();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
         b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
             b_new.body(),
-            ConsensusRuleSet::infer_from(network, b_prev.header().height),
+            consensus_rule_set,
         ));
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         prop_assert_eq!(
             BlockValidationError::NegativeCoinbase,
@@ -578,11 +638,17 @@ mod tests {
             TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
         tx_kernel_fee_neg.fee = -NativeCurrencyAmount::one_nau();
         b_new.kernel.body.transaction_kernel = tx_kernel_fee_neg.into_kernel();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
         b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
             b_new.body(),
-            ConsensusRuleSet::infer_from(network, b_prev.header().height),
+            consensus_rule_set,
         ));
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         prop_assert_eq!(
             BlockValidationError::NegativeFee,
@@ -602,7 +668,13 @@ mod tests {
         let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
         b_new.set_unparseable_lustration_status();
 
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         prop_assert_eq!(
             BlockValidationError::BadLustrationCounterEncoding,
@@ -630,12 +702,18 @@ mod tests {
             .append(b_prev.hash());
         b_new.fix_mutator_set_fields(&b_prev);
         b_new.set_lustration_status(LustrationStatus::default());
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
         b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
             b_new.body(),
-            ConsensusRuleSet::infer_from(network, b_new.header().height),
+            consensus_rule_set,
         ));
 
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         prop_assert_eq!(
             BlockValidationError::BadLustrationCounterEncodingOfParent,
@@ -660,8 +738,14 @@ mod tests {
             max_lustrating_aocl_leaf_index: parent_lustration_status.max_lustrating_aocl_leaf_index
                 + 3,
         });
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
 
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         assert!(matches!(
             b_new.validate(&b_prev, ts, network).await.err().unwrap(),
@@ -689,7 +773,13 @@ mod tests {
             max_lustrating_aocl_leaf_index: parent_lustration_status.max_lustrating_aocl_leaf_index,
         });
 
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         assert!(matches!(
             b_new.validate(&b_prev, ts, network).await.err().unwrap(),
@@ -709,7 +799,13 @@ mod tests {
         let (b_prev, ts, rness) = s;
 
         let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
         assert!(b_new.validate(&b_prev, ts, network).await.is_ok());
 
         let good_lustration_status = b_new.header().pow.lustration_status().unwrap();
@@ -723,7 +819,12 @@ mod tests {
             max_lustrating_aocl_leaf_index: good_lustration_status.max_lustrating_aocl_leaf_index,
         });
 
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         assert!(matches!(
             b_new.validate(&b_prev, ts, network).await.err().unwrap(),
@@ -751,7 +852,13 @@ mod tests {
                 - 1,
         });
 
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
 
         assert!(matches!(
             b_new.validate(&b_prev, ts, network).await.err().unwrap(),
@@ -770,7 +877,13 @@ mod tests {
         prop_assume!(b_prev.header().version != version);
 
         let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
-        cache_true_claims([BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)]).await;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+        cache_true_claims([BlockProgram::claim(
+            b_new.body(),
+            &b_new.kernel.appendix,
+            consensus_rule_set,
+        )])
+        .await;
         assert!(b_new.validate(&b_prev, ts, network).await.is_ok());
 
         b_new.set_header_version_in_pow_only(version);

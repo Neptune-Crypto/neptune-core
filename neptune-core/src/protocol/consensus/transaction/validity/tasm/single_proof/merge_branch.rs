@@ -1,8 +1,11 @@
 pub mod authenticate_coinbase_fields;
+pub(crate) mod bound_time_diff;
+pub(crate) mod coinbase_bound_time_diff;
 
 use std::cmp::max;
 use std::sync::Arc;
 
+use anyhow::ensure;
 use anyhow::Result;
 use authenticate_coinbase_fields::AuthenticateCoinbaseFields;
 use itertools::Itertools;
@@ -47,6 +50,8 @@ use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionKernel;
 use crate::protocol::consensus::transaction::TransactionKernelProxy;
 use crate::protocol::consensus::transaction::TransactionProof;
+use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::bound_time_diff::BoundTimeDiff;
+use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::coinbase_bound_time_diff::CoinbaseTimestampDiffBounded;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
@@ -147,6 +152,18 @@ impl MergeWitness {
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction> {
         let new_kernel = self.new_kernel.clone();
+
+        if self.new_kernel.coinbase.is_some() {
+            let lts = self.left_kernel.timestamp;
+            let rts = self.right_kernel.timestamp;
+            let diff = std::cmp::max(lts, rts) - std::cmp::min(lts, rts);
+            ensure!(
+                diff <= BoundTimeDiff::MAX_TIMESTAMP_DIFF,
+                "Coinbase transaction timestamp difference may not exceed max value. Got {} and {}",
+                lts.format_human_duration(),
+                rts.format_human_duration()
+            );
+        };
 
         let proof = if proof_job_options.job_settings.network.use_mock_proof() {
             Proof::valid_mock()
@@ -554,6 +571,8 @@ impl BasicSnippet for MergeBranch {
             TransactionKernelField::Timestamp,
         )));
         let timestamp_size = Timestamp::static_length().unwrap();
+
+        let bound_time_diff_if_cb = library.import(Box::new(CoinbaseTimestampDiffBounded));
 
         let assert_new_timestamp_is_max_of_left_and_right = triton_asm! {
             // _ *merge_witness *l_txk *r_txk *n_txk
@@ -1007,6 +1026,12 @@ impl BasicSnippet for MergeBranch {
             // _ *merge_witness *l_txk *r_txk *n_txk
 
             {&assert_new_timestamp_is_max_of_left_and_right}
+            // _ *merge_witness *l_txk *r_txk *n_txk
+
+            /* Disallow huge changes in timestamp if this is a coinbase tx
+               since that could be used to escape the miner reward's timelock
+            */
+            call {bound_time_diff_if_cb}
             // _ *merge_witness *l_txk *r_txk *n_txk
 
             {&assert_all_kernels_agree_on_mutator_set_hash}

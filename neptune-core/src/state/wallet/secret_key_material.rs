@@ -149,8 +149,19 @@ impl SecretKeyMaterial {
     ///
     /// The returned secret key material is wrapped in a `Result`, which is
     /// `Err` if the words are not 18 valid BIP-39 words.
-    pub fn from_phrase(phrase: &[String]) -> Result<Self> {
-        let mnemonic = Mnemonic::from_phrase(&phrase.iter().join(" "), bip39::Language::English)?;
+    pub fn from_phrase<I, T>(phrase: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = T>,
+        T: AsRef<str>,
+    {
+        let joined_phrase = phrase.into_iter().fold(String::new(), |mut acc, w| {
+            if !acc.is_empty() {
+                acc.push(' ');
+            }
+            acc.push_str(w.as_ref());
+            acc
+        });
+        let mnemonic = Mnemonic::from_phrase(&joined_phrase, bip39::Language::English)?;
         let secret_seed: [u8; 24] = mnemonic.entropy().try_into()?;
         let xfe = XFieldElement::new(
             secret_seed
@@ -161,6 +172,7 @@ impl SecretKeyMaterial {
                 .try_into()
                 .unwrap(),
         );
+
         Ok(Self(xfe))
     }
 
