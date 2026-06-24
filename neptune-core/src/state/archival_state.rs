@@ -726,10 +726,16 @@ impl ArchivalState {
         // Inform user if this will take a long time.
         let num_missing_blocks = missing_blocks.len();
         debug!("Applying {num_missing_blocks} missing blocks to UTXO index.");
-        if num_missing_blocks > 10 {
+        let process_many_blocks = num_missing_blocks > 10;
+        if process_many_blocks {
             info!("Applying {num_missing_blocks} missing blocks to UTXO index. This may take a while.")
         }
-        for missing in missing_blocks {
+
+        for (i, missing) in missing_blocks.into_iter().enumerate() {
+            if process_many_blocks && i.is_multiple_of(100) {
+                info!("Processed {i}/{num_missing_blocks} blocks for UTXO index")
+            }
+
             // This optimization means that we don't have to read the full
             // blocks from disk in case it was already processed.
             if self
@@ -764,7 +770,11 @@ impl ArchivalState {
             }
         }
 
-        debug!("Done updating UTXO index");
+        if process_many_blocks {
+            info!("Done updating UTXO index")
+        } else {
+            debug!("Done updating UTXO index");
+        }
     }
 
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
