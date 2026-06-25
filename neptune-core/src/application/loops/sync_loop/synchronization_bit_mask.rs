@@ -149,10 +149,31 @@ impl SynchronizationBitMask {
     /// put it into canonical representation. Canonical representation means
     /// the `lower_bound` field points to the first zero.
     fn canonize(mut self) -> SynchronizationBitMask {
-        // TODO: very slow. improve perf!
-        while self.contains(self.lower_bound) {
-            self.lower_bound += 1;
-            if self.lower_bound.is_multiple_of(32) {
+        while self.lower_bound < self.upper_bound && self.contains(self.lower_bound) {
+            if self.limbs.is_empty() {
+                break;
+            }
+            let rel = (self.lower_bound % 32) as u32;
+            let first = self.limbs[0];
+            let max_bits_in_limb = u64::from(32 - rel);
+            let remaining = self.upper_bound - self.lower_bound;
+            let chunk = max_bits_in_limb.min(remaining);
+            let chunk_u32 = u32::try_from(chunk).expect("chunk fits in u32");
+            let mask = if chunk_u32 == 32 {
+                u32::MAX
+            } else {
+                (1u32 << chunk_u32) - 1
+            };
+            let shifted = first >> rel;
+            let run = u64::from((shifted & mask).trailing_ones());
+            if run == 0 {
+                break;
+            }
+            let advance = run.min(remaining);
+            let old_lb = self.lower_bound;
+            self.lower_bound += advance;
+            let boundaries_crossed = (self.lower_bound / 32).saturating_sub(old_lb / 32);
+            for _ in 0..boundaries_crossed {
                 self.limbs.pop_front();
             }
         }

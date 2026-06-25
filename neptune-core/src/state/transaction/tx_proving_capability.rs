@@ -28,7 +28,9 @@ impl From<TxProvingCapability> for TransactionProofType {
     fn from(c: TxProvingCapability) -> Self {
         match c {
             TxProvingCapability::PrimitiveWitness => Self::PrimitiveWitness,
-            TxProvingCapability::LockScript => unimplemented!(),
+            // No distinct proof type: lock-script capability proves the same
+            // on-chain primitive-witness shape; prover jobs still use PW type.
+            TxProvingCapability::LockScript => Self::PrimitiveWitness,
             TxProvingCapability::ProofCollection => Self::ProofCollection,
             TxProvingCapability::SingleProof => Self::SingleProof,
         }
@@ -93,6 +95,15 @@ impl rand::distr::Distribution<TxProvingCapability> for rand::distr::StandardUni
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+
+    #[test]
+    fn lockscript_maps_to_primitive_witness_proof_type() {
+        assert_eq!(
+            TransactionProofType::PrimitiveWitness,
+            TxProvingCapability::LockScript.into()
+        );
+    }
 
     #[test]
     fn can_prove_simple() {
