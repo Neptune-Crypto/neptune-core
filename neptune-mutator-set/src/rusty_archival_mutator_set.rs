@@ -25,11 +25,7 @@ pub struct RustyArchivalMutatorSet {
 
 impl RustyArchivalMutatorSet {
     pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
-        let mut storage = SimpleRustyStorage::new_with_callback(
-            db,
-            "RustyArchivalMutatorSet-Schema",
-            crate::LOG_TOKIO_LOCK_EVENT_CB,
-        );
+        let mut storage = SimpleRustyStorage::new(db);
 
         let aocl = storage.schema.new_vec::<Digest>("aocl").await;
         let swbfi = storage.schema.new_vec::<Digest>("swbfi").await;
@@ -113,11 +109,11 @@ mod tests {
     use rand::RngCore;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
-    use crate::util_types::test_shared::mutator_set::*;
+    use crate::commit;
+    use crate::ms_membership_proof::MsMembershipProof;
+    use crate::shared::BATCH_SIZE;
+    use crate::test_shared::*;
+    use crate::test_utils::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
     async fn persist_test() {

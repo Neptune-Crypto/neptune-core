@@ -201,9 +201,10 @@ impl BlockTransaction {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+
     use super::*;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
     impl BlockTransaction {
         /// Upgrade a regular [`Transaction`] into a [`BlockTransaction`] by

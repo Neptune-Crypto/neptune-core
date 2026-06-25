@@ -24,6 +24,7 @@ use std::collections::HashSet;
 use bytesize::ByteSize;
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
 /// transactions.  Different strategies are possible for selecting transactions
 /// to mine, but a simple one is to pick transactions in descending order of
@@ -74,7 +75,6 @@ use crate::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 /// Transactions with a timestamp older than this are removed from the mempool.
 pub const MEMPOOL_TX_THRESHOLD_AGE: Timestamp = Timestamp::hours(10);
@@ -1456,6 +1456,7 @@ impl Mempool {
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use num_bigint::BigInt;
     use num_traits::One;
     use num_traits::Zero;
@@ -1504,7 +1505,6 @@ mod tests {
     use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
     impl Mempool {
         /// get mutable reference to a transaction from mempool

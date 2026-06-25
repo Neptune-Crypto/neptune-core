@@ -14,17 +14,17 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
-use crate::util_types::mutator_set::active_window::ActiveWindow;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::chunk::Chunk;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
-use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-use crate::util_types::mutator_set::shared::WINDOW_SIZE;
+use crate::active_window::ActiveWindow;
+use crate::addition_record::AdditionRecord;
+use crate::archival_mutator_set::ArchivalMutatorSet;
+use crate::commit;
+use crate::ms_membership_proof::MsMembershipProof;
+use crate::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::removal_record::chunk::Chunk;
+use crate::removal_record::RemovalRecord;
+use crate::rusty_archival_mutator_set::RustyArchivalMutatorSet;
+use crate::shared::CHUNK_SIZE;
+use crate::shared::WINDOW_SIZE;
 
 pub async fn get_all_indices_with_duplicates<
     MmrStorage: StorageVec<Digest> + Send + Sync,
@@ -57,7 +57,7 @@ pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
     (item, sender_randomness, receiver_preimage)
 }
 
-pub(crate) fn mock_item_mp_rr_for_init_msa() -> (Digest, MsMembershipProof, RemovalRecord) {
+pub fn mock_item_mp_rr_for_init_msa() -> (Digest, MsMembershipProof, RemovalRecord) {
     let accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
     let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
     let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
@@ -375,7 +375,7 @@ mod tests {
     use macro_rules_attr::apply;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
+    use crate::test_utils::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
     async fn can_call() {

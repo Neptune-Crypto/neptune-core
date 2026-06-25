@@ -9,6 +9,7 @@ members = [
     "neptune-database",
     "neptune-job-queue",
     "neptune-locks",
+    "neptune-mutator-set",
     "neptune-rpc/client",
     "neptune-rpc/macros",
 ]

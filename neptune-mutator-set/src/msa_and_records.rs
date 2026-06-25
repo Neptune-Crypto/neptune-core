@@ -16,7 +16,7 @@ pub struct MsaAndRecords {
 }
 
 impl MsaAndRecords {
-    pub(crate) fn unpacked_removal_records(&self) -> Vec<RemovalRecord> {
+    pub fn unpacked_removal_records(&self) -> Vec<RemovalRecord> {
         self.removal_records.clone()
     }
 
@@ -63,7 +63,7 @@ pub mod neptune_arbitrary {
     use super::super::removal_record::chunk_dictionary::ChunkDictionary;
     use super::super::shared::CHUNK_SIZE;
     use super::*;
-    use crate::util_types::mutator_set::commit;
+    use crate::commit;
 
     #[cfg(any(test, feature = "arbitrary-impls"))]
     impl Arbitrary for MsaAndRecords {
@@ -122,7 +122,7 @@ pub mod neptune_arbitrary {
                 // unwrap random aocl mmr with membership proofs
                 MmraAndMembershipProofs::arbitrary_with((all_aocl_indices_and_leafs, aocl_size))
                 .prop_flat_map(move |aocl_mmra_and_membership_proofs| {
-                    use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
+                    use crate::aocl_to_swbfi_leaf_counts;
 
                     let aocl_mmra = aocl_mmra_and_membership_proofs.mmra;
                     let aocl_membership_proofs = aocl_mmra_and_membership_proofs.membership_proofs;
@@ -305,6 +305,61 @@ pub mod neptune_arbitrary {
     }
 }
 
+/// Test-only constructors and helpers for [`MsaAndRecords`].
+#[cfg(any(test, feature = "test-helpers"))]
+impl MsaAndRecords {
+    pub fn new(
+        mutator_set_accumulator: MutatorSetAccumulator,
+        unpacked_removal_records: Vec<RemovalRecord>,
+        membership_proofs: Vec<MsMembershipProof>,
+    ) -> Self {
+        assert_eq!(unpacked_removal_records.len(), membership_proofs.len());
+        Self {
+            mutator_set_accumulator,
+            removal_records: unpacked_removal_records,
+            membership_proofs,
+        }
+    }
+
+    pub fn packed_removal_records(&self) -> Vec<RemovalRecord> {
+        crate::removal_record::removal_record_list::RemovalRecordList::pack(
+            self.removal_records.clone(),
+        )
+    }
+
+    /// Split an [MsaAndRecords] into multiple instances of the same type.
+    ///
+    /// input argument specifies the length of each returned instance.
+    ///
+    /// # Panics
+    /// Panics if input argument does not sum to the number of membership proofs
+    /// and removal records.
+    pub fn split_by<const N: usize>(&self, lengths: [usize; N]) -> [Self; N] {
+        let resulting_size: usize = lengths.into_iter().sum();
+        assert_eq!(self.membership_proofs.len(), resulting_size);
+        assert_eq!(self.removal_records.len(), resulting_size);
+
+        let ret = Self {
+            mutator_set_accumulator: self.mutator_set_accumulator.to_owned(),
+            ..Default::default()
+        };
+        let mut ret = vec![ret.clone(); N];
+
+        let mut counter = 0;
+        for (length, elem) in lengths.into_iter().zip(ret.iter_mut()) {
+            for _ in 0..length {
+                elem.membership_proofs
+                    .push(self.membership_proofs[counter].clone());
+                elem.removal_records
+                    .push(self.removal_records[counter].clone());
+                counter += 1;
+            }
+        }
+
+        ret.try_into().unwrap()
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -324,63 +379,11 @@ mod tests {
     use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::MsaAndRecords;
-    use crate::tests::shared::strategies;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
-    use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-    impl MsaAndRecords {
-        pub(crate) fn new(
-            mutator_set_accumulator: MutatorSetAccumulator,
-            unpacked_removal_records: Vec<RemovalRecord>,
-            membership_proofs: Vec<MsMembershipProof>,
-        ) -> Self {
-            assert_eq!(unpacked_removal_records.len(), membership_proofs.len());
-            Self {
-                mutator_set_accumulator,
-                removal_records: unpacked_removal_records,
-                membership_proofs,
-            }
-        }
-
-        pub(crate) fn packed_removal_records(&self) -> Vec<RemovalRecord> {
-            RemovalRecordList::pack(self.removal_records.clone())
-        }
-
-        /// Split an [MsaAndRecords] into multiple instances of the same type.
-        ///
-        /// input argument specifies the length of each returned instance.
-        ///
-        /// # Panics
-        /// Panics if input argument does not sum to the number of membership proofs
-        /// and removal records.
-        pub(crate) fn split_by<const N: usize>(&self, lengths: [usize; N]) -> [Self; N] {
-            let resulting_size: usize = lengths.into_iter().sum();
-            assert_eq!(self.membership_proofs.len(), resulting_size);
-            assert_eq!(self.removal_records.len(), resulting_size);
-
-            let ret = Self {
-                mutator_set_accumulator: self.mutator_set_accumulator.to_owned(),
-                ..Default::default()
-            };
-            let mut ret = vec![ret.clone(); N];
-
-            let mut counter = 0;
-            for (length, elem) in lengths.into_iter().zip(ret.iter_mut()) {
-                for _ in 0..length {
-                    elem.membership_proofs
-                        .push(self.membership_proofs[counter].clone());
-                    elem.removal_records
-                        .push(self.removal_records[counter].clone());
-                    counter += 1;
-                }
-            }
-
-            ret.try_into().unwrap()
-        }
-    }
+    use crate::commit;
+    use crate::ms_membership_proof::MsMembershipProof;
+    use crate::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::removal_record::RemovalRecord;
+    use crate::strategies;
 
     fn state_updates_prop(
         removables: Vec<(Digest, Digest, Digest)>,

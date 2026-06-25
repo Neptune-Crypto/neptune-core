@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use anyhow::Result;
 use itertools::Itertools;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde::Deserialize;
@@ -20,7 +21,6 @@ use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurr
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::unlocked_utxo::TxInputs;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// contains the unblinded data that a
 /// [Transaction](crate::protocol::consensus::transaction::Transaction) is

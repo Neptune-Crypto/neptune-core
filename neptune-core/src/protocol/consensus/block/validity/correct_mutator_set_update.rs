@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use get_size2::GetSize;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::library::Library;
@@ -9,7 +10,6 @@ use tasm_lib::triton_vm::prelude::*;
 use crate::protocol::consensus::block::BFieldCodec;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CorrectMutatorSetUpdateWitness {

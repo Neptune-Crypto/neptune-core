@@ -41,7 +41,7 @@ impl Display for AdditionRecord {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<AdditionRecord> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> AdditionRecord {
         AdditionRecord {
@@ -57,7 +57,7 @@ mod tests {
     use tasm_lib::prelude::Tip5;
 
     use super::*;
-    use crate::util_types::mutator_set::commit;
+    use crate::commit;
 
     #[test]
     fn get_size_test() {

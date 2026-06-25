@@ -8,8 +8,8 @@ use super::removal_record::RemovalRecord;
 
 #[derive(Debug, Clone)]
 pub struct AuthenticatedItem {
-    pub(crate) item: Digest,
-    pub(crate) ms_membership_proof: MsMembershipProof,
+    pub item: Digest,
+    pub ms_membership_proof: MsMembershipProof,
 }
 
 impl AuthenticatedItem {
@@ -17,7 +17,7 @@ impl AuthenticatedItem {
     /// anticipation of an addition.
     ///
     /// Does not verify that the membership proofs are valid.
-    pub(crate) fn batch_update_from_addition(
+    pub fn batch_update_from_addition(
         authenticated_items: &mut [&mut Self],
         mutator_set: &MutatorSetAccumulator,
         addition_record: AdditionRecord,
@@ -37,7 +37,7 @@ impl AuthenticatedItem {
 
     /// Update the membership proofs of a list of authenticated items in
     /// anticipation of one remove operation.
-    pub(crate) fn batch_update_from_remove(
+    pub fn batch_update_from_remove(
         authenticated_items: &mut [&mut Self],
         removal_record: &RemovalRecord,
     ) {

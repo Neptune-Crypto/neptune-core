@@ -2,6 +2,9 @@
 //!
 //! They are exported here in one location for convenience.
 
+pub use neptune_mutator_set::addition_record::AdditionRecord;
+pub use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+
 pub use crate::api::tx_initiation::builder::input_selector::InputSelectionPriority;
 pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 pub use crate::api::tx_initiation::consolidate::ConsolidationError;
@@ -47,5 +50,3 @@ pub use crate::tasm_lib::prelude::Tip5;
 pub use crate::triton_vm::prelude::Program;
 pub use crate::triton_vm::proof::Claim;
 pub use crate::triton_vm::vm::NonDeterminism;
-pub use crate::util_types::mutator_set::addition_record::AdditionRecord;
-pub use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;

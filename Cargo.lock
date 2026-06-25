@@ -3499,6 +3499,7 @@ dependencies = [
  "neptune-database",
  "neptune-job-queue",
  "neptune-locks",
+ "neptune-mutator-set",
  "neptune-rpc-macros",
  "num-bigint",
  "num-rational",
@@ -3636,6 +3637,32 @@ dependencies = [
  "tokio-test",
  "tracing",
  "tracing-test",
+]
+
+[[package]]
+name = "neptune-mutator-set"
+version = "0.12.0"
+dependencies = [
+ "arbitrary",
+ "bincode",
+ "get-size2",
+ "itertools",
+ "macro_rules_attr",
+ "neptune-archival-mmr",
+ "neptune-database",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "serde",
+ "serde_arrays",
+ "serde_json",
+ "statrs",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

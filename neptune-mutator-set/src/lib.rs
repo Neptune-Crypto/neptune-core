@@ -1,11 +1,17 @@
 use std::error::Error;
 use std::fmt;
 
+// Re-exported at the crate root so the `BFieldCodec`/`TasmObject` derive macros
+// (which generate `crate::twenty_first` / `crate::triton_vm` / `crate::tasm_lib`
+// paths) resolve.
+pub use tasm_lib;
+pub use tasm_lib::prelude::triton_vm;
+pub use tasm_lib::prelude::twenty_first;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 
 use self::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::shared::BATCH_SIZE;
+use crate::shared::BATCH_SIZE;
 
 pub mod active_window;
 pub mod addition_record;
@@ -20,6 +26,49 @@ pub mod removal_record;
 pub mod root_and_paths;
 pub mod rusty_archival_mutator_set;
 pub mod shared;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod strategies;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_shared;
+
+#[cfg(test)]
+mod test_utils {
+    use std::sync::OnceLock;
+
+    use tokio::runtime::Runtime;
+
+    pub fn tokio_runtime() -> &'static Runtime {
+        static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+        RUNTIME.get_or_init(|| Runtime::new().unwrap())
+    }
+
+    /// Runs an `async fn` test on a shared, multi-thread tokio runtime.
+    ///
+    /// Apply with `#[apply(shared_tokio_runtime)]` (from `macro_rules_attr`).
+    macro_rules! shared_tokio_runtime {
+        (
+            $(#[$fn_meta:meta])*
+            $vis:vis async fn $fn_name:ident() $(-> $ret:ty)? {
+                $($tt:tt)*
+            }
+        ) => {
+            $(#[$fn_meta])*
+            #[test]
+            // Propagate the return type and visibility to the #[test] fn.
+            $vis fn $fn_name() $(-> $ret)? {
+                let runtime = $crate::test_utils::tokio_runtime();
+                runtime.block_on(async {
+                    $vis async fn __inner() $(-> $ret)? {
+                        $($tt)*
+                    }
+                    __inner().await // Return the awaited result
+                })
+            }
+        };
+    }
+
+    pub(crate) use shared_tokio_runtime;
+}
 
 impl Error for MutatorSetError {}
 
@@ -85,13 +134,13 @@ mod tests {
     use tests::removal_record::RemovalRecord;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
-    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
-    use crate::util_types::test_shared::mutator_set::*;
+    use crate::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use crate::shared::BATCH_SIZE;
+    use crate::shared::CHUNK_SIZE;
+    use crate::shared::WINDOW_SIZE;
+    use crate::test_shared::*;
+    use crate::test_utils::shared_tokio_runtime;
 
     #[test]
     fn get_batch_index_test() {

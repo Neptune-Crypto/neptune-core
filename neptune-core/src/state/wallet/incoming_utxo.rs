@@ -2,6 +2,7 @@ use std::hash::Hash;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
+use neptune_mutator_set::addition_record::AdditionRecord;
 use tasm_lib::prelude::Digest;
 
 use super::expected_utxo::UtxoNotifier;
@@ -9,7 +10,6 @@ use super::utxo_notification::UtxoNotificationPayload;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
 use crate::state::ExpectedUtxo;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 /// A [`Utxo`] along with associated data necessary for a recipient to claim it.
 ///

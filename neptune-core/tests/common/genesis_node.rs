@@ -21,7 +21,7 @@ use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
 use neptune_cash::state::wallet::wallet_file::WalletFile;
 use neptune_cash::state::wallet::wallet_file::WalletFileContext;
-use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use tokio::net::TcpListener;

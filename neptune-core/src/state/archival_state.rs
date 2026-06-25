@@ -30,6 +30,12 @@ use neptune_database::create_db_if_missing;
 use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::NeptuneLevelDb;
 use neptune_database::WriteBatchAsync;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
@@ -60,12 +66,6 @@ use crate::state::database::BlockRecord;
 use crate::state::database::FileRecord;
 use crate::state::database::LastFileRecord;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::rusty_archival_block_mmr::RustyArchivalBlockMmr;
 use crate::BFieldElement;
 

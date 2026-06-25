@@ -35,6 +35,10 @@ impl RpcWalletBlock {
 #[cfg(test)]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use neptune_mutator_set::removal_record::chunk::Chunk;
+    use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+    use neptune_mutator_set::removal_record::RemovalRecord;
     use num_traits::Zero;
     use tasm_lib::twenty_first::prelude::MmrMembershipProof;
     use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -52,10 +56,6 @@ mod tests {
     use crate::tests::shared::blocks::block_with_num_puts;
     use crate::tests::shared::blocks::invalid_empty_block_with_proof_size;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::removal_record::chunk::Chunk;
-    use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
-    use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     fn assert_rpc_block_hash_and_block_hash_agree(block: &Block) {
         let rpc_block: RpcWalletBlock = RpcWalletBlock::from(block);
@@ -88,9 +88,7 @@ mod tests {
         let repeated_element = (0, (MmrMembershipProof::new(vec![]), Chunk::empty_chunk()));
         let repeated_keys = vec![RemovalRecord {
             absolute_indices: AbsoluteIndexSet::empty_dummy(),
-            target_chunks: ChunkDictionary {
-                dictionary: vec![repeated_element.clone(), repeated_element],
-            },
+            target_chunks: ChunkDictionary::new(vec![repeated_element.clone(), repeated_element]),
         }];
 
         let tx_kernel = TransactionKernelProxy {

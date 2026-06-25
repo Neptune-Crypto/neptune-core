@@ -4,6 +4,9 @@ use std::sync::OnceLock;
 use field_count::FieldCount;
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::RngCore;
@@ -40,9 +43,6 @@ use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurr
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 const COINBASE_HAS_INPUTS_ERROR: i128 = 1_000_000;
 const COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR: i128 = 1_000_001;
@@ -925,14 +925,14 @@ impl TritonProgram for RemovalRecordsIntegrity {
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
     use arbitrary::Arbitrary;
+    use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::commit;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     use super::*;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::consensus::transaction::utxo::Utxo;
-    use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
         fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
@@ -1045,6 +1045,10 @@ pub mod neptune_arbitrary {
 mod tests {
     use assert2::assert;
     use itertools::Itertools;
+    use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::commit;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::shared::NUM_TRIALS;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseResult;
@@ -1060,10 +1064,6 @@ mod tests {
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
-    use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
     impl TritonProgramSpecification for RemovalRecordsIntegrity {
         fn source(&self) {

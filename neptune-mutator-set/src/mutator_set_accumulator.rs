@@ -25,7 +25,7 @@ use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::shared::WINDOW_SIZE;
-use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
+use crate::aocl_to_swbfi_leaf_counts;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
@@ -525,7 +525,7 @@ impl MutatorSetAccumulator {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<MutatorSetAccumulator> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> MutatorSetAccumulator {
         let random_mmr_accumulator = |seed| {
@@ -564,13 +564,13 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
-    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
-    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
-    use crate::util_types::test_shared::mutator_set::*;
+    use crate::commit;
+    use crate::shared::BATCH_SIZE;
+    use crate::shared::CHUNK_SIZE;
+    use crate::shared::NUM_TRIALS;
+    use crate::shared::WINDOW_SIZE;
+    use crate::test_shared::*;
+    use crate::test_utils::shared_tokio_runtime;
 
     mod can_remove {
         use proptest::arbitrary::Arbitrary;
@@ -580,7 +580,7 @@ mod tests {
         use rand::rng;
 
         use super::*;
-        use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
+        use crate::msa_and_records::MsaAndRecords;
 
         #[proptest]
         fn missing_chunk_dictionary_entry_small(

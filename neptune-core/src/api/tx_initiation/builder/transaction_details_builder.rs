@@ -8,6 +8,7 @@
 //! except for a [TransactionProof](crate::protocol::consensus::transaction::TransactionProof).
 //!
 //! see [builder](super) for examples of using the builders together.
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
@@ -34,7 +35,6 @@ use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::GlobalState;
 use crate::state::StateLock;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::WalletState;
 
 /// a builder to generate [TransactionDetails].

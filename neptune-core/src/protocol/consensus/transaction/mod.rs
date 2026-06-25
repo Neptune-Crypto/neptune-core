@@ -25,6 +25,7 @@ use anyhow::ensure;
 use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::Deserialize;
@@ -44,7 +45,6 @@ use self::transaction_kernel::TransactionKernelProxy;
 use super::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::triton_vm::proof::Claim;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {
@@ -241,6 +241,8 @@ impl Transaction {
 pub(crate) mod tests {
     use lock_script::LockScript;
     use macro_rules_attr::apply;
+    use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::removal_record::RemovalRecord;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::random;
@@ -269,8 +271,6 @@ pub(crate) mod tests {
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl Transaction {
         /// Create a new transaction with primitive witness for a new mutator set.

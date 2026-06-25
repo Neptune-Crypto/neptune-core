@@ -89,6 +89,9 @@ pub(super) mod migration {
         use neptune_database::storage::storage_schema::DbtVec;
         use neptune_database::storage::storage_schema::SimpleRustyStorage;
         use neptune_database::storage::storage_vec::Index;
+        use neptune_mutator_set::commit;
+        use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+        use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
         use serde::Deserialize;
         use serde::Serialize;
         use tasm_lib::prelude::Digest;
@@ -101,9 +104,6 @@ pub(super) mod migration {
         use crate::state::wallet::sent_transaction::SentTransaction;
         use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
         use crate::state::Timestamp;
-        use crate::util_types::mutator_set::commit;
-        use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-        use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
         // this is a copy of MonitoredUtxo as it was in v2 schema.
         #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

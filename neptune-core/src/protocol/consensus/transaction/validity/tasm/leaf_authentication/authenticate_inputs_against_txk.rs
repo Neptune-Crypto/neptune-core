@@ -72,6 +72,7 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
+    use neptune_mutator_set::removal_record::RemovalRecord;
     use prop::test_runner::RngAlgorithm;
     use prop::test_runner::TestRng;
     use prop::test_runner::TestRunner;
@@ -95,7 +96,6 @@ mod tests {
 
     use super::*;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-    use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl AuthenticateInputsAgainstTxk {
         fn correct_init_state(

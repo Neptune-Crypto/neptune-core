@@ -6,6 +6,7 @@ use neptune_database::create_db_if_missing;
 use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::NeptuneLevelDb;
 use neptune_database::WriteBatchAsync;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -17,7 +18,6 @@ use crate::api::export::BlockHeight;
 use crate::application::config::data_directory::DataDirectory;
 use crate::protocol::consensus::block::Block;
 use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 /// The maximum number of blocks stored for each [`AnnouncementFlag`]. Wallets
 /// with incoming UTXOs in more than this number of blocks cannot rely on the
@@ -42,7 +42,7 @@ pub const MAX_NUM_BLOCKS_IN_LOOKUP_LIST: usize = 10_000;
 /// Block heights are often preferred over block digests due to their smaller
 /// serialized size (8 bytes vs. 40).
 ///
-/// [`ArchivalMutatorSet`]: crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet
+/// [`ArchivalMutatorSet`]: neptune_mutator_set::archival_mutator_set::ArchivalMutatorSet
 /// [`ArchivalState`]: crate::state::archival_state::ArchivalState
 #[derive(Debug)]
 pub(crate) struct RustyUtxoIndex {

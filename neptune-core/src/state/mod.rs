@@ -39,6 +39,9 @@ use neptune_database::storage::storage_vec::traits::*;
 use neptune_locks::tokio as sync_tokio;
 use neptune_locks::tokio::AtomicRwReadGuard;
 use neptune_locks::tokio::AtomicRwWriteGuard;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -115,9 +118,6 @@ use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::ArchivalState;
 use crate::RPCServerToMain;
 use crate::WalletFileContext;
@@ -3464,6 +3464,8 @@ impl GlobalState {
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+    use neptune_mutator_set::removal_record::RemovalRecord;
     use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::random;
@@ -3505,8 +3507,6 @@ mod tests {
     use crate::tests::shared::mock_tx::send_coins;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-    use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum AnnouncementScanMode {

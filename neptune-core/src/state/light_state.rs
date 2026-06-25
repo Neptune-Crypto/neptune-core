@@ -1,7 +1,8 @@
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+
 use crate::api::export::Network;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// LightState represents the latest accepted block,
 /// along with bookkeeping information about it

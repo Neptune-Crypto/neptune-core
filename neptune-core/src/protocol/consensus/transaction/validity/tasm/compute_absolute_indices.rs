@@ -1,3 +1,5 @@
+use neptune_mutator_set::shared::NUM_TRIALS;
+use neptune_mutator_set::shared::WINDOW_SIZE;
 use tasm_lib::arithmetic;
 use tasm_lib::data_type::ArrayType;
 use tasm_lib::data_type::StructType;
@@ -5,9 +7,6 @@ use tasm_lib::hashing::algebraic_hasher::sample_indices::SampleIndices;
 use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::DataType;
 use tasm_lib::triton_vm::isa::triton_asm;
-
-use crate::util_types::mutator_set::shared::NUM_TRIALS;
-use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 const LOG2_BATCH_SIZE: u8 = 3;
 const LOG2_CHUNK_SIZE: u8 = 12;
@@ -242,6 +241,7 @@ impl BasicSnippet for ComputeAbsoluteIndices {
 mod tests {
     use std::collections::HashMap;
 
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -260,7 +260,6 @@ mod tests {
     use super::*;
     use crate::tests::shared::pop_encodable;
     use crate::twenty_first::bfe;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     impl Function for ComputeAbsoluteIndices {
         fn rust_shadow(

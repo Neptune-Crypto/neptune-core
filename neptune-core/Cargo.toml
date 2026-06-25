@@ -50,7 +50,7 @@ track-lock-location = ["neptune-locks/track-lock-location"]
 track-lock-time = ["neptune-locks/track-lock-time"]
 
 # implements arbitrary::Arbitrary for various types
-arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest"]
+arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest", "neptune-mutator-set/arbitrary-impls"]
 
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]
@@ -134,6 +134,7 @@ neptune-archival-mmr = { version = "0.12.0", path = "../neptune-archival-mmr" }
 neptune-database = { version = "0.12.0", path = "../neptune-database" }
 neptune-job-queue = { version = "0.12.0", path = "../neptune-job-queue" }
 neptune-locks = { version = "0.12.0", path = "../neptune-locks" }
+neptune-mutator-set = { version = "0.12.0", path = "../neptune-mutator-set" }
 sha3 = "0.10.8"
 readonly = "0.2.12"
 thiserror = "1.0.65"
@@ -184,6 +185,9 @@ neptune-database = { version = "0.12.0", path = "../neptune-database", features 
 
 # enables neptune-archival-mmr's `mock` module used by mutator-set tests.
 neptune-archival-mmr = { version = "0.12.0", path = "../neptune-archival-mmr", features = ["test-helpers"] }
+
+# enables neptune-mutator-set's `strategies` + `test_shared` modules used by tests.
+neptune-mutator-set = { version = "0.12.0", path = "../neptune-mutator-set", features = ["test-helpers"] }
 
 # note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]
 # because they are optional deps but required for unit tests.

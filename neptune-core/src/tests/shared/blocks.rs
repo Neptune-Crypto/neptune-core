@@ -1,5 +1,13 @@
 use futures::channel::oneshot;
 use itertools::Itertools;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_mutator_set::shared::CHUNK_SIZE;
+use neptune_mutator_set::shared::NUM_TRIALS;
+use neptune_mutator_set::shared::WINDOW_SIZE;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -55,14 +63,6 @@ use crate::state::wallet::address::generation_address::GenerationReceivingAddres
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::mock_tx::send_coins;
 use crate::tests::shared::Randomness;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-use crate::util_types::mutator_set::shared::NUM_TRIALS;
-use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 /// Create a valid block on top of provided block. Returned block is valid in
 /// terms of both block validity and PoW, and is thus the new canonical block of

@@ -2,6 +2,7 @@
 
 use neptune_job_queue::errors::AddJobError;
 use neptune_job_queue::errors::JobHandleError;
+use neptune_mutator_set::MutatorSetError;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::BlockHeight;
@@ -10,7 +11,6 @@ use crate::api::export::RecordTransactionError;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-use crate::util_types::mutator_set::MutatorSetError;
 
 /// enumerates possible transaction send errors
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]

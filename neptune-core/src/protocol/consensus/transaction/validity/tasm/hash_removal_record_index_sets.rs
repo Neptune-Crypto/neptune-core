@@ -1,3 +1,4 @@
+use neptune_mutator_set::removal_record::RemovalRecord;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
@@ -7,8 +8,6 @@ use tasm_lib::list::higher_order::map::ChainMap;
 use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
-
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// Hash the absolute index sets of `NUM_INPUT_LISTS` lists of [`RemovalRecord`]s,
 /// putting all resulting digests in one list, which is returned.

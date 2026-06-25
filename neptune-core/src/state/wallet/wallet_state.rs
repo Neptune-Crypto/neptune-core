@@ -11,6 +11,12 @@ use neptune_database::storage::storage_schema::RustyKey;
 use neptune_database::storage::storage_schema::RustyValue;
 use neptune_database::storage::storage_vec::traits::*;
 use neptune_database::NeptuneLevelDb;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::IntoEnumIterator;
@@ -71,12 +77,6 @@ use crate::state::wallet::wallet_status::IncomingMempoolUtxo;
 use crate::state::wallet::wallet_status::OutgoingMempoolUtxo;
 use crate::state::wallet::wallet_status::SyncedUtxo;
 use crate::state::wallet::wallet_status::UnsyncedUtxo;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 const CHANGE_KEY_TYPE: KeyType = KeyType::ViewingAddress;
 

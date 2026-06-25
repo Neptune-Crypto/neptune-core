@@ -63,6 +63,9 @@ use itertools::Itertools;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use neptune_database::storage::storage_vec::traits::StorageVecBase;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -135,9 +138,6 @@ use crate::state::wallet::wallet_status::WalletStatus;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -4749,6 +4749,7 @@ pub mod error {
 mod tests {
     use anyhow::Result;
     use macro_rules_attr::apply;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use num_traits::One;
     use num_traits::Zero;
     use proptest::prop_assume;
@@ -4779,7 +4780,6 @@ mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use crate::BFieldElement;
     use crate::Block;
 

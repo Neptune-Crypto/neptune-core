@@ -1,5 +1,6 @@
+use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
+
 use crate::api::export::NativeCurrencyAmount;
-use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 
 /// The reasons why a [`Block`](crate::protocol::consensus::block::Block) can be
 /// invalid.
@@ -142,6 +143,7 @@ impl From<RemovalRecordListUnpackError> for BlockValidationError {
 
 #[cfg(test)]
 mod tests {
+    use neptune_mutator_set::addition_record::AdditionRecord;
     use num_traits::CheckedSub;
     use proptest::prelude::Just;
     use proptest::prop_assert_eq;
@@ -180,7 +182,6 @@ mod tests {
     use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
     use crate::tests::shared::strategies::block_with_arbkernel;
     use crate::tests::shared::Randomness;
-    use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
     proptest::prop_compose! {
         fn setup() (

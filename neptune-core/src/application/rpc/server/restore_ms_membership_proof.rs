@@ -1,10 +1,10 @@
+use neptune_mutator_set::archival_mutator_set::MsMembershipProofPrivacyPreserving;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::api::export::BlockHeight;
 use crate::api::export::Digest;
-use crate::util_types::mutator_set::archival_mutator_set::MsMembershipProofPrivacyPreserving;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// Data structure for returning components of a mutator set membership proof in
 /// a privacy preserving manner. Includes information about the tip.

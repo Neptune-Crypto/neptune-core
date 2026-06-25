@@ -196,6 +196,7 @@ mod migration {
     pub(super) mod schema_v1 {
         use std::collections::VecDeque;
 
+        use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
         use serde::Deserialize;
         use serde::Serialize;
         use tasm_lib::prelude::Digest;
@@ -203,7 +204,6 @@ mod migration {
         use crate::api::export::BlockHeight;
         use crate::protocol::consensus::transaction::utxo::Utxo;
         use crate::state::Timestamp;
-        use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
         // this is a copy of MonitoredUtxo as it was in v1 schema.
         #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +231,9 @@ mod tests {
     use neptune_database::storage::storage_schema::RustyKey;
     use neptune_database::storage::storage_schema::RustyValue;
     use neptune_database::NeptuneLevelDb;
+    use neptune_mutator_set::commit;
+    use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+    use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
     use tasm_lib::prelude::Digest;
     use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
@@ -247,9 +250,6 @@ mod tests {
     use crate::state::BlockHeight;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-    use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 
     impl migration::schema_v1::MonitoredUtxo {
         pub(in super::super) fn new(utxo: Utxo, number_of_mps_per_utxo: usize) -> Self {

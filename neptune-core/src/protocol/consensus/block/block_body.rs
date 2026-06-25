@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
@@ -23,7 +24,6 @@ use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 pub(crate) const NUM_GUESSER_FEE_OUTPUTS: u64 = 2;
 
@@ -278,6 +278,8 @@ impl rand::distr::Distribution<BlockBody> for rand::distr::StandardUniform {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_mutator_set::msa_and_records::MsaAndRecords;
+    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use num_traits::Zero;
     use proptest::prelude::BoxedStrategy;
     use proptest::prop_assert_eq;
@@ -291,8 +293,6 @@ mod tests {
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::tests::shared::blocks::invalid_empty_block;
-    use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
-    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
     #[test]
     fn max_aocl_leaf_index_genesis() {

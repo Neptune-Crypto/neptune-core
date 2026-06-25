@@ -430,11 +430,11 @@ fn sort<O: Ord>(order: SortOrder, a: &O, b: &O) -> std::cmp::Ordering {
 mod tests {
     use std::collections::HashSet;
 
+    use neptune_mutator_set::shared::WINDOW_SIZE;
     use strum::IntoEnumIterator;
 
     use super::*;
     use crate::state::wallet::wallet_status::SyncedUtxo;
-    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
     #[expect(clippy::derivable_impls)]
     impl Default for SortOrder {

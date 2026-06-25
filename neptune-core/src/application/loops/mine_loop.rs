@@ -1106,6 +1106,9 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use neptune_job_queue::errors::JobHandleError;
+    use neptune_mutator_set::test_shared::pseudorandom_addition_record;
+    use neptune_mutator_set::test_shared::random_mmra;
+    use neptune_mutator_set::test_shared::random_mutator_set_accumulator;
     use num_bigint::BigUint;
     use num_traits::One;
     use num_traits::Pow;
@@ -1146,9 +1149,6 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
-    use crate::util_types::test_shared::mutator_set::random_mmra;
-    use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::MINER_CHANNEL_CAPACITY;
 
     /// Produce a transaction that allocates the given fraction of the block

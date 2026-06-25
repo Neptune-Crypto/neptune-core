@@ -18,17 +18,17 @@ use super::chunk::ChunkUnpackError;
 use super::chunk_dictionary::ChunkDictionary;
 use super::AbsoluteIndexSet;
 use super::RemovalRecord;
-use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
-use crate::util_types::mutator_set::shared::BATCH_SIZE;
-use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+use crate::aocl_to_swbfi_leaf_counts;
+use crate::shared::BATCH_SIZE;
+use crate::shared::CHUNK_SIZE;
 
-/// A list of [`RemovalRecords`](crate::util_types::mutator_set::removal_record::RemovalRecord)s
+/// A list of [`RemovalRecords`](crate::removal_record::RemovalRecord)s
 /// without redundant Merkle authentication data.
 ///
 /// This is considered a trusted data structure as it's never transmitted over
 /// the network and is only ever used internally.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RemovalRecordList {
+pub struct RemovalRecordList {
     /// The unchanged absolute indices of the (unpacked) removal records.
     index_sets: Vec<AbsoluteIndexSet>,
 
@@ -53,7 +53,7 @@ pub(crate) struct RemovalRecordList {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum RemovalRecordListUnpackError {
+pub enum RemovalRecordListUnpackError {
     #[error("inner decoding error: {0}")]
     InnerDecodingFailure(#[from] Box<dyn core::error::Error + Send + Sync>),
     #[error("Absolute index value cannot exceed 74 bits")]
@@ -70,7 +70,7 @@ pub(crate) enum RemovalRecordListUnpackError {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 #[cfg_attr(test, derive(strum::EnumIter))]
-pub(crate) enum RemovalRecordListInconsistency {
+pub enum RemovalRecordListInconsistency {
     #[error("number of chunks ({num_chunks}) is inconsistent with number of chunk indices ({num_chunk_indices})")]
     Chunks {
         num_chunk_indices: usize,
@@ -662,7 +662,7 @@ impl RemovalRecordList {
 
     /// Compress a [`Vec`] of [`RemovalRecord`]s densely by packing the same
     /// information into another, *smaller*, [`Vec`] of [`RemovalRecord`]s.
-    pub(crate) fn pack(removal_records: Vec<RemovalRecord>) -> Vec<RemovalRecord> {
+    pub fn pack(removal_records: Vec<RemovalRecord>) -> Vec<RemovalRecord> {
         let as_rr_list = Self::convert_from_vec(removal_records);
         as_rr_list.encode_as_vec()
     }
@@ -671,7 +671,7 @@ impl RemovalRecordList {
     /// Returns an error if the packing is invalid.
     ///
     /// Never panics, so this function is safe to run on untrusted input.
-    pub(crate) fn try_unpack(
+    pub fn try_unpack(
         removal_records: Vec<RemovalRecord>,
     ) -> Result<Vec<RemovalRecord>, RemovalRecordListUnpackError> {
         let as_removal_record_list = RemovalRecordList::decode_from_vec(removal_records)?;
@@ -933,11 +933,11 @@ use proptest::collection::vec;
 use proptest::prelude::*;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
-use crate::util_types::mutator_set::shared::WINDOW_SIZE;
+use crate::shared::WINDOW_SIZE;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 impl RemovalRecord {
-    pub(crate) fn arbitrary_synchronized_set(
+    pub fn arbitrary_synchronized_set(
         num_leafs_aocl: u64,
         num_records: usize,
     ) -> BoxedStrategy<Vec<RemovalRecord>> {
@@ -972,7 +972,7 @@ impl RemovalRecord {
             u128::from(aocl_to_swbfi_leaf_counts(num_leafs_aocl)) * u128::from(CHUNK_SIZE);
         (
                 vec(0..num_leafs_aocl, num_records),
-                vec(vec(0u32..WINDOW_SIZE, crate::util_types::mutator_set::shared::NUM_TRIALS as usize), num_records),
+                vec(vec(0u32..WINDOW_SIZE, crate::shared::NUM_TRIALS as usize), num_records),
             )
                 .prop_flat_map(move |(aocl_indices, relative_index_sets)| {
                     let absolute_index_sets = aocl_indices
@@ -1188,12 +1188,11 @@ mod tests {
     use rand::Rng;
     use strum::IntoEnumIterator;
     use test_strategy::proptest;
-    use tracing_test::traced_test;
 
     use super::RemovalRecordList;
     use super::*;
-    use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use crate::msa_and_records::MsaAndRecords;
+    use crate::shared::NUM_TRIALS;
 
     impl RemovalRecord {
         /// Test if the removal records are consistent.
@@ -1811,7 +1810,6 @@ mod tests {
         removal_record
     }
 
-    #[traced_test]
     #[test]
     fn more_chunks_than_absolute_index_sets_multiple_steps() {
         let not_packed = vec![more_chunks_than_abs_index_sets()];
@@ -1823,7 +1821,6 @@ mod tests {
         assert_eq!(not_packed, unpacked);
     }
 
-    #[traced_test]
     #[test]
     fn more_chunks_than_absolute_index_sets_pack() {
         let not_packed = vec![more_chunks_than_abs_index_sets()];

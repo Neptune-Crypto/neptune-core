@@ -28,6 +28,10 @@ use difficulty_control::Difficulty;
 use get_size2::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use rand::rngs::StdRng;
@@ -82,10 +86,6 @@ use crate::protocol::proof_abstractions::verifier::verify;
 use crate::protocol::proof_abstractions::SecretWitness;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::wallet_entropy::WalletEntropy;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
 /// With removal records only represented by their absolute index set, the block
 /// size limit of 1.000.000 `BFieldElement`s allows for a "balanced" block
@@ -1442,6 +1442,7 @@ pub(crate) mod tests {
     use neptune_archival_mmr::ArchivalMmr;
     use neptune_database::storage::storage_schema::SimpleRustyStorage;
     use neptune_database::NeptuneLevelDb;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use proptest::collection;
     use proptest::prop_compose;
     use proptest_arbitrary_interop::arb;
@@ -1486,7 +1487,6 @@ pub(crate) mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
 

@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use itertools::Itertools;
 use neptune_database::storage::storage_vec::traits::StorageVecStream;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use tasm_lib::prelude::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -52,7 +53,6 @@ use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 #[async_trait]
 impl RpcApi for RpcServer {
@@ -1810,6 +1810,8 @@ pub mod tests {
 
     use libp2p::Multiaddr;
     use macro_rules_attr::apply;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::shared::NUM_TRIALS;
     use num_traits::Zero;
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
@@ -1857,8 +1859,6 @@ pub mod tests {
     use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::BFieldElement;
     use crate::Block;
 

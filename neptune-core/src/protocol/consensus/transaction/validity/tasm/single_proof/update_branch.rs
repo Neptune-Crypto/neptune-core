@@ -27,7 +27,7 @@ use crate::protocol::consensus::transaction::TransactionKernel;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::protocol::consensus::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 
 // Dictated by the witness type of SingleProof
@@ -673,6 +673,7 @@ impl BasicSnippet for UpdateBranch {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use macro_rules_attr::apply;
+    use neptune_mutator_set::addition_record::AdditionRecord;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -692,7 +693,6 @@ pub(crate) mod tests {
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
     // The main tests are actually in [`../../single_proof.rs`].
 

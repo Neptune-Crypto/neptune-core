@@ -3,6 +3,7 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use neptune_mutator_set::addition_record::AdditionRecord;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -21,7 +22,6 @@ use crate::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::state::wallet::wallet_state::WalletState;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 /// represents a transaction output, as used by
 /// [TransactionDetailsBuilder](crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder)

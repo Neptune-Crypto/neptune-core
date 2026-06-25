@@ -340,9 +340,9 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
-    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
+    use crate::shared::BATCH_SIZE;
+    use crate::shared::NUM_TRIALS;
+    use crate::shared::WINDOW_SIZE;
 
     #[test]
     fn chunk_is_reversible_bloom_filter() {

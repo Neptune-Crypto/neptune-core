@@ -1,11 +1,10 @@
 use anyhow::Result;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::authenticated_item::AuthenticatedItem;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use serde::Deserialize;
 use serde::Serialize;
-
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::authenticated_item::AuthenticatedItem;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MutatorSetUpdate {
@@ -156,13 +155,13 @@ impl MutatorSetUpdate {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use proptest::collection::vec;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
     use test_strategy::proptest;
 
     use super::MutatorSetUpdate;
-    use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
     #[proptest]
     fn can_remove_agrees_with_update_result(

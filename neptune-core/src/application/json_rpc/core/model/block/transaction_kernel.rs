@@ -1,3 +1,7 @@
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::chunk::Chunk;
+use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -11,10 +15,6 @@ use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMmrMembershipProof;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::chunk::Chunk;
-use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 pub type RpcAbsoluteIndexSet = AbsoluteIndexSet;
 
@@ -44,7 +44,7 @@ impl From<ChunkDictionary> for RpcChunkDictionary {
     fn from(value: ChunkDictionary) -> Self {
         Self(
             value
-                .dictionary
+                .into_inner()
                 .into_iter()
                 .map(
                     |(chunk_index, (membership_proof, chunk))| RpcChunkDictionaryElement {
@@ -76,7 +76,7 @@ impl From<RpcChunkDictionary> for ChunkDictionary {
             })
             .collect();
 
-        Self { dictionary }
+        ChunkDictionary::new(dictionary)
     }
 }
 

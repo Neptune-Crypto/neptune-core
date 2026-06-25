@@ -1,3 +1,6 @@
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
@@ -7,9 +10,6 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 /// The key data from a transaction input that enables a transparent audit.
 ///

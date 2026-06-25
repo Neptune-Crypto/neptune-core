@@ -19,10 +19,10 @@ use tasm_lib::twenty_first::prelude::Sponge;
 use super::super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::super::shared::NUM_TRIALS;
 use super::MutatorSetError;
-use crate::util_types::mutator_set::shared::indices_to_hash_map;
-use crate::util_types::mutator_set::shared::BATCH_SIZE;
-use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-use crate::util_types::mutator_set::shared::WINDOW_SIZE;
+use crate::shared::indices_to_hash_map;
+use crate::shared::BATCH_SIZE;
+use crate::shared::CHUNK_SIZE;
+use crate::shared::WINDOW_SIZE;
 
 /// A set of 45 (=[`NUM_TRIALS`]) sliding window Bloom filter bit indices.
 /// The indices live in a window that is at most 2^20 (=[`WINDOW_SIZE`]) wide.
@@ -179,7 +179,7 @@ impl AbsoluteIndexSet {
     /// Does not take the actual length of the AOCL into account, so a caller
     /// may want to further restrict the maximum in this range to the actual,
     /// current length of the AOCL.
-    pub(crate) fn aocl_range(&self) -> Result<(u64, u64), MutatorSetError> {
+    pub fn aocl_range(&self) -> Result<(u64, u64), MutatorSetError> {
         let max_offset: u128 = (*self.distances.iter().max().unwrap()).into();
         if max_offset >= u128::from(WINDOW_SIZE) {
             return Err(MutatorSetError::AbsoluteIndexExceedsTheoreticalBound);
@@ -245,8 +245,7 @@ mod neptune_arbitrary {
                 u128::from(aocl_index) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
             let mut relative_indices = vec![];
             for _ in 0..NUM_TRIALS {
-                let index =
-                    u32::arbitrary(u)? & (crate::util_types::mutator_set::shared::WINDOW_SIZE - 1);
+                let index = u32::arbitrary(u)? & (crate::shared::WINDOW_SIZE - 1);
                 relative_indices.push(index);
             }
             let absolute_indices = relative_indices
@@ -260,12 +259,53 @@ mod neptune_arbitrary {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<AbsoluteIndexSet> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> AbsoluteIndexSet {
         AbsoluteIndexSet {
             minimum: rng.random(),
             distances: rng.random(),
+        }
+    }
+}
+
+/// Test-only constructors and mutators for [`AbsoluteIndexSet`].
+#[cfg(any(test, feature = "test-helpers"))]
+impl AbsoluteIndexSet {
+    /// Test-function used for negative tests of removal records
+    pub fn increment_bloom_filter_index(&mut self, index: usize) {
+        let mut as_array = self.to_array();
+        as_array[index] = as_array[index].wrapping_add(1);
+        *self = Self::new(as_array)
+    }
+
+    /// Test-function used for negative tests of removal records
+    pub fn decrement_bloom_filter_index(&mut self, index: usize) {
+        let mut as_array = self.to_array();
+        as_array[index] = as_array[index].wrapping_sub(1);
+        *self = Self::new(as_array)
+    }
+
+    pub fn set_minimum(&mut self, new_minimum: u128) {
+        self.minimum = new_minimum;
+    }
+
+    pub fn minimum(&self) -> u128 {
+        self.minimum
+    }
+
+    pub fn set_distance(&mut self, index: usize, new_distance: u32) {
+        self.distances[index] = new_distance;
+    }
+
+    pub fn new_raw(minimum: u128, distances: [u32; NUM_TRIALS as usize]) -> Self {
+        Self { minimum, distances }
+    }
+
+    pub fn empty_dummy() -> Self {
+        Self {
+            minimum: 0,
+            distances: [0; NUM_TRIALS as usize],
         }
     }
 }
@@ -280,45 +320,6 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-
-    impl AbsoluteIndexSet {
-        /// Test-function used for negative tests of removal records
-        pub(crate) fn increment_bloom_filter_index(&mut self, index: usize) {
-            let mut as_array = self.to_array();
-            as_array[index] = as_array[index].wrapping_add(1);
-            *self = Self::new(as_array)
-        }
-
-        /// Test-function used for negative tests of removal records
-        pub(crate) fn decrement_bloom_filter_index(&mut self, index: usize) {
-            let mut as_array = self.to_array();
-            as_array[index] = as_array[index].wrapping_sub(1);
-            *self = Self::new(as_array)
-        }
-
-        pub(crate) fn set_minimum(&mut self, new_minimum: u128) {
-            self.minimum = new_minimum;
-        }
-
-        pub(crate) fn minimum(&self) -> u128 {
-            self.minimum
-        }
-
-        pub(crate) fn set_distance(&mut self, index: usize, new_distance: u32) {
-            self.distances[index] = new_distance;
-        }
-
-        pub(crate) fn new_raw(minimum: u128, distances: [u32; NUM_TRIALS as usize]) -> Self {
-            Self { minimum, distances }
-        }
-
-        pub(crate) fn empty_dummy() -> Self {
-            Self {
-                minimum: 0,
-                distances: [0; NUM_TRIALS as usize],
-            }
-        }
-    }
 
     #[proptest]
     fn to_array_followed_by_new_is_identity(#[strategy(arb())] ais: AbsoluteIndexSet) {

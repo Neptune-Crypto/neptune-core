@@ -1,4 +1,6 @@
 use bytesize::ByteSize;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::bfe;
@@ -35,8 +37,6 @@ use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::GlobalStateLock;
 use crate::state::StateLock;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 pub mod testrunning;
 

@@ -1,3 +1,5 @@
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
@@ -8,8 +10,6 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
 
 /// Represents the preimage of a transaction output, so not just the UTXO but
 /// also the randomnesses.

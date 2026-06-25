@@ -68,6 +68,8 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
+    use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::removal_record::RemovalRecord;
     use num_traits::ConstZero;
     use prop::test_runner::TestRunner;
     use proptest::prelude::*;
@@ -98,8 +100,6 @@ mod tests {
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::timestamp::Timestamp;
-    use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl AuthenticateTxkField {
         fn load_kernel(

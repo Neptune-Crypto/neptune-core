@@ -10,12 +10,12 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::prelude::Tip5;
+use tasm_lib::triton_vm;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use triton_vm::prelude::Digest;
 
 use super::chunk::Chunk;
-use crate::prelude::triton_vm;
 
 type AuthenticatedChunk = (MmrMembershipProof, Chunk);
 type ChunkIndex = u64;
@@ -42,6 +42,12 @@ impl ChunkDictionary {
     pub fn new(mut dictionary: Vec<(ChunkIndex, AuthenticatedChunk)>) -> Self {
         dictionary.sort_by_key(|(k, _v)| *k);
         Self { dictionary }
+    }
+
+    /// Consume the dictionary, returning its `(chunk index, (auth path, chunk))`
+    /// entries.
+    pub fn into_inner(self) -> Vec<(ChunkIndex, AuthenticatedChunk)> {
+        self.dictionary
     }
 
     pub fn indices_and_leafs(&self) -> Vec<(ChunkIndex, Digest)> {
@@ -175,7 +181,7 @@ impl IntoIterator for ChunkDictionary {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<ChunkDictionary> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ChunkDictionary {
         ChunkDictionary {
@@ -204,8 +210,8 @@ pub mod tests {
     use tasm_lib::twenty_first::math::other::random_elements;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+    use crate::shared::CHUNK_SIZE;
+    use crate::test_utils::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
     async fn hash_test() {

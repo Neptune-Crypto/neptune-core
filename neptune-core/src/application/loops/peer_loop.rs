@@ -17,6 +17,7 @@ use futures::FutureExt;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_mutator_set::removal_record::RemovalRecordValidityError;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -69,7 +70,6 @@ use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::sync_status::SyncStatus;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
-use crate::util_types::mutator_set::removal_record::RemovalRecordValidityError;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 35;
 const MAX_PEER_LIST_LENGTH: usize = 10;

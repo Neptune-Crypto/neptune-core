@@ -577,12 +577,12 @@ pub mod tests {
     use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::active_window::ActiveWindow;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::removal_record::chunk::Chunk;
-    use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
-    use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
+    use crate::active_window::ActiveWindow;
+    use crate::commit;
+    use crate::removal_record::chunk::Chunk;
+    use crate::test_shared::empty_rusty_mutator_set;
+    use crate::test_shared::mock_item_and_randomnesses;
+    use crate::test_utils::shared_tokio_runtime;
 
     const N: usize = 100;
 
@@ -1374,7 +1374,7 @@ pub mod tests {
             cases: 100, .. ProptestConfig::default()
           })]
         #[test]
-        fn test_decode_mutator_set_membership_proof(msmp in crate::tests::shared::strategies::msmembershipproof()) {
+        fn test_decode_mutator_set_membership_proof(msmp in crate::strategies::msmembershipproof()) {
             let encoded = msmp.encode();
             let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
             assert_eq!(msmp, decoded);

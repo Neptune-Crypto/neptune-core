@@ -20,10 +20,10 @@ use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
-use crate::util_types::mutator_set::archival_mutator_set::mmr::mmr_membership_proof::MmrMembershipProof;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::shared::WINDOW_SIZE;
-use crate::util_types::mutator_set::MutatorSetError;
+use crate::archival_mutator_set::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::removal_record::absolute_index_set::AbsoluteIndexSet;
+use crate::shared::WINDOW_SIZE;
+use crate::MutatorSetError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexedAoclAuthPath {
@@ -36,7 +36,7 @@ pub struct IndexedAoclAuthPath {
 /// transaction reveals, namely a fuzzy timestamp of the input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MsMembershipProofPrivacyPreserving {
-    pub(crate) aocl_auth_paths: Vec<IndexedAoclAuthPath>,
+    pub aocl_auth_paths: Vec<IndexedAoclAuthPath>,
     pub target_chunks: ChunkDictionary,
 }
 
@@ -211,7 +211,7 @@ where
 
     /// Clear the mutator set: revert all operations so as to bring it into a
     /// brand new state.
-    pub(crate) async fn clear(&mut self) {
+    pub async fn clear(&mut self) {
         self.aocl.prune_to_num_leafs(0).await;
         self.swbf_inactive.prune_to_num_leafs(0).await;
         self.swbf_active.sbf.clear();
@@ -337,7 +337,7 @@ where
 
     /// Restore a mutator set membership proof in a privacy-preserving manner,
     /// only leaking a fuzzy-timestamp.
-    pub(crate) async fn restore_membership_proof_privacy_preserving(
+    pub async fn restore_membership_proof_privacy_preserving(
         &self,
         absolute_indices: AbsoluteIndexSet,
     ) -> Result<MsMembershipProofPrivacyPreserving, Box<dyn Error>> {
@@ -667,13 +667,13 @@ mod tests {
     use rand::SeedableRng;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
-    use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
-    use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
+    use crate::commit;
+    use crate::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use crate::shared::BATCH_SIZE;
+    use crate::shared::NUM_TRIALS;
+    use crate::test_shared::empty_rusty_mutator_set;
+    use crate::test_shared::mock_item_and_randomnesses;
+    use crate::test_utils::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
     async fn index_set_checkers_cannot_panic() {

@@ -1091,7 +1091,7 @@ pub(crate) mod tests {
         use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
         use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::protocol::consensus::transaction::validity::tasm::single_proof::update_branch::tests::deterministic_update_witness_additions_and_removals;
-        use crate::util_types::mutator_set::removal_record::RemovalRecord;
+        use neptune_mutator_set::removal_record::RemovalRecord;
 
         use super::*;
 

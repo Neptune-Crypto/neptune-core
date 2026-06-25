@@ -158,11 +158,11 @@ mod tests {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
+    use tasm_lib::twenty_first::prelude::Digest;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use test_strategy::proptest;
 
     use super::*;
-    use crate::twenty_first::prelude::Digest;
 
     fn indices_and_leafs_strategy(max: u64, num: usize) -> BoxedStrategy<Vec<(u64, Digest)>> {
         vec((0u64..max, arb::<Digest>()), num)

@@ -1,6 +1,11 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -14,11 +19,6 @@ use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::LUSTRATION_FLAG;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::tasm_lib::prelude::Digest;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnlockedUtxo {

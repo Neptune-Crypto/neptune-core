@@ -12,6 +12,7 @@ use futures::task::Poll;
 use itertools::Itertools;
 use mock_tx::fake_create_transaction_from_details_for_tests;
 use neptune_database::storage::storage_vec::traits::StorageVecBase;
+use neptune_mutator_set::addition_record::AdditionRecord;
 use num_traits::Zero;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
@@ -41,7 +42,6 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::wallet_state::WalletState;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 pub mod blocks;
 pub mod files;

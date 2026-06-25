@@ -1,3 +1,4 @@
+use neptune_mutator_set::addition_record::AdditionRecord;
 use proptest::collection;
 use proptest::prelude::*;
 use proptest::prop_compose;
@@ -9,7 +10,6 @@ use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Timestamp;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 pub fn default(fee_nonegative: bool) -> impl Strategy<Value = TransactionKernel> {
     self::with_lengths(1usize..=5, 1usize..=6, 0usize..5, fee_nonegative)
@@ -47,7 +47,7 @@ prop_compose! {
 
 prop_compose! {
     pub fn with_usualtxdata(
-        inputs: Vec<crate::util_types::mutator_set::removal_record::RemovalRecord>,
+        inputs: Vec<neptune_mutator_set::removal_record::RemovalRecord>,
         outputs: Vec<AdditionRecord>,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,

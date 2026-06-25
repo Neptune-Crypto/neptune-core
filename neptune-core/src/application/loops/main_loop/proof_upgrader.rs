@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -42,7 +43,6 @@ use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
 use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 pub(crate) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
 const MINIMUM_FEE_FOR_FREE_MERGE: NativeCurrencyAmount =

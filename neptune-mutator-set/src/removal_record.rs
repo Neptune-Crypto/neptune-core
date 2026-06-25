@@ -1,7 +1,7 @@
 pub mod absolute_index_set;
-pub(crate) mod chunk;
-pub(crate) mod chunk_dictionary;
-pub(crate) mod removal_record_list;
+pub mod chunk;
+pub mod chunk_dictionary;
+pub mod removal_record_list;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -20,6 +20,7 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first;
 use tasm_lib::twenty_first::util_types::mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
@@ -33,7 +34,6 @@ use super::shared::indices_to_hash_map;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::MutatorSetError;
-use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
@@ -224,7 +224,7 @@ impl RemovalRecord {
     }
 
     /// Same as [`Self::validate`] but with informative error code.
-    pub(crate) fn validate_inner(
+    pub fn validate_inner(
         &self,
         mutator_set: &MutatorSetAccumulator,
     ) -> Result<(), RemovalRecordValidityError> {
@@ -257,12 +257,12 @@ impl RemovalRecord {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RemovalRecordValidityError {
+pub enum RemovalRecordValidityError {
     AbsentAuthenticatedChunk,
     InvalidSwbfiMmrMp { chunk_index: u64 },
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<RemovalRecord> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> RemovalRecord {
         RemovalRecord {
@@ -284,14 +284,14 @@ mod tests {
     use tasm_lib::triton_vm::prelude::BFieldCodec;
 
     use super::*;
-    use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
-    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
-    use crate::util_types::test_shared::mutator_set::*;
+    use crate::addition_record::AdditionRecord;
+    use crate::commit;
+    use crate::ms_membership_proof::MsMembershipProof;
+    use crate::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::removal_record::removal_record_list::RemovalRecordList;
+    use crate::shared::CHUNK_SIZE;
+    use crate::shared::NUM_TRIALS;
+    use crate::test_shared::*;
 
     #[test]
     fn increment_bloom_filter_index_behaves_as_expected() {
@@ -725,7 +725,7 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn test_index_set_serialization(
-            original_indexset in crate::tests::shared::strategies::absindset()
+            original_indexset in crate::strategies::absindset()
         ) {
             let serialized_indexset = serde_json::to_string(&original_indexset).unwrap();
             let reconstructed_indexset: AbsoluteIndexSet =

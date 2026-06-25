@@ -10,6 +10,8 @@ use neptune_database::storage::storage_vec::traits::StorageVecBase;
 use neptune_database::storage::storage_vec::traits::StorageVecStream;
 use neptune_database::storage::storage_vec::Index;
 use neptune_database::NeptuneLevelDb;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
@@ -23,8 +25,6 @@ use crate::api::export::AdditionRecord;
 use crate::api::export::BlockHeight;
 use crate::api::export::Timestamp;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 #[derive(Debug)]
 pub struct RustyWalletDatabase {

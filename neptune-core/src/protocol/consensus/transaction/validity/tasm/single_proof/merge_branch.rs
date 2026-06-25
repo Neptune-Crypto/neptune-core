@@ -59,8 +59,8 @@ use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::proof_abstractions::SecretWitness;
 use crate::triton_vm::prelude::NonDeterminism;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
 // Dictated by the witness type of SingleProof
 const MERGE_WITNESS_ADDRESS: BFieldElement = BFieldElement::new(2);
@@ -220,7 +220,7 @@ impl MergeWitness {
 
     /// Generate a new transaction kernel from two transactions.
     ///
-    /// Assumes the [`RemovalRecord`](crate::util_types::mutator_set::removal_record::RemovalRecord)s
+    /// Assumes the [`RemovalRecord`](neptune_mutator_set::removal_record::RemovalRecord)s
     /// in both arguments are not packed.
     pub(super) fn new_kernel(
         left_kernel: &TransactionKernel,
@@ -1065,6 +1065,7 @@ impl BasicSnippet for MergeBranch {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use itertools::Itertools;
+    use neptune_mutator_set::removal_record::RemovalRecord;
     use num_traits::CheckedAdd;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -1079,7 +1080,6 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::transaction::PrimitiveWitness;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
-    use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl MergeWitness {
         pub fn branch_source(&self, single_proof_program_digest: Digest, new_txk_digest: Digest) {

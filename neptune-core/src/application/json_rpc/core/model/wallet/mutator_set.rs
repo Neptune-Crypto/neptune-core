@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+use neptune_mutator_set::archival_mutator_set::IndexedAoclAuthPath;
+use neptune_mutator_set::archival_mutator_set::MsMembershipProofPrivacyPreserving;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -8,9 +11,6 @@ use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
 use crate::application::json_rpc::core::model::block::body::RpcMutatorSetAccumulator;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcChunkDictionary;
-use crate::util_types::mutator_set::archival_mutator_set::IndexedAoclAuthPath;
-use crate::util_types::mutator_set::archival_mutator_set::MsMembershipProofPrivacyPreserving;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RpcMmrMembershipProof(Vec<Digest>);
