@@ -19,7 +19,6 @@ use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
-use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::archival_mutator_set::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -72,16 +71,6 @@ impl MsMembershipProofPrivacyPreserving {
             target_chunks: self.target_chunks,
         })
     }
-}
-
-/// Data structure for returning components of a mutator set membership proof in
-/// a privacy preserving manner. Includes information about the tip.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResponseMsMembershipProofPrivacyPreserving {
-    pub tip_height: BlockHeight,
-    pub tip_hash: Digest,
-    pub tip_mutator_set: MutatorSetAccumulator,
-    pub membership_proofs: Vec<MsMembershipProofPrivacyPreserving>,
 }
 
 #[derive(Debug, Clone)]

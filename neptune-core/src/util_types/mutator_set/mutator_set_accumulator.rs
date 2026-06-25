@@ -580,7 +580,6 @@ mod tests {
         use rand::rng;
 
         use super::*;
-        use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
         use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
         #[proptest]
@@ -661,32 +660,6 @@ mod tests {
                         "Can remove must return false after RR has been applied"
                     );
                 }
-            }
-        }
-
-        #[proptest]
-        fn can_remove_agrees_with_update_result(
-            #[strategy(0usize..30)] _num_removals: usize,
-            #[strategy((#_num_removals as u64)..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
-            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
-            _removables: Vec<(Digest, Digest, Digest)>,
-            #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
-            msa_and_records: MsaAndRecords,
-        ) {
-            let removal_records = msa_and_records.unpacked_removal_records();
-            for rr in &removal_records {
-                assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
-            }
-
-            let original_msa = msa_and_records.mutator_set_accumulator;
-            for rr in removal_records {
-                let mut mutated_msa = original_msa.clone();
-                let as_msu = MutatorSetUpdate::new(vec![rr.clone()], vec![]);
-                assert!(as_msu.apply_to_accumulator(&mut mutated_msa).is_ok());
-                assert!(
-                    !mutated_msa.can_remove(&rr),
-                    "Can remove must return false after RR has been applied"
-                );
             }
         }
     }
