@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 
 use itertools::Itertools;
+use neptune_archival_mmr::ArchivalMmr;
 use neptune_database::storage::storage_vec::traits::*;
 use serde::Deserialize;
 use serde::Serialize;
@@ -19,7 +20,6 @@ use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
-use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::archival_mutator_set::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;

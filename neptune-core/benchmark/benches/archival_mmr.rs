@@ -3,7 +3,7 @@ use leveldb::options::Options;
 use leveldb::options::ReadOptions;
 use leveldb::options::WriteOptions;
 use leveldb_sys::Compression;
-use neptune_cash::util_types::archival_mmr::ArchivalMmr;
+use neptune_archival_mmr::ArchivalMmr;
 use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::storage::storage_schema::DbtVec;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;

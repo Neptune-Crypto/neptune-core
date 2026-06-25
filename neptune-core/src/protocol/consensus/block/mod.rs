@@ -1439,6 +1439,7 @@ impl rand::distr::Distribution<Block> for rand::distr::StandardUniform {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use macro_rules_attr::apply;
+    use neptune_archival_mmr::ArchivalMmr;
     use neptune_database::storage::storage_schema::SimpleRustyStorage;
     use neptune_database::NeptuneLevelDb;
     use proptest::collection;
@@ -1485,7 +1486,6 @@ pub(crate) mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::archival_mmr::ArchivalMmr;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;

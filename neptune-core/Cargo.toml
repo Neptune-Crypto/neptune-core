@@ -130,6 +130,7 @@ zeroize = "1.8.1"
 rs-leveldb = "0.1.5"
 leveldb-sys = "2.0.9"
 async-trait = "0.1.83"
+neptune-archival-mmr = { version = "0.12.0", path = "../neptune-archival-mmr" }
 neptune-database = { version = "0.12.0", path = "../neptune-database" }
 neptune-job-queue = { version = "0.12.0", path = "../neptune-job-queue" }
 neptune-locks = { version = "0.12.0", path = "../neptune-locks" }
@@ -180,6 +181,9 @@ neptune-cash = { path = "../neptune-core", features = ["arbitrary-impls", "spec"
 # enables neptune-database's test-only accessors (e.g. SimpleRustyStorage::db)
 # used by the wallet-db migration tests.
 neptune-database = { version = "0.12.0", path = "../neptune-database", features = ["test-helpers"] }
+
+# enables neptune-archival-mmr's `mock` module used by mutator-set tests.
+neptune-archival-mmr = { version = "0.12.0", path = "../neptune-archival-mmr", features = ["test-helpers"] }
 
 # note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]
 # because they are optional deps but required for unit tests.

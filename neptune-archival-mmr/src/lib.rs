@@ -1,3 +1,42 @@
+#[cfg(test)]
+mod test_utils {
+    use std::sync::OnceLock;
+
+    use tokio::runtime::Runtime;
+
+    pub fn tokio_runtime() -> &'static Runtime {
+        static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+        RUNTIME.get_or_init(|| Runtime::new().unwrap())
+    }
+
+    /// Runs an `async fn` test on a shared, multi-thread tokio runtime.
+    ///
+    /// Apply with `#[apply(shared_tokio_runtime)]` (from `macro_rules_attr`).
+    macro_rules! shared_tokio_runtime {
+        (
+            $(#[$fn_meta:meta])*
+            $vis:vis async fn $fn_name:ident() $(-> $ret:ty)? {
+                $($tt:tt)*
+            }
+        ) => {
+            $(#[$fn_meta])*
+            #[test]
+            // Propagate the return type and visibility to the #[test] fn.
+            $vis fn $fn_name() $(-> $ret)? {
+                let runtime = $crate::test_utils::tokio_runtime();
+                runtime.block_on(async {
+                    $vis async fn __inner() $(-> $ret)? {
+                        $($tt)*
+                    }
+                    __inner().await // Return the awaited result
+                })
+            }
+        };
+    }
+
+    pub(crate) use shared_tokio_runtime;
+}
+
 use std::ops::RangeInclusive;
 
 use itertools::Itertools;
@@ -239,7 +278,7 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
     /// Return membership proof, as it looks relative to a smaller version of
     /// the MMR which only has `num_leafs` leafs. `num_leafs` may not exceed
     /// the actual number of leafs.
-    pub(crate) async fn prove_membership_relative_to_smaller_mmr(
+    pub async fn prove_membership_relative_to_smaller_mmr(
         &self,
         leaf_index: u64,
         num_leafs: u64,
@@ -321,7 +360,7 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
 
     /// Returns the right-most leaf of the MMR, the leaf that was added the
     /// latest.
-    pub(crate) async fn get_latest_leaf(&self) -> Option<Digest> {
+    pub async fn get_latest_leaf(&self) -> Option<Digest> {
         if self.is_empty().await {
             return None;
         }
@@ -353,7 +392,7 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
     /// Remove the last leafs of the MMR such that only the specified number
     /// of leafs remain. If initial number of leafs is less than requested,
     /// this MMR is not mutated.
-    pub(crate) async fn prune_to_num_leafs(&mut self, num_leafs: u64) {
+    pub async fn prune_to_num_leafs(&mut self, num_leafs: u64) {
         let index_of_last_removal = leaf_index_to_node_index(num_leafs);
 
         while self.digests.len().await > index_of_last_removal {
@@ -367,8 +406,36 @@ impl ArchivalMmr<DbtVec<Digest>> {
     /// Delete ephemeral (cache) values, without persisting them.
     ///
     /// Can be used to roll-back ephemeral values to a persisted state.
-    pub(crate) async fn delete_cache(&mut self) {
+    pub async fn delete_cache(&mut self) {
         self.digests.delete_cache().await;
+    }
+}
+
+/// Test-only constructors for [`ArchivalMmr`].
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod mock {
+    use neptune_database::storage::storage_vec::OrdinaryVec;
+    use tasm_lib::twenty_first::tip5::digest::Digest;
+
+    use crate::ArchivalMmr;
+
+    type Storage = OrdinaryVec<Digest>;
+
+    /// Return an empty ArchivalMmr for testing purposes.
+    /// Does *not* have a unique ID, so you can't expect multiple of these
+    /// instances to behave independently unless you understand the
+    /// underlying data structure.
+    pub async fn get_empty_ammr() -> ArchivalMmr<Storage> {
+        let pv: Storage = Default::default();
+        ArchivalMmr::new(pv).await
+    }
+
+    pub async fn get_ammr_from_digests(digests: Vec<Digest>) -> ArchivalMmr<Storage> {
+        let mut ammr = get_empty_ammr().await;
+        for digest in digests {
+            ammr.append(digest).await;
+        }
+        ammr
     }
 }
 
@@ -395,30 +462,9 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
+    use crate::test_utils::shared_tokio_runtime;
 
     type Storage = OrdinaryVec<Digest>;
-
-    pub(crate) mod mock {
-        use super::*;
-
-        /// Return an empty ArchivalMmR for testing purposes.
-        /// Does *not* have a unique ID, so you can't expect multiple of these
-        /// instances to behave independently unless you understand the
-        /// underlying data structure.
-        pub async fn get_empty_ammr() -> ArchivalMmr<Storage> {
-            let pv: Storage = Default::default();
-            ArchivalMmr::new(pv).await
-        }
-
-        pub async fn get_ammr_from_digests(digests: Vec<Digest>) -> ArchivalMmr<Storage> {
-            let mut ammr = get_empty_ammr().await;
-            for digest in digests {
-                ammr.append(digest).await;
-            }
-            ammr
-        }
-    }
 
     impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         /// Return the number of nodes in all the trees in the MMR

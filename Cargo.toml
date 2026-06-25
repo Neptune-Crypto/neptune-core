@@ -2,6 +2,7 @@
 resolver="2"
 
 members = [
+    "neptune-archival-mmr",
     "neptune-core",
     "neptune-core-cli",
     "neptune-dashboard",

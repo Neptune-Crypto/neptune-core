@@ -1,3 +1,4 @@
+use neptune_archival_mmr::ArchivalMmr;
 use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::storage::storage_schema::DbtSingleton;
 use neptune_database::storage::storage_schema::DbtVec;
@@ -10,7 +11,6 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use super::active_window::ActiveWindow;
 use super::archival_mutator_set::ArchivalMutatorSet;
 use super::removal_record::chunk::Chunk;
-use crate::util_types::archival_mmr::ArchivalMmr;
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;

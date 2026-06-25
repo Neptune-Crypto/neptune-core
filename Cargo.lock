@@ -3445,6 +3445,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "neptune-archival-mmr"
+version = "0.12.0"
+dependencies = [
+ "futures",
+ "itertools",
+ "macro_rules_attr",
+ "neptune-database",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "tokio",
+]
+
+[[package]]
 name = "neptune-cash"
 version = "0.12.0"
 dependencies = [
@@ -3478,6 +3494,7 @@ dependencies = [
  "libp2p",
  "macro_rules_attr",
  "memmap2",
+ "neptune-archival-mmr",
  "neptune-cash",
  "neptune-database",
  "neptune-job-queue",

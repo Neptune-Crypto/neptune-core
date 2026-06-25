@@ -1,0 +1,33 @@
+[package]
+name = "neptune-archival-mmr"
+description = "Append-only archival Merkle Mountain Range backed by neptune-database storage"
+authors = ["Triton Software"]
+
+version = "0.12.0"
+edition = "2021"
+license = "Apache-2.0"
+
+homepage = "https://neptune.cash/"
+repository = "https://github.com/Neptune-Crypto/neptune-core/"
+
+[features]
+# exposes the `mock` module (test-only ArchivalMmr constructors) needed by
+# downstream crates' tests. off by default; not part of the normal public API.
+test-helpers = []
+
+[dependencies]
+neptune-database = { version = "0.12.0", path = "../neptune-database" }
+itertools = "0.14"
+tasm-lib = "7.0.0"
+
+[dev-dependencies]
+futures = "0.3"
+macro_rules_attr = "0.1.3"
+proptest = "1.7"
+proptest-arbitrary-interop = "0.1"
+rand = "0.9"
+test-strategy = "0.3"
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

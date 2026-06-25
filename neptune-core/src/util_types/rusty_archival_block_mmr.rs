@@ -1,3 +1,4 @@
+use neptune_archival_mmr::ArchivalMmr;
 use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::storage::storage_schema::DbtVec;
 use neptune_database::storage::storage_schema::RustyKey;
@@ -5,8 +6,6 @@ use neptune_database::storage::storage_schema::RustyValue;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;
 use neptune_database::NeptuneLevelDb;
 use tasm_lib::prelude::Digest;
-
-use super::archival_mmr::ArchivalMmr;
 
 #[derive(Debug)]
 pub struct RustyArchivalBlockMmr {

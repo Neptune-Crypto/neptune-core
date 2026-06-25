@@ -200,11 +200,11 @@ impl rand::distr::Distribution<ChunkDictionary> for rand::distr::StandardUniform
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use macro_rules_attr::apply;
+    use neptune_archival_mmr::mock;
     use tasm_lib::twenty_first::math::other::random_elements;
 
     use super::*;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::archival_mmr::tests::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
     #[apply(shared_tokio_runtime)]
