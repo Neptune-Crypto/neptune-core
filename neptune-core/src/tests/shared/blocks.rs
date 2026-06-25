@@ -503,11 +503,20 @@ pub(crate) async fn invalid_empty_block1_with_guesser_fraction(
 }
 
 pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {
+    invalid_empty_block_with_num_outputs(predecessor, network, 0)
+}
+
+pub(crate) fn invalid_empty_block_with_num_outputs(
+    predecessor: &Block,
+    network: Network,
+    num_outputs: usize,
+) -> Block {
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    let outputs = vec![AdditionRecord::new(Digest::default()); num_outputs];
     let tx =
         crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash_and_timestamp(
             vec![],
-            vec![],
+            outputs,
             predecessor.mutator_set_accumulator_after().unwrap().hash(),
             timestamp,
         );

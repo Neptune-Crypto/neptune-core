@@ -5147,6 +5147,7 @@ pub(super) mod tests {
     mod find_canonical_block_with_puts {
         use super::*;
         use crate::tests::shared::blocks::block_with_num_puts;
+        use crate::tests::shared::blocks::invalid_empty_block_with_num_outputs;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -5332,6 +5333,44 @@ pub(super) mod tests {
                     .find_canonical_block_with_input(random_index_set, None)
                     .await
                     .is_none());
+            }
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn utxo_origin_blocks_from_absolute_index_sets_genesis() {
+            let network = Network::Main;
+            let genesis = Block::genesis(network);
+            let cli = Args {
+                network,
+                ..Default::default()
+            };
+            let mut alice = mock_genesis_global_state(0, WalletEntropy::devnet_wallet(), cli).await;
+            let mut alice = alice.global_state_lock.lock_guard_mut().await;
+
+            let devnet_absi = alice
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .get_all()
+                .await[0]
+                .absolute_indices();
+
+            let mut tip = genesis.clone();
+            for _block_height in 0..5 {
+                let res = alice
+                    .chain
+                    .archival_state()
+                    .utxo_origin_blocks_from_absolute_index_sets(vec![devnet_absi])
+                    .await
+                    .unwrap();
+                assert!(res
+                    .iter()
+                    .map(|(block_hash, _, _, _)| block_hash)
+                    .any(|hash| *hash == genesis.hash()));
+
+                tip = invalid_empty_block_with_num_outputs(&tip, network, 20);
+                alice.set_new_tip(tip.clone()).await.unwrap();
             }
         }
 
