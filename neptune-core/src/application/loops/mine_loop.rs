@@ -289,7 +289,7 @@ fn guess_worker(
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
     block.set_difficulty_related_fields(now, new_difficulty, new_cum_pow);
 
-    block.set_header_guesser_address(guesser_address);
+    block.set_header_guesser_data(guesser_address.into());
 
     info!("Start: guess preprocessing, consensus ruleset: {consensus_rule_set}.");
 

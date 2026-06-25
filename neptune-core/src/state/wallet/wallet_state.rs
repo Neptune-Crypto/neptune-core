@@ -3498,7 +3498,7 @@ pub(crate) mod tests {
 
             // other guesser -> no detection
             let rando = GenerationReceivingAddress::derive_from_seed(rng.random());
-            incoming_block.set_header_guesser_address(rando.into());
+            incoming_block.set_header_guesser_data(rando.into());
             assert_eq!(
                 0,
                 wallet_state
@@ -3508,7 +3508,7 @@ pub(crate) mod tests {
 
             // our lucky guess -> guesser fees detected
             let own = wallet_state.wallet_entropy.guesser_fee_key().to_address();
-            incoming_block.set_header_guesser_address(own.into());
+            incoming_block.set_header_guesser_data(own.into());
             assert_eq!(
                 2,
                 wallet_state

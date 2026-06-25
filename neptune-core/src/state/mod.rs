@@ -4580,7 +4580,7 @@ mod tests {
             let guesser_fraction = 1f64;
             let mut block1 =
                 invalid_empty_block1_with_guesser_fraction(network, guesser_fraction).await;
-            block1.set_header_guesser_address(alice_guesser_address);
+            block1.set_header_guesser_data(alice_guesser_address.into());
 
             alice.set_new_tip(block1.clone()).await.unwrap();
 

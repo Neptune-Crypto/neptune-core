@@ -12,6 +12,7 @@ use super::generation_address;
 use super::symmetric_key;
 use crate::api::export::KeyType;
 use crate::application::config::network::Network;
+use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::state::wallet::address::elliptic_curve_hybrid;
 use crate::state::wallet::address::elliptic_curve_hybrid::ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG;
@@ -92,6 +93,23 @@ impl From<elliptic_curve_hybrid::EcHybridAddress> for ReceivingAddress {
 impl From<viewing_address::ViewingAddress> for ReceivingAddress {
     fn from(value: viewing_address::ViewingAddress) -> Self {
         Self::ViewingAddress(value)
+    }
+}
+
+/// The lock script hash and the receiver digest are the only parts of an
+/// guesser-receiver address that the block sees.
+impl From<ReceivingAddress> for GuesserReceiverData {
+    fn from(address: ReceivingAddress) -> Self {
+        GuesserReceiverData {
+            receiver_digest: address.privacy_digest(),
+            lock_script_hash: address.lock_script_hash(),
+        }
+    }
+}
+
+impl From<generation_address::GenerationReceivingAddress> for GuesserReceiverData {
+    fn from(address: generation_address::GenerationReceivingAddress) -> Self {
+        ReceivingAddress::from(address).into()
     }
 }
 

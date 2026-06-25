@@ -313,7 +313,7 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         None,
         network,
     );
-    block.set_header_guesser_address(guesser_address);
+    block.set_header_guesser_data(guesser_address.into());
 
     let composer_expected_utxos = composer_txos
         .iter()
@@ -458,7 +458,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     let network = global_state_lock.cli().network;
     let mut block =
         Block::block_template_invalid_proof(&tip, transaction, timestamp, None, network);
-    block.set_header_guesser_address(guesser_address);
+    block.set_header_guesser_data(guesser_address.into());
 
     global_state_lock
         .set_new_self_composed_tip(block.clone(), expected_composer_utxos)

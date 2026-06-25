@@ -1416,7 +1416,7 @@ impl RpcApi for RpcServer {
         let address =
             ReceivingAddress::from_bech32m(&request.guesser_address, self.state.cli().network)
                 .map_err(|_| RpcError::InvalidAddress)?;
-        proposal.set_header_guesser_address(address);
+        proposal.set_header_guesser_data(address.into());
 
         let template = RpcBlockTemplate {
             block: RpcBlock::from(&proposal),

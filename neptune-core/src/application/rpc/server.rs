@@ -2227,7 +2227,7 @@ impl NeptuneRPCServer {
             proposal.header().difficulty
         };
 
-        proposal.set_header_guesser_address(guesser_address);
+        proposal.set_header_guesser_data(guesser_address.into());
         let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty);
 
         // Record block proposal in case of guesser-success, for later
@@ -4181,7 +4181,7 @@ impl RPC for NeptuneRPCServer {
             (proposal, difficulty)
         };
 
-        proposal.set_header_guesser_address(guesser_fee_address);
+        proposal.set_header_guesser_data(guesser_fee_address.into());
 
         let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty);
 
@@ -6224,7 +6224,7 @@ mod tests {
             let mut block1 = invalid_empty_block(&genesis, network);
             let mut rng = StdRng::seed_from_u64(3409875378456);
             let guesser_address = GenerationReceivingAddress::derive_from_seed(rng.random());
-            block1.set_header_guesser_address(guesser_address.into());
+            block1.set_header_guesser_data(guesser_address.into());
 
             let guess_challenge =
                 ProofOfWorkPuzzle::new(block1.clone(), genesis.header().difficulty);
@@ -6493,7 +6493,7 @@ mod tests {
                 let resulting_block_hash = pow_puzzle.pow_mast_paths.fast_mast_hash(pow);
 
                 block1.set_header_pow(pow);
-                block1.set_header_guesser_address(guesser_address.into());
+                block1.set_header_guesser_data(guesser_address.into());
                 assert_eq!(block1.hash(), resulting_block_hash);
                 assert_eq!(
                     block1.body().total_guesser_reward().unwrap(),

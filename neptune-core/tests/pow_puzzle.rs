@@ -35,7 +35,7 @@ pub async fn can_find_valid_pow_solution() {
         .expect("Just set block proposal")
         .clone();
     let (guesser_address, _) = alice.gsl.lock_guard().await.mining_rewards_address();
-    proposal.set_header_guesser_address(guesser_address);
+    proposal.set_header_guesser_data(guesser_address.into());
 
     let latest_block_header = *alice.gsl.lock_guard().await.chain.tip().header();
     let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
