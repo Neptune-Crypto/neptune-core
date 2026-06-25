@@ -12,7 +12,7 @@
 //!    atomic NeptuneLevelDb writes across any number of
 //!    [`DbtVec`](storage_schema::DbtVec) or
 //!    [`DbtSingleton`](storage_schema::DbtSingleton) "tables".
-//!  - [`NeptuneLevelDb`](crate::application::database::NeptuneLevelDb) provides
+//!  - [`NeptuneLevelDb`](crate::NeptuneLevelDb) provides
 //!    a convenient wrapper for the LevelDB API.
 
 // For anyone reading this code and trying to understand the StorageVec trait and the DbSchema

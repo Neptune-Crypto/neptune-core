@@ -60,14 +60,14 @@ mod tests {
     use rand::RngCore;
     use serde::Deserialize;
     use serde::Serialize;
+    use twenty_first::math::other::random_elements;
 
     use super::super::storage_vec::traits::*;
     use super::super::storage_vec::Index;
     use super::traits::*;
     use super::*;
-    use crate::application::database::NeptuneLevelDb;
-    use crate::tests::shared_tokio_runtime;
-    use crate::twenty_first::math::other::random_elements;
+    use crate::test_utils::shared_tokio_runtime;
+    use crate::NeptuneLevelDb;
 
     #[derive(Default, PartialEq, Hash, Eq, Clone, Debug, Serialize, Deserialize)]
     struct S(Vec<u8>);

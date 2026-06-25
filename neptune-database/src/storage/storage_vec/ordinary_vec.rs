@@ -99,7 +99,7 @@ mod tests {
         use trait_tests::streams as stream_tests;
 
         use super::*;
-        use crate::tests::shared_tokio_runtime;
+        use crate::test_utils::shared_tokio_runtime;
 
         #[apply(shared_tokio_runtime)]
         pub async fn stream() {

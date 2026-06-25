@@ -1,20 +1,10 @@
-// [track_caller] is used in this module to obtain source location of caller when
-// a write-lock is acquired, and log it upon drop if the lock is held too long.
-//
-// [track_caller] is not (yet?) available for async fn in stable rust.
-// it is available in nightly rust with the async_fn_track_caller
-// feature flag.  To enable the feature in neptune build with
-// cargo +nightly build --features track-lock-location
-
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use tokio::sync::RwLock;
-use tokio::sync::RwLockReadGuard;
-use tokio::sync::RwLockWriteGuard;
-use tokio::sync::TryLockError;
+use tokio::sync::Mutex;
+use tokio::sync::MutexGuard;
 
 use super::now;
 use super::LockAcquisition;
@@ -23,27 +13,28 @@ use super::LockCallbackInfo;
 use super::LockEvent;
 use super::LockType;
 
-/// An `Arc<RwLock<T>>` wrapper to make data thread-safe and easy to work with.
+/// An `Arc<Mutex<T>>` wrapper to make data thread-safe and easy to work with.
 ///
 /// # Examples
 /// ```
-/// # use neptune_cash::application::locks::tokio::AtomicRw;
+/// # use neptune_locks::tokio::AtomicMutex;
 /// struct Car {
 ///     year: u16,
 /// };
 /// # tokio_test::block_on(async {
-/// let mut atomic_car = AtomicRw::from(Car{year: 2016});
+/// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
 /// atomic_car.lock(|c| {println!("year: {}", c.year)}).await;
 /// atomic_car.lock_mut(|mut c| {c.year = 2023}).await;
 /// # })
 /// ```
 ///
-/// It is also possible to provide a name and callback fn/// during instantiation.  In this way, the application
+/// It is also possible to provide a name and callback fn
+/// during instantiation.  In this way, the application
 /// can easily trace lock acquisitions.
 ///
 /// # Examples
 /// ```
-/// # use neptune_cash::application::locks::tokio::{AtomicRw, LockEvent, LockCallbackFn};
+/// # use neptune_locks::tokio::{AtomicMutex, LockEvent, LockCallbackFn};
 /// struct Car {
 ///     year: u16,
 /// };
@@ -69,7 +60,7 @@ use super::LockType;
 /// const LOG_TOKIO_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 ///
 /// # tokio_test::block_on(async {
-/// let mut atomic_car = AtomicRw::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_TOKIO_LOCK_EVENT_CB)));
+/// let mut atomic_car = AtomicMutex::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_TOKIO_LOCK_EVENT_CB)));
 /// atomic_car.lock(|c| {println!("year: {}", c.year)}).await;
 /// atomic_car.lock_mut(|mut c| {c.year = 2023}).await;
 /// # })
@@ -77,64 +68,64 @@ use super::LockType;
 ///
 /// results in:
 /// ```text
-/// TryAcquire lock `car` of type `RwLock` for `Read` by
+/// TryAcquire lock `car` of type `Mutex` for `Read` by
 ///     |-- thread main, `ThreadId(1)`
-/// Acquire lock `car` of type `RwLock` for `Read` by
+/// Acquire lock `car` of type `Mutex` for `Read` by
 ///     |-- thread main, `ThreadId(1)`
 /// year: 2016
-/// Release lock `car` of type `RwLock` for `Read` by
+/// Release lock `car` of type `Mutex` for `Read` by
 ///     |-- thread main, `ThreadId(1)`
-/// TryAcquire lock `car` of type `RwLock` for `Write` by
+/// TryAcquire lock `car` of type `Mutex` for `Write` by
 ///     |-- thread main, `ThreadId(1)`
-/// Acquire lock `car` of type `RwLock` for `Write` by
+/// Acquire lock `car` of type `Mutex` for `Write` by
 ///     |-- thread main, `ThreadId(1)`
-/// Release lock `car` of type `RwLock` for `Write` by
+/// Release lock `car` of type `Mutex` for `Write` by
 ///     |-- thread main, `ThreadId(1)`
 /// ```
 #[derive(Debug)]
-pub struct AtomicRw<T> {
-    inner: Arc<RwLock<T>>,
+pub struct AtomicMutex<T> {
+    inner: Arc<Mutex<T>>,
     lock_callback_info: LockCallbackInfo,
 }
 
-impl<T: Default> Default for AtomicRw<T> {
+impl<T: Default> Default for AtomicMutex<T> {
     fn default() -> Self {
         Self {
             inner: Default::default(),
-            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, None, None),
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
         }
     }
 }
 
-impl<T> From<T> for AtomicRw<T> {
+impl<T> From<T> for AtomicMutex<T> {
     #[inline]
     fn from(t: T) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(t)),
-            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, None, None),
+            inner: Arc::new(Mutex::new(t)),
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
         }
     }
 }
-impl<T> From<(T, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
+impl<T> From<(T, Option<String>, Option<LockCallbackFn>)> for AtomicMutex<T> {
     /// Create from an optional name and an optional callback function, which
     /// is called when a lock event occurs.
     #[inline]
     fn from(v: (T, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(v.0)),
-            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, v.1, v.2),
+            inner: Arc::new(Mutex::new(v.0)),
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1, v.2),
         }
     }
 }
-impl<T> From<(T, Option<&str>, Option<LockCallbackFn>)> for AtomicRw<T> {
+impl<T> From<(T, Option<&str>, Option<LockCallbackFn>)> for AtomicMutex<T> {
     /// Create from a name ref and an optional callback function, which
     /// is called when a lock event occurs.
     #[inline]
     fn from(v: (T, Option<&str>, Option<LockCallbackFn>)) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(v.0)),
+            inner: Arc::new(Mutex::new(v.0)),
             lock_callback_info: LockCallbackInfo::new(
-                LockType::RwLock,
+                LockType::Mutex,
                 v.1.map(|s| s.to_owned()),
                 v.2,
             ),
@@ -142,7 +133,7 @@ impl<T> From<(T, Option<&str>, Option<LockCallbackFn>)> for AtomicRw<T> {
     }
 }
 
-impl<T> Clone for AtomicRw<T> {
+impl<T> Clone for AtomicMutex<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -151,154 +142,147 @@ impl<T> Clone for AtomicRw<T> {
     }
 }
 
-impl<T> From<RwLock<T>> for AtomicRw<T> {
+impl<T> From<Mutex<T>> for AtomicMutex<T> {
     #[inline]
-    fn from(t: RwLock<T>) -> Self {
+    fn from(t: Mutex<T>) -> Self {
         Self {
             inner: Arc::new(t),
-            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, None, None),
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
         }
     }
 }
-impl<T> From<(RwLock<T>, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
-    /// Create from a `RwLock<T>` plus an optional name
+impl<T> From<(Mutex<T>, Option<String>, Option<LockCallbackFn>)> for AtomicMutex<T> {
+    /// Create from a `Mutex<T>` plus an optional name
     /// and an optional callback function, which is called
     /// when a lock event occurs.
     #[inline]
-    fn from(v: (RwLock<T>, Option<String>, Option<LockCallbackFn>)) -> Self {
+    fn from(v: (Mutex<T>, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: Arc::new(v.0),
-            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, v.1, v.2),
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1, v.2),
         }
     }
 }
 
-impl<T> TryFrom<AtomicRw<T>> for RwLock<T> {
-    type Error = Arc<RwLock<T>>;
-    fn try_from(t: AtomicRw<T>) -> Result<RwLock<T>, Self::Error> {
-        Arc::<RwLock<T>>::try_unwrap(t.inner)
+impl<T> TryFrom<AtomicMutex<T>> for Mutex<T> {
+    type Error = Arc<Mutex<T>>;
+    fn try_from(t: AtomicMutex<T>) -> Result<Mutex<T>, Self::Error> {
+        Arc::<Mutex<T>>::try_unwrap(t.inner)
     }
 }
 
-impl<T> From<Arc<RwLock<T>>> for AtomicRw<T> {
+impl<T> From<Arc<Mutex<T>>> for AtomicMutex<T> {
     #[inline]
-    fn from(t: Arc<RwLock<T>>) -> Self {
+    fn from(t: Arc<Mutex<T>>) -> Self {
         Self {
             inner: t,
-            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, None, None),
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
         }
     }
 }
-impl<T> From<(Arc<RwLock<T>>, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
-    /// Create from an `Arc<RwLock<T>>` plus an optional name and
+impl<T> From<(Arc<Mutex<T>>, Option<String>, Option<LockCallbackFn>)> for AtomicMutex<T> {
+    /// Create from an `Arc<Mutex<T>>` plus an optional name and
     /// an optional callback function, which is called when a lock
     /// event occurs.
     #[inline]
-    fn from(v: (Arc<RwLock<T>>, Option<String>, Option<LockCallbackFn>)) -> Self {
+    fn from(v: (Arc<Mutex<T>>, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: v.0,
-            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, v.1, v.2),
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1, v.2),
         }
     }
 }
 
-impl<T> From<AtomicRw<T>> for Arc<RwLock<T>> {
+impl<T> From<AtomicMutex<T>> for Arc<Mutex<T>> {
     #[inline]
-    fn from(t: AtomicRw<T>) -> Self {
+    fn from(t: AtomicMutex<T>) -> Self {
         t.inner
     }
 }
 
 // note: we impl the Atomic trait methods here also so they
 // can be used without caller having to use the trait.
-impl<T> AtomicRw<T> {
-    /// Acquire read lock and return an `AtomicRwReadGuard`
+impl<T> AtomicMutex<T> {
+    /// Acquire read lock and return an `AtomicMutexGuard`
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::application::locks::tokio::AtomicRw;
+    /// # use neptune_locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
     /// # tokio_test::block_on(async {
-    /// let atomic_car = AtomicRw::from(Car{year: 2016});
+    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
     /// let year = atomic_car.lock_guard().await.year;
     /// # })
-    ///```
+    /// ```
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub async fn lock_guard(&self) -> AtomicRwReadGuard<'_, T> {
+    pub async fn lock_guard(&self) -> AtomicMutexGuard<'_, T> {
         self.try_acquire_read_cb();
 
         let try_acquire_at = now();
-        let guard = self.inner.read().await;
-        AtomicRwReadGuard::new(guard, &self.lock_callback_info, try_acquire_at)
+        let guard = self.inner.lock().await;
+        AtomicMutexGuard::new(
+            guard,
+            &self.lock_callback_info,
+            LockAcquisition::Read,
+            try_acquire_at,
+        )
     }
 
-    /// Acquire write lock and return an `AtomicRwWriteGuard`
+    /// Attempt to return a read lock and return an `AtomicMutextGuard`. Returns
+    /// an error if the lock is already held, otherwise returns Ok(lock).
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
+    pub fn try_lock_guard(&self) -> Result<AtomicMutexGuard<'_, T>, tokio::sync::TryLockError> {
+        self.try_acquire_try_acquire();
+
+        let try_acquire_at = now();
+        let guard = self.inner.try_lock()?;
+        Ok(AtomicMutexGuard::new(
+            guard,
+            &self.lock_callback_info,
+            LockAcquisition::TryAcquire,
+            try_acquire_at,
+        ))
+    }
+
+    /// Acquire write lock and return an `AtomicMutexGuard`
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::application::locks::tokio::AtomicRw;
+    /// # use neptune_locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
     /// # tokio_test::block_on(async {
-    /// let mut atomic_car = AtomicRw::from(Car{year: 2016});
+    /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_guard_mut().await.year = 2022;
     /// # })
     /// ```
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub async fn lock_guard_mut(&mut self) -> AtomicRwWriteGuard<'_, T> {
+    pub async fn lock_guard_mut(&mut self) -> AtomicMutexGuard<'_, T> {
         self.try_acquire_write_cb();
 
         let try_acquire_at = now();
-        let guard = self.inner.write().await;
-        AtomicRwWriteGuard::new(guard, &self.lock_callback_info, try_acquire_at)
-    }
-
-    /// Attempt to acquire write lock immediately.
-    ///
-    /// If the lock cannot be acquired without waiting, an error is returned.
-    #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub fn try_lock_guard_mut(&mut self) -> Result<AtomicRwWriteGuard<'_, T>, TryLockError> {
-        self.try_acquire_write_cb();
-
-        let try_acquire_at = now();
-        let guard = self.inner.try_write()?;
-        Ok(AtomicRwWriteGuard::new(
+        let guard = self.inner.lock().await;
+        AtomicMutexGuard::new(
             guard,
             &self.lock_callback_info,
+            LockAcquisition::Write,
             try_acquire_at,
-        ))
-    }
-
-    /// Attempt to acquire the read lock immediately,
-    ///
-    /// If the lock cannot be acquired without waiting, an error is returned.
-    #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub fn try_lock_guard(&self) -> Result<AtomicRwReadGuard<'_, T>, TryLockError> {
-        self.try_acquire_read_cb();
-
-        let try_acquire_at = now();
-        let guard = self.inner.try_read()?;
-
-        Ok(AtomicRwReadGuard::new(
-            guard,
-            &self.lock_callback_info,
-            try_acquire_at,
-        ))
+        )
     }
 
     /// Immutably access the data of type `T` in a closure and possibly return a result of type `R`
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::application::locks::tokio::AtomicRw;
+    /// # use neptune_locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
     /// # tokio_test::block_on(async {
-    /// let atomic_car = AtomicRw::from(Car{year: 2016});
+    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock(|c| println!("year: {}", c.year)).await;
     /// let year = atomic_car.lock(|c| c.year).await;
     /// })
@@ -311,8 +295,13 @@ impl<T> AtomicRw<T> {
         self.try_acquire_read_cb();
 
         let try_acquire_at = now();
-        let inner_guard = self.inner.read().await;
-        let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info, try_acquire_at);
+        let inner_guard = self.inner.lock().await;
+        let guard = AtomicMutexGuard::new(
+            inner_guard,
+            &self.lock_callback_info,
+            LockAcquisition::Read,
+            try_acquire_at,
+        );
         f(&guard)
     }
 
@@ -320,12 +309,12 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::application::locks::tokio::AtomicRw;
+    /// # use neptune_locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
     /// # tokio_test::block_on(async {
-    /// let mut atomic_car = AtomicRw::from(Car{year: 2016});
+    /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_mut(|mut c| c.year = 2022).await;
     /// let year = atomic_car.lock_mut(|mut c| {c.year = 2023; c.year}).await;
     /// })
@@ -338,9 +327,13 @@ impl<T> AtomicRw<T> {
         self.try_acquire_write_cb();
 
         let try_acquire_at = now();
-        let inner_guard = self.inner.write().await;
-        let mut guard =
-            AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info, try_acquire_at);
+        let inner_guard = self.inner.lock().await;
+        let mut guard = AtomicMutexGuard::new(
+            inner_guard,
+            &self.lock_callback_info,
+            LockAcquisition::Write,
+            try_acquire_at,
+        );
         f(&mut guard)
     }
 
@@ -351,13 +344,13 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::application::locks::tokio::AtomicRw;
+    /// # use neptune_locks::tokio::AtomicMutex;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,
     /// };
     /// # tokio_test::block_on(async {
-    /// let atomic_car = AtomicRw::from(Car{year: 2016});
+    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_async(|c| async {println!("year: {}", c.year)}.boxed()).await;
     /// let year = atomic_car.lock_async(|c| async {c.year}.boxed()).await;
     /// })
@@ -368,8 +361,13 @@ impl<T> AtomicRw<T> {
         self.try_acquire_read_cb();
 
         let try_acquire_at = now();
-        let inner_guard = self.inner.read().await;
-        let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info, try_acquire_at);
+        let inner_guard = self.inner.lock().await;
+        let guard = AtomicMutexGuard::new(
+            inner_guard,
+            &self.lock_callback_info,
+            LockAcquisition::Read,
+            try_acquire_at,
+        );
         f(&guard).await
     }
 
@@ -380,13 +378,13 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::application::locks::tokio::AtomicRw;
+    /// # use neptune_locks::tokio::AtomicMutex;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,
     /// };
     /// # tokio_test::block_on(async {
-    /// let mut atomic_car = AtomicRw::from(Car{year: 2016});
+    /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_mut_async(|mut c| async {c.year = 2022}.boxed()).await;
     /// let year = atomic_car.lock_mut_async(|mut c| async {c.year = 2023; c.year}.boxed()).await;
     /// })
@@ -397,16 +395,29 @@ impl<T> AtomicRw<T> {
         self.try_acquire_write_cb();
 
         let try_acquire_at = now();
-        let inner_guard = self.inner.write().await;
-        let mut guard =
-            AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info, try_acquire_at);
+        let inner_guard = self.inner.lock().await;
+        let mut guard = AtomicMutexGuard::new(
+            inner_guard,
+            &self.lock_callback_info,
+            LockAcquisition::Write,
+            try_acquire_at,
+        );
         f(&mut guard).await
     }
 
-    /// retrieve lock name if present, or None
-    #[inline]
-    pub fn name(&self) -> Option<&str> {
-        self.lock_callback_info.lock_info_owned.name.as_deref()
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
+    fn try_acquire_try_acquire(&self) {
+        if let Some(cb) = self.lock_callback_info.lock_callback_fn {
+            cb(LockEvent::TryAcquire {
+                info: self.lock_callback_info.lock_info_owned.as_lock_info(),
+                acquisition: LockAcquisition::TryAcquire,
+
+                #[cfg(feature = "track-lock-location")]
+                location: Some(core::panic::Location::caller()),
+                #[cfg(not(feature = "track-lock-location"))]
+                location: None,
+            });
+        }
     }
 
     #[cfg_attr(feature = "track-lock-location", track_caller)]
@@ -438,34 +449,31 @@ impl<T> AtomicRw<T> {
             });
         }
     }
-
-    /// obtain inner Arc.
-    pub fn inner(&self) -> &Arc<RwLock<T>> {
-        &self.inner
-    }
 }
 
-/// A wrapper for [RwLockReadGuard] that can optionally call a callback to
-/// notify when the lock event occurs.
+/// A wrapper for [MutexGuard] that can optionally call a callback to notify
+/// when the lock event occurs.
 #[derive(Debug)]
-pub struct AtomicRwReadGuard<'a, T> {
-    guard: RwLockReadGuard<'a, T>,
+pub struct AtomicMutexGuard<'a, T> {
+    guard: MutexGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
+    acquisition: LockAcquisition,
     try_acquire_at: Option<std::time::Instant>,
     acquire_at: Option<std::time::Instant>,
     location: Option<&'static core::panic::Location<'static>>,
 }
 
-impl<'a, T> AtomicRwReadGuard<'a, T> {
-    #[cfg_attr(feature = "track-lock-location", track_caller)]
+impl<'a, T> AtomicMutexGuard<'a, T> {
     fn new(
-        guard: RwLockReadGuard<'a, T>,
+        guard: MutexGuard<'a, T>,
         lock_callback_info: &'a LockCallbackInfo,
+        acquisition: LockAcquisition,
         try_acquire_at: Option<std::time::Instant>,
     ) -> Self {
         let my_guard = Self {
             guard,
             lock_callback_info,
+            acquisition,
             try_acquire_at,
 
             #[cfg(feature = "track-lock-time")]
@@ -482,76 +490,7 @@ impl<'a, T> AtomicRwReadGuard<'a, T> {
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquisition: LockAcquisition::Read,
-                try_acquire_at: my_guard.try_acquire_at,
-                acquire_at: my_guard.acquire_at,
-                location: my_guard.location,
-            });
-        }
-        my_guard
-    }
-}
-
-impl<T> Drop for AtomicRwReadGuard<'_, T> {
-    fn drop(&mut self) {
-        let lock_callback_info = self.lock_callback_info;
-        if let Some(cb) = lock_callback_info.lock_callback_fn {
-            cb(LockEvent::Release {
-                info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquisition: LockAcquisition::Read,
-                try_acquire_at: self.try_acquire_at,
-                acquire_at: self.acquire_at,
-                location: self.location,
-            });
-        }
-    }
-}
-
-impl<T> Deref for AtomicRwReadGuard<'_, T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        &self.guard
-    }
-}
-
-/// A wrapper for [RwLockWriteGuard] that can optionally call a callback to
-/// notify when the lock event occurs.
-#[derive(Debug)]
-pub struct AtomicRwWriteGuard<'a, T> {
-    guard: RwLockWriteGuard<'a, T>,
-    lock_callback_info: &'a LockCallbackInfo,
-    try_acquire_at: Option<std::time::Instant>,
-    acquire_at: Option<std::time::Instant>,
-    location: Option<&'static core::panic::Location<'static>>,
-}
-
-impl<'a, T> AtomicRwWriteGuard<'a, T> {
-    #[cfg_attr(feature = "track-lock-location", track_caller)]
-    fn new(
-        guard: RwLockWriteGuard<'a, T>,
-        lock_callback_info: &'a LockCallbackInfo,
-        try_acquire_at: Option<std::time::Instant>,
-    ) -> Self {
-        let my_guard = Self {
-            guard,
-            lock_callback_info,
-            try_acquire_at,
-
-            #[cfg(feature = "track-lock-time")]
-            acquire_at: Some(std::time::Instant::now()),
-            #[cfg(not(feature = "track-lock-time"))]
-            acquire_at: None,
-
-            #[cfg(feature = "track-lock-location")]
-            location: Some(core::panic::Location::caller()),
-            #[cfg(not(feature = "track-lock-location"))]
-            location: None,
-        };
-
-        if let Some(cb) = lock_callback_info.lock_callback_fn {
-            cb(LockEvent::Acquire {
-                info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquisition: LockAcquisition::Write,
+                acquisition,
                 try_acquire_at: my_guard.try_acquire_at,
                 acquire_at: my_guard.acquire_at,
                 location: my_guard.location,
@@ -562,13 +501,13 @@ impl<'a, T> AtomicRwWriteGuard<'a, T> {
     }
 }
 
-impl<T> Drop for AtomicRwWriteGuard<'_, T> {
+impl<T> Drop for AtomicMutexGuard<'_, T> {
     fn drop(&mut self) {
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquisition: LockAcquisition::Write,
+                acquisition: self.acquisition,
                 try_acquire_at: self.try_acquire_at,
                 acquire_at: self.acquire_at,
                 location: self.location,
@@ -577,14 +516,14 @@ impl<T> Drop for AtomicRwWriteGuard<'_, T> {
     }
 }
 
-impl<T> Deref for AtomicRwWriteGuard<'_, T> {
+impl<T> Deref for AtomicMutexGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.guard
     }
 }
 
-impl<T> DerefMut for AtomicRwWriteGuard<'_, T> {
+impl<T> DerefMut for AtomicMutexGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.guard
     }
@@ -595,20 +534,81 @@ impl<T> DerefMut for AtomicRwWriteGuard<'_, T> {
 mod tests {
     use futures::future::FutureExt;
     use macro_rules_attr::apply;
+    use tracing_test::traced_test;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
+    use crate::test_utils::shared_tokio_runtime;
 
-    /// Verify (compile-time) that AtomicRw::lock() and ::lock_mut() accept
+    /// Verify (compile-time) that AtomicMutex:.lock() and :.lock_mut() accept
     /// mutable values. (FnMut)
     #[apply(shared_tokio_runtime)]
     async fn mutable_assignment() {
         let name = "Jim".to_string();
-        let mut atomic_name = AtomicRw::from(name);
+        let mut atomic_name = AtomicMutex::from(name);
 
         let mut new_name = String::new();
         atomic_name.lock_mut(|n| *n = "Sally".to_string()).await;
         atomic_name.lock_mut(|n| new_name = (*n).to_string()).await;
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn try_acquire_no_log() {
+        let unit = ();
+        let atomic_unit = AtomicMutex::<()>::from(unit);
+        assert!(
+            atomic_unit.try_lock_guard().is_ok(),
+            "Must succeed when no lock is held"
+        );
+
+        let _held_lock = atomic_unit.try_lock_guard().unwrap();
+        assert!(
+            atomic_unit.try_lock_guard().is_err(),
+            "Must fail when lock is held"
+        );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn try_acquire_with_log() {
+        pub fn log_lock_event(lock_event: LockEvent) {
+            let (event, info, acquisition) = match lock_event {
+                LockEvent::TryAcquire {
+                    info, acquisition, ..
+                } => ("TryAcquire", info, acquisition),
+                LockEvent::Acquire {
+                    info, acquisition, ..
+                } => ("Acquire", info, acquisition),
+                LockEvent::Release {
+                    info, acquisition, ..
+                } => ("Release", info, acquisition),
+            };
+
+            println!(
+                "{} lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, `{:?}`",
+                event,
+                info.name().unwrap_or("?"),
+                info.lock_type(),
+                acquisition,
+                std::thread::current().name().unwrap_or("?"),
+                std::thread::current().id(),
+            );
+        }
+
+        const LOG_TOKIO_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
+        let name = "Jim".to_string();
+        let atomic_name =
+            AtomicMutex::<String>::from((name, Some("name"), Some(LOG_TOKIO_LOCK_EVENT_CB)));
+        assert!(
+            atomic_name.try_lock_guard().is_ok(),
+            "Must succeed when no lock is held"
+        );
+
+        let _held_lock = atomic_name.lock_guard().await;
+        assert!(
+            atomic_name.try_lock_guard().is_err(),
+            "Must fail when lock is held"
+        );
     }
 
     #[apply(shared_tokio_runtime)]
@@ -617,7 +617,7 @@ mod tests {
             year: u16,
         }
 
-        let atomic_car = AtomicRw::from(Car { year: 2016 });
+        let atomic_car = AtomicMutex::from(Car { year: 2016 });
 
         // access data without returning anything from closure
         atomic_car

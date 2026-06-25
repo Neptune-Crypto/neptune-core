@@ -1,7 +1,7 @@
 //! Traits that define the StorageVec interface
 //!
 //! It is recommended to wildcard import these with
-//! `use crate::application::database::storage::storage_vec::traits::*`
+//! `use crate::storage::storage_vec::traits::*`
 
 // for Stream (async Iterator equiv)
 use async_stream::stream;
@@ -129,7 +129,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # Example:
     /// ```
     /// # tokio_test::block_on(async {
-    /// # use neptune_cash::application::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # use neptune_database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
     /// let stream = vec.stream().await;
@@ -153,7 +153,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # Example:
     /// ```
     /// # tokio_test::block_on(async {
-    /// # use neptune_cash::application::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # use neptune_database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
     /// let stream = vec.stream_values().await;
@@ -177,7 +177,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # Example:
     /// ```
     /// # tokio_test::block_on(async {
-    /// # use neptune_cash::application::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # use neptune_database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
     /// let stream = vec.stream_many([2,3,7]);
@@ -207,7 +207,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # Example:
     /// ```
     /// # tokio_test::block_on(async {
-    /// # use neptune_cash::application::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # use neptune_database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
     /// let stream = vec.stream_many_values([2,3,7]);

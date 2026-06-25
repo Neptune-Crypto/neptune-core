@@ -1,3 +1,8 @@
+use neptune_database::storage::storage_schema::DbtMap;
+use neptune_database::storage::storage_schema::DbtSingleton;
+use neptune_database::storage::storage_schema::DbtVec;
+use neptune_database::storage::storage_schema::SimpleRustyStorage;
+use neptune_database::storage::storage_vec::Index;
 use serde::Deserialize;
 use serde::Serialize;
 use twenty_first::prelude::Digest;
@@ -6,11 +11,6 @@ use super::expected_utxo::ExpectedUtxo;
 use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
 use crate::api::export::AdditionRecord;
-use crate::application::database::storage::storage_schema::DbtMap;
-use crate::application::database::storage::storage_schema::DbtSingleton;
-use crate::application::database::storage::storage_schema::DbtVec;
-use crate::application::database::storage::storage_schema::SimpleRustyStorage;
-use crate::application::database::storage::storage_vec::Index;
 use crate::prelude::twenty_first;
 use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 

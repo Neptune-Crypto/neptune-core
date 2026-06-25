@@ -4,6 +4,7 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use neptune_locks::tokio::AtomicRw;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -14,7 +15,6 @@ use super::RustyKey;
 use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
-use crate::application::locks::tokio::AtomicRw;
 
 pub(super) struct DbtVecPrivate<V> {
     pub(super) pending_writes: AtomicRw<PendingWrites>,

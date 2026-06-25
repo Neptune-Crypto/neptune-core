@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use neptune_locks::tokio::AtomicRw;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -8,7 +9,6 @@ use super::dbtsingleton_private::DbtSingletonPrivate;
 use super::traits::*;
 use super::PendingWrites;
 use super::SimpleRustyReader;
-use crate::application::locks::tokio::AtomicRw;
 
 /// Singleton type created by [`super::DbtSchema`]
 ///

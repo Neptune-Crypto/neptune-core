@@ -6,6 +6,11 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use itertools::Itertools;
+use neptune_database::storage::storage_schema::DbtVec;
+use neptune_database::storage::storage_schema::RustyKey;
+use neptune_database::storage::storage_schema::RustyValue;
+use neptune_database::storage::storage_vec::traits::*;
+use neptune_database::NeptuneLevelDb;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::IntoEnumIterator;
@@ -41,11 +46,6 @@ use crate::api::export::UtxoTriple;
 use crate::application::config::cli_args::Args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-use crate::application::database::storage::storage_schema::DbtVec;
-use crate::application::database::storage::storage_schema::RustyKey;
-use crate::application::database::storage::storage_schema::RustyValue;
-use crate::application::database::storage::storage_vec::traits::*;
-use crate::application::database::NeptuneLevelDb;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
@@ -435,7 +435,7 @@ impl WalletState {
     }
 
     async fn open_wallet_db(path: &Path) -> anyhow::Result<NeptuneLevelDb<RustyKey, RustyValue>> {
-        NeptuneLevelDb::new(path, &crate::application::database::create_db_if_missing())
+        NeptuneLevelDb::new(path, &neptune_database::create_db_if_missing())
             .await
             .map_err(|e| anyhow::anyhow!("Failed to open wallet db at '{}': {}", path.display(), e))
     }
@@ -3851,8 +3851,9 @@ pub(crate) mod tests {
         }
 
         mod worker {
+            use neptune_database::storage::storage_schema::traits::StorageWriter;
+
             use super::*;
-            use crate::application::database::storage::storage_schema::traits::StorageWriter;
             use crate::tests::shared::files::unit_test_data_directory;
 
             /// tests that all known keys are unique for a given key-type
@@ -4170,8 +4171,9 @@ pub(crate) mod tests {
         }
 
         mod worker {
+            use neptune_database::storage::storage_schema::traits::StorageWriter;
+
             use super::*;
-            use crate::application::database::storage::storage_schema::traits::StorageWriter;
             use crate::tests::shared::files::unit_test_data_directory;
 
             /// implements a test with 2 variations via `persist` param.

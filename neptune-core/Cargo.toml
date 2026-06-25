@@ -41,11 +41,13 @@ log-lock_events = ["track-lock-location"]
 
 # locks::sync::tokio support for tracking location of lock acquisition
 # requires nightly.  not generally useful by itself.
-track-lock-location = []
+# (forwards to neptune-locks; opt-in, off unless explicitly enabled)
+track-lock-location = ["neptune-locks/track-lock-location"]
 
 # locks::sync::tokio support for tracking instant of lock acquisition
 # not generally useful by itself.
-track-lock-time = []
+# (forwards to neptune-locks; opt-in, off unless explicitly enabled)
+track-lock-time = ["neptune-locks/track-lock-time"]
 
 # implements arbitrary::Arbitrary for various types
 arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest"]
@@ -128,7 +130,8 @@ zeroize = "1.8.1"
 rs-leveldb = "0.1.5"
 leveldb-sys = "2.0.9"
 async-trait = "0.1.83"
-async-stream = "0.3.6"
+neptune-database = { version = "0.12.0", path = "../neptune-database" }
+neptune-locks = { version = "0.12.0", path = "../neptune-locks" }
 sha3 = "0.10.8"
 readonly = "0.2.12"
 thiserror = "1.0.65"
@@ -172,6 +175,10 @@ whoami = "2.0.0"
 # integration tests we want to rely on whatever is public in crate neptune cash
 # *when feature flags "arbitrary-impls" and "spec" are enabled*.
 neptune-cash = { path = "../neptune-core", features = ["arbitrary-impls", "spec"] }
+
+# enables neptune-database's test-only accessors (e.g. SimpleRustyStorage::db)
+# used by the wallet-db migration tests.
+neptune-database = { version = "0.12.0", path = "../neptune-database", features = ["test-helpers"] }
 
 # note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]
 # because they are optional deps but required for unit tests.

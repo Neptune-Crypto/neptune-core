@@ -26,6 +26,11 @@ use tracing::warn;
 pub(crate) mod import_blocks_from_files;
 pub mod rusty_utxo_index;
 
+use neptune_database::create_db_if_missing;
+use neptune_database::storage::storage_schema::traits::*;
+use neptune_database::NeptuneLevelDb;
+use neptune_database::WriteBatchAsync;
+
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
 use crate::api::export::Args;
@@ -33,10 +38,6 @@ use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
 use crate::api::export::Utxo;
 use crate::application::config::data_directory::DataDirectory;
-use crate::application::database::create_db_if_missing;
-use crate::application::database::storage::storage_schema::traits::*;
-use crate::application::database::NeptuneLevelDb;
-use crate::application::database::WriteBatchAsync;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
@@ -2412,6 +2413,7 @@ pub(super) mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_database::storage::storage_vec::traits::*;
     use proptest::collection;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -2428,7 +2430,6 @@ pub(super) mod tests {
     use crate::application::config::cli_args::Args;
     use crate::application::config::data_directory::DataDirectory;
     use crate::application::config::network::Network;
-    use crate::application::database::storage::storage_vec::traits::*;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;

@@ -1439,6 +1439,8 @@ impl rand::distr::Distribution<Block> for rand::distr::StandardUniform {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use macro_rules_attr::apply;
+    use neptune_database::storage::storage_schema::SimpleRustyStorage;
+    use neptune_database::NeptuneLevelDb;
     use proptest::collection;
     use proptest::prop_compose;
     use proptest_arbitrary_interop::arb;
@@ -1458,8 +1460,6 @@ pub(crate) mod tests {
     use crate::application::config::cli_args;
     use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
     use crate::application::config::network::Network;
-    use crate::application::database::storage::storage_schema::SimpleRustyStorage;
-    use crate::application::database::NeptuneLevelDb;
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
     use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
     use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;

@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use neptune_locks::tokio::AtomicRw;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -9,8 +10,7 @@ use super::super::storage_vec::Index;
 use super::traits::*;
 use super::PendingWrites;
 use super::SimpleRustyReader;
-use crate::application::database::storage::storage_schema::dbtmap_private::DbtMapPrivate;
-use crate::application::locks::tokio::AtomicRw;
+use crate::storage::storage_schema::dbtmap_private::DbtMapPrivate;
 
 /// A LevelDb-backed insert-only mapping from keys to values for use with
 /// DbSchema. Notably, this mapping does not support removal of records. Once

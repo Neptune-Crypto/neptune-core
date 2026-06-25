@@ -3454,7 +3454,6 @@ dependencies = [
  "arbitrary",
  "arraystring",
  "assert2",
- "async-stream",
  "async-trait",
  "axum",
  "bech32",
@@ -3480,6 +3479,8 @@ dependencies = [
  "macro_rules_attr",
  "memmap2",
  "neptune-cash",
+ "neptune-database",
+ "neptune-locks",
  "neptune-rpc-macros",
  "num-bigint",
  "num-rational",
@@ -3568,6 +3569,40 @@ dependencies = [
  "tasm-lib",
  "tokio",
  "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "neptune-database"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "bincode",
+ "futures",
+ "itertools",
+ "leveldb-sys",
+ "macro_rules_attr",
+ "neptune-locks",
+ "rand 0.9.4",
+ "rs-leveldb",
+ "serde",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "twenty-first",
+]
+
+[[package]]
+name = "neptune-locks"
+version = "0.12.0"
+dependencies = [
+ "futures",
+ "macro_rules_attr",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]

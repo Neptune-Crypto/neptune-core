@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use futures::Stream;
+use neptune_locks::tokio::AtomicRw;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -11,7 +12,6 @@ use super::dbtvec_private::DbtVecPrivate;
 use super::traits::*;
 use super::PendingWrites;
 use super::SimpleRustyReader;
-use crate::application::locks::tokio::AtomicRw;
 
 /// A LevelDb-backed Vec for use with DbSchema
 ///
@@ -40,8 +40,10 @@ where
         Self { inner: vec }
     }
 
+    /// Clear the in-memory cache, forcing subsequent reads to see only the
+    /// persisted data.
     #[inline]
-    pub(crate) async fn delete_cache(&mut self) {
+    pub async fn delete_cache(&mut self) {
         self.inner.delete_cache().await;
     }
 }
@@ -158,8 +160,8 @@ mod tests {
 
     use super::super::SimpleRustyStorage;
     use super::*;
-    use crate::application::database::NeptuneLevelDb;
-    use crate::tests::shared_tokio_runtime;
+    use crate::test_utils::shared_tokio_runtime;
+    use crate::NeptuneLevelDb;
 
     pub async fn mk_test_vec_u64() -> DbtVec<u64> {
         // open new DB that will be closed on drop.
@@ -265,7 +267,7 @@ mod tests {
 
         use super::super::super::super::storage_vec::traits::tests::streams as stream_tests;
         use super::*;
-        use crate::tests::shared_tokio_runtime;
+        use crate::test_utils::shared_tokio_runtime;
 
         #[apply(shared_tokio_runtime)]
         pub async fn stream() {

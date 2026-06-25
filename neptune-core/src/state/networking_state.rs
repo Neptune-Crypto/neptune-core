@@ -4,6 +4,9 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use libp2p::PeerId;
+use neptune_database::create_db_if_missing;
+use neptune_database::NeptuneLevelDb;
+use neptune_database::WriteBatchAsync;
 use rand::rng;
 use rand::Rng;
 use tasm_lib::prelude::Digest;
@@ -11,9 +14,6 @@ use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::config::data_directory::DataDirectory;
-use crate::application::database::create_db_if_missing;
-use crate::application::database::NeptuneLevelDb;
-use crate::application::database::WriteBatchAsync;
 use crate::application::loops::sync_loop::sync_progress::SyncProgress;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::difficulty_control::ProofOfWork;

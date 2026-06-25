@@ -2,13 +2,13 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use neptune_locks::tokio::AtomicRw;
 use serde::Serialize;
 
 use super::PendingWrites;
 use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
-use crate::application::locks::tokio::AtomicRw;
 
 // note: no locking is required in `DbtSingletonPrivate` because locking
 // is performed in the `DbtSingleton` public wrapper.

@@ -1,11 +1,11 @@
 use std::fmt;
 use std::net::IpAddr;
 
+use neptune_database::NeptuneLevelDb;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::application::database::NeptuneLevelDb;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
 use crate::protocol::consensus::block::block_height::BlockHeight;

@@ -5,6 +5,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use neptune_locks::tokio::AtomicRw;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -14,9 +15,8 @@ use super::RustyKey;
 use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
-use crate::application::database::storage::storage_schema::DbtVec;
-use crate::application::database::storage::storage_vec::traits::StorageVecBase;
-use crate::application::locks::tokio::AtomicRw;
+use crate::storage::storage_schema::DbtVec;
+use crate::storage::storage_vec::traits::StorageVecBase;
 
 /// A level-DB backed insertion-only mapping from keys to values.
 ///

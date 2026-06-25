@@ -33,6 +33,7 @@ mod tests {
     use expected_utxo::ExpectedUtxo;
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_database::storage::storage_vec::traits::*;
     use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::random;
@@ -51,7 +52,6 @@ mod tests {
     use crate::api::export::Transaction;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::application::database::storage::storage_vec::traits::*;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;

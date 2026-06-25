@@ -34,6 +34,11 @@ use mining::mining_state::MiningState;
 use mining::mining_status::ComposingWorkInfo;
 use mining::mining_status::GuessingWorkInfo;
 use mining::mining_status::MiningStatus;
+use neptune_database::storage::storage_schema::traits::StorageWriter as SW;
+use neptune_database::storage::storage_vec::traits::*;
+use neptune_locks::tokio as sync_tokio;
+use neptune_locks::tokio::AtomicRwReadGuard;
+use neptune_locks::tokio::AtomicRwWriteGuard;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -60,11 +65,6 @@ use crate::api::export::TxInputs;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::application::database::storage::storage_schema::traits::StorageWriter as SW;
-use crate::application::database::storage::storage_vec::traits::*;
-use crate::application::locks::tokio as sync_tokio;
-use crate::application::locks::tokio::AtomicRwReadGuard;
-use crate::application::locks::tokio::AtomicRwWriteGuard;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
 use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
@@ -124,7 +124,7 @@ use crate::WalletFileContext;
 use crate::VERSION;
 
 /// `GlobalStateLock` holds a
-/// [`tokio::AtomicRw`](crate::application::locks::tokio::AtomicRw)
+/// [`tokio::AtomicRw`](neptune_locks::tokio::AtomicRw)
 /// ([`RwLock`](tokio::sync::RwLock)) over [`GlobalState`].
 ///
 /// Conceptually** all reads and writes of application state

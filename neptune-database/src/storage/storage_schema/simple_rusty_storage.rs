@@ -1,3 +1,5 @@
+use neptune_locks::tokio::LockCallbackFn;
+
 use super::super::super::neptune_leveldb::NeptuneLevelDb;
 use super::traits::StorageWriter;
 use super::DbtSchema;
@@ -5,8 +7,7 @@ use super::RustyKey;
 use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
-use crate::application::database::neptune_leveldb::WriteBatchAsync;
-use crate::application::locks::tokio::LockCallbackFn;
+use crate::neptune_leveldb::WriteBatchAsync;
 
 /// Database schema and tables logic for RustyLevelDB.
 ///
@@ -75,16 +76,16 @@ impl SimpleRustyStorage {
         Self { schema, db }
     }
 
-    // reset the schema to a new, empty schema.
-    //
-    // this causes the schema to forget about any logical tables
-    // that were created with new_vec() or new_singleton() and
-    // resets the table_count to 0.
-    //
-    // This fn should not be used in normal operation, but is
-    // useful for migrating between different schema versions
-    // where the newer version has an altered datatype.
-    pub(crate) fn reset_schema(&mut self) {
+    /// Reset the schema to a new, empty schema.
+    ///
+    /// This causes the schema to forget about any logical tables
+    /// that were created with `new_vec()` or `new_singleton()` and
+    /// resets the table_count to 0.
+    ///
+    /// This fn should not be used in normal operation, but is
+    /// useful for migrating between different schema versions
+    /// where the newer version has an altered datatype.
+    pub fn reset_schema(&mut self) {
         self.schema = DbtSchema::new(
             SimpleRustyReader {
                 db: self.db.clone(),
@@ -94,9 +95,12 @@ impl SimpleRustyStorage {
         );
     }
 
-    // obtain reference to the underlying db.  for tests only.
-    #[cfg(test)]
-    pub(crate) fn db(&self) -> &NeptuneLevelDb<RustyKey, RustyValue> {
+    /// Obtain a reference to the underlying db. For tests only.
+    ///
+    /// Exposed cross-crate (e.g. neptune-core's migration tests) via the
+    /// `test-helpers` feature; not part of the normal public API.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn db(&self) -> &NeptuneLevelDb<RustyKey, RustyValue> {
         &self.db
     }
 }

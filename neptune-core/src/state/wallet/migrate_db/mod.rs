@@ -8,10 +8,11 @@ pub(crate) use migrate_db_impl::migrate_range;
 pub(super) mod worker {
     use std::path::PathBuf;
 
+    use neptune_database::storage::storage_schema::RustyKey;
+    use neptune_database::storage::storage_schema::RustyValue;
+    use neptune_database::NeptuneLevelDb;
+
     use crate::application::config::data_directory::DataDirectory;
-    use crate::application::database::storage::storage_schema::RustyKey;
-    use crate::application::database::storage::storage_schema::RustyValue;
-    use crate::application::database::NeptuneLevelDb;
 
     pub(super) fn crate_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -30,7 +31,7 @@ pub(super) mod worker {
         DataDirectory::create_dir_if_not_exists(&wallet_database_path).await?;
         NeptuneLevelDb::new(
             &wallet_database_path,
-            &crate::application::database::create_db_if_missing(),
+            &neptune_database::create_db_if_missing(),
         )
         .await
     }

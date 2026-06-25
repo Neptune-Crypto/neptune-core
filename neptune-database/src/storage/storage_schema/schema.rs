@@ -3,6 +3,8 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use neptune_locks::tokio::AtomicRw;
+use neptune_locks::tokio::LockCallbackFn;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -11,9 +13,7 @@ use super::DbtSingleton;
 use super::DbtVec;
 use super::PendingWrites;
 use super::SimpleRustyReader;
-use crate::application::database::storage::storage_schema::DbtMap;
-use crate::application::locks::tokio::AtomicRw;
-use crate::application::locks::tokio::LockCallbackFn;
+use crate::storage::storage_schema::DbtMap;
 
 /// Provides a virtual database schema.
 ///
@@ -35,7 +35,7 @@ use crate::application::locks::tokio::LockCallbackFn;
 /// container such as a `struct` or `tuple`. Then place an
 /// `Arc<Mutex<..>>` or `Arc<Mutex<RwLock<..>>` around the container.
 /// This crate provides [`AtomicRw`] and
-/// [`AtomicMutex`](crate::application::locks::tokio::AtomicMutex)
+/// [`AtomicMutex`](neptune_locks::tokio::AtomicMutex)
 /// which are simple wrappers around `Arc<RwLock<T>>` and `Arc<Mutex<T>>`.
 ///
 /// This is the recommended usage.
@@ -45,9 +45,9 @@ use crate::application::locks::tokio::LockCallbackFn;
 /// ```
 /// # // note: compile_fail due to: https://github.com/rust-lang/rust/issues/67295
 /// # tokio_test::block_on(async {
-/// # use neptune_cash::application::database::storage::{storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-/// # let db = neptune_cash::application::database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
-/// use neptune_cash::application::locks::tokio::AtomicRw;
+/// # use neptune_database::storage::{storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
+/// # let db = neptune_database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
+/// use neptune_locks::tokio::AtomicRw;
 ///
 /// let mut storage = SimpleRustyStorage::new(db);
 ///

@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
 use futures::pin_mut;
+use neptune_database::storage::storage_schema::SimpleRustyStorage;
+use neptune_database::storage::storage_vec::traits::*;
 use tasm_lib::prelude::Tip5;
 use tracing::debug;
 use tracing::trace;
 
-use crate::application::database::storage::storage_schema::SimpleRustyStorage;
-use crate::application::database::storage::storage_vec::traits::*;
 use crate::state::wallet::migrate_db::v2_to_v3::migration::schema_v2;
 use crate::state::wallet::migrate_db::v2_to_v3::migration::schema_v2::load_v2_schema_in_order;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
@@ -225,6 +225,12 @@ mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_database::storage::storage_schema::traits::StorageWriter;
+    use neptune_database::storage::storage_schema::DbtSingleton;
+    use neptune_database::storage::storage_schema::DbtVec;
+    use neptune_database::storage::storage_schema::RustyKey;
+    use neptune_database::storage::storage_schema::RustyValue;
+    use neptune_database::NeptuneLevelDb;
     use tasm_lib::prelude::Digest;
     use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
@@ -233,12 +239,6 @@ mod tests {
     use crate::api::export::Timestamp;
     use crate::api::export::Utxo;
     use crate::application::config::network::Network;
-    use crate::application::database::storage::storage_schema::traits::StorageWriter;
-    use crate::application::database::storage::storage_schema::DbtSingleton;
-    use crate::application::database::storage::storage_schema::DbtVec;
-    use crate::application::database::storage::storage_schema::RustyKey;
-    use crate::application::database::storage::storage_schema::RustyValue;
-    use crate::application::database::NeptuneLevelDb;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::expected_utxo::UtxoNotifier;

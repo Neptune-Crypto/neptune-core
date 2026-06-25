@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
 use futures::pin_mut;
+use neptune_database::storage::storage_schema::SimpleRustyStorage;
+use neptune_database::storage::storage_vec::traits::*;
 use tracing::debug;
 
-use crate::application::database::storage::storage_schema::SimpleRustyStorage;
-use crate::application::database::storage::storage_vec::traits::*;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::wallet_db_tables::WalletDbTables;
@@ -84,6 +84,11 @@ pub(super) mod migration {
     pub(in crate::state::wallet::migrate_db) mod schema_v2 {
         use std::collections::VecDeque;
 
+        use neptune_database::storage::storage_schema::DbtMap;
+        use neptune_database::storage::storage_schema::DbtSingleton;
+        use neptune_database::storage::storage_schema::DbtVec;
+        use neptune_database::storage::storage_schema::SimpleRustyStorage;
+        use neptune_database::storage::storage_vec::Index;
         use serde::Deserialize;
         use serde::Serialize;
         use tasm_lib::prelude::Digest;
@@ -91,11 +96,6 @@ pub(super) mod migration {
 
         use crate::api::export::AdditionRecord;
         use crate::api::export::BlockHeight;
-        use crate::application::database::storage::storage_schema::DbtMap;
-        use crate::application::database::storage::storage_schema::DbtSingleton;
-        use crate::application::database::storage::storage_schema::DbtVec;
-        use crate::application::database::storage::storage_schema::SimpleRustyStorage;
-        use crate::application::database::storage::storage_vec::Index;
         use crate::protocol::consensus::transaction::utxo::Utxo;
         use crate::state::wallet::expected_utxo::ExpectedUtxo;
         use crate::state::wallet::sent_transaction::SentTransaction;
@@ -222,10 +222,10 @@ pub(super) mod migration {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_database::NeptuneLevelDb;
 
     use super::*;
     use crate::api::export::Network;
-    use crate::application::database::NeptuneLevelDb;
     use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::tests::shared::files::unit_test_data_directory;

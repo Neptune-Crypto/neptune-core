@@ -6,6 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use itertools::Itertools;
+use neptune_database::storage::storage_vec::traits::StorageVecStream;
 use tasm_lib::prelude::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -21,7 +22,6 @@ use crate::api::export::ReceivingAddress;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
-use crate::application::database::storage::storage_vec::traits::StorageVecStream;
 use crate::application::json_rpc::core::api::rpc::*;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeader;
 use crate::application::json_rpc::core::model::block::header::TransactionKernelWithPriority;
@@ -2848,9 +2848,10 @@ pub mod tests {
     }
 
     mod history {
+        use neptune_database::storage::storage_vec::traits::StorageVecBase;
+
         use super::*;
         use crate::api::export::ReceivingAddress;
-        use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 
         #[apply(shared_tokio_runtime)]
         async fn incoming_history_no_filter() {

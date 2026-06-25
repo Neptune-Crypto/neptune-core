@@ -1,6 +1,8 @@
 use std::ops::RangeInclusive;
 
 use itertools::Itertools;
+use neptune_database::storage::storage_schema::DbtVec;
+use neptune_database::storage::storage_vec::traits::*;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -14,9 +16,6 @@ use tasm_lib::twenty_first::util_types::mmr::shared_advanced::leaf_index_to_node
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
-
-use crate::application::database::storage::storage_schema::DbtVec;
-use crate::application::database::storage::storage_vec::traits::*;
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
 ///
@@ -381,6 +380,10 @@ pub(crate) mod tests {
 
     use itertools::*;
     use macro_rules_attr::apply;
+    use neptune_database::storage::storage_schema::traits::*;
+    use neptune_database::storage::storage_schema::SimpleRustyStorage;
+    use neptune_database::storage::storage_vec::OrdinaryVec;
+    use neptune_database::NeptuneLevelDb;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
@@ -392,10 +395,6 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::application::database::storage::storage_schema::traits::*;
-    use crate::application::database::storage::storage_schema::SimpleRustyStorage;
-    use crate::application::database::storage::storage_vec::OrdinaryVec;
-    use crate::application::database::NeptuneLevelDb;
     use crate::tests::shared_tokio_runtime;
 
     type Storage = OrdinaryVec<Digest>;
