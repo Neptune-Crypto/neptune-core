@@ -1,3 +1,4 @@
+use neptune_primitives::mast_hash::MastHash;
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::mmr::bag_peaks::BagPeaks;
@@ -6,7 +7,6 @@ use tasm_lib::twenty_first::prelude::Digest;
 
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::TransactionKernel;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::triton_vm::prelude::*;
 
 /// Authenticate a mutator set accumulator against a transaction-kernel mast hash

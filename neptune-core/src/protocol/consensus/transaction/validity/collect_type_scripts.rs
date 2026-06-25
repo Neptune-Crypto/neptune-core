@@ -426,6 +426,7 @@ impl From<&PrimitiveWitness> for CollectTypeScriptsWitness {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_primitives::timestamp::Timestamp;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -443,7 +444,6 @@ mod tests {
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     impl TritonProgramSpecification for CollectTypeScripts {
         fn source(&self) {

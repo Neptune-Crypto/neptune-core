@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use futures::channel::oneshot;
 use libp2p::Multiaddr;
+use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
@@ -16,7 +17,6 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 

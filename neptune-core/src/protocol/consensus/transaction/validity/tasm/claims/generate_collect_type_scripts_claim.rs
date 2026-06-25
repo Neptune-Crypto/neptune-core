@@ -173,6 +173,7 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
+    use neptune_primitives::timestamp::Timestamp;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -196,7 +197,6 @@ mod tests {
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     #[traced_test]
     #[test]

@@ -7,6 +7,7 @@ use itertools::Itertools;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_primitives::mast_hash::MastHash;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::RngCore;
@@ -40,7 +41,6 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::validity::tasm::compute_absolute_indices::ComputeAbsoluteIndices;
 use crate::protocol::consensus::transaction::PrimitiveWitness;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 
@@ -1049,6 +1049,7 @@ mod tests {
     use neptune_mutator_set::commit;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::shared::NUM_TRIALS;
+    use neptune_primitives::timestamp::Timestamp;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseResult;
@@ -1063,7 +1064,6 @@ mod tests {
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     impl TritonProgramSpecification for RemovalRecordsIntegrity {
         fn source(&self) {

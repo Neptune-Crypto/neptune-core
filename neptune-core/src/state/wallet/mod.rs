@@ -34,6 +34,7 @@ mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use neptune_database::storage::storage_vec::traits::*;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::random;
@@ -63,7 +64,6 @@ mod tests {
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::expected_utxo::UtxoNotifier;

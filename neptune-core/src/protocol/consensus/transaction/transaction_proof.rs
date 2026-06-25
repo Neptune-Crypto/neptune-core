@@ -1,4 +1,5 @@
 use get_size2::GetSize;
+use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -11,7 +12,6 @@ use crate::protocol::consensus::transaction::BFieldCodec;
 use crate::protocol::consensus::transaction::PrimitiveWitness;
 use crate::protocol::consensus::transaction::ProofCollection;
 use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::verifier::verify;
 
 /// represents available types of transaction proofs

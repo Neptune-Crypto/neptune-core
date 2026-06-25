@@ -75,6 +75,7 @@ impl TryFrom<&Block> for TransferBlock {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_primitives::timestamp::Timestamp;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -82,7 +83,6 @@ mod tests {
 
     use super::*;
     use crate::protocol::peer::Network;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared_tokio_runtime;

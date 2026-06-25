@@ -1,3 +1,4 @@
+use neptune_primitives::timestamp::Timestamp;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -18,7 +19,6 @@ use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::transaction_output::TxOutputList;
 

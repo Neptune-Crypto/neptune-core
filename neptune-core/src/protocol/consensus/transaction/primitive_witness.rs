@@ -7,6 +7,7 @@ use neptune_mutator_set::authenticated_item::AuthenticatedItem;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_primitives::mast_hash::MastHash;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -29,7 +30,6 @@ use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::type_scripts::known_type_scripts;
 use crate::protocol::consensus::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::protocol::consensus::type_scripts::TypeScriptAndWitness;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 
 /// A list of UTXOs with an associated salt.
 ///
@@ -551,6 +551,7 @@ pub enum WitnessValidationError {
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedAdd;
     use num_traits::CheckedSub;
     use num_traits::Zero;
@@ -570,7 +571,6 @@ pub mod neptune_arbitrary {
     use crate::protocol::consensus::type_scripts::time_lock::TimeLock;
     use crate::protocol::consensus::type_scripts::time_lock::TimeLockWitness;
     use crate::protocol::consensus::type_scripts::TypeScriptWitness;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::state::wallet::address::generation_address;
 
     impl PrimitiveWitness {
@@ -1072,6 +1072,7 @@ mod tests {
     use macro_rules_attr::apply;
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedAdd;
     use num_traits::CheckedSub;
     use num_traits::Zero;
@@ -1103,7 +1104,6 @@ mod tests {
     use crate::protocol::consensus::type_scripts::time_lock::TimeLockWitness;
     use crate::protocol::consensus::type_scripts::TypeScriptWitness;
     use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
 
     impl Utxo {

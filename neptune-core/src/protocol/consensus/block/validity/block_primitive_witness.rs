@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use tasm_lib::twenty_first::prelude::Mmr;
 
@@ -15,7 +16,6 @@ use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::consensus_rule_set::LustrationRule;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 /// Wraps all information necessary to produce a block.
 ///
@@ -184,6 +184,7 @@ pub(crate) mod tests {
     use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedSub;
     use proptest::collection::vec;
     use proptest::prelude::Arbitrary;
@@ -218,7 +219,6 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     /// Returns transactions without packed inputs
     #[cfg_attr(test, expect(clippy::too_many_arguments))]

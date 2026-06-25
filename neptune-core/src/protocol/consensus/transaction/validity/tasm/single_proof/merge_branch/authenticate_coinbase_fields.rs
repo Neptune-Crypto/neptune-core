@@ -250,6 +250,8 @@ mod tests {
     use std::collections::HashMap;
     use std::collections::VecDeque;
 
+    use neptune_primitives::mast_hash::MastHash;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::Zero;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
@@ -279,8 +281,6 @@ mod tests {
     use super::*;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::transaction::TransactionKernelProxy;
-    use crate::protocol::proof_abstractions::mast_hash::MastHash;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     fn dummy_snippet_for_test() -> AuthenticateCoinbaseFields {
         let mut mock_library = Library::default();

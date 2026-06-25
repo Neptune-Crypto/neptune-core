@@ -182,7 +182,7 @@ impl Timestamp {
     /// # Examples
     ///
     /// ```
-    /// use neptune_cash::api::export::Timestamp;
+    /// use neptune_primitives::timestamp::Timestamp;
     ///
     /// let timestamp = Timestamp::millis(1234567*1000);
     /// assert_eq!(timestamp.format_human_duration(), "2 weeks, 6 hours, 56 minutes, 7 seconds");
@@ -274,7 +274,7 @@ mod tests {
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use test_strategy::proptest;
 
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
+    use crate::timestamp::Timestamp;
 
     #[test]
     fn print_now() {

@@ -1,3 +1,4 @@
+use neptune_primitives::mast_hash::MastHash;
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
@@ -6,7 +7,6 @@ use tasm_lib::prelude::Library;
 
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::TransactionKernel;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::triton_vm::prelude::*;
 
 /// Authenticate transaction inputs against the transaction kernel mast hash.

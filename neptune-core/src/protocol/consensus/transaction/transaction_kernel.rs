@@ -7,6 +7,9 @@ use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_primitives::mast_hash::HasDiscriminant;
+use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -20,9 +23,6 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use super::announcement::Announcement;
 use crate::api::export::TransparentInput;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 pub(crate) const LUSTRATION_FLAG: BFieldElement = BFieldElement::new(51022176260u64);
 

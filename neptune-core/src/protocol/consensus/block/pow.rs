@@ -4,6 +4,7 @@ use std::num::NonZeroUsize;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_primitives::mast_hash::MastHash;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
@@ -26,7 +27,6 @@ use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Serialize, Deserialize)]

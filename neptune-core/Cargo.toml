@@ -50,7 +50,7 @@ track-lock-location = ["neptune-locks/track-lock-location"]
 track-lock-time = ["neptune-locks/track-lock-time"]
 
 # implements arbitrary::Arbitrary for various types
-arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest", "neptune-mutator-set/arbitrary-impls"]
+arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest", "neptune-mutator-set/arbitrary-impls", "neptune-primitives/arbitrary-impls"]
 
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]
@@ -135,6 +135,7 @@ neptune-database = { version = "0.12.0", path = "../neptune-database" }
 neptune-job-queue = { version = "0.12.0", path = "../neptune-job-queue" }
 neptune-locks = { version = "0.12.0", path = "../neptune-locks" }
 neptune-mutator-set = { version = "0.12.0", path = "../neptune-mutator-set" }
+neptune-primitives = { version = "0.12.0", path = "../neptune-primitives" }
 sha3 = "0.10.8"
 readonly = "0.2.12"
 thiserror = "1.0.65"

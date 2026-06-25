@@ -170,6 +170,7 @@ impl Distribution<BlockHeight> for StandardUniform {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedAdd;
     use num_traits::CheckedSub;
     use proptest::prop_assert;
@@ -182,7 +183,6 @@ mod tests {
     use crate::protocol::consensus::block::Network;
     use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
 
     #[traced_test]

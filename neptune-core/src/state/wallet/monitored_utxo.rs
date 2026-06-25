@@ -6,6 +6,7 @@ use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -15,7 +16,6 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 

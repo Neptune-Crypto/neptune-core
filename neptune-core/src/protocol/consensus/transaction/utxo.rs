@@ -6,6 +6,7 @@ use std::hash::Hasher as StdHasher;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
@@ -22,7 +23,6 @@ use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::consensus::type_scripts::time_lock::TimeLock;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -26,7 +27,6 @@ use crate::protocol::consensus::transaction::validity::kernel_to_outputs::Kernel
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::protocol::consensus::transaction::BFieldCodec;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::verifier::verify;

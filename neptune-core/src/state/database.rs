@@ -2,6 +2,7 @@ use std::fmt;
 use std::net::IpAddr;
 
 use neptune_database::NeptuneLevelDb;
+use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -10,7 +11,6 @@ use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::peer::PeerStanding;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 

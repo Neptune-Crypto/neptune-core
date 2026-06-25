@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use get_size2::GetSize;
+use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::data_type::DataType;
@@ -30,9 +32,7 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::validity::tasm::coinbase_amount::CoinbaseAmount;
 use crate::protocol::consensus::type_scripts::BFieldCodec;
 use crate::protocol::consensus::type_scripts::TypeScriptAndWitness;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::proof_abstractions::SecretWitness;
 
 impl NativeCurrency {
@@ -746,6 +746,7 @@ pub mod tests {
     use std::panic;
 
     use macro_rules_attr::apply;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedAdd;
     use num_traits::Zero;
     use proptest::collection::vec;
@@ -771,7 +772,6 @@ pub mod tests {
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::protocol::proof_abstractions::tasm::program::TritonError;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::protocol::proof_abstractions::verifier::verify;
     use crate::tests::shared_tokio_runtime;
 

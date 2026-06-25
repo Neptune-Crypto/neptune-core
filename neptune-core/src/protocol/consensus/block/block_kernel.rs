@@ -2,6 +2,8 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use neptune_primitives::mast_hash::HasDiscriminant;
+use neptune_primitives::mast_hash::MastHash;
 use num_traits::CheckedSub;
 use serde::Deserialize;
 use serde::Serialize;
@@ -19,8 +21,6 @@ use crate::api::export::Timestamp;
 use crate::api::export::Utxo;
 use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 
 /// The kernel of a block contains all data that is not proof data
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]

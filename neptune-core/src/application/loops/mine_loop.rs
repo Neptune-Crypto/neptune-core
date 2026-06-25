@@ -11,6 +11,7 @@ use block_header::BlockHeader;
 use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
 use neptune_job_queue::errors::JobHandleError;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use primitive_witness::PrimitiveWitness;
@@ -56,7 +57,6 @@ use crate::protocol::consensus::transaction::transaction_proof::TransactionProof
 use crate::protocol::consensus::transaction::*;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::shared::SIZE_20MB_IN_BYTES;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_details::TransactionDetails;
@@ -1109,6 +1109,8 @@ pub(crate) mod tests {
     use neptune_mutator_set::test_shared::pseudorandom_addition_record;
     use neptune_mutator_set::test_shared::random_mmra;
     use neptune_mutator_set::test_shared::random_mutator_set_accumulator;
+    use neptune_primitives::mast_hash::MastHash;
+    use neptune_primitives::timestamp::Timestamp;
     use num_bigint::BigUint;
     use num_traits::One;
     use num_traits::Pow;
@@ -1130,8 +1132,6 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::mast_hash::MastHash;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::protocol::proof_abstractions::verifier::verify;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::mining::mining_status::MiningStatus;

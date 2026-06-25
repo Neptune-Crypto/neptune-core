@@ -2,13 +2,13 @@
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 /// represents utxo and secrets necessary for recipient to claim it.
 ///

@@ -3,6 +3,8 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -24,9 +26,7 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::TypeScriptAndWitness;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::proof_abstractions::SecretWitness;
 
 #[derive(Debug, Copy, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]

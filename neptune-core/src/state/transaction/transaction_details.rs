@@ -3,6 +3,7 @@ use std::fmt::Display;
 use anyhow::Result;
 use itertools::Itertools;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde::Deserialize;
@@ -18,7 +19,6 @@ use crate::protocol::consensus::transaction::primitive_witness::WitnessValidatio
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::unlocked_utxo::TxInputs;
 

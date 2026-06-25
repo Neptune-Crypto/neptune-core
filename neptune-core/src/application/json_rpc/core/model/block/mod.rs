@@ -1,3 +1,4 @@
+use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -12,7 +13,6 @@ use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockProof;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 
 pub mod appendix;
 pub mod body;

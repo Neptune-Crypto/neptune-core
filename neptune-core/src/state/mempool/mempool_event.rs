@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
+use neptune_primitives::mast_hash::MastHash;
 use tasm_lib::prelude::Digest;
 
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 
 /// Represents a mempool state change.
 ///

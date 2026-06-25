@@ -144,6 +144,7 @@ mod tests {
     use std::collections::HashMap;
     use std::collections::VecDeque;
 
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::Zero;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -162,7 +163,6 @@ mod tests {
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
     use crate::protocol::consensus::transaction::TransactionKernelProxy;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     #[test]
     fn small_time_diff_ok() {

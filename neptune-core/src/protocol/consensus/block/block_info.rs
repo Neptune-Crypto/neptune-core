@@ -2,6 +2,7 @@
 //! consumption/reporting in block explorers, cli, dashboard, etc.
 
 use itertools::Itertools;
+use neptune_primitives::timestamp::Timestamp;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
@@ -15,7 +16,6 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 /// Provides summary information about a Block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

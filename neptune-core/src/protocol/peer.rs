@@ -11,6 +11,7 @@ use std::time::SystemTime;
 
 use handshake_data::HandshakeData;
 use itertools::Itertools;
+use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use num_traits::Zero;
@@ -37,7 +38,6 @@ use super::consensus::block::block_height::BlockHeight;
 use super::consensus::block::difficulty_control::Difficulty;
 use super::consensus::block::difficulty_control::ProofOfWork;
 use super::consensus::block::Block;
-use super::proof_abstractions::timestamp::Timestamp;
 use crate::application::config::network::Network;
 use crate::application::loops::channel::BlockProposalNotification;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;

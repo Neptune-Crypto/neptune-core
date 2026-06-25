@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use itertools::Itertools;
+use neptune_primitives::mast_hash::MastHash;
 use tasm_lib::field;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::hash_from_stack::HashFromStack;
@@ -30,7 +31,6 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::verifier::verify;
 
@@ -363,6 +363,7 @@ impl TritonProgram for BlockProgram {
 pub(crate) mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_primitives::timestamp::Timestamp;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -390,7 +391,6 @@ pub(crate) mod tests {
     use crate::protocol::proof_abstractions::tasm::builtins::verify_stark;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::protocol::proof_abstractions::SecretWitness;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;

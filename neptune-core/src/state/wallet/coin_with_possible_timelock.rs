@@ -1,13 +1,13 @@
 use std::fmt::Display;
 
 use itertools::Itertools;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 /// An amount of Neptune coins, with confirmation timestamp and (if it has a
 /// time-lock) its release date.
@@ -124,13 +124,13 @@ impl CoinWithPossibleTimeLock {
 mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
+    use neptune_primitives::timestamp::Timestamp;
     use rand::Rng;
     use rand::RngCore;
     use tasm_lib::prelude::Digest;
 
     use super::CoinWithPossibleTimeLock;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     #[test]
     fn sample_report() {

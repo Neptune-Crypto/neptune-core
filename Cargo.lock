@@ -3500,6 +3500,7 @@ dependencies = [
  "neptune-job-queue",
  "neptune-locks",
  "neptune-mutator-set",
+ "neptune-primitives",
  "neptune-rpc-macros",
  "num-bigint",
  "num-rational",
@@ -3663,6 +3664,24 @@ dependencies = [
  "test-strategy 0.3.1",
  "thiserror 1.0.69",
  "tokio",
+]
+
+[[package]]
+name = "neptune-primitives"
+version = "0.12.0"
+dependencies = [
+ "arbitrary",
+ "chrono",
+ "get-size2",
+ "itertools",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "serde",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
 ]
 
 [[package]]

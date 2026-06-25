@@ -32,7 +32,7 @@ use crate::protocol::consensus::transaction::validity::tasm::claims::generate_lo
 use crate::protocol::consensus::transaction::validity::tasm::claims::generate_type_script_claim_template::GenerateTypeScriptClaimTemplate;
 use crate::protocol::consensus::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriClaim;
 use crate::protocol::consensus::transaction::Claim;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
+use neptune_primitives::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::SecretWitness;
@@ -799,7 +799,7 @@ pub(crate) mod tests {
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::TritonError;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
+    use neptune_primitives::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
 
     impl TritonProgramSpecification for SingleProof {

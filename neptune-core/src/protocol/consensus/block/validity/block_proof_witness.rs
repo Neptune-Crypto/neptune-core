@@ -1,5 +1,6 @@
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
@@ -24,7 +25,6 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
 use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
 

@@ -1,10 +1,11 @@
 // private module.  no need for module docs.
 
+use neptune_primitives::timestamp::Timestamp;
+
 use super::error::WalletError;
 use super::wallet_balances::WalletBalances;
 use crate::macros::state_lock_call_async;
 use crate::macros::state_lock_call_mut_async;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::address::SpendingKey;

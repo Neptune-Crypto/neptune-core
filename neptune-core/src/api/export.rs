@@ -4,6 +4,7 @@
 
 pub use neptune_mutator_set::addition_record::AdditionRecord;
 pub use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+pub use neptune_primitives::timestamp::Timestamp;
 
 pub use crate::api::tx_initiation::builder::input_selector::InputSelectionPriority;
 pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
@@ -24,7 +25,6 @@ pub use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
 pub use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
 pub use crate::protocol::consensus::transaction::Transaction;
 pub use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-pub use crate::protocol::proof_abstractions::timestamp::Timestamp;
 pub use crate::state::transaction::transaction_details::TransactionDetails;
 pub use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 pub use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;

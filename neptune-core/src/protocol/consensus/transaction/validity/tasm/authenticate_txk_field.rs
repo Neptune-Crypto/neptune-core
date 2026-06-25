@@ -1,3 +1,4 @@
+use neptune_primitives::mast_hash::MastHash;
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
@@ -7,7 +8,6 @@ use tasm_lib::triton_vm::prelude::*;
 
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AuthenticateTxkField(pub(crate) TransactionKernelField);
@@ -70,6 +70,7 @@ mod tests {
     use itertools::Itertools;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::ConstZero;
     use prop::test_runner::TestRunner;
     use proptest::prelude::*;
@@ -99,7 +100,6 @@ mod tests {
     use crate::protocol::consensus::transaction::announcement::Announcement;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     impl AuthenticateTxkField {
         fn load_kernel(

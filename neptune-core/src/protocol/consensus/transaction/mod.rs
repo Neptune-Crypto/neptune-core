@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
+use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::timestamp::Timestamp;
+
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::application::config::network::Network;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 
@@ -243,6 +244,7 @@ pub(crate) mod tests {
     use macro_rules_attr::apply;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_primitives::timestamp::Timestamp;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::random;
@@ -268,7 +270,6 @@ pub(crate) mod tests {
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
     use crate::protocol::proof_abstractions::tasm::prover_job::VmProcessError;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
 

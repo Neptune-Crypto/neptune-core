@@ -4,6 +4,7 @@ use std::ops::Deref;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -15,7 +16,6 @@ use crate::protocol::consensus::block::Claim;
 use crate::protocol::consensus::block::Tip5;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 
 pub(crate) const MAX_NUM_CLAIMS: usize = 500;
 

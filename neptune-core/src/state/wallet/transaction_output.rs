@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -14,7 +15,6 @@ use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;

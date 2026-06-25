@@ -66,6 +66,7 @@ use neptune_database::storage::storage_vec::traits::StorageVecBase;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -120,7 +121,6 @@ use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurr
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::claim_error::ClaimError;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::state::transaction::transaction_details::TransactionDetails;
@@ -4750,6 +4750,7 @@ mod tests {
     use anyhow::Result;
     use macro_rules_attr::apply;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_primitives::mast_hash::MastHash;
     use num_traits::One;
     use num_traits::Zero;
     use proptest::prop_assume;
@@ -4769,7 +4770,6 @@ mod tests {
     use crate::protocol::consensus::block::block_selector::BlockSelectorLiteral;
     use crate::protocol::peer::NegativePeerSanction;
     use crate::protocol::peer::PeerSanction;
-    use crate::protocol::proof_abstractions::mast_hash::MastHash;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;

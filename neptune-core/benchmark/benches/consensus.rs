@@ -25,8 +25,8 @@ mod transaction {
     use neptune_cash::protocol::consensus::type_scripts::time_lock::TimeLock;
     use neptune_cash::protocol::consensus::type_scripts::time_lock::TimeLockWitness;
     use neptune_cash::protocol::proof_abstractions::tasm::program::TritonProgram;
-    use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
     use neptune_cash::protocol::proof_abstractions::SecretWitness;
+    use neptune_primitives::timestamp::Timestamp;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;

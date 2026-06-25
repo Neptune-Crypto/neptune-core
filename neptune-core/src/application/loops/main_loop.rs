@@ -2997,6 +2997,8 @@ mod tests {
     }
 
     mod proof_upgrader {
+        use neptune_primitives::timestamp::Timestamp;
+
         use super::*;
         use crate::api::export::BlockHeight;
         use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
@@ -3004,7 +3006,6 @@ mod tests {
         use crate::protocol::consensus::transaction::TransactionProof;
         use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
-        use crate::protocol::proof_abstractions::timestamp::Timestamp;
         use crate::state::transaction::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::transaction_output::TxOutput;
 

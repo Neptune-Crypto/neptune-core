@@ -1,6 +1,7 @@
 use bytesize::ByteSize;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_primitives::mast_hash::MastHash;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::bfe;
@@ -27,7 +28,6 @@ use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::state::wallet::expected_utxo::UtxoNotifier;

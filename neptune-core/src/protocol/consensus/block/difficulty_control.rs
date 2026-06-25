@@ -9,6 +9,7 @@ use anyhow::ensure;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
 use num_traits::FromPrimitive;
 use num_traits::ToPrimitive;
@@ -24,7 +25,6 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Digest;
 
 use super::block_height::BlockHeight;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 const DIFFICULTY_NUM_LIMBS: usize = 5;
 

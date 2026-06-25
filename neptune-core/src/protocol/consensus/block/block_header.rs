@@ -3,6 +3,9 @@ use std::fmt::Display;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
+use neptune_primitives::mast_hash::HasDiscriminant;
+use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -25,9 +28,6 @@ use crate::application::config::network::Network;
 use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 pub(crate) const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
 

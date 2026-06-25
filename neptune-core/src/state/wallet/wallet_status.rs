@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use itertools::Itertools;
 use neptune_mutator_set::commit;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde::Deserialize;
@@ -15,7 +16,6 @@ use crate::api::export::AdditionRecord;
 use crate::api::export::BlockHeight;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

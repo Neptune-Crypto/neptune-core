@@ -10,6 +10,7 @@ members = [
     "neptune-job-queue",
     "neptune-locks",
     "neptune-mutator-set",
+    "neptune-primitives",
     "neptune-rpc/client",
     "neptune-rpc/macros",
 ]

@@ -2414,6 +2414,7 @@ pub(super) mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use neptune_database::storage::storage_vec::traits::*;
+    use neptune_primitives::timestamp::Timestamp;
     use proptest::collection;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -2438,7 +2439,6 @@ pub(super) mod tests {
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::timestamp::Timestamp;
     use crate::state::archival_state::ArchivalState;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
