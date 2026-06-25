@@ -1,12 +1,12 @@
 //! provides error types related to initiating transactions.
 
+use neptune_job_queue::errors::AddJobError;
+use neptune_job_queue::errors::JobHandleError;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::RecordTransactionError;
-use crate::application::job_queue::errors::AddJobError;
-use crate::application::job_queue::errors::JobHandleError;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;

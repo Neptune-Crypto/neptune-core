@@ -3480,6 +3480,7 @@ dependencies = [
  "memmap2",
  "neptune-cash",
  "neptune-database",
+ "neptune-job-queue",
  "neptune-locks",
  "neptune-rpc-macros",
  "num-bigint",
@@ -3591,6 +3592,21 @@ dependencies = [
  "tokio-test",
  "tracing",
  "twenty-first",
+]
+
+[[package]]
+name = "neptune-job-queue"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "rand 0.9.4",
+ "strum",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]

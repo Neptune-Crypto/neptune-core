@@ -6,6 +6,7 @@ members = [
     "neptune-core-cli",
     "neptune-dashboard",
     "neptune-database",
+    "neptune-job-queue",
     "neptune-locks",
     "neptune-rpc/client",
     "neptune-rpc/macros",

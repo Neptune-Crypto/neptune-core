@@ -10,6 +10,7 @@ use anyhow::Result;
 use block_header::BlockHeader;
 use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
+use neptune_job_queue::errors::JobHandleError;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use primitive_witness::PrimitiveWitness;
@@ -33,7 +34,6 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::application::config::network::Network;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::application::job_queue::errors::JobHandleError;
 use crate::application::loops::channel::*;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
@@ -1105,6 +1105,7 @@ pub(crate) mod tests {
     use difficulty_control::Difficulty;
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_job_queue::errors::JobHandleError;
     use num_bigint::BigUint;
     use num_traits::One;
     use num_traits::Pow;
@@ -1119,7 +1120,6 @@ pub(crate) mod tests {
     use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
     use crate::application::config::network::Network;
     use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-    use crate::application::job_queue::errors::JobHandleError;
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;

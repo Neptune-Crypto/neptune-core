@@ -10,16 +10,16 @@
 //! program can execute at a time.
 use std::process::Stdio;
 
+use neptune_job_queue::channels::JobCancelReceiver;
+use neptune_job_queue::traits::Job;
+use neptune_job_queue::JobCompletion;
+use neptune_job_queue::JobResultWrapper;
 use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
 use tasm_lib::triton_vm::error::InstructionError;
 use tokio::io::AsyncWriteExt;
 
 use crate::application::config::network::Network;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
-use crate::application::job_queue::channels::JobCancelReceiver;
-use crate::application::job_queue::traits::Job;
-use crate::application::job_queue::JobCompletion;
-use crate::application::job_queue::JobResultWrapper;
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
@@ -115,12 +115,18 @@ impl From<ProverProcessCompletion> for JobCompletion {
         }
     }
 }
-impl From<Result<ProverProcessCompletion, VmProcessError>> for JobCompletion {
-    fn from(result: Result<ProverProcessCompletion, VmProcessError>) -> Self {
-        match result {
-            Ok(ppc) => ppc.into(),
-            Err(e) => ProverJobResult::new(Err(e.into())).into(),
-        }
+/// Convert a prover process result into a [`JobCompletion`].
+///
+/// A free function rather than a `From` impl because `JobCompletion` lives in
+/// the `neptune-job-queue` crate, and the orphan rule forbids
+/// `impl From<Result<..>> for JobCompletion` here (the local types are nested
+/// inside a foreign `Result`).
+fn job_completion_from_prover_result(
+    result: Result<ProverProcessCompletion, VmProcessError>,
+) -> JobCompletion {
+    match result {
+        Ok(ppc) => ppc.into(),
+        Err(e) => ProverJobResult::new(Err(e.into())).into(),
     }
 }
 
@@ -288,7 +294,7 @@ impl ProverJob {
         #[cfg(not(test))]
         let result = self.prove_out_of_process(rx).await;
 
-        result.into()
+        job_completion_from_prover_result(result)
     }
 
     /// Runs the `neptune-prover` out-of-process Triton VM prover.
