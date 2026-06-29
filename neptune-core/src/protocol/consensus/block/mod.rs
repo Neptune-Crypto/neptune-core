@@ -410,12 +410,6 @@ impl Block {
         &self.kernel.appendix
     }
 
-    /// note: this causes block digest to change to that of the new block.
-    #[inline]
-    pub fn set_block(&mut self, block: Block) {
-        *self = block;
-    }
-
     /// The number of coins that can be printed into existence with the mining
     /// a block with this height.
     pub fn block_subsidy(block_height: BlockHeight) -> NativeCurrencyAmount {
@@ -2552,22 +2546,6 @@ pub(crate) mod tests {
             let mut new_block = gblock.clone();
             new_block.set_header_pow(rng.random());
             assert_ne!(gblock.hash(), new_block.hash());
-        }
-
-        // test: verify set_block() copies source digest
-        #[test]
-        fn set_block() {
-            let gblock = Block::genesis(Network::RegTest);
-            let mut rng = rand::rng();
-
-            let mut unique_block = gblock.clone();
-            unique_block.set_header_pow(rng.random());
-
-            let mut block = gblock.clone();
-            block.set_block(unique_block.clone());
-
-            assert_eq!(unique_block.hash(), block.hash());
-            assert_ne!(unique_block.hash(), gblock.hash());
         }
 
         // test: verify digest is correct after deserializing
