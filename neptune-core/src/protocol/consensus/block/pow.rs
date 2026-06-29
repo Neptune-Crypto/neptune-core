@@ -20,13 +20,13 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::twenty_first::bfe_array;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::BFieldElement;
 
 /// Abstracts a cancellation signal for long-running guessing/PoW work, so the
 /// consensus layer can poll for cancellation without depending on the concrete

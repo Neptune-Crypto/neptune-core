@@ -36,7 +36,7 @@ use neptune_primitives::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::SecretWitness;
-use crate::BFieldElement;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
 
 use super::tasm::single_proof::merge_branch::MergeWitness;

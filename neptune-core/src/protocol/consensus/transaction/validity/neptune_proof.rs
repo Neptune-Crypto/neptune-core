@@ -8,9 +8,9 @@ use tasm_lib::prelude::Library;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::proof::Proof as VmProof;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use crate::protocol::consensus::transaction::BFieldCodec;
-use crate::BFieldElement;
 
 /// defines Mock proof behaviors. (private)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]

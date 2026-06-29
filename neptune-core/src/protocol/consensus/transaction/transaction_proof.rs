@@ -177,9 +177,9 @@ impl rand::distr::Distribution<TransactionProofType> for rand::distr::StandardUn
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use tasm_lib::twenty_first::bfe_vec;
+    use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
     use super::*;
-    use crate::BFieldElement;
 
     impl TransactionProofType {
         pub(crate) fn invalid(self) -> TransactionProof {
