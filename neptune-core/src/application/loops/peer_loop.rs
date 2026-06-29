@@ -55,6 +55,7 @@ use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerConnectionInfo;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::transfer_block::TransferBlock;
+use crate::protocol::peer::transfer_transaction::TransactionProofQualityExt;
 use crate::protocol::peer::BlockProposalRequest;
 use crate::protocol::peer::BlockRequestBatch;
 use crate::protocol::peer::IssuedSyncChallenge;

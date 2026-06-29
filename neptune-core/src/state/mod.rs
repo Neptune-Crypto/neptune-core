@@ -1,4 +1,5 @@
 pub mod archival_state;
+pub mod block_selector;
 pub mod blockchain_state;
 pub mod claim_error;
 pub mod database;

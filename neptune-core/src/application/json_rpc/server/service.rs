@@ -42,10 +42,10 @@ use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoin
 use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNotificationData;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
-use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::state::block_selector::BlockSelector;
 use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;

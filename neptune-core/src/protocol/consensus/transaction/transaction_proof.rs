@@ -11,7 +11,6 @@ use crate::protocol::consensus::transaction::validity::single_proof::single_proo
 use crate::protocol::consensus::transaction::BFieldCodec;
 use crate::protocol::consensus::transaction::PrimitiveWitness;
 use crate::protocol::consensus::transaction::ProofCollection;
-use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
 use crate::protocol::proof_abstractions::verifier::verify;
 
 /// represents available types of transaction proofs
@@ -116,16 +115,6 @@ impl TransactionProof {
             TransactionProof::ProofCollection(_) => {
                 panic!("Expected primitive witness, got ProofCollection")
             }
-        }
-    }
-
-    pub(crate) fn proof_quality(&self) -> anyhow::Result<TransactionProofQuality> {
-        match self {
-            TransactionProof::Witness(_) => {
-                anyhow::bail!("Primitive witness does not have a proof")
-            }
-            TransactionProof::ProofCollection(_) => Ok(TransactionProofQuality::ProofCollection),
-            TransactionProof::SingleProof(_) => Ok(TransactionProofQuality::SingleProof),
         }
     }
 

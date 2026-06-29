@@ -108,7 +108,6 @@ use crate::protocol::consensus::block::block_header::BlockPow;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_info::BlockInfo;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
-use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
@@ -121,6 +120,7 @@ use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurr
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
+use crate::state::block_selector::BlockSelector;
 use crate::state::claim_error::ClaimError;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::state::transaction::transaction_details::TransactionDetails;
@@ -475,8 +475,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
+    /// use neptune_cash::state::block_selector::BlockSelector;
+    /// use neptune_cash::state::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -569,7 +569,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+    /// use neptune_cash::state::block_selector::BlockSelector;
     /// use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
@@ -610,8 +610,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
+    /// use neptune_cash::state::block_selector::BlockSelector;
+    /// use neptune_cash::state::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -651,7 +651,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+    /// use neptune_cash::state::block_selector::BlockSelector;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -695,8 +695,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
+    /// use neptune_cash::state::block_selector::BlockSelector;
+    /// use neptune_cash::state::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1531,8 +1531,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
+    /// use neptune_cash::state::block_selector::BlockSelector;
+    /// use neptune_cash::state::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -4767,9 +4767,9 @@ mod tests {
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
     use crate::application::rpc::server::NeptuneRPCServer;
-    use crate::protocol::consensus::block::block_selector::BlockSelectorLiteral;
     use crate::protocol::peer::NegativePeerSanction;
     use crate::protocol::peer::PeerSanction;
+    use crate::state::block_selector::BlockSelectorLiteral;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;

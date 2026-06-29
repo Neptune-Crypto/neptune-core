@@ -10,7 +10,7 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
 use crate::api::export::NativeCurrencyAmount;
-use crate::protocol::consensus::block::block_selector::BlockSelector;
+use crate::state::block_selector::BlockSelector;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RpcNativeCurrencyAmount(pub NativeCurrencyAmount);

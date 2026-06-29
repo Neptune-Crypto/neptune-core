@@ -67,6 +67,7 @@ use crate::protocol::consensus::transaction::validity::proof_collection::ProofCo
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
+use crate::protocol::peer::transfer_transaction::TransactionProofQualityExt;
 use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;

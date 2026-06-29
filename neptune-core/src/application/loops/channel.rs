@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use futures::channel::oneshot;
 use libp2p::Multiaddr;
 use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
@@ -161,14 +160,4 @@ pub(crate) enum RPCServerToMain {
         transaction: TxCreationArtifacts,
         increment_change_key_counter: bool,
     },
-}
-
-pub trait Cancelable: Send + Sync {
-    fn is_canceled(&self) -> bool;
-}
-
-impl<T: Send + Sync> Cancelable for oneshot::Sender<T> {
-    fn is_canceled(&self) -> bool {
-        self.is_canceled()
-    }
 }

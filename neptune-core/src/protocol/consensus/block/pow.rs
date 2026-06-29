@@ -21,13 +21,25 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::twenty_first::bfe_array;
 
-use crate::application::loops::channel::Cancelable;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::BFieldElement;
+
+/// Abstracts a cancellation signal for long-running guessing/PoW work, so the
+/// consensus layer can poll for cancellation without depending on the concrete
+/// channel type owned by the node's loops.
+pub trait Cancelable: Send + Sync {
+    fn is_canceled(&self) -> bool;
+}
+
+impl<T: Send + Sync> Cancelable for futures::channel::oneshot::Sender<T> {
+    fn is_canceled(&self) -> bool {
+        self.is_canceled()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Default))]

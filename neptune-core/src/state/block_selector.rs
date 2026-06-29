@@ -20,7 +20,7 @@ use serde::Serialize;
 use tasm_lib::twenty_first::prelude::Digest;
 use thiserror::Error;
 
-use super::block_height::BlockHeight;
+use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::state::GlobalState;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
