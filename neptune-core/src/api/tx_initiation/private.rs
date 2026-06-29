@@ -66,11 +66,13 @@ impl TransactionInitiatorPrivate {
             tracing::warn!(
                 "Cannot initiate transaction because transaction proving capability is too weak."
             );
-            return Err(error::CreateProofError::TooWeak {
-                proof_type,
-                capability,
-            }
-            .into());
+            return Err(
+                crate::protocol::proof_abstractions::error::CreateProofError::TooWeak {
+                    proof_type,
+                    capability,
+                }
+                .into(),
+            );
         }
 
         self.check_rate_limit().await

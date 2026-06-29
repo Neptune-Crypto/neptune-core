@@ -55,8 +55,6 @@ mod tests {
     use crate::application::config::network::Network;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
     use crate::protocol::consensus::block::Block;
@@ -64,8 +62,10 @@ mod tests {
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::expected_utxo::UtxoNotifier;
     use crate::state::wallet::secret_key_material::SecretKeyMaterial;
     use crate::state::wallet::transaction_output::TxOutput;

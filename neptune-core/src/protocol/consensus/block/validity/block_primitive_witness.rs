@@ -199,8 +199,6 @@ pub(crate) mod tests {
 
     use super::BlockPrimitiveWitness;
     use crate::api::export::Network;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_body::BlockBody;
     use crate::protocol::consensus::block::block_header::BlockHeader;
@@ -219,6 +217,8 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
     /// Returns transactions without packed inputs
     #[cfg_attr(test, expect(clippy::too_many_arguments))]

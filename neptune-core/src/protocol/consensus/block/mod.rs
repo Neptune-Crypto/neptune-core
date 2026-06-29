@@ -57,10 +57,8 @@ use validity::block_proof_witness::BlockProofWitness;
 
 use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::application::config::network::Network;
 use crate::application::loops::channel::Cancelable;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::block_header::BlockHeaderField;
 use crate::protocol::consensus::block::block_header::BlockPow;
 use crate::protocol::consensus::block::block_height::BLOCKS_PER_GENERATION;
@@ -78,8 +76,10 @@ use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::consensus_rule_set::LustrationRule;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionLustrationError;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
+use crate::protocol::proof_abstractions::proof_builder::ProofBuilder;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::verifier::verify;
 use crate::protocol::proof_abstractions::SecretWitness;
 
@@ -1254,14 +1254,14 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
-    use crate::application::triton_vm_job_queue::vm_job_queue;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
     use crate::protocol::consensus::type_scripts::TypeScript;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::address::KeyType;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -1868,7 +1868,7 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::create_block_transaction_from;
         use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
         use crate::application::loops::mine_loop::TxMergeOrigin;
-        use crate::application::triton_vm_job_queue::vm_job_queue;
+        use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
         use crate::protocol::proof_abstractions::verifier::disable_true_claims_cache;
         use crate::protocol::proof_abstractions::verifier::enable_true_claims_cache;
         use crate::state::transaction::tx_creation_config::TxCreationConfig;

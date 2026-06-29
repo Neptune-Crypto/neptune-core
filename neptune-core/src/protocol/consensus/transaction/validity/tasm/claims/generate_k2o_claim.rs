@@ -139,9 +139,9 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadowError;
 
     use super::*;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
     #[test]
     fn unit_test() {

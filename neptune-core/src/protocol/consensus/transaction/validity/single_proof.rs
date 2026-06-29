@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
-use crate::api::tx_initiation::error::CreateProofError;
+use crate::protocol::proof_abstractions::proof_builder::ProofBuilder;
+use crate::protocol::proof_abstractions::error::CreateProofError;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use tasm_lib::triton_vm::prelude::*;
@@ -34,7 +34,7 @@ use crate::protocol::consensus::transaction::validity::tasm::claims::generate_rr
 use crate::protocol::consensus::transaction::Claim;
 use neptune_primitives::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
 use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
@@ -788,7 +788,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::application::config::network::Network;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::transaction::validity::single_proof::SingleProof;
     use crate::protocol::consensus::transaction::validity::single_proof::SingleProofWitness;

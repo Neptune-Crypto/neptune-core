@@ -21,12 +21,12 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Coin;
-use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
-use crate::api::tx_initiation::error::CreateProofError;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
+use crate::protocol::proof_abstractions::error::CreateProofError;
+use crate::protocol::proof_abstractions::proof_builder::ProofBuilder;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
 pub(crate) trait TypeScript: TritonProgram {
     type State: BFieldCodec;

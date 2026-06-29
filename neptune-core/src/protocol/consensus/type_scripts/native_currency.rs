@@ -759,8 +759,6 @@ pub mod tests {
 
     use super::*;
     use crate::application::config::network::Network;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::transaction::announcement::Announcement;
     use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
@@ -772,6 +770,8 @@ pub mod tests {
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::protocol::proof_abstractions::tasm::program::TritonError;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::proof_abstractions::verifier::verify;
     use crate::tests::shared_tokio_runtime;
 

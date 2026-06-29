@@ -7,7 +7,11 @@ use triton_vm::prelude::Claim;
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 
+pub mod error;
+pub mod proof_builder;
 pub mod tasm;
+pub mod triton_vm_job_queue;
+pub mod tx_proving_capability;
 pub mod verifier;
 
 /// A [`SecretWitness`] is data that makes a `TritonProgram` halt gracefully,

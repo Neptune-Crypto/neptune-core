@@ -5,9 +5,9 @@ use neptune_primitives::timestamp::Timestamp;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::application::config::network::Network;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 
 pub mod announcement;
@@ -258,17 +258,17 @@ pub(crate) mod tests {
     use super::*;
     use crate::api::export::TxInputs;
     use crate::api::export::TxOutputList;
-    use crate::api::tx_initiation::error::CreateProofError;
     use crate::application::config::network::Network;
-    use crate::application::triton_vm_job_queue::vm_job_queue;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::protocol::proof_abstractions::error::CreateProofError;
     use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
     use crate::protocol::proof_abstractions::tasm::prover_job::VmProcessError;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
     use crate::state::transaction::transaction_details::TransactionDetails;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;

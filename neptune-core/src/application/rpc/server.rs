@@ -6584,7 +6584,7 @@ mod tests {
             use cli_args::Args;
 
             use super::*;
-            use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+            use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
             use crate::tests::shared::blocks::invalid_block_with_transaction;
             use crate::tests::shared::blocks::invalid_empty_block;
 

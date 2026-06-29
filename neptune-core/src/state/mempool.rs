@@ -67,6 +67,7 @@ use crate::protocol::consensus::transaction::validity::proof_collection::ProofCo
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
+use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::merge_input_cache::MergeInputCache;
@@ -74,7 +75,6 @@ use crate::state::mempool::merge_input_cache::MergeInputCacheElement;
 use crate::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 
 /// Transactions with a timestamp older than this are removed from the mempool.
 pub const MEMPOOL_TX_THRESHOLD_AGE: Timestamp = Timestamp::hours(10);
@@ -1414,7 +1414,7 @@ impl Mempool {
     /// use neptune_cash::application::config::network::Network;
     /// use neptune_cash::protocol::consensus::block::Block;
     /// use neptune_cash::state::mempool::Mempool;
-    /// use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
+    /// use neptune_cash::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     ///
     /// let network = Network::Main;
     /// let genesis_block = Block::genesis(network);
@@ -1476,8 +1476,6 @@ mod tests {
     use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
     use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
@@ -1488,9 +1486,11 @@ mod tests {
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::protocol::shared::SIZE_20MB_IN_BYTES;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::expected_utxo::UtxoNotifier;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::transaction_output::TxOutputList;

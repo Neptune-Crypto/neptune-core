@@ -26,10 +26,10 @@ use crate::macros::log_scope_duration;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
+use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::protocol::proof_abstractions::Claim;
 use crate::protocol::proof_abstractions::NonDeterminism;
 use crate::protocol::proof_abstractions::Program;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 
 /// Error code from the spawned prover process in the range 200-232 are reserved
 /// for communicating that the proof is too big. The error code returned is

@@ -15,9 +15,7 @@ use tracing::trace;
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
-use crate::api::tx_initiation::error::CreateProofError;
 use crate::application::config::network::Network;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::validity::collect_lock_scripts::CollectLockScripts;
@@ -27,8 +25,10 @@ use crate::protocol::consensus::transaction::validity::kernel_to_outputs::Kernel
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::protocol::consensus::transaction::BFieldCodec;
+use crate::protocol::proof_abstractions::error::CreateProofError;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::verifier::verify;
 use crate::protocol::proof_abstractions::SecretWitness;
 
@@ -495,10 +495,10 @@ pub mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::tests::shared_tokio_runtime;
 
     impl ProofCollection {

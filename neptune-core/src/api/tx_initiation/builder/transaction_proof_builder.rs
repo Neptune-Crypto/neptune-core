@@ -26,12 +26,7 @@ use std::borrow::Borrow;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use super::proof_builder::ProofBuilder;
 use crate::api::export::NeptuneProof;
-use crate::api::tx_initiation::error::CreateProofError;
-use crate::api::tx_initiation::error::ProofRequirement;
-use crate::application::triton_vm_job_queue::vm_job_queue;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
@@ -42,8 +37,13 @@ use crate::protocol::consensus::transaction::validity::single_proof::SingleProof
 use crate::protocol::consensus::transaction::validity::single_proof::SingleProofWitness;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::update_branch::UpdateWitness;
 use crate::protocol::consensus::transaction::TransactionProof;
+use crate::protocol::proof_abstractions::error::CreateProofError;
+use crate::protocol::proof_abstractions::error::ProofRequirement;
+use crate::protocol::proof_abstractions::proof_builder::ProofBuilder;
 use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::SecretWitness;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::triton_vm::proof::Claim;

@@ -27,13 +27,13 @@ use crate::application::config::parser::CliArgsParseError;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::json_rpc::core::api::ops::Namespace;
-use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 
 const MAX_NUM_INPUTS_FOR_PC_BACKED_TXS: u64 = 200;

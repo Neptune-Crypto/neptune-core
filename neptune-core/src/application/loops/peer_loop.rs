@@ -2386,9 +2386,9 @@ mod tests {
     use crate::protocol::peer::peer_info::pseudorandom_peer_id;
     use crate::protocol::peer::transaction_notification::TransactionNotification;
     use crate::protocol::peer::Sanction;
+    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_block_for_tests;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
@@ -4449,10 +4449,10 @@ mod tests {
         use super::*;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
-        use crate::application::triton_vm_job_queue::vm_job_queue;
         use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
         use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
         use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+        use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 

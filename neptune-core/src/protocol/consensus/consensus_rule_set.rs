@@ -399,7 +399,6 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::guess_nonce;
     use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
     use crate::application::loops::mine_loop::TxMergeOrigin;
-    use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
@@ -411,6 +410,7 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;

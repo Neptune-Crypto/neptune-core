@@ -5,7 +5,7 @@ use anyhow::ensure;
 
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProof;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;

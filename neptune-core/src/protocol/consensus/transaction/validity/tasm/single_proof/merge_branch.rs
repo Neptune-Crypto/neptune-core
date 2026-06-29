@@ -31,7 +31,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
 use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransactionKernel;
@@ -1075,11 +1075,11 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::api::export::Network;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::transaction::PrimitiveWitness;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
     impl MergeWitness {
         pub fn branch_source(&self, single_proof_program_digest: Digest, new_txk_digest: Digest) {

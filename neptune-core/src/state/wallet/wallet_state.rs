@@ -2237,13 +2237,13 @@ pub(crate) mod tests {
     use crate::api::tx_initiation::initiator::TransactionInitiator;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::utxo::Coin;
     use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::transaction_output::TxOutput;
@@ -3527,8 +3527,8 @@ pub(crate) mod tests {
         use super::*;
         use crate::application::config::cli_args;
         use crate::protocol::consensus::block::block_height::BlockHeight;
+        use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
-        use crate::state::transaction::tx_proving_capability::TxProvingCapability;
         use crate::state::wallet::address::ReceivingAddress;
         use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;

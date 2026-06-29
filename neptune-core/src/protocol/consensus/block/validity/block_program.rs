@@ -379,8 +379,6 @@ pub(crate) mod tests {
     use crate::application::config::network::Network;
     use crate::application::loops::mine_loop::create_block_transaction_from;
     use crate::application::loops::mine_loop::TxMergeOrigin;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
     use crate::protocol::consensus::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::protocol::consensus::block::Block;
@@ -391,9 +389,11 @@ pub(crate) mod tests {
     use crate::protocol::proof_abstractions::tasm::builtins::verify_stark;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::protocol::proof_abstractions::SecretWitness;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;

@@ -10,11 +10,11 @@ use tracing::debug;
 use super::prover_job::ProverJob;
 use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
-use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
-use crate::api::tx_initiation::error::CreateProofError;
-use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
+use crate::protocol::proof_abstractions::error::CreateProofError;
+use crate::protocol::proof_abstractions::proof_builder::ProofBuilder;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
 #[derive(Debug, Clone)]
 pub enum TritonError {
@@ -310,7 +310,7 @@ pub mod tests {
     use crate::api::export::Network;
     use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::tests::shared::files::headers_for_proof_server_request;
     use crate::tests::shared::files::load_test_proof_servers;
     use crate::tests::shared::files::test_helper_data_dir;

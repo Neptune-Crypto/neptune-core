@@ -34,7 +34,6 @@ use crate::application::loops::mine_loop::composer_parameters::ComposerParameter
 use crate::application::loops::mine_loop::guess_nonce;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
 use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::block_appendix::BlockAppendix;
 use crate::protocol::consensus::block::block_body::BlockBody;
 use crate::protocol::consensus::block::block_header::BlockHeader;
@@ -57,6 +56,7 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::generation_address::GenerationReceivingAddress;

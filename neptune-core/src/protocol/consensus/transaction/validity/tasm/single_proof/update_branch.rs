@@ -683,8 +683,6 @@ pub(crate) mod tests {
     use strum::EnumCount;
 
     use super::*;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
@@ -692,6 +690,8 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionKernelModifier;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::tests::shared_tokio_runtime;
 
     // The main tests are actually in [`../../single_proof.rs`].
