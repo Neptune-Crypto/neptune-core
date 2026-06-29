@@ -3,7 +3,7 @@ use tracing::info;
 
 use super::error::RegTestError;
 use crate::api::export::Timestamp;
-use crate::protocol::consensus::block::mock_block_generator::MockBlockGenerator;
+use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::shared::SIZE_20MB_IN_BYTES;
 use crate::state::mining::block_proposal::BlockProposal;

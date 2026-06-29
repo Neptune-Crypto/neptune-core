@@ -9,7 +9,6 @@ pub(crate) mod block_transaction;
 pub(crate) mod block_validation_error;
 pub mod difficulty_control;
 pub(crate) mod guesser_receiver_data;
-pub mod mock_block_generator;
 pub mod mutator_set_update;
 pub mod pow;
 pub(crate) mod premine;

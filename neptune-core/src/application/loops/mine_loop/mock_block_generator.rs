@@ -3,11 +3,11 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 
-use super::block_transaction::BlockOrRegularTransaction;
 use crate::api::export::ReceivingAddress;
 use crate::application::config::network::Network;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
+use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::protocol::consensus::block::validity::block_proof_witness::BlockProofWitness;
