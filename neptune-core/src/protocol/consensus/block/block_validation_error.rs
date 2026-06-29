@@ -158,7 +158,6 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_appendix::MAX_NUM_CLAIMS;
     use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -172,6 +171,7 @@ mod tests {
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
     use crate::protocol::consensus::consensus_rule_set::TX_BACKDATING_LIMIT;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;

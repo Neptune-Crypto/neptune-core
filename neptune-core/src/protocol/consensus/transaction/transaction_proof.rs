@@ -4,8 +4,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::application::config::network::Network;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
 use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
 use crate::protocol::consensus::transaction::BFieldCodec;

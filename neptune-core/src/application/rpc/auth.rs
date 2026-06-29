@@ -18,7 +18,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
 use crate::application::config::data_directory::DataDirectory;
-use crate::application::config::network::Network;
+use crate::protocol::consensus::network::Network;
 
 /// enumerates neptune-core RPC authentication token types
 ///

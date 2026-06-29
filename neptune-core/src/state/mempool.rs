@@ -1412,7 +1412,7 @@ impl Mempool {
     ///
     /// ```
     /// use bytesize::ByteSize;
-    /// use neptune_cash::application::config::network::Network;
+    /// use neptune_cash::protocol::consensus::network::Network;
     /// use neptune_cash::protocol::consensus::block::Block;
     /// use neptune_cash::state::mempool::Mempool;
     /// use neptune_cash::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -1472,7 +1472,6 @@ mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
     use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
     use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
     use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
@@ -1480,6 +1479,7 @@ mod tests {
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;

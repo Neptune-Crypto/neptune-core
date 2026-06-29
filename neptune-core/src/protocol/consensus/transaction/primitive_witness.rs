@@ -1062,9 +1062,9 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::MINING_REWARD_TIME_LOCK_PERIOD;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::announcement::Announcement;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;

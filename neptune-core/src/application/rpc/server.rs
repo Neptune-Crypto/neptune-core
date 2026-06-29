@@ -88,7 +88,6 @@ use crate::api::export::ConsolidationError;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
-use crate::application::config::network::Network;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
@@ -111,6 +110,7 @@ use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
@@ -1170,7 +1170,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::application::config::network::Network;
+    /// use neptune_cash::protocol::consensus::network::Network;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1773,7 +1773,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::config::network::Network;
+    /// # use neptune_cash::protocol::consensus::network::Network;
     /// # use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     /// # use neptune_cash::state::wallet::address::ReceivingAddress;
     /// # use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -4765,8 +4765,8 @@ mod tests {
     use super::*;
     use crate::api::export::TxProvingCapability;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
     use crate::application::rpc::server::NeptuneRPCServer;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::peer::NegativePeerSanction;
     use crate::protocol::peer::PeerSanction;
     use crate::state::block_selector::BlockSelectorLiteral;

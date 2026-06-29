@@ -740,9 +740,9 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::protocol::consensus::block::tests::DIFFICULTY_LIMIT_FOR_TESTS;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::tests::shared::blocks::invalid_empty_block;
 

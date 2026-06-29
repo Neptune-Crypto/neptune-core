@@ -716,8 +716,8 @@ mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
     use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::peer::handshake_data::VersionString;
     use crate::protocol::peer::peer_info::PeerInfo;
     use crate::protocol::peer::InternalConnectionStatus;

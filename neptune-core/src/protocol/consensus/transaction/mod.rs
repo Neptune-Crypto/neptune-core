@@ -4,8 +4,8 @@ use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-use crate::application::config::network::Network;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
@@ -245,8 +245,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::api::export::TxInputs;
     use crate::api::export::TxOutputList;
-    use crate::application::config::network::Network;
     use crate::protocol::consensus::block::Block;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;

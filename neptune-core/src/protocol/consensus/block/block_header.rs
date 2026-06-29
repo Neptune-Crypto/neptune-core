@@ -24,10 +24,10 @@ use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
 use super::Block;
 use crate::api::export::ReceivingAddress;
-use crate::application::config::network::Network;
 use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::network::Network;
 
 pub(crate) const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
 

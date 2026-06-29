@@ -4,8 +4,8 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
-use crate::application::config::network::Network;
 use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;

@@ -21,7 +21,7 @@ use libp2p::StreamProtocol;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::application::config::network::Network;
+use crate::protocol::consensus::network::Network;
 
 pub(crate) const ADDRESS_BOOK_MAX_SIZE: usize = 1000_usize;
 

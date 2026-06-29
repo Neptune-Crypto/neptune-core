@@ -3483,10 +3483,10 @@ mod tests {
     use super::*;
     use crate::api::export::ReceivingAddress;
     use crate::api::export::TxOutputList;
-    use crate::application::config::network::Network;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
     use crate::protocol::consensus::block::Block;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::utxo::Utxo;

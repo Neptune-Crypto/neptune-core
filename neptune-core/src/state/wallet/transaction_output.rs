@@ -9,8 +9,8 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::utxo_notification::UtxoNotificationMethod;
-use crate::application::config::network::Network;
 use crate::prelude::twenty_first::prelude::Digest;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
@@ -646,7 +646,7 @@ mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::utxo::Coin;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;

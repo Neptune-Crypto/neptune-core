@@ -307,8 +307,8 @@ pub mod tests {
     use tracing::debug;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
     use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::tests::shared::files::headers_for_proof_server_request;

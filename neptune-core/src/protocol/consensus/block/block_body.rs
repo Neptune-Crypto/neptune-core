@@ -288,8 +288,8 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::protocol::consensus::block::Block;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::tests::shared::blocks::invalid_empty_block;

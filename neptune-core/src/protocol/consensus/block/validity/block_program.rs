@@ -22,11 +22,11 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::debug;
 
 use super::block_proof_witness::BlockProofWitness;
-use crate::application::config::network::Network;
 use crate::protocol::consensus::block::block_body::BlockBody;
 use crate::protocol::consensus::block::block_body::BlockBodyField;
 use crate::protocol::consensus::block::BlockAppendix;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
@@ -376,7 +376,6 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
     use crate::application::loops::mine_loop::create_block_transaction_from;
     use crate::application::loops::mine_loop::TxMergeOrigin;
     use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
@@ -384,6 +383,7 @@ pub(crate) mod tests {
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::TritonVmProofJobOptions;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::builtins::verify_stark;

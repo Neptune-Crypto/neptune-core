@@ -23,7 +23,7 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::application::config::network::Network;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;

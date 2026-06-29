@@ -5,8 +5,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::application::config::network::Network;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::primitive_witness::WitnessValidationError;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::state::transaction::transaction_details::TransactionDetails;

@@ -98,11 +98,11 @@ pub(crate) mod tests {
     use rand::SeedableRng;
 
     use super::*;
-    use crate::application::config::network::Network;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_header::BlockHeader;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::BlockProof;
+    use crate::protocol::consensus::network::Network;
 
     #[test]
     fn update_works() {

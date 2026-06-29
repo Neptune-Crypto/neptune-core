@@ -1074,8 +1074,8 @@ pub(crate) mod tests {
     use strum::EnumCount;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::transaction::PrimitiveWitness;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;

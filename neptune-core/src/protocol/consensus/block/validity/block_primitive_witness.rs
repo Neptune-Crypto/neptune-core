@@ -5,7 +5,6 @@ use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use tasm_lib::twenty_first::prelude::Mmr;
 
-use crate::api::export::Network;
 use crate::protocol::consensus::block::block_body::BlockBody;
 use crate::protocol::consensus::block::block_body::NUM_GUESSER_FEE_OUTPUTS;
 use crate::protocol::consensus::block::block_header::BlockHeader;
@@ -15,6 +14,7 @@ use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::consensus_rule_set::LustrationRule;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 
 /// Wraps all information necessary to produce a block.
@@ -198,7 +198,6 @@ pub(crate) mod tests {
     use tasm_lib::twenty_first::bfe;
 
     use super::BlockPrimitiveWitness;
-    use crate::api::export::Network;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_body::BlockBody;
     use crate::protocol::consensus::block::block_header::BlockHeader;
@@ -209,6 +208,7 @@ pub(crate) mod tests {
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::BlockProof;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::transaction::utxo::Utxo;

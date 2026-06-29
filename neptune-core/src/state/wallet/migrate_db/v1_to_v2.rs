@@ -241,7 +241,7 @@ mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::Timestamp;
     use crate::api::export::Utxo;
-    use crate::application::config::network::Network;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::expected_utxo::UtxoNotifier;

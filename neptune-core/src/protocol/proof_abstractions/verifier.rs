@@ -3,7 +3,7 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tokio::task;
 
-use crate::application::config::network::Network;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 
 /// This claims-cache contains claims that are simply defined to be true.

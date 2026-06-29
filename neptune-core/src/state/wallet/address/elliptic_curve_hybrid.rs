@@ -19,7 +19,7 @@ use tasm_lib::twenty_first::tip5::Tip5;
 
 use crate::api::export::Announcement;
 use crate::api::export::Utxo;
-use crate::application::config::network::Network;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
 use crate::state::wallet::address::common;

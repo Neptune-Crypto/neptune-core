@@ -11,8 +11,8 @@ pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat
 pub use crate::api::tx_initiation::consolidate::ConsolidationError;
 pub use crate::api::wallet::WalletBalances;
 pub use crate::application::config::cli_args::Args;
-pub use crate::application::config::network::Network;
 pub use crate::protocol::consensus::block::block_height::BlockHeight;
+pub use crate::protocol::consensus::network::Network;
 pub use crate::protocol::consensus::transaction::announcement::Announcement;
 pub use crate::protocol::consensus::transaction::primitive_witness::WitnessValidationError;
 pub use crate::protocol::consensus::transaction::transaction_proof::TransactionProof;

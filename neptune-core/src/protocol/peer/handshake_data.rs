@@ -8,9 +8,9 @@ use arraystring::ArrayString;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::application::config::network::Network;
 use crate::application::loops::connect_to_peers::PEER_TIME_DIFFERENCE_THRESHOLD;
 use crate::protocol::consensus::block::block_header::BlockHeader;
+use crate::protocol::consensus::network::Network;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VersionString(ArrayString<U30>);

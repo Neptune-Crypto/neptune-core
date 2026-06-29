@@ -2380,8 +2380,8 @@ mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
     use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::peer::peer_block_notifications::PeerBlockNotification;
     use crate::protocol::peer::peer_info::pseudorandom_peer_id;

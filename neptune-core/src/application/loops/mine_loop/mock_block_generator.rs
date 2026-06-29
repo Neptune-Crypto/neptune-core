@@ -4,7 +4,6 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use crate::api::export::ReceivingAddress;
-use crate::application::config::network::Network;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
@@ -14,6 +13,7 @@ use crate::protocol::consensus::block::validity::block_proof_witness::BlockProof
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockProof;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::protocol::consensus::transaction::Transaction;

@@ -1058,7 +1058,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::api::export::Network;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::transaction::TransactionKernelModifier;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;

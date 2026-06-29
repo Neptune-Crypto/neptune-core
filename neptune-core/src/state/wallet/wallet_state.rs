@@ -2236,8 +2236,8 @@ pub(crate) mod tests {
     use crate::api::export::Transaction;
     use crate::api::tx_initiation::initiator::TransactionInitiator;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::utxo::Coin;
     use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;

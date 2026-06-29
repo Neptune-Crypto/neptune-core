@@ -52,13 +52,13 @@ mod tests {
     use crate::api::export::SpendingKey;
     use crate::api::export::Transaction;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;

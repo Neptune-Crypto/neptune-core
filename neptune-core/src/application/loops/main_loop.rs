@@ -2600,7 +2600,7 @@ mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::ReceivingAddress;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::peer::peer_info::pseudorandom_peer_id;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;

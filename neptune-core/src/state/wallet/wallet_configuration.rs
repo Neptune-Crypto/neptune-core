@@ -7,7 +7,7 @@ use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use super::wallet_file::WALLET_OUTGOING_SECRETS_FILE_NAME;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
-use crate::application::config::network::Network;
+use crate::protocol::consensus::network::Network;
 
 /// Configuration options for [`WalletState`](super::wallet_state::WalletState).
 ///

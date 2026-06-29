@@ -29,7 +29,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::application::config::network::Network;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::state::wallet::utxo_notification::UtxoNotificationPayload;

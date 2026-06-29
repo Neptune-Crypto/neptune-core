@@ -1,13 +1,13 @@
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 
-use crate::api::export::Network;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
 use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::BFieldElement;
 

@@ -38,10 +38,10 @@ use super::consensus::block::block_height::BlockHeight;
 use super::consensus::block::difficulty_control::Difficulty;
 use super::consensus::block::difficulty_control::ProofOfWork;
 use super::consensus::block::Block;
-use crate::application::config::network::Network;
 use crate::application::loops::channel::BlockProposalNotification;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::protocol::consensus::block::difficulty_control::max_cumulative_pow_after;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::peer::transfer_block::TransferBlock;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 

@@ -758,7 +758,7 @@ pub mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::application::config::network::Network;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::announcement::Announcement;
     use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;

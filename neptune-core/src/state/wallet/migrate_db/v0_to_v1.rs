@@ -152,7 +152,7 @@ mod tests {
 
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
-    use crate::application::config::network::Network;
+    use crate::protocol::consensus::network::Network;
     use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::state::wallet::utxo_notification::UtxoNotificationMethod;

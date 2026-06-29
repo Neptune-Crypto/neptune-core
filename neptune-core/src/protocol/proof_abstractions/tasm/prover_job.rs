@@ -19,10 +19,10 @@ use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::vm::VMState;
 use tokio::io::AsyncWriteExt;
 
-use crate::application::config::network::Network;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
+use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
