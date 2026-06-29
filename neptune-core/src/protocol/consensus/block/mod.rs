@@ -2674,7 +2674,6 @@ pub(crate) mod tests {
             let premine_max_size = PREMINE_MAX_SIZE;
 
             let very_far_future = BLOCKS_PER_GENERATION * 128;
-            // let total_mined = Block::mined_supply(very_far_future.into());
             let total_mined = mined_supply_slow(very_far_future.into());
 
             assert!(

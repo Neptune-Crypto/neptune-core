@@ -244,7 +244,7 @@ impl Block {
     }
 
     /// Premine allocations for the claims fund and for all claimants to have
-    /// exercided claims before relaunch.
+    /// exercised claims before relaunch.
     pub(crate) fn utxo_redemption_fund_and_claims() -> Vec<(PremineReceiver, NativeCurrencyAmount)>
     {
         let [(claims_fund_address, mut claims_fund_amount)] =
@@ -311,6 +311,29 @@ mod tests {
         assert!(
             premine_max_size.to_nau_f64() / asymptotic_total_cap.to_nau_f64() < 0.0198f64,
             "Premine must be less than or equal to promised"
+        );
+    }
+
+    #[test]
+    fn premine_amount_is_831488() {
+        assert_eq!(
+            NativeCurrencyAmount::coins(831_488),
+            Block::original_premine_distribution()
+                .iter()
+                .map(|(_receiving_address, amount)| *amount)
+                .sum::<NativeCurrencyAmount>()
+        );
+    }
+
+    #[test]
+    fn claims_pool_has_right_size() {
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY
+                .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap()),
+            Block::utxo_redemption_fund_and_claims()
+                .iter()
+                .map(|(_receiving_address, amount)| *amount)
+                .sum::<NativeCurrencyAmount>()
         );
     }
 
