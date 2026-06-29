@@ -1,14 +1,14 @@
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
-use crate::api::export::Timestamp;
+use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
 use crate::protocol::consensus::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::BFieldElement;
 
 /// Height of 1st block that follows the alpha consensus ruleset, for main net.
@@ -363,6 +363,7 @@ pub(crate) mod tests {
 
     use futures::channel::oneshot;
     use itertools::Itertools;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedSub;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -378,13 +379,9 @@ pub(crate) mod tests {
     use crate::api::export::InputCandidate;
     use crate::api::export::InputSelectionPriority;
     use crate::api::export::KeyType;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::NeptuneProof;
     use crate::api::export::OutputFormat;
     use crate::api::export::ReceivingAddress;
     use crate::api::export::StateLock;
-    use crate::api::export::Timestamp;
-    use crate::api::export::TransactionProofType;
     use crate::api::export::TxCreationArtifacts;
     use crate::api::export::TxProvingCapability;
     use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
@@ -410,6 +407,9 @@ pub(crate) mod tests {
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::BlockProof;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+    use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;

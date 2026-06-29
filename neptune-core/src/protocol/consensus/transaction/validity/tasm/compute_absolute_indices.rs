@@ -256,10 +256,10 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::traits::rust_shadow::RustShadowError;
     use tasm_lib::triton_vm::prelude::BFieldElement;
+    use tasm_lib::twenty_first::bfe;
 
     use super::*;
     use crate::tests::shared::pop_encodable;
-    use crate::twenty_first::bfe;
 
     impl Function for ComputeAbsoluteIndices {
         fn rust_shadow(

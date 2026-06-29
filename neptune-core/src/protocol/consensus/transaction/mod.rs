@@ -30,6 +30,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tracing::info;
@@ -44,7 +45,6 @@ use self::transaction_kernel::TransactionKernelModifier;
 use self::transaction_kernel::TransactionKernelProxy;
 use super::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::triton_vm::proof::Claim;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {

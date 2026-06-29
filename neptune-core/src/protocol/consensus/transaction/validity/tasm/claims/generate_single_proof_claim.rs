@@ -1,9 +1,9 @@
 use tasm_lib::data_type::DataType;
 use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Library;
+use tasm_lib::triton_vm::prelude::*;
 
 use crate::protocol::consensus::transaction::validity::tasm::claims::new_claim::NewClaim;
-use crate::triton_vm::prelude::*;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct GenerateSingleProofClaim;

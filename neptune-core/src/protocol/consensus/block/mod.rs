@@ -1207,7 +1207,7 @@ impl Block {
 #[cfg(test)]
 impl rand::distr::Distribution<Block> for rand::distr::StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Block {
-        use crate::api::export::NeptuneProof;
+        use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
 
         let kernel = rng.random::<BlockKernel>();
         let proof = BlockProof::SingleProof(NeptuneProof::from(
@@ -2202,7 +2202,7 @@ pub(crate) mod tests {
     mod digest_encapsulation {
 
         use super::*;
-        use crate::api::export::NeptuneProof;
+        use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
 
         // test: verify clone + modify does not change original.
         //

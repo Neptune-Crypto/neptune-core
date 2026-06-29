@@ -303,6 +303,7 @@ pub mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use tasm_lib::triton_vm;
+    use tasm_lib::triton_vm::stark::Stark;
     use tracing::debug;
 
     use super::*;
@@ -317,7 +318,6 @@ pub mod tests {
     use crate::tests::shared::files::try_fetch_from_server;
     use crate::tests::shared::files::try_load_file_from_disk;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm::stark::Stark;
 
     impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
         fn from(job_priority: TritonVmJobPriority) -> Self {

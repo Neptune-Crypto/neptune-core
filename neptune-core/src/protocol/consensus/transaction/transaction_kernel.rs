@@ -21,7 +21,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::announcement::Announcement;
-use crate::api::export::TransparentInput;
+use crate::protocol::consensus::transaction::transparent_input::TransparentInput;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 pub(crate) const LUSTRATION_FLAG: BFieldElement = BFieldElement::new(51022176260u64);
@@ -795,7 +795,7 @@ pub mod tests {
         use super::*;
         use crate::api::export::GenerationSpendingKey;
         use crate::api::export::UnlockedUtxo;
-        use crate::api::export::Utxo;
+        use crate::protocol::consensus::transaction::utxo::Utxo;
 
         #[proptest(cases = 5)]
         fn no_lustration_required_on_new_aocl_leafs(

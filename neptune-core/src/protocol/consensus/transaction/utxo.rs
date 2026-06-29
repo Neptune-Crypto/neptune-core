@@ -298,12 +298,12 @@ pub mod neptune_arbitrary {
 mod tests {
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
+    use tasm_lib::triton_vm::prelude::*;
     use test_strategy::proptest;
     use tracing_test::traced_test;
 
     use super::*;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
-    use crate::triton_vm::prelude::*;
 
     impl Utxo {
         pub(crate) fn with_coin(mut self, coin: Coin) -> Self {

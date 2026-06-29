@@ -26,7 +26,7 @@ use crate::protocol::consensus::transaction::Proof;
 use crate::protocol::consensus::transaction::TransactionKernel;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::mast_hash::MastHash;
-use crate::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::protocol::consensus::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 

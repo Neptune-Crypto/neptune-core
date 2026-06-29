@@ -1,4 +1,4 @@
-use crate::api::export::Utxo;
+use crate::protocol::consensus::transaction::utxo::Utxo;
 
 pub struct Lustration {
     aocl_leaf_index: u64,

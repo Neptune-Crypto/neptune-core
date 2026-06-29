@@ -1,9 +1,11 @@
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use serde::Deserialize;
 use serde::Serialize;
@@ -16,11 +18,9 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use super::block_appendix::BlockAppendix;
 use super::block_body::BlockBody;
 use super::block_header::BlockHeader;
-use crate::api::export::AdditionRecord;
-use crate::api::export::Timestamp;
-use crate::api::export::Utxo;
 use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
+use crate::protocol::consensus::transaction::utxo::Utxo;
 
 /// The kernel of a block contains all data that is not proof data
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]

@@ -16,6 +16,7 @@ use neptune_job_queue::JobCompletion;
 use neptune_job_queue::JobResultWrapper;
 use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
 use tasm_lib::triton_vm::error::InstructionError;
+use tasm_lib::triton_vm::vm::VMState;
 use tokio::io::AsyncWriteExt;
 
 use crate::application::config::network::Network;
@@ -29,7 +30,6 @@ use crate::protocol::proof_abstractions::Claim;
 use crate::protocol::proof_abstractions::NonDeterminism;
 use crate::protocol::proof_abstractions::Program;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-use crate::triton_vm::vm::VMState;
 
 /// Error code from the spawned prover process in the range 200-232 are reserved
 /// for communicating that the proof is too big. The error code returned is

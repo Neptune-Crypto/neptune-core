@@ -93,6 +93,7 @@ mod test {
     use std::collections::HashMap;
 
     use itertools::Itertools;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedAdd;
     use rand::rng;
     use rand::rngs::StdRng;
@@ -114,10 +115,9 @@ mod test {
     use tasm_lib::triton_vm::vm::NonDeterminism;
 
     use super::GetTotalAndTimeLockedAmounts;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::Timestamp;
     use crate::protocol::consensus::transaction::utxo::Coin;
     use crate::protocol::consensus::transaction::utxo::Utxo;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::consensus::type_scripts::time_lock::TimeLock;
     use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 

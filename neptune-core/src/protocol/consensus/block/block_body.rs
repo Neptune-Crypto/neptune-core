@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
@@ -17,13 +18,12 @@ use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::api::export::AdditionRecord;
-use crate::api::export::BlockHeight;
-use crate::api::export::NativeCurrencyAmount;
 use crate::prelude::twenty_first;
+use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 pub(crate) const NUM_GUESSER_FEE_OUTPUTS: u64 = 2;
 
@@ -288,10 +288,10 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::Network;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::tests::shared::blocks::invalid_empty_block;
 
     #[test]

@@ -360,11 +360,11 @@ impl TritonProgram for KernelToOutputs {
 
 #[cfg(any(test, feature = "spec"))]
 mod spec {
+    use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::commit;
 
     use super::*;
-    use crate::api::export::AdditionRecord;
-    use crate::api::export::Utxo;
+    use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
 
@@ -423,13 +423,13 @@ mod tests {
     use proptest::test_runner::TestRunner;
     use rand::random;
     use tasm_lib::triton_vm;
+    use tasm_lib::triton_vm::proof::Claim;
+    use tasm_lib::triton_vm::stark::Stark;
     use test_strategy::proptest;
 
     use super::*;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::triton_vm::proof::Claim;
-    use crate::triton_vm::stark::Stark;
 
     #[proptest(cases = 30)]
     fn kernel_to_outputs_proptest(

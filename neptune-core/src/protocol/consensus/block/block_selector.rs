@@ -17,11 +17,11 @@ use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::twenty_first::prelude::Digest;
 use thiserror::Error;
 
 use super::block_height::BlockHeight;
 use crate::state::GlobalState;
-use crate::twenty_first::prelude::Digest;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

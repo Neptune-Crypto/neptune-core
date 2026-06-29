@@ -58,7 +58,7 @@ use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_primitives::timestamp::Timestamp;
 use crate::protocol::proof_abstractions::SecretWitness;
-use crate::triton_vm::prelude::NonDeterminism;
+use tasm_lib::triton_vm::prelude::NonDeterminism;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
@@ -434,10 +434,10 @@ impl BasicSnippet for MergeBranch {
         let neptune_coins_size = NativeCurrencyAmount::static_length().unwrap();
         let kernel_field_fee = field!(TransactionKernel::fee);
         let overflowing_add_u128 = library.import(Box::new(
-            crate::tasm_lib::arithmetic::u128::overflowing_add::OverflowingAdd,
+            tasm_lib::arithmetic::u128::overflowing_add::OverflowingAdd,
         ));
         let compare_u128 = DataType::U128.compare();
-        let lt_u128 = library.import(Box::new(crate::tasm_lib::arithmetic::u128::lt::Lt));
+        let lt_u128 = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
         let push_max_amount = NativeCurrencyAmount::max().push_to_stack();
 
         let assert_new_fee_is_sum_of_left_and_right = triton_asm!(

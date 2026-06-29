@@ -198,13 +198,13 @@ pub(crate) mod tests {
     use tasm_lib::twenty_first::bfe;
 
     use super::BlockPrimitiveWitness;
-    use crate::api::export::BlockHeight;
     use crate::api::export::Network;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_body::BlockBody;
     use crate::protocol::consensus::block::block_header::BlockHeader;
+    use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_kernel::BlockKernel;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;

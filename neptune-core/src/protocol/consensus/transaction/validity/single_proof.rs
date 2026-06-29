@@ -6,7 +6,7 @@ use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::triton_vm::prelude::*;
+use tasm_lib::triton_vm::prelude::*;
 use itertools::Itertools;
 use tasm_lib::field;
 use tasm_lib::memory::encode_to_memory;

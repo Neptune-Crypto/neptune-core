@@ -495,9 +495,9 @@ pub mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::NeptuneProof;
     use crate::application::triton_vm_job_queue::vm_job_queue;
+    use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::tests::shared_tokio_runtime;
 

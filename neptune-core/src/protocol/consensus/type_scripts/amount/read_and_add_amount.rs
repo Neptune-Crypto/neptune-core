@@ -6,10 +6,10 @@ use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 
-use crate::api::export::NativeCurrencyAmount;
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::type_scripts::amount::BAD_STATE_SIZE_ERROR;
 use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// Add the amount of a native currency coin to a running sum.
 #[derive(Debug, Clone, Copy)]

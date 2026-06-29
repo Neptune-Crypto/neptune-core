@@ -6,7 +6,7 @@ use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::api::export::NativeCurrencyAmount;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::bound_time_diff::BoundTimeDiff;
 
@@ -101,8 +101,8 @@ mod tests {
     use tasm_lib::triton_vm::vm::NonDeterminism;
 
     use super::*;
-    use crate::api::export::NativeCurrencyAmount;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     #[test]
     fn small_time_diff_ok() {

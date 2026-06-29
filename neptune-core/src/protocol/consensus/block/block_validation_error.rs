@@ -1,6 +1,6 @@
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 
-use crate::api::export::NativeCurrencyAmount;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// The reasons why a [`Block`](crate::protocol::consensus::block::Block) can be
 /// invalid.
@@ -144,6 +144,7 @@ impl From<RemovalRecordListUnpackError> for BlockValidationError {
 #[cfg(test)]
 mod tests {
     use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedSub;
     use proptest::prelude::Just;
     use proptest::prop_assert_eq;
@@ -157,13 +158,10 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::api::export::BlockHeight;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::NeptuneProof;
     use crate::api::export::Network;
-    use crate::api::export::Timestamp;
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_appendix::MAX_NUM_CLAIMS;
+    use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::difficulty_control;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::protocol::consensus::block::pow::LustrationStatus;
@@ -176,6 +174,8 @@ mod tests {
     use crate::protocol::consensus::consensus_rule_set::TX_BACKDATING_LIMIT;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
+    use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::verifier::cache_true_claims;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_empty_block;

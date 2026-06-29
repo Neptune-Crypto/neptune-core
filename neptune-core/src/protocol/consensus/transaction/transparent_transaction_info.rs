@@ -6,7 +6,7 @@ use rand::distr::StandardUniform;
 use rand::Rng;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
-use crate::api::export::Announcement;
+use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transparent_input::TransparentInput;
 use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;

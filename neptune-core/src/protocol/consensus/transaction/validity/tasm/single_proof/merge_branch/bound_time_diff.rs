@@ -1,3 +1,4 @@
+use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::prelude::BasicSnippet;
@@ -5,7 +6,6 @@ use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 
-use crate::api::export::Timestamp;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 
 /// Crash execution if the difference in timestamp in the two transactions
@@ -161,8 +161,8 @@ mod tests {
     use tasm_lib::triton_vm::vm::NonDeterminism;
 
     use super::*;
-    use crate::api::export::NativeCurrencyAmount;
     use crate::protocol::consensus::transaction::TransactionKernelProxy;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     #[test]
     fn small_time_diff_ok() {
