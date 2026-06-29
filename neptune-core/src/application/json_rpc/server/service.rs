@@ -1388,6 +1388,56 @@ impl RpcApi for RpcServer {
         Ok(ClaimUtxoResponse { new: true })
     }
 
+    async fn prove_an_transfer_call(
+        &self,
+        request: ProveAnTransferRequest,
+    ) -> RpcResult<ProveAnTransferResponse> {
+        if request.tx_ix.is_some()
+            && request.tx_ix.unwrap() >= self
+            .state
+            .lock_async(|gs| {
+                crate::application::database::storage::storage_vec::traits::StorageVecBase::len(
+                    gs.wallet_state.wallet_db.sent_transactions(),
+                )
+            }).await {return Err(RpcError::SentTxIndexOutOfBounds)}
+
+        let (block, data) = crate::util_types::proof_of_transfer::helper(
+            self.state.clone(),
+            request.tx_ix,
+            request.utxo_ix,
+            request.block,
+        )
+        .await
+        .map_err(|e| {
+            RpcError::Server(JsonError::Custom {
+                code: -32603,
+                message: format!("Failed to prove transfer: {}", e),
+                data: None,
+            })
+        })?;
+
+        Ok(ProveAnTransferResponse {
+            block,
+            data: data
+                .into_iter()
+                .map(|(claim, proof)| (claim, proof.map_err(|e| e.to_string())))
+                .collect(),
+        })
+    }
+
+    async fn triton_verify_call(
+        &self,
+        request: TritonVerifyRequest,
+    ) -> RpcResult<TritonVerifyResponse> {
+        Ok(TritonVerifyResponse {
+            is_valid: tasm_lib::triton_vm::verify(
+                Default::default(),
+                &request.claim,
+                &request.proof,
+            ),
+        })
+    }
+
     /* Mining */
     async fn get_block_template_call(
         &self,
@@ -3155,7 +3205,7 @@ pub mod tests {
 
         /// Return an RPC server with state with wallet history. Also returns
         /// the address receiving all non-change transactions.
-        async fn state_with_transaction_history(
+        pub(crate) async fn state_with_transaction_history(
             network: Network,
             num_blocks: usize,
             send_amount: NativeCurrencyAmount,
@@ -3211,5 +3261,225 @@ pub mod tests {
 
             (rpc_server, to_address)
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn prove_transfer_basic_functionality() {
+        use super::*;
+        use crate::application::config::network::Network;
+        use crate::application::json_rpc::core::api::ops::Namespace;
+
+        // create a proper RPC server with test wallet
+        let cli_args = crate::application::config::cli_args::Args {
+            network: Network::RegTest,
+            rpc_modules: vec![Namespace::Personal],
+            unsafe_rpc: true,
+            tx_proving_capability: Some(crate::api::export::TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
+
+        let rpc_server = test_rpc_server_with_cli_args(cli_args).await;
+
+        // test that the method exists and can be called (even if it fails due to no data)
+        let result = rpc_server
+            .prove_an_transfer_call(ProveAnTransferRequest {
+                tx_ix: Some(0),
+                utxo_ix: Some(0),
+                block: Some(tasm_lib::prelude::Digest::default()),
+            })
+            .await;
+
+        // We expect this to fail since there's no actual transaction data, but the method should be callable and return a proper error.
+        assert_eq!(result.unwrap_err(), RpcError::SentTxIndexOutOfBounds);
+
+        // verify request/response types work correctly
+        let request = ProveAnTransferRequest {
+            tx_ix: Some(42),
+            utxo_ix: Some(7),
+            block: Some(tasm_lib::prelude::Digest::default()),
+        };
+
+        // verify the request can be serialized/deserialized (basic JSON-RPC compatibility)
+        let serialized = serde_json::to_string(&request).unwrap();
+        let deserialized: ProveAnTransferRequest = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(request.tx_ix, deserialized.tx_ix);
+        assert_eq!(request.utxo_ix, deserialized.utxo_ix);
+        assert_eq!(request.block, deserialized.block);
+
+        // verify response type works
+        let response = ProveAnTransferResponse {
+            block: request.block.unwrap(),
+            data: vec![(
+                tasm_lib::triton_vm::proof::Claim {
+                    program_digest: tasm_lib::prelude::Digest::default(),
+                    version: 1,
+                    input: vec![],
+                    output: vec![],
+                },
+                Ok(crate::api::export::NeptuneProof::invalid()),
+            )],
+        };
+
+        let serialized_response = serde_json::to_string(&response).unwrap();
+        let deserialized_response: ProveAnTransferResponse =
+            serde_json::from_str(&serialized_response).unwrap();
+
+        assert_eq!(
+            response.data[0].0.program_digest,
+            deserialized_response.data[0].0.program_digest
+        );
+        assert_eq!(
+            response.data[0].0.version,
+            deserialized_response.data[0].0.version
+        );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn prove_transfer_with_transaction_history() {
+        use super::*;
+        use crate::application::config::network::Network;
+
+        // create RPC server with transaction history
+        let (rpc_server, _to_address) =
+            crate::application::json_rpc::server::service::tests::history::
+            state_with_transaction_history(
+                Network::RegTest,
+                3, // create 3 blocks with transactions
+                NativeCurrencyAmount::from_nau(1000),
+                NativeCurrencyAmount::from_nau(10),
+            ).await;
+
+        // Test prove_transfer on a real transaction from the history.
+        // Get the first block (after genesis) that contains transactions.
+        let state = rpc_server.state.lock_guard().await;
+        let tip_height = state.chain.tip().kernel.header.height;
+        drop(state);
+
+        // we should have at least 3 blocks with transactions
+        assert!(tip_height.value() >= 3);
+
+        // Try to prove transfer for transaction in block 1 (first block after genesis)
+        // For now, just test that the method exists and handles basic request structure
+        // TODO: Add more comprehensive test with real transaction data once API access is sorted out
+        let result = rpc_server
+            .prove_an_transfer_call(ProveAnTransferRequest {
+                tx_ix: Some(0),                                    // First transaction in the block
+                utxo_ix: Some(0),                                  // First UTXO
+                block: Some(tasm_lib::prelude::Digest::default()), // Use default digest for now
+            })
+            .await;
+
+        // This should fail gracefully with proper error message
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            RpcError::Server(json_err) => match json_err {
+                JsonError::Custom { message, .. } => {
+                    assert!(message.contains("Failed to prove transfer"));
+                }
+                _ => panic!("Expected Custom error"),
+            },
+            _ => panic!("Expected Server error"),
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn triton_verify_basic_functionality() {
+        use super::*;
+
+        let rpc_server = test_rpc_server().await;
+
+        // Test with invalid proof
+        let invalid_claim = tasm_lib::triton_vm::proof::Claim {
+            program_digest: Digest::default(),
+            version: 1,
+            input: vec![],
+            output: vec![],
+        };
+
+        let invalid_proof = crate::api::export::NeptuneProof::invalid();
+
+        let response = rpc_server
+            .triton_verify_call(TritonVerifyRequest {
+                claim: invalid_claim.clone(),
+                proof: invalid_proof,
+            })
+            .await;
+
+        // invalid proof should return `false`
+        assert!(!response.unwrap().is_valid);
+
+        // Test serialization/deserialization
+        let request = TritonVerifyRequest {
+            claim: invalid_claim,
+            proof: crate::api::export::NeptuneProof::invalid(),
+        };
+
+        let serialized = serde_json::to_string(&request).unwrap();
+        let deserialized: TritonVerifyRequest = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(
+            request.claim.program_digest,
+            deserialized.claim.program_digest
+        );
+        assert_eq!(request.claim.version, deserialized.claim.version);
+
+        let response_ = TritonVerifyResponse { is_valid: true };
+        let serialized_response = serde_json::to_string(&response_).unwrap();
+        let deserialized_response: TritonVerifyResponse =
+            serde_json::from_str(&serialized_response).unwrap();
+
+        assert_eq!(response_.is_valid, deserialized_response.is_valid);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn prove_transfer_error_handling() {
+        use super::*;
+        use crate::application::config::network::Network;
+
+        let rpc_server = test_rpc_server_with_cli_args(cli_args::Args {
+            network: Network::RegTest,
+            rpc_modules: vec![Namespace::Personal],
+            unsafe_rpc: true,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        })
+        .await;
+
+        // test with non-existent block
+        let fake_block = Digest::new([tasm_lib::triton_vm::prelude::BFieldElement::new(1); 5]);
+        let result = rpc_server
+            .prove_an_transfer_call(ProveAnTransferRequest {
+                tx_ix: None,
+                utxo_ix: None,
+                block: Some(fake_block),
+            })
+            .await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            RpcError::Server(json_err) => match json_err {
+                JsonError::Custom { message, .. } => {
+                    assert!(message.contains("Failed to prove transfer"));
+                }
+                _ => panic!("Expected Custom error"),
+            },
+            _ => panic!("Expected Server error"),
+        }
+
+        // Test with out-of-bounds indices
+        let state = rpc_server.state.lock_guard().await;
+        let genesis_hash = state.chain.tip().kernel.header.prev_block_digest;
+        drop(state);
+
+        let result_ = rpc_server
+            .prove_an_transfer_call(ProveAnTransferRequest {
+                tx_ix: Some(0),
+                utxo_ix: Some(999),
+                block: Some(genesis_hash),
+            })
+            .await;
+
+        assert!(result_.is_err());
     }
 }

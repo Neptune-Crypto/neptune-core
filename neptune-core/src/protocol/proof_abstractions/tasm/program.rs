@@ -141,9 +141,8 @@ pub(crate) async fn prove_triton_program(
     Ok(ProverJobResult::try_from(completion)?.into_inner()?)
 }
 
-/// Options for executing the triton-vm proving job
-#[derive(Clone, Debug)]
-#[cfg_attr(test, derive(Default))]
+/// Options for executing the `triton-vm` proving job.
+#[derive(Clone, Debug, Default)]
 pub struct TritonVmProofJobOptions {
     /// priority of this job in the job-queue
     ///

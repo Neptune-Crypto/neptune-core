@@ -7,6 +7,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::api::export::KeyType;
+use crate::api::export::NeptuneProof;
 use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::body::*;
 use crate::application::json_rpc::core::model::block::header::*;
@@ -594,6 +595,24 @@ pub struct ClaimUtxoResponse {
     pub new: bool,
 }
 
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct ProveAnTransferRequest {
+    pub tx_ix: Option<u64>,
+    pub utxo_ix: Option<usize>,
+    pub block: Option<Digest>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProveAnTransferResponse {
+    pub block: Digest,
+    pub data: Vec<(
+        tasm_lib::triton_vm::proof::Claim,
+        Result<NeptuneProof, String>,
+    )>,
+}
+
 /* Mining */
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -605,6 +624,19 @@ pub struct GetBlockTemplateRequest {
 #[serde(rename_all = "camelCase")]
 pub struct GetBlockTemplateResponse {
     pub template: Option<RpcBlockTemplate>,
+}
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct TritonVerifyRequest {
+    pub claim: tasm_lib::triton_vm::proof::Claim,
+    pub proof: NeptuneProof,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TritonVerifyResponse {
+    pub is_valid: bool,
 }
 
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]

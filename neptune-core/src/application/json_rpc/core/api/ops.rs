@@ -201,6 +201,12 @@ pub enum RpcMethods {
     #[namespace(Namespace::Personal)]
     ClaimUtxo,
 
+    #[namespace(Namespace::Personal)]
+    ProveAnTransfer,
+
+    #[namespace(Namespace::Personal)]
+    TritonVerify,
+
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,
 

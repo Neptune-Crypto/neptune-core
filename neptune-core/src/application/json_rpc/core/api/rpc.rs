@@ -22,6 +22,7 @@ use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::json::JsonError;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
+use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RestoreMembershipProofError {
@@ -128,6 +129,9 @@ pub enum RpcError {
         "The consensus rules require lustration of the input, but the lustration flag was not set."
     )]
     TransactionRequiresLustration,
+
+    #[error("Sent tx index is out of bounds.")]
+    SentTxIndexOutOfBounds,
 }
 
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -748,6 +752,45 @@ pub trait RpcApi: Sync + Send {
     }
 
     async fn claim_utxo_call(&self, request: ClaimUtxoRequest) -> RpcResult<ClaimUtxoResponse>;
+
+    /// Prove a transfer of the native coin from the current wallet.
+    /// Discloses amount, addresses, and other transfer information while
+    /// keeping sensitive data hidden in the proof.
+    async fn prove_an_transfer(
+        &self,
+        tx_ix: Option<u64>,
+        utxo_ix: Option<usize>,
+        block: Option<Digest>,
+    ) -> RpcResult<ProveAnTransferResponse> {
+        self.prove_an_transfer_call(ProveAnTransferRequest {
+            tx_ix,
+            utxo_ix,
+            block,
+        })
+        .await
+    }
+
+    async fn prove_an_transfer_call(
+        &self,
+        request: ProveAnTransferRequest,
+    ) -> RpcResult<ProveAnTransferResponse>;
+
+    /// Verify a Triton VM (claim, proof) pair.
+    /// Returns `true` if the proof is valid for the given claim.
+    async fn triton_verify(
+        &self,
+        claim: tasm_lib::triton_vm::proof::Claim,
+        proof: NeptuneProof,
+    ) -> TritonVerifyResponse {
+        self.triton_verify_call(TritonVerifyRequest { claim, proof })
+            .await
+            .expect("infallible")
+    }
+
+    async fn triton_verify_call(
+        &self,
+        request: TritonVerifyRequest,
+    ) -> RpcResult<TritonVerifyResponse>;
 
     /* Mining */
 
