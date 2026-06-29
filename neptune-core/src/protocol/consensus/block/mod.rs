@@ -1257,7 +1257,6 @@ pub(crate) mod tests {
     use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
     use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
     use crate::protocol::consensus::type_scripts::TypeScript;
@@ -1629,8 +1628,7 @@ pub(crate) mod tests {
             );
             let (composer_txos, transaction_details) =
                 prepare_coinbase_transaction_stateless(&genesis, composer_parameters, now, network);
-            let coinbase_kernel =
-                PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
+            let coinbase_kernel = transaction_details.primitive_witness().kernel;
             let coinbase_kernel = TransactionKernelModifier::default()
                 .merge_bit(true)
                 .modify(coinbase_kernel); // ok: proof is invalid anyway

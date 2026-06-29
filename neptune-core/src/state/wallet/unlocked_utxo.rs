@@ -8,15 +8,11 @@ use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::Tip5;
 
-use crate::api::export::AbsoluteIndexSet;
-use crate::api::export::Announcement;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::TransparentInput;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
-use crate::protocol::consensus::transaction::transaction_kernel::LUSTRATION_FLAG;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::tasm_lib::prelude::Digest;
 
@@ -65,29 +61,6 @@ impl UnlockedUtxo {
             self.membership_proof.sender_randomness,
             self.membership_proof.receiver_preimage.hash(),
         )
-    }
-
-    pub(crate) fn absolute_indices(&self) -> AbsoluteIndexSet {
-        let item = self.mutator_set_item();
-        let msmp = self.mutator_set_mp();
-        AbsoluteIndexSet::compute(
-            item,
-            msmp.sender_randomness,
-            msmp.receiver_preimage,
-            msmp.aocl_leaf_index,
-        )
-    }
-
-    /// Return the lustration of this unlocked UTXO.
-    ///
-    /// The lustration is an announcement that proves the value of the input.
-    /// To achieve this, some privacy is leaked: The sender randomness, the
-    /// lock script hash, the receiver preimage, and the lock script hash and
-    /// anything else the input UTXO may contain.
-    pub(crate) fn lustration(&self) -> Announcement {
-        let as_transparent_input: TransparentInput = self.clone().into();
-
-        Announcement::new([vec![LUSTRATION_FLAG], as_transparent_input.encode()].concat())
     }
 }
 
@@ -185,5 +158,16 @@ impl TxInputs {
     /// retrieves mutator-set membership proofs
     pub fn ms_membership_proofs(&self) -> Vec<MsMembershipProof> {
         self.ms_membership_proofs_iter().into_iter().collect()
+    }
+}
+
+impl From<UnlockedUtxo> for TransparentInput {
+    fn from(tx_input: UnlockedUtxo) -> Self {
+        TransparentInput {
+            utxo: tx_input.utxo.clone(),
+            aocl_leaf_index: tx_input.mutator_set_mp().aocl_leaf_index,
+            sender_randomness: tx_input.mutator_set_mp().sender_randomness,
+            receiver_preimage: tx_input.mutator_set_mp().receiver_preimage,
+        }
     }
 }

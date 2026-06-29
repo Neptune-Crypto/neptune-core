@@ -14,7 +14,6 @@ use crate::protocol::consensus::block::validity::block_proof_witness::BlockProof
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockProof;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::protocol::consensus::transaction::Transaction;
@@ -58,7 +57,7 @@ impl MockBlockGenerator {
     /// scenes, this method updates the true claims cache, such that the call to
     /// `triton_vm::verify` will be by-passed.
     fn mock_transaction_from_details(transaction_details: &TransactionDetails) -> Transaction {
-        let kernel = PrimitiveWitness::from_transaction_details(transaction_details).kernel;
+        let kernel = transaction_details.primitive_witness().kernel;
 
         Transaction {
             kernel,

@@ -23,7 +23,6 @@ use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransact
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
@@ -147,7 +146,7 @@ pub(super) async fn fake_create_transaction_from_details_for_tests(
     transaction_details: crate::api::export::TransactionDetails,
     consensus_rule_set: ConsensusRuleSet,
 ) -> Transaction {
-    let kernel = PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
+    let kernel = transaction_details.primitive_witness().kernel;
 
     let claim = single_proof_claim(kernel.mast_hash(), consensus_rule_set);
     cache_true_claims([claim.clone()]).await;

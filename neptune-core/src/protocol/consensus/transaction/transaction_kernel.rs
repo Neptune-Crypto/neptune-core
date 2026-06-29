@@ -871,12 +871,16 @@ pub mod tests {
             let mut kernel = primitive_witness.kernel.clone();
 
             if include_lustration {
-                let unlocked_utxo = UnlockedUtxo::unlock(
+                let input = UnlockedUtxo::unlock(
                     input_utxo,
                     lock_script_and_witness,
                     primitive_witness.input_membership_proofs[0].clone(),
                 );
-                kernel.announcements.push(unlocked_utxo.lustration());
+                kernel
+                    .announcements
+                    .push(Announcement::lustration_announcement(
+                        &TransparentInput::from(input),
+                    ));
             }
 
             kernel

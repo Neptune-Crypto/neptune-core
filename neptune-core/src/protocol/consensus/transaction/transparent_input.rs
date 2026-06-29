@@ -9,7 +9,6 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 
 /// The key data from a transaction input that enables a transparent audit.
 ///
@@ -40,17 +39,6 @@ pub struct TransparentInput {
     pub aocl_leaf_index: u64,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
-}
-
-impl From<UnlockedUtxo> for TransparentInput {
-    fn from(tx_input: UnlockedUtxo) -> Self {
-        TransparentInput {
-            utxo: tx_input.utxo.clone(),
-            aocl_leaf_index: tx_input.mutator_set_mp().aocl_leaf_index,
-            sender_randomness: tx_input.mutator_set_mp().sender_randomness,
-            receiver_preimage: tx_input.mutator_set_mp().receiver_preimage,
-        }
-    }
 }
 
 impl TransparentInput {

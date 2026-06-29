@@ -11,9 +11,9 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tracing::debug;
 
-use crate::api::export::UnlockedUtxo;
 use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::transaction::transaction_kernel::LUSTRATION_FLAG;
+use crate::protocol::consensus::transaction::transparent_input::TransparentInput;
 
 /// Represents arbitrary data that can be stored in a transaction on the public
 /// blockchain.
@@ -58,9 +58,15 @@ impl Announcement {
             .is_some_and(|elem0| *elem0 == LUSTRATION_FLAG)
     }
 
+    /// Return the lustration announcements required for these inputs. Only
+    /// returns lustration announcements for those inputs that must be
+    /// lustrated.
+    ///
+    /// The supplied [`LustrationStatus`] dictates which inputs that must
+    /// lustrate.
     pub fn lustration_announcements(
         lustration_status: LustrationStatus,
-        tx_inputs: &[UnlockedUtxo],
+        tx_inputs: &[TransparentInput],
     ) -> Vec<Self> {
         let mut lustrations = vec![];
 
@@ -68,7 +74,7 @@ impl Announcement {
             // Match consensus rule that defines when inputs need to be
             // lustrated.
             let (input_index_lower_end, _) = input
-                .absolute_indices()
+                .absolute_index_set()
                 .aocl_range()
                 .expect("Must be able to calculate AOCL range of own input");
 
@@ -78,11 +84,16 @@ impl Announcement {
                      range was: {input_index_lower_end}"
                 );
                 // Input must be lustrated
-                lustrations.push(input.lustration());
+                lustrations.push(Self::lustration_announcement(input));
             }
         }
 
         lustrations
+    }
+
+    /// Build the lustration announcement for a transaction input.
+    pub(crate) fn lustration_announcement(input: &TransparentInput) -> Self {
+        Self::new([vec![LUSTRATION_FLAG], input.encode()].concat())
     }
 }
 

@@ -309,9 +309,7 @@ impl TransactionDetails {
     /// specifically, a [PrimitiveWitness] is built from these
     /// details and validated.
     pub async fn validate(&self) -> Result<(), WitnessValidationError> {
-        PrimitiveWitness::from_transaction_details(self)
-            .validate()
-            .await
+        self.primitive_witness().validate().await
     }
 
     /// Produce the list of announcements, including the UTXO
@@ -324,8 +322,29 @@ impl TransactionDetails {
         .concat()
     }
 
+    /// Create a [`PrimitiveWitness`] from these [`TransactionDetails`].
     pub fn primitive_witness(&self) -> PrimitiveWitness {
-        PrimitiveWitness::from_transaction_details(self)
+        let kernel = self.transaction_kernel();
+
+        let TransactionDetails {
+            tx_outputs,
+            tx_inputs,
+            mutator_set_accumulator,
+            ..
+        } = self;
+
+        // populate witness
+        let output_utxos = tx_outputs.utxos();
+        let sender_randomnesses = tx_outputs.sender_randomnesses();
+        let receiver_digests = tx_outputs.receiver_digests();
+        PrimitiveWitness::generate_primitive_witness(
+            tx_inputs,
+            output_utxos,
+            sender_randomnesses,
+            receiver_digests,
+            kernel,
+            mutator_set_accumulator.clone(),
+        )
     }
 
     /// Assemble the transaction kernel corresponding to this

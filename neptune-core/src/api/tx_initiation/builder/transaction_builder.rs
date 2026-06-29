@@ -3,7 +3,6 @@
 //! see [builder](super) for examples of using the builders together.
 
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
@@ -69,12 +68,8 @@ impl<'a> TransactionBuilder<'a> {
     /// Either a `TransactionKernel` or `TransactionDetails` is required.
     ///
     /// Provide a kernel if available.  Note that it can be obtained from a
-    /// [PrimitiveWitness] and that `TransactionDetails` provides a
-    /// `primitive_witness()` method.
-    ///
-    /// If both are provided, the details are ignored as using them requires the
-    /// builder to generate a new [PrimitiveWitness], which is comparatively
-    /// expensive.
+    /// [PrimitiveWitness](crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness)
+    /// and that `TransactionDetails` provides a `primitive_witness()` method.
     ///
     /// note: the builder does not validate the resulting artifacts.
     /// That can be done with [Transaction::is_valid()]
@@ -82,7 +77,7 @@ impl<'a> TransactionBuilder<'a> {
         // prefer kernel, else tx_details.
         let Some(kernel) = self.kernel.or_else(|| {
             self.transaction_details
-                .map(|d| PrimitiveWitness::from_transaction_details(d).kernel)
+                .map(|d| d.primitive_witness().kernel)
         }) else {
             return Err(CreateTxError::MissingRequirement);
         };

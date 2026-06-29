@@ -7,7 +7,6 @@ use tasm_lib::prelude::Digest;
 
 use crate::application::config::network::Network;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::primitive_witness::WitnessValidationError;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::state::transaction::transaction_details::TransactionDetails;
@@ -117,9 +116,7 @@ impl TxCreationArtifacts {
 
         // 2. verify that Transaction and TransactionDetails match.
         let tx_hash = self.transaction.kernel.mast_hash();
-        let details_hash = PrimitiveWitness::from_transaction_details(&self.details)
-            .kernel
-            .mast_hash();
+        let details_hash = self.details.primitive_witness().kernel.mast_hash();
 
         if details_hash != tx_hash {
             return Err(TxCreationArtifactsError::TxDetailsMismatch {

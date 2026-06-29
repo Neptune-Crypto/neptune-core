@@ -28,7 +28,6 @@ use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
@@ -139,7 +138,7 @@ impl TransactionInitiator {
     ///
     /// see [builder::transaction_proof_builder](super::builder::transaction_proof_builder) for details.
     pub fn generate_witness_proof(&self, tx_details: Arc<TransactionDetails>) -> TransactionProof {
-        let primitive_witness = PrimitiveWitness::from_transaction_details(&tx_details);
+        let primitive_witness = tx_details.primitive_witness();
         TransactionProof::Witness(primitive_witness)
     }
 

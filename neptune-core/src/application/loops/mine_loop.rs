@@ -14,7 +14,6 @@ use neptune_job_queue::errors::JobHandleError;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use num_traits::Zero;
-use primitive_witness::PrimitiveWitness;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -457,7 +456,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         network,
     );
 
-    let witness = PrimitiveWitness::from_transaction_details(&transaction_details);
+    let witness = transaction_details.primitive_witness();
 
     info!("Start: generate single proof for coinbase transaction");
 
@@ -681,7 +680,7 @@ pub(crate) async fn create_block_transaction_from(
             coinbase_timestamp,
             global_state_lock.cli().network,
         );
-        let nop = PrimitiveWitness::from_transaction_details(&nop);
+        let nop = nop.primitive_witness();
 
         let proof = TransactionProofBuilder::new()
             .consensus_rule_set(new_rules)

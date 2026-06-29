@@ -24,7 +24,6 @@ use super::lock_script::LockScriptAndWitness;
 use super::transaction_kernel::TransactionKernel;
 use super::transaction_kernel::TransactionKernelModifier;
 use super::utxo::Utxo;
-use super::TransactionDetails;
 use crate::api::export::TxInputs;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::type_scripts::known_type_scripts;
@@ -154,7 +153,7 @@ impl PrimitiveWitness {
     ///
     /// # Panics
     /// Panics if transaction validity cannot be satisfied.
-    fn generate_primitive_witness(
+    pub(crate) fn generate_primitive_witness(
         unlocked_utxos: &TxInputs,
         output_utxos: Vec<Utxo>,
         sender_randomnesses: Vec<Digest>,
@@ -226,31 +225,6 @@ impl PrimitiveWitness {
             mutator_set_accumulator,
             kernel: transaction_kernel,
         }
-    }
-
-    /// Create a [`PrimitiveWitness`] from [`TransactionDetails`].
-    pub fn from_transaction_details(transaction_details: &TransactionDetails) -> Self {
-        let kernel = transaction_details.transaction_kernel();
-
-        let TransactionDetails {
-            tx_outputs,
-            tx_inputs,
-            mutator_set_accumulator,
-            ..
-        } = transaction_details;
-
-        // populate witness
-        let output_utxos = tx_outputs.utxos();
-        let sender_randomnesses = tx_outputs.sender_randomnesses();
-        let receiver_digests = tx_outputs.receiver_digests();
-        Self::generate_primitive_witness(
-            tx_inputs,
-            output_utxos,
-            sender_randomnesses,
-            receiver_digests,
-            kernel.clone(),
-            mutator_set_accumulator.clone(),
-        )
     }
 
     /// Verify the transaction directly from primitive witness
@@ -1104,6 +1078,7 @@ mod tests {
     use crate::protocol::consensus::type_scripts::time_lock::TimeLockWitness;
     use crate::protocol::consensus::type_scripts::TypeScriptWitness;
     use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
+    use crate::state::transaction::transaction_details::TransactionDetails;
     use crate::tests::shared_tokio_runtime;
 
     impl Utxo {
@@ -1825,7 +1800,7 @@ mod tests {
             Timestamp::now(),
             network,
         );
-        let nop = PrimitiveWitness::from_transaction_details(&nop);
+        let nop = nop.primitive_witness();
         assert!(nop.validate().await.is_ok(), "nop PW must be valid");
     }
 

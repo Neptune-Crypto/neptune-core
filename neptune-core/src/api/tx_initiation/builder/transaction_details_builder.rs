@@ -323,7 +323,8 @@ impl TransactionDetailsBuilder {
             custom_announcements.push(transparent_transaction_details.to_announcement());
         }
 
-        // If transaction needs to lustrate, do so here.
+        // If transaction needs to lustrate, do so here. Only those inputs that
+        // must be lustrated will be so.
         if let Some(lustration_status) = lustration_status {
             debug!(
                 "Lustration rules activated. Checking all inputs for lustration requirements.
@@ -332,6 +333,11 @@ impl TransactionDetailsBuilder {
                 lustration_status.max_lustrating_aocl_leaf_index
             );
 
+            let tx_inputs = tx_inputs
+                .iter()
+                .cloned()
+                .map(TransparentInput::from)
+                .collect::<Vec<_>>();
             custom_announcements.extend(Announcement::lustration_announcements(
                 lustration_status,
                 &tx_inputs,

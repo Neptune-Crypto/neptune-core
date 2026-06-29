@@ -8,7 +8,6 @@ use crate::application::config::network::Network;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 
 pub mod announcement;
@@ -270,6 +269,7 @@ pub(crate) mod tests {
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
     use crate::protocol::proof_abstractions::tasm::prover_job::VmProcessError;
+    use crate::state::transaction::transaction_details::TransactionDetails;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
 

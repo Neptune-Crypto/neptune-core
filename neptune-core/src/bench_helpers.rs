@@ -29,7 +29,6 @@ use crate::protocol::consensus::block::validity::block_primitive_witness::BlockP
 use crate::protocol::consensus::block::validity::block_proof_witness::BlockProofWitness;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::BlockProof;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
@@ -162,7 +161,7 @@ pub async fn next_block_incoming_utxos(
         network,
     );
 
-    let kernel = PrimitiveWitness::from_transaction_details(&tx_details).kernel;
+    let kernel = tx_details.primitive_witness().kernel;
     let block = block_from_tx_kernel(parent, network, kernel);
 
     (block, outputs)
