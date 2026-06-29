@@ -8,7 +8,6 @@ use crate::application::config::network::Network;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 
 pub mod announcement;
 pub mod lock_script;
@@ -71,18 +70,6 @@ impl From<Arc<Transaction>> for Transaction {
 }
 
 impl Transaction {
-    /// return transaction id.
-    ///
-    /// note that transactions created by users are temporary.  Once confirmed
-    /// into a block they are merged into a single block transaction.  So this
-    /// id will not correspond to anything on the blockchain except for the
-    /// single transaction in each block.
-    ///
-    /// These id are useful for referencing transactions in the mempool however.
-    pub fn txid(&self) -> TransactionKernelId {
-        self.kernel.txid()
-    }
-
     /// Create a new `Transaction` by updating the given one with the mutator
     /// set update. If `new_timestamp` is `None`, the timestamp from the old
     /// transaction kernel will be used.

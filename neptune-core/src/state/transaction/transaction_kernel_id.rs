@@ -10,6 +10,7 @@ use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::prelude::MerkleTree;
 
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::Transaction;
 
 /// A unique identifier of a transaction whose value is unaffected by a
 /// transaction update.
@@ -121,6 +122,20 @@ impl TransactionKernel {
         let as_digest = MerkleTree::par_new(&digests).unwrap().root();
 
         TransactionKernelId(as_digest)
+    }
+}
+
+impl Transaction {
+    /// return transaction id.
+    ///
+    /// note that transactions created by users are temporary.  Once confirmed
+    /// into a block they are merged into a single block transaction.  So this
+    /// id will not correspond to anything on the blockchain except for the
+    /// single transaction in each block.
+    ///
+    /// These id are useful for referencing transactions in the mempool however.
+    pub fn txid(&self) -> TransactionKernelId {
+        self.kernel.txid()
     }
 }
 
