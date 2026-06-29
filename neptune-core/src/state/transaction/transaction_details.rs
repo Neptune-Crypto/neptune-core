@@ -337,8 +337,18 @@ impl TransactionDetails {
         let output_utxos = tx_outputs.utxos();
         let sender_randomnesses = tx_outputs.sender_randomnesses();
         let receiver_digests = tx_outputs.receiver_digests();
+        let inputs = tx_inputs
+            .iter()
+            .map(|unlocker| {
+                (
+                    unlocker.utxo.to_owned(),
+                    unlocker.lock_script_and_witness().to_owned(),
+                    unlocker.mutator_set_mp().to_owned(),
+                )
+            })
+            .collect_vec();
         PrimitiveWitness::generate_primitive_witness(
-            tx_inputs,
+            inputs,
             output_utxos,
             sender_randomnesses,
             receiver_digests,

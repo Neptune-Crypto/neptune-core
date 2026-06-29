@@ -3,7 +3,6 @@ use std::sync::Arc;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
 
-use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::network::Network;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -35,6 +34,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorPr
 use tracing::info;
 pub(crate) use transaction_proof::TransactionProof;
 use validity::proof_collection::ProofCollection;
+use validity::single_proof::SingleProofWitness;
 use validity::tasm::single_proof::merge_branch::MergeWitness;
 use validity::tasm::single_proof::update_branch::UpdateWitness;
 
@@ -88,7 +88,7 @@ impl Transaction {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
         new_timestamp: Option<Timestamp>,
-        consensus_rule_set: ConsensusRuleSet,
+        _consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<Transaction> {
         ensure!(
             old_transaction_kernel.mutator_set_hash == previous_mutator_set_accumulator.hash(),
@@ -136,13 +136,10 @@ impl Transaction {
         );
 
         info!("starting single proof via update ...");
-        let proof = TransactionProofBuilder::new()
-            .consensus_rule_set(consensus_rule_set)
-            .update_witness(&update_witness)
-            .job_queue(triton_vm_job_queue)
-            .proof_job_options(proof_job_options)
-            .build()
+        let single_proof = SingleProofWitness::from_update(update_witness)
+            .produce(triton_vm_job_queue, proof_job_options)
             .await?;
+        let proof = TransactionProof::SingleProof(single_proof);
         info!("done.");
 
         Ok(Transaction {

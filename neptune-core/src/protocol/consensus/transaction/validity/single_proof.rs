@@ -71,6 +71,24 @@ impl SingleProofWitness {
     pub fn from_merge(merge_witness: MergeWitness) -> Self {
         Self::Merger(merge_witness)
     }
+
+    /// Prove this witness, yielding a [`SingleProof`]-backed [`Proof`].
+    pub(crate) async fn produce(
+        self,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> Result<Proof, CreateProofError> {
+        let claim = self.claim();
+        let nondeterminism = self.nondeterminism();
+        ProofBuilder::new()
+            .program(self.program())
+            .claim(claim)
+            .nondeterminism(|| nondeterminism)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
+            .await
+    }
 }
 
 // This implementation of `TasmObject` is required for `decode_iter` and the

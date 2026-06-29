@@ -2,8 +2,8 @@ use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 
-use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJob;
+use crate::protocol::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
 
 /// A complete description of a prover task, tailored for inter-process
 /// communication.

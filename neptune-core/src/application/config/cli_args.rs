@@ -23,7 +23,6 @@ use crate::api::export::ReceivingAddress;
 use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::parser::CliArgsParseError;
-use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::json_rpc::core::api::ops::Namespace;
 use crate::protocol::consensus::network::Network;
@@ -31,6 +30,7 @@ use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurr
 use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use crate::protocol::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
 use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::mining::block_proposal::BlockProposalRejectError;

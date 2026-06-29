@@ -80,6 +80,7 @@ use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
+use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
@@ -1086,7 +1087,7 @@ impl GlobalState {
 
         let own_guesser_key: SpendingKey =
             self.wallet_state.wallet_entropy.guesser_fee_key().into();
-        let own_guesser_address = own_guesser_key.to_address();
+        let own_guesser_data: GuesserReceiverData = own_guesser_key.to_address().into();
         let receiver_preimage = own_guesser_key.privacy_preimage();
         let num_mps_per_mutxo = self.cli().number_of_mps_per_utxo;
 
@@ -1111,7 +1112,7 @@ impl GlobalState {
                 .await
                 .expect("Must have block header for canonical block");
 
-            if !block_header.was_guessed_by(&own_guesser_address) {
+            if !block_header.was_guessed_by(&own_guesser_data) {
                 trace!("block {block_height} not guessed by us.");
                 continue;
             }

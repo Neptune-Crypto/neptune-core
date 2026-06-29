@@ -10,6 +10,7 @@ use triton_vm::prelude::PublicInput;
 pub mod error;
 pub mod proof_builder;
 pub mod tasm;
+pub mod triton_vm_env_vars;
 pub mod triton_vm_job_queue;
 pub mod tx_proving_capability;
 pub mod verifier;

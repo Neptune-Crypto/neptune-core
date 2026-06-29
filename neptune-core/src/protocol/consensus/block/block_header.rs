@@ -23,7 +23,6 @@ use super::difficulty_control::difficulty_control;
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
 use super::Block;
-use crate::api::export::ReceivingAddress;
 use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
@@ -181,11 +180,8 @@ impl BlockHeader {
         }
     }
 
-    pub fn was_guessed_by(&self, address: &ReceivingAddress) -> bool {
-        let address_receiver_digest = address.privacy_digest();
-        let address_lock_script_hash = address.lock_script_hash();
-        self.guesser_receiver_data.receiver_digest == address_receiver_digest
-            && self.guesser_receiver_data.lock_script_hash == address_lock_script_hash
+    pub fn was_guessed_by(&self, guesser_receiver_data: &GuesserReceiverData) -> bool {
+        self.guesser_receiver_data == *guesser_receiver_data
     }
 }
 

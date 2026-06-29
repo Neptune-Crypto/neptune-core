@@ -24,7 +24,6 @@ use super::lock_script::LockScriptAndWitness;
 use super::transaction_kernel::TransactionKernel;
 use super::transaction_kernel::TransactionKernelModifier;
 use super::utxo::Utxo;
-use crate::api::export::TxInputs;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::type_scripts::known_type_scripts;
 use crate::protocol::consensus::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
@@ -154,7 +153,7 @@ impl PrimitiveWitness {
     /// # Panics
     /// Panics if transaction validity cannot be satisfied.
     pub(crate) fn generate_primitive_witness(
-        unlocked_utxos: &TxInputs,
+        inputs: Vec<(Utxo, LockScriptAndWitness, MsMembershipProof)>,
         output_utxos: Vec<Utxo>,
         sender_randomnesses: Vec<Digest>,
         receiver_digests: Vec<Digest>,
@@ -179,10 +178,12 @@ impl PrimitiveWitness {
             seed[0..32].try_into().unwrap()
         }
 
-        let input_utxos = unlocked_utxos
-            .iter()
-            .map(|unlocker| unlocker.utxo.to_owned())
-            .collect_vec();
+        let (input_utxos, input_lock_scripts_and_witnesses, input_membership_proofs): (
+            Vec<Utxo>,
+            Vec<LockScriptAndWitness>,
+            Vec<MsMembershipProof>,
+        ) = inputs.into_iter().multiunzip();
+
         let salt_seed =
             generate_secure_pseudorandom_seed(&input_utxos, &output_utxos, &sender_randomnesses);
 
@@ -204,16 +205,6 @@ impl PrimitiveWitness {
                 .expect("type script hash should be known.")
             })
             .collect_vec();
-        let input_lock_scripts_and_witnesses = unlocked_utxos
-            .iter()
-            .map(|unlocker| unlocker.lock_script_and_witness())
-            .cloned()
-            .collect_vec();
-        let input_membership_proofs = unlocked_utxos
-            .iter()
-            .map(|unlocker| unlocker.mutator_set_mp().to_owned())
-            .collect_vec();
-
         PrimitiveWitness {
             input_utxos: salted_input_utxos,
             lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,

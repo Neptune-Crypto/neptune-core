@@ -182,7 +182,7 @@ fn main() {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod neptune_prover_tests {
-    use neptune_cash::application::config::triton_vm_env_vars::TritonVmEnvVars;
+    use neptune_cash::protocol::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::isa::triton_asm;
 

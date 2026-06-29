@@ -1,10 +1,10 @@
 //! This module implements a builder for [TritonVmProofJobOptions]
 
-use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use crate::protocol::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
 use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 
