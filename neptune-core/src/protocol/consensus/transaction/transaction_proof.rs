@@ -173,6 +173,14 @@ impl rand::distr::Distribution<TransactionProofType> for rand::distr::StandardUn
     }
 }
 
+#[cfg(any(test, feature = "test-helpers"))]
+impl TransactionProof {
+    /// A proof that will always be invalid
+    pub(crate) fn invalid() -> Self {
+        Self::SingleProof(NeptuneProof::from(vec![]))
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -198,11 +206,6 @@ mod tests {
     }
 
     impl TransactionProof {
-        /// A proof that will always be invalid
-        pub(crate) fn invalid() -> Self {
-            Self::SingleProof(NeptuneProof::from(vec![]))
-        }
-
         /// A proof that will always be invalid, with a specified size measured in
         /// number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s.
         pub(crate) fn invalid_single_proof_of_size(size: usize) -> Self {

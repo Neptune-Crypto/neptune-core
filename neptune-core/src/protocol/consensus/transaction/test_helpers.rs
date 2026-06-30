@@ -11,14 +11,14 @@ use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// Make a transaction with `Invalid` transaction proof.
-pub(crate) fn make_mock_transaction(
+pub fn make_mock_transaction(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
 ) -> Transaction {
     make_mock_transaction_with_mutator_set_hash(inputs, outputs, Digest::default())
 }
 
-pub(crate) fn make_mock_transaction_with_mutator_set_hash_and_timestamp(
+pub fn make_mock_transaction_with_mutator_set_hash_and_timestamp(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
     mutator_set_hash: Digest,
@@ -40,7 +40,7 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash_and_timestamp(
     }
 }
 
-pub(crate) fn make_mock_transaction_with_mutator_set_hash(
+pub fn make_mock_transaction_with_mutator_set_hash(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
     mutator_set_hash: Digest,
@@ -58,7 +58,7 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
 /// Proptest strategies producing [`TransactionKernel`]s.
 ///
 /// [`TransactionKernel`]: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel
-pub(crate) mod txkernel {
+pub mod txkernel {
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::strategies::removalrecord;
     use neptune_primitives::timestamp::Timestamp;
@@ -73,12 +73,12 @@ pub(crate) mod txkernel {
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-    pub(crate) fn default(fee_nonegative: bool) -> impl Strategy<Value = TransactionKernel> {
+    pub fn default(fee_nonegative: bool) -> impl Strategy<Value = TransactionKernel> {
         self::with_lengths(1usize..=5, 1usize..=6, 0usize..5, fee_nonegative)
     }
 
     prop_compose! {
-        pub(crate) fn with_lengths(
+        pub fn with_lengths(
             num_inputs: impl Into<SizeRange>,
             num_outputs: impl Into<SizeRange>,
             num_announcements: impl Into<SizeRange>,
@@ -108,7 +108,7 @@ pub(crate) mod txkernel {
     }
 
     prop_compose! {
-        pub(crate) fn with_usualtxdata(
+        pub fn with_usualtxdata(
             inputs: Vec<neptune_mutator_set::removal_record::RemovalRecord>,
             outputs: Vec<AdditionRecord>,
             fee: NativeCurrencyAmount,

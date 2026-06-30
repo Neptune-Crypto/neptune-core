@@ -199,45 +199,46 @@ impl BlockTransaction {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
-    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+#[cfg(any(test, feature = "test-helpers"))]
+impl BlockTransaction {
+    /// Upgrade a regular [`Transaction`] into a [`BlockTransaction`] by
+    /// setting the merge bit and packing the removal records. If a proof is
+    /// supplied, it will (probably) become invalid. Use only in tests where
+    /// the proof does not matter.
+    pub(crate) fn upgrade(tx: Transaction) -> Self {
+        use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
-    use super::*;
-    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+        use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
 
-    impl BlockTransaction {
-        /// Upgrade a regular [`Transaction`] into a [`BlockTransaction`] by
-        /// setting the merge bit and packing the removal records. If a proof is
-        /// supplied, it will (probably) become invalid. Use only in tests where
-        /// the proof does not matter.
-        pub(crate) fn upgrade(tx: Transaction) -> Self {
-            let packed = RemovalRecordList::pack(tx.kernel.inputs.clone());
-            let kernel = TransactionKernelModifier::default()
-                .merge_bit(true)
-                .inputs(packed)
-                .modify(tx.kernel);
-            let transaction = Transaction {
-                kernel,
-                proof: tx.proof,
-            };
-            Self::try_from(transaction).expect("just set merge bit")
-        }
+        let packed = RemovalRecordList::pack(tx.kernel.inputs.clone());
+        let kernel = TransactionKernelModifier::default()
+            .merge_bit(true)
+            .inputs(packed)
+            .modify(tx.kernel);
+        let transaction = Transaction {
+            kernel,
+            proof: tx.proof,
+        };
+        Self::try_from(transaction).expect("just set merge bit")
+    }
 
-        /// Produce an invalid [`BlockTransaction`] from a transaction kernel.
-        /// Is guaranteed to have an invalid transaction proof. Use only in
-        /// tests.
-        pub(crate) fn from_tx_kernel(kernel: TransactionKernel) -> Self {
-            let packed = RemovalRecordList::pack(kernel.inputs.clone());
-            let kernel = TransactionKernelModifier::default()
-                .merge_bit(true)
-                .inputs(packed)
-                .modify(kernel);
-            let transaction = Transaction {
-                kernel,
-                proof: TransactionProof::invalid(),
-            };
-            Self::try_from(transaction).expect("just set merge bit")
-        }
+    /// Produce an invalid [`BlockTransaction`] from a transaction kernel.
+    /// Is guaranteed to have an invalid transaction proof. Use only in
+    /// tests.
+    pub(crate) fn from_tx_kernel(kernel: TransactionKernel) -> Self {
+        use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+
+        use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+
+        let packed = RemovalRecordList::pack(kernel.inputs.clone());
+        let kernel = TransactionKernelModifier::default()
+            .merge_bit(true)
+            .inputs(packed)
+            .modify(kernel);
+        let transaction = Transaction {
+            kernel,
+            proof: TransactionProof::invalid(),
+        };
+        Self::try_from(transaction).expect("just set merge bit")
     }
 }

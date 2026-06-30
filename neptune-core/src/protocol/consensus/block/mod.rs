@@ -11,8 +11,8 @@ pub(crate) mod guesser_receiver_data;
 pub mod mutator_set_update;
 pub mod pow;
 pub(crate) mod premine;
-#[cfg(test)]
-pub(crate) mod test_helpers;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers;
 pub mod validity;
 
 use std::sync::Arc;
@@ -1223,6 +1223,50 @@ impl rand::distr::Distribution<Block> for rand::distr::StandardUniform {
     }
 }
 
+#[cfg(any(test, feature = "test-helpers"))]
+impl Block {
+    pub(crate) fn set_proof(&mut self, proof: BlockProof) {
+        self.proof = proof;
+        self.unset_digest();
+    }
+
+    /// Create a block template with an invalid block proof.
+    ///
+    /// To be used in tests where you don't care about block validity.
+    pub(crate) fn block_template_invalid_proof(
+        predecessor: &Block,
+        block_transaction: BlockTransaction,
+        block_timestamp: Timestamp,
+        override_target_block_interval: Option<Timestamp>,
+        network: Network,
+    ) -> Block {
+        let primitive_witness =
+            BlockPrimitiveWitness::new(predecessor.to_owned(), block_transaction, network);
+        let target_block_interval =
+            override_target_block_interval.unwrap_or(network.target_block_interval());
+        Self::block_template_invalid_proof_from_witness(
+            primitive_witness,
+            block_timestamp,
+            target_block_interval,
+        )
+    }
+
+    /// Create a block template with an invalid block proof, from a block
+    /// primitive witness.
+    pub(crate) fn block_template_invalid_proof_from_witness(
+        primitive_witness: BlockPrimitiveWitness,
+        block_timestamp: Timestamp,
+        target_block_interval: Timestamp,
+    ) -> Block {
+        let body = primitive_witness.body().to_owned();
+        let header = primitive_witness.header(block_timestamp, target_block_interval);
+        let proof = BlockProof::Invalid;
+        let appendix = BlockAppendix::default();
+
+        Block::new(header, body, appendix, proof)
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
@@ -1288,11 +1332,6 @@ pub(crate) mod tests {
                 .collect()
         }
 
-        pub(crate) fn set_proof(&mut self, proof: BlockProof) {
-            self.proof = proof;
-            self.unset_digest();
-        }
-
         pub(super) fn fix_mutator_set_fields(&mut self, prev_block: &Block) {
             let mut msa = prev_block.mutator_set_accumulator_after().unwrap();
 
@@ -1314,42 +1353,6 @@ pub(crate) mod tests {
         pub(crate) fn set_appendix(&mut self, appendix: BlockAppendix) {
             self.kernel.appendix = appendix;
             self.unset_digest();
-        }
-
-        /// Create a block template with an invalid block proof.
-        ///
-        /// To be used in tests where you don't care about block validity.
-        pub(crate) fn block_template_invalid_proof(
-            predecessor: &Block,
-            block_transaction: BlockTransaction,
-            block_timestamp: Timestamp,
-            override_target_block_interval: Option<Timestamp>,
-            network: Network,
-        ) -> Block {
-            let primitive_witness =
-                BlockPrimitiveWitness::new(predecessor.to_owned(), block_transaction, network);
-            let target_block_interval =
-                override_target_block_interval.unwrap_or(network.target_block_interval());
-            Self::block_template_invalid_proof_from_witness(
-                primitive_witness,
-                block_timestamp,
-                target_block_interval,
-            )
-        }
-
-        /// Create a block template with an invalid block proof, from a block
-        /// primitive witness.
-        pub(crate) fn block_template_invalid_proof_from_witness(
-            primitive_witness: BlockPrimitiveWitness,
-            block_timestamp: Timestamp,
-            target_block_interval: Timestamp,
-        ) -> Block {
-            let body = primitive_witness.body().to_owned();
-            let header = primitive_witness.header(block_timestamp, target_block_interval);
-            let proof = BlockProof::Invalid;
-            let appendix = BlockAppendix::default();
-
-            Block::new(header, body, appendix, proof)
         }
 
         /// Produce two fake blocks, parent and child.

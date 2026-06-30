@@ -13,7 +13,7 @@ use tracing::Span;
 
 /// Return path for the directory containing test data, like proofs and block
 /// data.
-pub(crate) fn test_helper_data_dir() -> PathBuf {
+pub fn test_helper_data_dir() -> PathBuf {
     const TEST_DATA_DIR_NAME: &str = "test_data/";
     let mut path = PathBuf::new();
     path.push(TEST_DATA_DIR_NAME);
@@ -23,7 +23,7 @@ pub(crate) fn test_helper_data_dir() -> PathBuf {
 /// Load a list of proof-servers from test data directory. These servers are
 /// expected to server data required for tests. That data is mainly proofs but
 /// may also be blocks.
-pub(crate) fn load_test_proof_servers() -> Vec<String> {
+pub fn load_test_proof_servers() -> Vec<String> {
     let mut server_list_path = test_helper_data_dir();
     server_list_path.push(Path::new("proof_servers").with_extension("txt"));
     let Ok(mut input_file) = File::open(server_list_path.clone()) else {
@@ -49,7 +49,7 @@ pub(crate) fn load_test_proof_servers() -> Vec<String> {
 }
 
 /// Tries to load a file from disk, returns the bytes if successful.
-pub(crate) fn try_load_file_from_disk(path: &Path) -> Option<Vec<u8>> {
+pub fn try_load_file_from_disk(path: &Path) -> Option<Vec<u8>> {
     let Ok(mut input_file) = File::open(path) else {
         debug!("cannot open file '{}' -- might not exist", path.display());
         return None;
@@ -64,7 +64,7 @@ pub(crate) fn try_load_file_from_disk(path: &Path) -> Option<Vec<u8>> {
     Some(file_contents)
 }
 
-pub(crate) fn try_fetch_from_server(
+pub fn try_fetch_from_server(
     filename: String,
     server: String,
     headers: HttpHeaders,
@@ -127,7 +127,7 @@ pub(crate) fn try_fetch_from_server(
 
 /// Build headers expected by proof server. Allows proof server to see which
 /// test is requesting the data.
-pub(crate) fn headers_for_proof_server_request() -> clienter::HttpHeaders {
+pub fn headers_for_proof_server_request() -> clienter::HttpHeaders {
     const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
 
     fn get_test_name_from_tracing() -> String {
@@ -164,7 +164,7 @@ pub(crate) fn headers_for_proof_server_request() -> clienter::HttpHeaders {
 
 /// Return the specified file from a server, along with the name of the server
 /// providing the result.
-pub(crate) fn try_fetch_file(filename: String) -> Option<(Vec<u8>, String)> {
+pub fn try_fetch_file(filename: String) -> Option<(Vec<u8>, String)> {
     let headers = headers_for_proof_server_request();
 
     let mut servers = load_test_proof_servers();

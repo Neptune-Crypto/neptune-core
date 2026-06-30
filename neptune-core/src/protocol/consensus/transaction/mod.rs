@@ -11,8 +11,8 @@ use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 pub mod announcement;
 pub mod lock_script;
 pub mod primitive_witness;
-#[cfg(test)]
-pub(crate) mod test_helpers;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers;
 pub mod transaction_kernel;
 pub mod transaction_proof;
 pub mod transparent_input;

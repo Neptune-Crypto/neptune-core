@@ -52,6 +52,11 @@ track-lock-time = ["neptune-locks/track-lock-time"]
 # implements arbitrary::Arbitrary for various types
 arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest", "neptune-mutator-set/arbitrary-impls", "neptune-primitives/arbitrary-impls"]
 
+# exposes the consensus/proof-abstraction test-support constructors and proptest
+# strategies (the `test_helpers` modules) needed by downstream crates' tests.
+# off by default.
+test-helpers = ["arbitrary-impls", "dep:clienter", "neptune-mutator-set/test-helpers"]
+
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]
 
@@ -93,6 +98,9 @@ num-bigint = { version = "0.4", features = ["serde"] }
 num-rational = "0.4"
 num-traits = "0.2"
 priority-queue = "1.4"
+# optional: required by the test-helpers feature's proof-server fetchers.
+# duplicated (non-optional) in [dev-dependencies] for this crate's own tests.
+clienter = { version = "0.1.1", optional = true }
 proptest = { version = "1.7", optional = true }
 proptest-arbitrary-interop = { version = "0.1", optional = true }
 rand = "0.9"

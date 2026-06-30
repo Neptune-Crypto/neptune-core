@@ -23,10 +23,7 @@ use crate::protocol::consensus::transaction::transaction_kernel::TransactionKern
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::Transaction;
 
-pub(crate) fn invalid_block_with_tx_kernel(
-    previous_block: &Block,
-    tx_kernel: TransactionKernel,
-) -> Block {
+pub fn invalid_block_with_tx_kernel(previous_block: &Block, tx_kernel: TransactionKernel) -> Block {
     // 60s min block time on main and testnet
     let minimum_block_time = Timestamp::seconds(60);
     let timestamp = Timestamp::max(
@@ -70,14 +67,11 @@ pub(crate) fn invalid_block_with_tx_kernel(
 /// Create a block containing the supplied transaction.
 ///
 /// The returned block has an invalid block proof.
-pub(crate) fn invalid_block_with_transaction(
-    previous_block: &Block,
-    transaction: Transaction,
-) -> Block {
+pub fn invalid_block_with_transaction(previous_block: &Block, transaction: Transaction) -> Block {
     invalid_block_with_tx_kernel(previous_block, transaction.kernel)
 }
 
-pub(crate) fn invalid_empty_block_with_proof_size(
+pub fn invalid_empty_block_with_proof_size(
     predecessor: &Block,
     network: Network,
     proof_size: usize,
@@ -90,11 +84,11 @@ pub(crate) fn invalid_empty_block_with_proof_size(
     block
 }
 
-pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {
+pub fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {
     invalid_empty_block_with_num_outputs(predecessor, network, 0)
 }
 
-pub(crate) fn invalid_empty_block_with_num_outputs(
+pub fn invalid_empty_block_with_num_outputs(
     predecessor: &Block,
     network: Network,
     num_outputs: usize,
@@ -111,7 +105,7 @@ pub(crate) fn invalid_empty_block_with_num_outputs(
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
 
-pub(crate) fn invalid_empty_block_with_timestamp(
+pub fn invalid_empty_block_with_timestamp(
     predecessor: &Block,
     timestamp: Timestamp,
     network: Network,

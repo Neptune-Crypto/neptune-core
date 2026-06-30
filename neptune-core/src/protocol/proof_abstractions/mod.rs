@@ -10,8 +10,8 @@ use triton_vm::prelude::PublicInput;
 pub mod error;
 pub mod proof_builder;
 pub mod tasm;
-#[cfg(test)]
-pub(crate) mod test_helpers;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers;
 pub mod triton_vm_env_vars;
 pub mod triton_vm_job_queue;
 pub mod tx_proving_capability;

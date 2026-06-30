@@ -122,7 +122,7 @@ impl NeptuneProof {
 
     /// creates an invalid proof (not a mock proof) of a specified length, in
     /// number of b-field elements.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-helpers"))]
     pub fn invalid_with_size(len: usize) -> Self {
         use num_traits::ConstZero;
 
