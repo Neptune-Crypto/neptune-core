@@ -93,11 +93,11 @@ mod tests {
         use crate::application::config::cli_args;
         use crate::protocol::consensus::block::Block;
         use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
-        use crate::protocol::consensus::consensus_rule_set::tests::tx_with_n_outputs;
         use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
         use crate::state::wallet::address::elliptic_curve_hybrid::EcHybridAddress;
+        use crate::tests::consensus_integration::consensus_rule_set::tx_with_n_outputs;
         use crate::tests::shared::blocks::next_block;
         use crate::tests::shared::globalstate::mock_genesis_global_state;
 

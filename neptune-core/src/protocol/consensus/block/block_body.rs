@@ -87,7 +87,7 @@ pub struct BlockBody {
     ///
     /// For the final post-block state, refer to
     /// [`Self::mutator_set_accumulator_after`].
-    pub(super) mutator_set_accumulator: MutatorSetAccumulator,
+    pub(crate) mutator_set_accumulator: MutatorSetAccumulator,
 
     /// Lock-free UTXOs do not come with lock scripts and do not live in the mutator set.
     pub lock_free_mmr_accumulator: MmrAccumulator,

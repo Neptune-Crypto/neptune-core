@@ -18,7 +18,7 @@ use crate::protocol::consensus::transaction::utxo::Utxo;
 /// in particular lays bare the amounts if native currency coins are involved.
 ///
 /// See also:
-///  - [`InputCandidate`](crate::state::wallet::input_candidate::InputCandidate)
+///  - `InputCandidate`
 ///    -- representation of spendable UTXOs used for applying
 ///    input selection policy;
 ///  - `ExpectedUtxo` -- contains data for receiving and monitoring received

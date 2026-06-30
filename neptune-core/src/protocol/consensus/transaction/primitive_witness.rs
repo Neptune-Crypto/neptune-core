@@ -1046,7 +1046,6 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::announcement::Announcement;
@@ -1062,7 +1061,6 @@ mod tests {
     use crate::protocol::consensus::type_scripts::time_lock::TimeLockWitness;
     use crate::protocol::consensus::type_scripts::TypeScriptWitness;
     use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
-    use crate::state::transaction::transaction_details::TransactionDetails;
     use crate::tests::shared_tokio_runtime;
 
     impl Utxo {
@@ -1780,20 +1778,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn nop_pw_is_valid() {
-        let network = Network::Main;
-        let genesis = Block::genesis(network);
-        let nop = TransactionDetails::nop(
-            genesis.mutator_set_accumulator_after().unwrap(),
-            Timestamp::now(),
-            network,
-        );
-        let nop = nop.primitive_witness();
-        assert!(nop.validate().await.is_ok(), "nop PW must be valid");
     }
 
     #[traced_test]
