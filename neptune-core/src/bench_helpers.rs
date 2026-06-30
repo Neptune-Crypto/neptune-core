@@ -178,7 +178,7 @@ fn block_from_tx_kernel(parent: &Block, network: Network, txkernel: TransactionK
         proof: TransactionProof::SingleProof(NeptuneProof::invalid()),
     };
     let tx: BlockTransaction = tx.try_into().unwrap();
-    let timestamp = tx.kernel.timestamp;
+    let timestamp = tx.kernel().timestamp;
     let block_primitive_witness = BlockPrimitiveWitness::new(parent.to_owned(), tx, network);
     let body = block_primitive_witness.body().to_owned();
     let header = block_primitive_witness.header(timestamp, network.target_block_interval());

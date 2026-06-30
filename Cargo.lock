@@ -3496,6 +3496,7 @@ dependencies = [
  "memmap2",
  "neptune-archival-mmr",
  "neptune-cash",
+ "neptune-consensus",
  "neptune-database",
  "neptune-job-queue",
  "neptune-locks",
@@ -3541,6 +3542,50 @@ dependencies = [
  "tracing-throttle",
  "whoami",
  "zeroize",
+]
+
+[[package]]
+name = "neptune-consensus"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "arbitrary",
+ "assert2",
+ "async-trait",
+ "bincode",
+ "clap",
+ "clienter",
+ "codspeed-divan-compat",
+ "field_count",
+ "futures",
+ "get-size2",
+ "itertools",
+ "macro_rules_attr",
+ "neptune-consensus",
+ "neptune-job-queue",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "num-bigint",
+ "num-rational",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "rand_distr 0.5.1",
+ "rayon",
+ "readonly",
+ "regex",
+ "serde",
+ "serde_arrays",
+ "serde_json",
+ "statrs",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]

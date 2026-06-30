@@ -8,6 +8,7 @@ use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::tasm_lib::prelude::Digest;
 
 /// Data structure for communicating knowledge of transactions.

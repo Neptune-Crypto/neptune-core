@@ -47,6 +47,7 @@ use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::block_selector::BlockSelector;
 use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
+use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_output::TxOutput;
@@ -93,7 +94,7 @@ impl RpcApi for RpcServer {
         let proof = &state.chain.tip().proof;
 
         Ok(TipProofResponse {
-            proof: proof.into(),
+            proof: crate::application::json_rpc::core::model::block::rpc_block_proof_from(proof),
         })
     }
 
@@ -211,7 +212,9 @@ impl RpcApi for RpcServer {
                 .await
                 .unwrap()
                 .as_ref()
-                .map(|b| (&b.proof).into()),
+                .map(|b| {
+                    crate::application::json_rpc::core::model::block::rpc_block_proof_from(&b.proof)
+                }),
             None => None,
         };
 
@@ -1851,6 +1854,7 @@ pub mod tests {
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::mining::block_proposal::BlockProposal;
+    use crate::state::transaction::transaction_kernel_id::Txid;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::state::wallet::wallet_status::SyncedUtxo;

@@ -19,6 +19,9 @@ pub(crate) fn network_hrp_char(network: Network) -> char {
         Network::Testnet(_) => 't',
         Network::TestnetMock => 'z',
         Network::RegTest => 'r',
+        // `Network` is `#[non_exhaustive]`; this arm is unreachable for all
+        // currently defined variants.
+        _ => unreachable!("unhandled network variant"),
     }
 }
 

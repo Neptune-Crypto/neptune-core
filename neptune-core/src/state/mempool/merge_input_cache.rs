@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use get_size2::GetSize;
 
 use crate::api::export::TransactionKernelId;
+use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::NeptuneProof;
 use crate::state::TransactionKernel;
 use crate::state::UpgradePriority;

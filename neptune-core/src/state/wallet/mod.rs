@@ -720,7 +720,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let timestamp = merged_tx.kernel.timestamp;
+        let timestamp = merged_tx.kernel().timestamp;
         let block_3_b = Block::compose(
             block_2_b.clone(),
             merged_tx,

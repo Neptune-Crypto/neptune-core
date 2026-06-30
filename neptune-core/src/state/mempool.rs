@@ -76,6 +76,7 @@ use crate::state::mempool::merge_input_cache::MergeInputCacheElement;
 use crate::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction::transaction_kernel_id::Txid;
 
 /// Transactions with a timestamp older than this are removed from the mempool.
 pub const MEMPOOL_TX_THRESHOLD_AGE: Timestamp = Timestamp::hours(10);

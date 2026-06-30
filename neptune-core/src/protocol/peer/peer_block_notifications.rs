@@ -29,7 +29,7 @@ impl From<&Block> for PeerBlockNotification {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::PeerBlockNotification;
-    use crate::protocol::consensus::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
+    use crate::protocol::consensus::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
 
     #[test]
     fn block_notification_hash_matches_block_hash() {

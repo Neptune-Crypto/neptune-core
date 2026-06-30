@@ -91,7 +91,7 @@ pub(crate) async fn compose_block_helper(
     // Block timestamp must be at least that of the transaction. So don't use
     // coinbase timestamp here, but rather the actual timestamp from the
     // created transaction.
-    let block_timestamp = transaction.kernel.timestamp;
+    let block_timestamp = transaction.kernel().timestamp;
     let compose_result = Block::compose(
         latest_block,
         transaction,
@@ -449,7 +449,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     job_options: TritonVmProofJobOptions,
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<(Transaction, TxOutputList)> {
-    let network = job_options.job_settings.network;
+    let network = job_options.job_settings.network();
     let (composer_outputs, transaction_details) = prepare_coinbase_transaction_stateless(
         latest_block,
         composer_parameters,
@@ -1411,7 +1411,7 @@ pub(crate) mod tests {
 
         assert!(
             tx_from_alice.kernel.inputs.iter().all(|y| block2_tx
-                .kernel
+                .kernel()
                 .inputs
                 .iter()
                 .any(|x| x.absolute_indices == y.absolute_indices)),
@@ -1419,7 +1419,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             1,
-            block2_tx.kernel.inputs.len(),
+            block2_tx.kernel().inputs.len(),
             "Block tx must have exactly one input from Alice's tx"
         );
 
@@ -1489,13 +1489,13 @@ pub(crate) mod tests {
              So no expected UTXOs should be returned here."
             );
 
-            let cb_txkmh = transaction_empty_mempool.kernel.mast_hash();
+            let cb_txkmh = transaction_empty_mempool.kernel().mast_hash();
             let cb_tx_claim = single_proof_claim(cb_txkmh, consensus_rule_set);
             assert!(
                 verify(
                     cb_tx_claim,
                     transaction_empty_mempool
-                        .proof
+                        .proof()
                         .clone()
                         .into_single_proof()
                         .clone(),
@@ -1508,11 +1508,11 @@ pub(crate) mod tests {
             let num_coinbase_outputs = if guesser_fee_fraction == 1.0 { 0 } else { 2 };
             assert_eq!(
                 num_coinbase_outputs,
-                transaction_empty_mempool.kernel.outputs.len(),
+                transaction_empty_mempool.kernel().outputs.len(),
                 "Coinbase transaction with empty mempool must have exactly {num_coinbase_outputs} outputs"
             );
             assert!(
-                transaction_empty_mempool.kernel.inputs.is_empty(),
+                transaction_empty_mempool.kernel().inputs.is_empty(),
                 "Coinbase transaction with empty mempool must have zero inputs"
             );
             let block_1_empty_mempool = Block::compose(
@@ -1554,13 +1554,13 @@ pub(crate) mod tests {
             let num_outputs_after_merge = num_coinbase_outputs + 2;
             assert_eq!(
                 num_outputs_after_merge,
-                transaction_non_empty_mempool.kernel.outputs.len(),
+                transaction_non_empty_mempool.kernel().outputs.len(),
                 "Transaction for block with non-empty mempool must contain {num_coinbase_outputs} outputs from coinbase, \
                 send output, and change output"
             );
             assert_eq!(
                 1,
-                transaction_non_empty_mempool.kernel.inputs.len(),
+                transaction_non_empty_mempool.kernel().inputs.len(),
                 "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent"
             );
 

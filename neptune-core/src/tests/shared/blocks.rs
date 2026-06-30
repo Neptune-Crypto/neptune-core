@@ -183,7 +183,7 @@ pub(crate) fn invalid_block_with_kernel_and_mutator_set(
 
     let lock_free_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
     let body = BlockBody::new(
-        transaction.kernel.into(),
+        transaction.kernel().clone(),
         mutator_set,
         lock_free_mmr_accumulator,
         block_mmr,
@@ -499,7 +499,7 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     tx: BlockTransaction,
     network: Network,
 ) -> Block {
-    let timestamp = tx.kernel.timestamp;
+    let timestamp = tx.kernel().timestamp;
 
     let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), tx, network);
 

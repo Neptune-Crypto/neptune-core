@@ -5,6 +5,7 @@ use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionKernelId;
 use crate::api::export::TransactionProofType;
+use crate::state::transaction::transaction_kernel_id::Txid;
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct MempoolTransactionInfo {

@@ -124,6 +124,8 @@ use crate::state::claim_error::ClaimError;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
+#[cfg(test)]
+use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::ReceivingAddress;

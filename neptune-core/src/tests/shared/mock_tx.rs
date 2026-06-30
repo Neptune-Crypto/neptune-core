@@ -136,10 +136,10 @@ pub(super) async fn fake_merge_block_transactions_for_tests(
     let claim = single_proof_claim(new_kernel.mast_hash(), consensus_rule_set);
     cache_true_claims([claim]).await;
 
-    Ok(BlockTransaction {
-        kernel: new_kernel.try_into().unwrap(),
-        proof: TransactionProof::SingleProof(Proof::invalid()),
-    })
+    Ok(BlockTransaction::new(
+        new_kernel.try_into().unwrap(),
+        TransactionProof::SingleProof(Proof::invalid()),
+    ))
 }
 
 /// Return a valid, deterministic transaction with a specified proof type.

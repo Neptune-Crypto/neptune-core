@@ -99,10 +99,10 @@ impl TritonVmProofJobOptionsBuilder {
     ///
     /// this will set all fields from [ProverJobSettings] at once.
     pub fn prover_job_settings(mut self, js: &ProverJobSettings) -> Self {
-        self.max_log2_padded_height_for_proofs = js.max_log2_padded_height_for_proofs;
-        self.network = Some(js.network);
-        self.tx_proving_capability = Some(js.tx_proving_capability);
-        self.proof_type = Some(js.proof_type);
+        self.max_log2_padded_height_for_proofs = js.max_log2_padded_height_for_proofs();
+        self.network = Some(js.network());
+        self.tx_proving_capability = Some(js.tx_proving_capability());
+        self.proof_type = Some(js.proof_type());
         self.triton_vm_env_vars = js.triton_vm_env_vars.clone();
         self
     }
@@ -226,13 +226,13 @@ impl TritonVmProofJobOptionsBuilder {
         let tx_proving_capability = tx_proving_capability.unwrap_or_default();
         let proof_type = proof_type.unwrap_or(tx_proving_capability.into());
 
-        let job_settings = ProverJobSettings {
+        let job_settings = ProverJobSettings::new(
             max_log2_padded_height_for_proofs,
             network,
             tx_proving_capability,
             proof_type,
             triton_vm_env_vars,
-        };
+        );
 
         TritonVmProofJobOptions {
             job_priority,

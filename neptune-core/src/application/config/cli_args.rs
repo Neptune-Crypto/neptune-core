@@ -1089,13 +1089,13 @@ impl Args {
 impl From<&Args> for ProverJobSettings {
     fn from(cli: &Args) -> Self {
         let triton_vm_env_vars: TritonVmEnvVars = cli.triton_vm_env_vars.clone();
-        Self {
-            max_log2_padded_height_for_proofs: cli.max_log2_padded_height_for_proofs,
-            network: cli.network,
-            tx_proving_capability: cli.proving_capability(),
-            proof_type: cli.proving_capability().into(),
+        ProverJobSettings::new(
+            cli.max_log2_padded_height_for_proofs,
+            cli.network,
+            cli.proving_capability(),
+            cli.proving_capability().into(),
             triton_vm_env_vars,
-        }
+        )
     }
 }
 
@@ -1127,7 +1127,7 @@ mod tests {
             proof_type: TransactionProofType,
         ) -> TritonVmProofJobOptions {
             let mut options: TritonVmProofJobOptions = self.into();
-            options.job_settings.proof_type = proof_type;
+            options.job_settings.set_proof_type(proof_type);
             options
         }
 

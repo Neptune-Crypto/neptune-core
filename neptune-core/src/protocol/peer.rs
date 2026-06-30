@@ -1068,7 +1068,7 @@ mod tests {
 
         for j in 0..SYNC_CHALLENGE_POW_WITNESS_LENGTH {
             let mut invalid_pow_chain = valid_pow_chain.clone();
-            invalid_pow_chain[j].header.prev_block_digest = random();
+            invalid_pow_chain[j].header_mut().prev_block_digest = random();
             assert!(!SyncChallengeResponse::pow_witnesses_form_chain_from_tip(
                 tip.hash(),
                 &invalid_pow_chain
@@ -1077,7 +1077,7 @@ mod tests {
 
         for j in 0..SYNC_CHALLENGE_POW_WITNESS_LENGTH {
             let mut invalid_pow_chain = valid_pow_chain.clone();
-            invalid_pow_chain[j].header.set_nonce(random());
+            invalid_pow_chain[j].header_mut().set_nonce(random());
             assert!(!SyncChallengeResponse::pow_witnesses_form_chain_from_tip(
                 tip.hash(),
                 &invalid_pow_chain

@@ -37,11 +37,11 @@ impl RpcBlockKernel {
 
 impl From<RpcBlockKernel> for BlockKernel {
     fn from(value: RpcBlockKernel) -> Self {
-        BlockKernel {
-            header: BlockHeader::from(value.header),
-            body: BlockBody::from(value.body),
-            appendix: BlockAppendix::from(value.appendix),
-        }
+        BlockKernel::new(
+            BlockHeader::from(value.header),
+            BlockBody::from(value.body),
+            BlockAppendix::from(value.appendix),
+        )
     }
 }
 
@@ -50,28 +50,26 @@ impl From<&BlockKernel> for RpcBlockKernel {
         RpcBlockKernel {
             header: RpcBlockHeader::from(&kernel.header),
             body: RpcBlockBody::from(&kernel.body),
-            appendix: RpcBlockAppendix::from(&kernel.appendix),
+            appendix: RpcBlockAppendix::from(kernel.appendix()),
         }
     }
 }
 
 pub type RpcBlockProof = Option<RpcBFieldElements>;
 
-impl From<&BlockProof> for RpcBlockProof {
-    fn from(proof: &BlockProof) -> Self {
-        match proof {
-            BlockProof::Genesis | BlockProof::Invalid => None,
-            BlockProof::SingleProof(proof) => Some(proof.0.clone().into()),
-        }
+/// Convert a consensus [`BlockProof`] into its RPC representation.
+pub fn rpc_block_proof_from(proof: &BlockProof) -> RpcBlockProof {
+    match proof {
+        BlockProof::Genesis | BlockProof::Invalid => None,
+        BlockProof::SingleProof(proof) => Some(proof.0.clone().into()),
     }
 }
 
-impl From<RpcBlockProof> for BlockProof {
-    fn from(proof: RpcBlockProof) -> Self {
-        match proof {
-            None => BlockProof::Invalid,
-            Some(bfes) => BlockProof::SingleProof(bfes.0.into()),
-        }
+/// Convert an RPC block proof into the consensus [`BlockProof`].
+pub fn block_proof_from_rpc(proof: RpcBlockProof) -> BlockProof {
+    match proof {
+        None => BlockProof::Invalid,
+        Some(bfes) => BlockProof::SingleProof(bfes.0.into()),
     }
 }
 
@@ -86,7 +84,7 @@ impl From<&Block> for RpcBlock {
     fn from(block: &Block) -> Self {
         RpcBlock {
             kernel: RpcBlockKernel::from(&block.kernel),
-            proof: RpcBlockProof::from(&block.proof),
+            proof: rpc_block_proof_from(&block.proof),
         }
     }
 }
@@ -97,7 +95,7 @@ impl From<RpcBlock> for Block {
             block.kernel.header.into(),
             block.kernel.body.into(),
             block.kernel.appendix.into(),
-            block.proof.into(),
+            block_proof_from_rpc(block.proof),
         )
     }
 }

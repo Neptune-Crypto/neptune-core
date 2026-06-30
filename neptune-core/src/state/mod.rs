@@ -3158,7 +3158,7 @@ impl GlobalState {
                 .unwrap_or_else(|| {
                     panic!("Pow-witness for block with hash {block_hash} must exist")
                 });
-            block_hash = pow_witness.header.prev_block_digest;
+            block_hash = pow_witness.header().prev_block_digest;
             pow_witnesses.push(pow_witness);
         }
 

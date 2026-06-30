@@ -545,7 +545,7 @@ mod block_is_valid {
             .await
             .unwrap();
             assert!(
-                !block3_tx.kernel.inputs.len().is_zero(),
+                !block3_tx.kernel().inputs.len().is_zero(),
                 "block transaction 3 must have inputs"
             );
             let block3_without_valid_pow = Block::compose(
@@ -796,7 +796,7 @@ mod guesser_fee_utxos {
         let block2 =
             Block::block_template_invalid_proof(&block1, tx2, in_eight_months, None, network);
 
-        let mut ms = block1.body().mutator_set_accumulator.clone();
+        let mut ms = block1.body().mutator_set_accumulator().clone();
 
         // Assumes no packing of mutator set happens on block level.
         let mutator_set_update_guesser_fees =
@@ -819,7 +819,7 @@ mod guesser_fee_utxos {
             .apply_to_accumulator(&mut ms)
             .expect(reason);
 
-        assert_eq!(ms.hash(), block2.body().mutator_set_accumulator.hash());
+        assert_eq!(ms.hash(), block2.body().mutator_set_accumulator().hash());
     }
 }
 

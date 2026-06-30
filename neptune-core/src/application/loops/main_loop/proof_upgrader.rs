@@ -36,6 +36,7 @@ use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapabil
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -666,7 +667,7 @@ impl UpgradeJob {
             mutator_set,
             old_tx_timestamp,
             utxo_notification_method,
-            proof_job_options.job_settings.network,
+            proof_job_options.job_settings.network(),
         );
 
         let gobbler_witness = gobbler.primitive_witness();
@@ -687,7 +688,7 @@ impl UpgradeJob {
             .build();
 
         let consensus_rule_set = ConsensusRuleSet::infer_from(
-            proof_job_options.job_settings.network,
+            proof_job_options.job_settings.network(),
             current_block_height,
         );
         let proof = TransactionProofBuilder::new()
@@ -726,7 +727,7 @@ impl UpgradeJob {
         let gobble_data = self.gobble_data();
         let mutator_set = self.mutator_set();
         let old_tx_timestamp = self.old_tx_timestamp();
-        let network = proof_job_options.job_settings.network;
+        let network = proof_job_options.job_settings.network();
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, current_block_height);
 
         let (maybe_gobbler, expected_utxos) =

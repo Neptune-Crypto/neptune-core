@@ -10,3 +10,4 @@ pub mod block_validation_error;
 pub mod consensus_rule_set;
 pub mod primitive_witness;
 pub mod transaction;
+pub mod transaction_kernel;

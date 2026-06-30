@@ -33,7 +33,7 @@ impl MockBlockGenerator {
         guesser_address: ReceivingAddress,
         network: Network,
     ) -> Block {
-        let timestamp = block_tx.kernel.timestamp;
+        let timestamp = block_tx.kernel().timestamp;
 
         let primitive_witness = BlockPrimitiveWitness::new(predecessor, block_tx, network);
 
@@ -86,10 +86,10 @@ impl MockBlockGenerator {
         let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed);
         let new_kernel = merge_witness.new_kernel.clone();
 
-        BlockTransaction {
-            kernel: new_kernel.try_into().unwrap(),
-            proof: TransactionProof::SingleProof(Proof::invalid()),
-        }
+        BlockTransaction::new(
+            new_kernel.try_into().unwrap(),
+            TransactionProof::SingleProof(Proof::invalid()),
+        )
     }
 
     /// Create a block-transaction with a bogus proof but such that `verify` passes.

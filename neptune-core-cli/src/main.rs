@@ -23,6 +23,7 @@ use clap_complete::Shell;
 use itertools::Itertools;
 use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::Timestamp;
+use neptune_cash::api::export::Txid;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::application::rpc::auth;

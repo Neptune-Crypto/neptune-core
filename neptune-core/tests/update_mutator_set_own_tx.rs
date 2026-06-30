@@ -7,6 +7,7 @@ use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::TxProvingCapability;
+use neptune_cash::api::export::Txid;
 use rand::Rng;
 use tracing_test::traced_test;
 

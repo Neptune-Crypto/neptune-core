@@ -28,6 +28,7 @@ pub use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPri
 pub use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 pub use crate::state::transaction::transaction_details::TransactionDetails;
 pub use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
+pub use crate::state::transaction::transaction_kernel_id::Txid;
 pub use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
 pub use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
 pub use crate::state::wallet::address::generation_address::GenerationSpendingKey;

@@ -64,6 +64,7 @@ use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::utxo_validitor::UtxoValidator;
 use crate::state::wallet::address::elliptic_curve_hybrid;
 use crate::state::wallet::address::viewing_address;

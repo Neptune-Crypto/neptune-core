@@ -53,7 +53,13 @@ impl TransactionKernelId {
     }
 }
 
-impl TransactionKernel {
+/// Extension trait providing the [`txid`](Txid::txid) method on consensus
+/// transaction types.
+pub trait Txid {
+    fn txid(&self) -> TransactionKernelId;
+}
+
+impl Txid for TransactionKernel {
     // Return a digest that is unchanged by transaction updates.
     ///
     /// Return a digest that only commits to those fields of the
@@ -64,7 +70,7 @@ impl TransactionKernel {
     ///
     ///
     /// [new_with_updated_mutator_set_records]: crate::protocol::consensus::transaction::Transaction
-    pub fn txid(&self) -> TransactionKernelId {
+    fn txid(&self) -> TransactionKernelId {
         // Since the `Update` program allows permutation of inputs, we must sort
         // the digests of the absolute indices to arrive at a digest that is
         // unchanged by an update.
@@ -125,7 +131,7 @@ impl TransactionKernel {
     }
 }
 
-impl Transaction {
+impl Txid for Transaction {
     /// return transaction id.
     ///
     /// note that transactions created by users are temporary.  Once confirmed
@@ -134,7 +140,7 @@ impl Transaction {
     /// single transaction in each block.
     ///
     /// These id are useful for referencing transactions in the mempool however.
-    pub fn txid(&self) -> TransactionKernelId {
+    fn txid(&self) -> TransactionKernelId {
         self.kernel.txid()
     }
 }

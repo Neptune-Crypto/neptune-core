@@ -9,6 +9,7 @@ use neptune_cash::api::export::SymmetricKey;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::TransparentTransactionInfo;
 use neptune_cash::api::export::TxProvingCapability;
+use neptune_cash::api::export::Txid;
 use neptune_cash::api::tx_initiation::error::SendError;
 use num_traits::ops::checked::CheckedSub;
 use num_traits::Zero;

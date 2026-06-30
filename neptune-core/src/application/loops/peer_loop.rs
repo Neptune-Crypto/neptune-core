@@ -69,6 +69,7 @@ use crate::protocol::peer::SyncChallenge;
 use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::sync_status::SyncStatus;
+use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 
