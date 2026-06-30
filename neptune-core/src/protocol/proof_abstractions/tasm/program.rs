@@ -315,9 +315,9 @@ pub mod tests {
     use crate::protocol::proof_abstractions::test_helpers::try_fetch_file;
     use crate::protocol::proof_abstractions::test_helpers::try_fetch_from_server;
     use crate::protocol::proof_abstractions::test_helpers::try_load_file_from_disk;
+    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::protocol::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
     use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
-    use crate::tests::shared_tokio_runtime;
 
     impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
         fn from(job_priority: TritonVmJobPriority) -> Self {

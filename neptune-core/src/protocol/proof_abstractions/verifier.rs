@@ -110,7 +110,7 @@ pub(crate) mod tests {
     use triton_vm::prelude::BFieldCodec;
 
     use super::*;
-    use crate::tests::shared_tokio_runtime;
+    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
 
     pub(crate) fn bogus_proof(claim: &Claim) -> Proof {
         Proof::from(Tip5::hash_varlen(&claim.encode()).values().to_vec())

@@ -818,7 +818,7 @@ pub(crate) mod tests {
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::TritonError;
     use neptune_primitives::timestamp::Timestamp;
-    use crate::tests::shared_tokio_runtime;
+    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
 
     impl TritonProgramSpecification for SingleProof {
         fn source(&self) {

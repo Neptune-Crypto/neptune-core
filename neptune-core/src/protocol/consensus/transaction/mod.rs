@@ -245,8 +245,8 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::tests::shared_tokio_runtime;
 
     impl Transaction {
         /// Create a new transaction with primitive witness for a new mutator set.

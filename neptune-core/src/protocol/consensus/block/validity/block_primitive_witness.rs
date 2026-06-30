@@ -247,7 +247,7 @@ pub(crate) mod tests {
             arb::<[u8; 32]>(),
         )
             .prop_map(move |((primwit_coinbase, primwit_inputs), shuffle_seed)| {
-                let rt = crate::tests::tokio_runtime();
+                let rt = crate::protocol::proof_abstractions::test_runtime::tokio_runtime();
                 let _guard = rt.enter();
 
                 let proof_job_options = TritonVmProofJobOptions::from(TritonVmJobPriority::default());

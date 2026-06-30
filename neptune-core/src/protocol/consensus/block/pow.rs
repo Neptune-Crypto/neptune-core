@@ -1143,7 +1143,7 @@ pub(crate) mod tests {
         use macro_rules_attr::apply;
 
         use super::*;
-        use crate::tests::shared_tokio_runtime;
+        use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
 
         #[apply(shared_tokio_runtime)]
         async fn can_cancel_preprocess_within_one_second() {

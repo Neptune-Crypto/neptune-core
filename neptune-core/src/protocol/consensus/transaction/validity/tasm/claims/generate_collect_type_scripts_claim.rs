@@ -262,7 +262,7 @@ mod tests {
                 !primitive_witness.kernel.merge_bit,
                 "No primitive witness should have its merge bit set."
             );
-            let rt = crate::tests::tokio_runtime();
+            let rt = crate::protocol::proof_abstractions::test_runtime::tokio_runtime();
             let _guard = rt.enter();
             assert!(
                 rt.block_on(primitive_witness.validate()).is_ok(),

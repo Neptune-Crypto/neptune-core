@@ -498,8 +498,8 @@ pub mod tests {
     use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
-    use crate::tests::shared_tokio_runtime;
 
     impl ProofCollection {
         /// Return an invalid proof collection for testing purposes

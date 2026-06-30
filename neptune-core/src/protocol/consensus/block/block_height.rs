@@ -183,7 +183,7 @@ mod tests {
     use crate::protocol::consensus::block::Network;
     use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::tests::shared_tokio_runtime;
+    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]

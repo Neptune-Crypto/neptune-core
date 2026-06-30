@@ -1254,7 +1254,7 @@ mod tests {
     ) {
         // Negative test: Primitive witness spending inputs that are timelocked
         // must fail to validate.
-        let rt = crate::tests::tokio_runtime();
+        let rt = crate::protocol::proof_abstractions::test_runtime::tokio_runtime();
         prop_assert!(rt.block_on(primitive_witness.validate()).is_err());
     }
 

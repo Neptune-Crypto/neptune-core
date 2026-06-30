@@ -367,7 +367,7 @@ pub(crate) mod tests {
     use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::tests::tokio_runtime;
+    use crate::protocol::proof_abstractions::test_runtime::tokio_runtime;
 
     #[test]
     fn lustration_counter_has_expected_initial_value() {

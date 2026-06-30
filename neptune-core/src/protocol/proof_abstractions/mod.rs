@@ -12,6 +12,8 @@ pub mod proof_builder;
 pub mod tasm;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
+#[cfg(test)]
+pub(crate) mod test_runtime;
 pub mod triton_vm_env_vars;
 pub mod triton_vm_job_queue;
 pub mod tx_proving_capability;

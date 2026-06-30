@@ -690,9 +690,9 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionKernelModifier;
     use crate::protocol::proof_abstractions::tasm::builtins as tasm;
+    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::tests::shared_tokio_runtime;
 
     // The main tests are actually in [`../../single_proof.rs`].
 

@@ -45,6 +45,7 @@ use crate::state::wallet::address::KeyType;
 use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
 use crate::tests::shared::blocks::make_mock_block;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::tests::shared_tokio_runtime;
@@ -954,5 +955,14 @@ async fn avoid_reselecting_same_input_utxos() {
         alice.set_new_tip(block.clone()).await.unwrap();
 
         blocks.push(block);
+    }
+}
+
+#[apply(shared_tokio_runtime)]
+async fn relative_guesser_reward() {
+    let network = Network::Main;
+    for fraction in [0.01, 0.1, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99, 1.0] {
+        let block = invalid_empty_block1_with_guesser_fraction(network, fraction).await;
+        assert_eq!(fraction, block.relative_guesser_reward().unwrap());
     }
 }

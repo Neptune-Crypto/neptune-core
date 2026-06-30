@@ -1061,7 +1061,7 @@ mod tests {
     use crate::protocol::consensus::type_scripts::time_lock::TimeLockWitness;
     use crate::protocol::consensus::type_scripts::TypeScriptWitness;
     use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
-    use crate::tests::shared_tokio_runtime;
+    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
 
     impl Utxo {
         /// returns a new Utxo with properties:

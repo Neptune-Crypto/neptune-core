@@ -1290,7 +1290,6 @@ impl Block {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
-    use macro_rules_attr::apply;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use proptest::prop_compose;
     use proptest_arbitrary_interop::arb;
@@ -1306,8 +1305,6 @@ pub(crate) mod tests {
     use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
     use crate::protocol::consensus::type_scripts::TypeScript;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
-    use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
-    use crate::tests::shared_tokio_runtime;
 
     pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
 
@@ -1587,15 +1584,6 @@ pub(crate) mod tests {
             NativeCurrencyAmount::coins(128),
             Block::block_subsidy(block_height_generation_0)
         );
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn relative_guesser_reward() {
-        let network = Network::Main;
-        for fraction in [0.01, 0.1, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99, 1.0] {
-            let block = invalid_empty_block1_with_guesser_fraction(network, fraction).await;
-            assert_eq!(fraction, block.relative_guesser_reward().unwrap());
-        }
     }
 
     #[test]
