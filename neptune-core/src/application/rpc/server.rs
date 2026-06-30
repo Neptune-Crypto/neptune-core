@@ -46,7 +46,6 @@
 pub mod coinbase_output_readable;
 pub mod mempool_transaction_info;
 pub mod overview_data;
-pub mod proof_of_work_puzzle;
 pub mod restore_ms_membership_proof;
 pub mod ui_utxo;
 
@@ -96,7 +95,6 @@ use crate::application::rpc::server::coinbase_output_readable::CoinbaseOutputRea
 use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
 use crate::application::rpc::server::overview_data::OverviewData;
-use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::application::rpc::server::restore_ms_membership_proof::ResponseMsMembershipProofPrivacyPreserving;
 use crate::application::rpc::server::ui_utxo::UiUtxo;
 use crate::application::rpc::server::ui_utxo::UtxoStatusEvent;
@@ -108,6 +106,7 @@ use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::block_info::BlockInfo;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
+use crate::protocol::consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::protocol::consensus::network::Network;

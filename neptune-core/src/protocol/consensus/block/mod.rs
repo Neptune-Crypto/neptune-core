@@ -11,6 +11,7 @@ pub(crate) mod guesser_receiver_data;
 pub mod mutator_set_update;
 pub mod pow;
 pub(crate) mod premine;
+pub mod proof_of_work_puzzle;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
 pub mod validity;
@@ -1297,7 +1298,7 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
     use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
-    use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
+    use crate::protocol::consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
     use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
     use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
     use crate::protocol::consensus::network::Network;
