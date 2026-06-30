@@ -1097,11 +1097,19 @@ mod tests {
     impl PrimitiveWitness {
         /// Return a primitive witness that's guaranteed to be invalid
         pub(crate) fn invalid() -> Self {
-            let network = Network::Main;
             let mutator_set_accumulator = MutatorSetAccumulator::default();
-            let timestamp = network.launch_date();
-            let kernel = TransactionDetails::nop(mutator_set_accumulator, timestamp, network)
-                .transaction_kernel();
+            // An empty (no inputs, no outputs, zero-fee) transaction kernel.
+            let kernel = TransactionKernelProxy {
+                inputs: vec![],
+                outputs: vec![],
+                announcements: vec![],
+                fee: NativeCurrencyAmount::coins(0),
+                coinbase: None,
+                timestamp: Network::Main.launch_date(),
+                mutator_set_hash: mutator_set_accumulator.hash(),
+                merge_bit: false,
+            }
+            .into_kernel();
             Self {
                 input_utxos: SaltedUtxos::empty(),
                 input_membership_proofs: vec![],
