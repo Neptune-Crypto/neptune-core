@@ -3486,6 +3486,9 @@ mod tests {
     use crate::api::export::TxOutputList;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
+    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_timestamp;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
@@ -3499,9 +3502,6 @@ mod tests {
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_status::WalletStatusExportFormat;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
-    use crate::tests::shared::blocks::invalid_empty_block;
-    use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
     use crate::tests::shared::globalstate::mock_genesis_global_state;

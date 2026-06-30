@@ -2432,6 +2432,9 @@ pub(super) mod tests {
     use crate::application::config::data_directory::DataDirectory;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
+    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_proof_size;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::lock_script::LockScript;
@@ -2448,9 +2451,6 @@ pub(super) mod tests {
     use crate::state::wallet::transaction_output::TxOutputList;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::block_with_puts;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
-    use crate::tests::shared::blocks::invalid_empty_block;
-    use crate::tests::shared::blocks::invalid_empty_block_with_proof_size;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -5147,8 +5147,8 @@ pub(super) mod tests {
 
     mod find_canonical_block_with_puts {
         use super::*;
+        use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_num_outputs;
         use crate::tests::shared::blocks::block_with_num_puts;
-        use crate::tests::shared::blocks::invalid_empty_block_with_num_outputs;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -5440,7 +5440,7 @@ pub(super) mod tests {
 
     mod block_hash_witness {
         use super::*;
-        use crate::tests::shared::blocks::invalid_empty_block;
+        use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -5495,8 +5495,8 @@ pub(super) mod tests {
         use tasm_lib::twenty_first::bfe;
 
         use super::*;
+        use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
         use crate::tests::shared::blocks::block_with_num_puts;
-        use crate::tests::shared::blocks::invalid_empty_block;
 
         #[apply(shared_tokio_runtime)]
         async fn only_canonical_addition_records_are_matched() {

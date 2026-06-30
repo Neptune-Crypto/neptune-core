@@ -164,6 +164,9 @@ mod tests {
     use crate::protocol::consensus::block::difficulty_control;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
     use crate::protocol::consensus::block::pow::LustrationStatus;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_timestamp;
+    use crate::protocol::consensus::block::tests::arbitrary_kernel as block_with_arbkernel;
     use crate::protocol::consensus::block::tests::DIFFICULTY_LIMIT_FOR_TESTS;
     use crate::protocol::consensus::block::validity::block_program::BlockProgram;
     use crate::protocol::consensus::block::Block;
@@ -178,9 +181,6 @@ mod tests {
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::verifier::cache_true_claims;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
-    use crate::tests::shared::blocks::invalid_empty_block;
-    use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
-    use crate::tests::shared::strategies::block_with_arbkernel;
     use crate::tests::shared::Randomness;
 
     proptest::prop_compose! {

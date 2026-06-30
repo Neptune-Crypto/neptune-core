@@ -355,7 +355,7 @@ pub(crate) mod tests {
     }
 
     use super::*;
-    use crate::tests::shared::blocks::invalid_empty_block_with_proof_size;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_proof_size;
 
     impl BlockHeader {
         pub(crate) fn set_nonce(&mut self, nonce: Digest) {

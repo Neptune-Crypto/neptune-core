@@ -119,12 +119,12 @@ pub mod tests {
     use super::*;
     use crate::api::export::Network;
     use crate::application::config::cli_args;
+    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
+    use crate::protocol::consensus::transaction::test_helpers::txkernel;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared::strategies::txkernel;
     use crate::Block;
 
     #[test]

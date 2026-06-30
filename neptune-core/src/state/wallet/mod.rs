@@ -56,6 +56,7 @@ mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
+    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::network::Network;
@@ -72,7 +73,6 @@ mod tests {
     use crate::state::wallet::transaction_output::TxOutputList;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::state::GlobalStateLock;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;

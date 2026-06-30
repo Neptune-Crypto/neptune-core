@@ -16,8 +16,6 @@ use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 pub use crate::protocol::consensus::block::tests::arbitrary_kernel as block_with_arbkernel;
 
-pub mod txkernel;
-
 // TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord>,
@@ -26,7 +24,7 @@ pub fn make_mock_transaction_with_wallet(
     _wallet_state: &crate::state::wallet::wallet_state::WalletState,
     timestamp: Option<Timestamp>,
 ) -> proptest::prelude::BoxedStrategy<Transaction> {
-    txkernel::with_usualtxdata(
+    crate::protocol::consensus::transaction::test_helpers::txkernel::with_usualtxdata(
         inputs,
         outputs,
         fee,

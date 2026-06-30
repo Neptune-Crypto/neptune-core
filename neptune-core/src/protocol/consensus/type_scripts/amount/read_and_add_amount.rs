@@ -119,6 +119,7 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::pop_encodable;
     use tasm_lib::prelude::TasmObject;
     use tasm_lib::push_encodable;
     use tasm_lib::snippet_bencher::BenchmarkCase;
@@ -132,7 +133,6 @@ mod tests {
     use tasm_lib::twenty_first::bfe;
 
     use super::*;
-    use crate::tests::shared::pop_encodable;
 
     const ADD_OVERFLOW_ERROR_CODE: i128 = 170;
 
@@ -222,11 +222,11 @@ mod tests {
             stack: &mut Vec<BFieldElement>,
             memory: &HashMap<BFieldElement, BFieldElement>,
         ) -> Result<(), RustShadowError> {
-            let utxo_is_timelocked: bool = pop_encodable(stack);
-            let utxo_amount: u128 = pop_encodable(stack);
-            let timelocked_amount: u128 = pop_encodable(stack);
-            let amount: u128 = pop_encodable(stack);
-            let coin_si_ptr: BFieldElement = pop_encodable(stack);
+            let utxo_is_timelocked: bool = pop_encodable(stack).unwrap();
+            let utxo_amount: u128 = pop_encodable(stack).unwrap();
+            let timelocked_amount: u128 = pop_encodable(stack).unwrap();
+            let amount: u128 = pop_encodable(stack).unwrap();
+            let coin_si_ptr: BFieldElement = pop_encodable(stack).unwrap();
 
             let coin_size = NativeCurrencyAmount::static_length().unwrap();
             let state_size = memory

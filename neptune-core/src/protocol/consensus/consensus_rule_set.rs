@@ -402,6 +402,8 @@ pub(crate) mod tests {
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
     use crate::protocol::consensus::block::difficulty_control::Difficulty;
+    use crate::protocol::consensus::block::test_helpers::invalid_block_with_tx_kernel;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
     use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::block::BlockProof;
@@ -416,8 +418,6 @@ pub(crate) mod tests {
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::blocks::invalid_block_with_tx_kernel;
-    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::next_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;

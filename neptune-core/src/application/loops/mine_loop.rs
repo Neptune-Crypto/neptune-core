@@ -1128,6 +1128,7 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
     use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
     use crate::protocol::consensus::network::Network;
+    use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1146,7 +1147,6 @@ pub(crate) mod tests {
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
-    use crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
     use crate::MINER_CHANNEL_CAPACITY;

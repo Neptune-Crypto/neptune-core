@@ -2600,12 +2600,12 @@ mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::ReceivingAddress;
     use crate::application::config::cli_args;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
     use crate::protocol::consensus::network::Network;
     use crate::protocol::peer::peer_info::pseudorandom_peer_id;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::blocks::block_with_outputs;
-    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
     use crate::tests::shared::globalstate::get_test_genesis_setup;
@@ -3701,7 +3701,7 @@ mod tests {
         async fn new_block_from_peer_invokes_block_notify() {
             use std::fs;
 
-            use crate::tests::shared::files::test_helper_data_dir;
+            use crate::protocol::proof_abstractions::test_helpers::test_helper_data_dir;
             use crate::tests::shared::files::unit_test_data_directory;
             use crate::tests::shared::files::wait_for_file_to_exist;
 

@@ -2236,6 +2236,7 @@ pub(crate) mod tests {
     use crate::api::export::Transaction;
     use crate::api::tx_initiation::initiator::TransactionInitiator;
     use crate::application::config::cli_args;
+    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
@@ -2249,7 +2250,6 @@ pub(crate) mod tests {
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::GlobalStateLock;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -3983,7 +3983,7 @@ pub(crate) mod tests {
         use super::*;
         use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
         use crate::protocol::consensus::transaction::lock_script::LockScript;
-        use crate::tests::shared::mock_tx::make_mock_transaction;
+        use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction;
 
         #[apply(shared_tokio_runtime)]
         async fn no_expected_utxos_on_custom_coinbase_distribution_and_offchain_notifications() {
@@ -4261,7 +4261,7 @@ pub(crate) mod tests {
     /// Test wallet state's handling of UTXOs abandoned due to reorganization.
     mod abandoned_mutxos {
         use super::*;
-        use crate::tests::shared::blocks::invalid_empty_block;
+        use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -4465,9 +4465,9 @@ pub(crate) mod tests {
         use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
         use crate::protocol::consensus::block::block_height::BlockHeight;
+        use crate::protocol::consensus::transaction::test_helpers::txkernel;
         use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::files::unit_test_data_directory;
-        use crate::tests::shared::strategies::txkernel;
 
         const NUM_FUTURE_KEYS: usize = 20;
 

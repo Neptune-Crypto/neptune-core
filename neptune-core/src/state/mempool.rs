@@ -1478,9 +1478,11 @@ mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_timestamp;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+    use crate::protocol::consensus::transaction::test_helpers::txkernel;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
@@ -1497,14 +1499,12 @@ mod tests {
     use crate::state::wallet::transaction_output::TxOutputList;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::state::GlobalStateLock;
-    use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
     use crate::tests::shared::mock_tx::mock_transactions_with_sized_single_proof;
     use crate::tests::shared::mock_tx::testrunning::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
-    use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
 
     impl Mempool {

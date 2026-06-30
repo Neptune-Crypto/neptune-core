@@ -972,6 +972,7 @@ mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_timestamp;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::network::Network;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
@@ -979,7 +980,6 @@ mod tests {
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::tests::shared::blocks::fake_block_successor_with_merged_tx;
-    use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
     use crate::tests::shared::globalstate::get_test_genesis_setup;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;

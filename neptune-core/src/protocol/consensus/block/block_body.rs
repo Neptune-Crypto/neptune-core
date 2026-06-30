@@ -288,11 +288,11 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::tests::shared::blocks::invalid_empty_block;
 
     #[test]
     fn max_aocl_leaf_index_genesis() {

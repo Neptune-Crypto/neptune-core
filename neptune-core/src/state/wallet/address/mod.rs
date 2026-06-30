@@ -30,11 +30,11 @@ mod tests {
 
     use super::*;
     use crate::protocol::consensus::network::Network;
+    use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
     use crate::state::Digest;
-    use crate::tests::shared::mock_tx::make_mock_transaction;
 
     #[proptest]
     fn scan_for_announceed_utxos(#[strategy(arb())] seed: Digest) {

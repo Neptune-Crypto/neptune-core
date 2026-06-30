@@ -17,7 +17,6 @@ use tasm_lib::twenty_first;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use crate::api::export::Announcement;
 use crate::api::export::GenerationSpendingKey;
@@ -44,6 +43,9 @@ use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::pow::Pow;
+use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
+use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
+use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_proof_size;
 use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::protocol::consensus::block::validity::block_program::BlockProgram;
 use crate::protocol::consensus::block::validity::block_proof_witness::BlockProofWitness;
@@ -189,60 +191,6 @@ pub(crate) fn invalid_block_with_kernel_and_mutator_set(
     let appendix = BlockAppendix::default();
 
     Block::new(block_header, body, appendix, BlockProof::Invalid)
-}
-
-pub(crate) fn invalid_block_with_tx_kernel(
-    previous_block: &Block,
-    tx_kernel: TransactionKernel,
-) -> Block {
-    // 60s min block time on main and testnet
-    let minimum_block_time = Timestamp::seconds(60);
-    let timestamp = Timestamp::max(
-        previous_block.header().timestamp + minimum_block_time,
-        tx_kernel.timestamp,
-    );
-    let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
-    let difficulty = previous_block.header().difficulty;
-    let block_header = BlockHeader {
-        version: bfe!(0),
-        height: new_block_height,
-        prev_block_digest: previous_block.hash(),
-        timestamp,
-        pow: Pow::default(),
-        guesser_receiver_data: GuesserReceiverData::default(),
-        cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work + difficulty,
-        difficulty,
-    };
-
-    let mut next_mutator_set = previous_block.mutator_set_accumulator_after().unwrap();
-    let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
-    block_mmr.append(previous_block.hash());
-
-    let ms_update = MutatorSetUpdate::new(tx_kernel.inputs.clone(), tx_kernel.outputs.clone());
-    ms_update
-        .apply_to_accumulator(&mut next_mutator_set)
-        .unwrap();
-
-    let transaction = BlockTransaction::from_tx_kernel(tx_kernel);
-    let body = BlockBody::new(
-        transaction.kernel.into(),
-        next_mutator_set,
-        previous_block.body().lock_free_mmr_accumulator.clone(),
-        block_mmr,
-    );
-    let appendix = BlockAppendix::default();
-
-    Block::new(block_header, body, appendix, BlockProof::Invalid)
-}
-
-/// Create a block containing the supplied transaction.
-///
-/// The returned block has an invalid block proof.
-pub(crate) fn invalid_block_with_transaction(
-    previous_block: &Block,
-    transaction: Transaction,
-) -> Block {
-    invalid_block_with_tx_kernel(previous_block, transaction.kernel)
 }
 
 /// Build a fake and invalid block where the caller can specify the
@@ -467,19 +415,6 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     Ok(block)
 }
 
-pub(crate) fn invalid_empty_block_with_proof_size(
-    predecessor: &Block,
-    network: Network,
-    proof_size: usize,
-) -> Block {
-    let mut block = invalid_empty_block(predecessor, network);
-    block.set_proof(BlockProof::SingleProof(Proof::invalid_with_size(
-        proof_size,
-    )));
-
-    block
-}
-
 pub(crate) async fn invalid_empty_block1_with_guesser_fraction(
     network: Network,
     guesser_fraction: f64,
@@ -500,28 +435,6 @@ pub(crate) async fn invalid_empty_block1_with_guesser_fraction(
     )
     .await
     .0
-}
-
-pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {
-    invalid_empty_block_with_num_outputs(predecessor, network, 0)
-}
-
-pub(crate) fn invalid_empty_block_with_num_outputs(
-    predecessor: &Block,
-    network: Network,
-    num_outputs: usize,
-) -> Block {
-    let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
-    let outputs = vec![AdditionRecord::new(Digest::default()); num_outputs];
-    let tx =
-        crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash_and_timestamp(
-            vec![],
-            outputs,
-            predecessor.mutator_set_accumulator_after().unwrap().hash(),
-            timestamp,
-        );
-    let tx = BlockTransaction::upgrade(tx);
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
 
 /// Return a list of `n` invalid, empty blocks.
@@ -550,7 +463,7 @@ pub(crate) fn invalid_empty_block_with_announcements(
     network: Network,
     announcements: Vec<Announcement>,
 ) -> Block {
-    let tx = crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash(
+    let tx = crate::protocol::consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash(
         vec![],
         vec![],
         predecessor.mutator_set_accumulator_after().unwrap().hash(),
@@ -577,21 +490,6 @@ pub(crate) fn invalid_empty_blocks(ancestor: &Block, n: usize, network: Network)
     }
 
     blocks
-}
-
-pub(crate) fn invalid_empty_block_with_timestamp(
-    predecessor: &Block,
-    timestamp: Timestamp,
-    network: Network,
-) -> Block {
-    let tx = super::mock_tx::make_mock_transaction_with_mutator_set_hash_and_timestamp(
-        vec![],
-        vec![],
-        predecessor.mutator_set_accumulator_after().unwrap().hash(),
-        timestamp,
-    );
-    let tx = BlockTransaction::upgrade(tx);
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
 
 /// Create a fake block proposal; will pass `is_valid` but fail pow-check. Will

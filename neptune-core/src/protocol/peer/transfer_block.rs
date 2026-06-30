@@ -82,9 +82,9 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
     use crate::protocol::peer::Network;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
-    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared_tokio_runtime;
 
     #[test]

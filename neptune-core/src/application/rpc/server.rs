@@ -4766,7 +4766,9 @@ mod tests {
     use crate::api::export::TxProvingCapability;
     use crate::application::config::cli_args;
     use crate::application::rpc::server::NeptuneRPCServer;
+    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
     use crate::protocol::consensus::network::Network;
+    use crate::protocol::consensus::transaction::test_helpers::txkernel;
     use crate::protocol::peer::NegativePeerSanction;
     use crate::protocol::peer::PeerSanction;
     use crate::state::block_selector::BlockSelectorLiteral;
@@ -4774,11 +4776,9 @@ mod tests {
     use crate::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
     use crate::BFieldElement;
     use crate::Block;
@@ -6208,6 +6208,7 @@ mod tests {
         use super::*;
         use crate::protocol::consensus::block::block_header::BlockPow;
         use crate::protocol::consensus::block::pow::Pow;
+        use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
         use crate::protocol::consensus::block::BlockProof;
         use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
         use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
@@ -6215,7 +6216,6 @@ mod tests {
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
-        use crate::tests::shared::blocks::invalid_empty_block;
 
         #[test]
         fn pow_puzzle_is_consistent_with_block_hash() {
@@ -6584,9 +6584,9 @@ mod tests {
             use cli_args::Args;
 
             use super::*;
+            use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
+            use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
             use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
-            use crate::tests::shared::blocks::invalid_block_with_transaction;
-            use crate::tests::shared::blocks::invalid_empty_block;
 
             pub(super) async fn claim_utxo_unowned(claim_after_confirmed: bool) -> Result<()> {
                 let network = Network::Main;

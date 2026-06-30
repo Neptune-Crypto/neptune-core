@@ -246,6 +246,7 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::pop_encodable;
     use tasm_lib::prelude::Digest;
     use tasm_lib::push_encodable;
     use tasm_lib::rust_shadowing_helper_functions;
@@ -259,7 +260,6 @@ mod tests {
     use tasm_lib::twenty_first::bfe;
 
     use super::*;
-    use crate::tests::shared::pop_encodable;
 
     impl Function for ComputeAbsoluteIndices {
         fn rust_shadow(
@@ -267,10 +267,10 @@ mod tests {
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
         ) -> Result<(), RustShadowError> {
-            let item = pop_encodable::<Digest>(stack);
-            let sender_randomness = pop_encodable::<Digest>(stack);
-            let receiver_preimage = pop_encodable::<Digest>(stack);
-            let aocl_leaf_index = pop_encodable::<u64>(stack);
+            let item = pop_encodable::<Digest>(stack).unwrap();
+            let sender_randomness = pop_encodable::<Digest>(stack).unwrap();
+            let receiver_preimage = pop_encodable::<Digest>(stack).unwrap();
+            let aocl_leaf_index = pop_encodable::<u64>(stack).unwrap();
 
             let absolute_index_set = AbsoluteIndexSet::compute(
                 item,

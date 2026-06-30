@@ -11,6 +11,8 @@ pub(crate) mod guesser_receiver_data;
 pub mod mutator_set_update;
 pub mod pow;
 pub(crate) mod premine;
+#[cfg(test)]
+pub(crate) mod test_helpers;
 pub mod validity;
 
 use std::sync::Arc;
@@ -1252,7 +1254,10 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
+    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
     use crate::protocol::consensus::network::Network;
+    use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
     use crate::protocol::consensus::type_scripts::TypeScript;
@@ -1265,12 +1270,9 @@ pub(crate) mod tests {
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
-    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
 
     pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
@@ -1436,7 +1438,7 @@ pub(crate) mod tests {
         /// Relies on the private fields hence is here for re-export via `tests::shared::strategies`.
         pub fn arbitrary_kernel() (
             header in arb::<BlockHeader>(),
-            transaction_kernel in crate::tests::shared::strategies::txkernel::default(true),
+            transaction_kernel in crate::protocol::consensus::transaction::test_helpers::txkernel::default(true),
             lock_free_mmr_accumulator in arb::<MmrAccumulator>(),
             block_mmr_accumulator in arb::<MmrAccumulator>(),
             appendix in arb::<BlockAppendix>(),

@@ -1841,9 +1841,12 @@ pub mod tests {
     use crate::application::network::arbitrary::arb_multiaddr;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
     use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
     use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::transaction::test_helpers::txkernel;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
@@ -1852,12 +1855,9 @@ pub mod tests {
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::state::wallet::wallet_status::SyncedUtxo;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
-    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
-    use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
     use crate::BFieldElement;
     use crate::Block;

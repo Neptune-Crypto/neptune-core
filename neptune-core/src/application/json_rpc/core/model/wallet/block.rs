@@ -51,10 +51,10 @@ mod tests {
     use crate::protocol::consensus::block::block_appendix::BlockAppendix;
     use crate::protocol::consensus::block::block_body::BlockBody;
     use crate::protocol::consensus::block::block_header::BlockHeader;
+    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_proof_size;
     use crate::protocol::consensus::block::BlockProof;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::tests::shared::blocks::block_with_num_puts;
-    use crate::tests::shared::blocks::invalid_empty_block_with_proof_size;
     use crate::tests::shared_tokio_runtime;
 
     fn assert_rpc_block_hash_and_block_hash_agree(block: &Block) {

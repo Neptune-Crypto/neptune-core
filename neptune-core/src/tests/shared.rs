@@ -9,7 +9,6 @@ use futures::sink;
 use futures::stream;
 use futures::task::Context;
 use futures::task::Poll;
-use itertools::Itertools;
 use mock_tx::fake_create_transaction_from_details_for_tests;
 use neptune_database::storage::storage_vec::traits::StorageVecBase;
 use neptune_mutator_set::addition_record::AdditionRecord;
@@ -17,8 +16,6 @@ use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
-use tasm_lib::triton_vm::prelude::BFieldElement;
 use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
@@ -266,14 +263,6 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
     }
 
     true
-}
-
-// TODO: Use this function from `tasm-lib` once upgraded to latest
-// version. And delete this function.
-pub(crate) fn pop_encodable<T: BFieldCodec>(stack: &mut Vec<BFieldElement>) -> T {
-    let len = T::static_length().unwrap();
-    let limbs = (0..len).map(|_| stack.pop().unwrap()).collect_vec();
-    *T::decode(&limbs).unwrap()
 }
 
 /// Waits for an async predicate to return true or a timeout.

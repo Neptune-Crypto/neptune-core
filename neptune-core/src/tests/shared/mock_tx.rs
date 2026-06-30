@@ -23,6 +23,8 @@ use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransact
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction;
+use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
 use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
@@ -74,52 +76,6 @@ pub(crate) fn invalid_empty_single_proof_transaction() -> Transaction {
     let tx = make_mock_transaction(vec![], vec![]);
     assert!(matches!(tx.proof, TransactionProof::SingleProof(_)));
     tx
-}
-
-/// Make a transaction with `Invalid` transaction proof.
-pub fn make_mock_transaction(
-    inputs: Vec<RemovalRecord>,
-    outputs: Vec<AdditionRecord>,
-) -> Transaction {
-    make_mock_transaction_with_mutator_set_hash(inputs, outputs, Digest::default())
-}
-
-pub(crate) fn make_mock_transaction_with_mutator_set_hash_and_timestamp(
-    inputs: Vec<RemovalRecord>,
-    outputs: Vec<AdditionRecord>,
-    mutator_set_hash: Digest,
-    timestamp: Timestamp,
-) -> Transaction {
-    Transaction {
-        kernel:
-            crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy {
-                inputs,
-                outputs,
-                announcements: vec![],
-                fee: NativeCurrencyAmount::coins(1),
-                timestamp,
-                coinbase: None,
-                mutator_set_hash,
-                merge_bit: false,
-            }
-            .into_kernel(),
-        proof: TransactionProof::invalid(),
-    }
-}
-
-pub(crate) fn make_mock_transaction_with_mutator_set_hash(
-    inputs: Vec<RemovalRecord>,
-    outputs: Vec<AdditionRecord>,
-    mutator_set_hash: Digest,
-) -> Transaction {
-    let timestamp = Timestamp::now();
-
-    make_mock_transaction_with_mutator_set_hash_and_timestamp(
-        inputs,
-        outputs,
-        mutator_set_hash,
-        timestamp,
-    )
 }
 
 pub(crate) fn make_mock_block_transaction_with_mutator_set_hash(

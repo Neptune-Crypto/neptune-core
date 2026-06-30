@@ -11,6 +11,8 @@ use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 pub mod announcement;
 pub mod lock_script;
 pub mod primitive_witness;
+#[cfg(test)]
+pub(crate) mod test_helpers;
 pub mod transaction_kernel;
 pub mod transaction_proof;
 pub mod transparent_input;
@@ -244,6 +246,7 @@ pub(crate) mod tests {
     use crate::api::export::TxOutputList;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::network::Network;
+    use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction;
     use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
@@ -254,7 +257,6 @@ pub(crate) mod tests {
     use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
     use crate::state::transaction::transaction_details::TransactionDetails;
-    use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
 
     impl Transaction {

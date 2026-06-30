@@ -309,14 +309,14 @@ pub mod tests {
     use super::*;
     use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+    use crate::protocol::proof_abstractions::test_helpers::headers_for_proof_server_request;
+    use crate::protocol::proof_abstractions::test_helpers::load_test_proof_servers;
+    use crate::protocol::proof_abstractions::test_helpers::test_helper_data_dir;
+    use crate::protocol::proof_abstractions::test_helpers::try_fetch_file;
+    use crate::protocol::proof_abstractions::test_helpers::try_fetch_from_server;
+    use crate::protocol::proof_abstractions::test_helpers::try_load_file_from_disk;
     use crate::protocol::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
     use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
-    use crate::tests::shared::files::headers_for_proof_server_request;
-    use crate::tests::shared::files::load_test_proof_servers;
-    use crate::tests::shared::files::test_helper_data_dir;
-    use crate::tests::shared::files::try_fetch_file;
-    use crate::tests::shared::files::try_fetch_from_server;
-    use crate::tests::shared::files::try_load_file_from_disk;
     use crate::tests::shared_tokio_runtime;
 
     impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
