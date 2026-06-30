@@ -184,6 +184,23 @@ impl LockScriptAndWitness {
         )
     }
 
+    /// Create a generation address-like hash lock deterministically from a
+    /// seed.
+    ///
+    /// The preimage is derived from the seed exactly as a generation-address
+    /// spending key derives its unlock key, so the resulting lock script — and
+    /// therefore any transaction proof that commits to it — is identical to one
+    /// produced from the corresponding generation-address key. This lets test
+    /// generators produce stable lock scripts without depending on wallet code,
+    /// and it let's the caller unlock any UTXOs with generation addresses,
+    /// should anyone wish to use this property in a test.
+    #[cfg(any(test, feature = "arbitrary-impls"))]
+    pub(crate) fn genaddr_like_hash_lock_from_seed(seed: Digest) -> LockScriptAndWitness {
+        let preimage =
+            Tip5::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(1)]].concat());
+        Self::standard_hash_lock_from_preimage(preimage)
+    }
+
     #[cfg(test)]
     pub(crate) fn set_nd_tokens(&mut self, tokens: Vec<BFieldElement>) {
         self.nd_tokens = tokens;

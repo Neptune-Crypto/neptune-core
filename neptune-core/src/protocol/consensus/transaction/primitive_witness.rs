@@ -536,7 +536,6 @@ pub mod neptune_arbitrary {
     use crate::protocol::consensus::type_scripts::time_lock::TimeLock;
     use crate::protocol::consensus::type_scripts::time_lock::TimeLockWitness;
     use crate::protocol::consensus::type_scripts::TypeScriptWitness;
-    use crate::state::wallet::address::generation_address;
 
     impl PrimitiveWitness {
         /// Strategy for generating a `PrimitiveWitness` with the given number of
@@ -901,16 +900,11 @@ pub mod neptune_arbitrary {
             address_seeds: &[Digest],
             input_amounts: &[NativeCurrencyAmount],
         ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
-            let input_spending_keys = address_seeds
+            let input_lock_scripts_and_witnesses = address_seeds
                 .iter()
                 .map(|address_seed| {
-                    generation_address::GenerationSpendingKey::derive_from_seed(*address_seed)
+                    LockScriptAndWitness::genaddr_like_hash_lock_from_seed(*address_seed)
                 })
-                .collect_vec();
-
-            let input_lock_scripts_and_witnesses = input_spending_keys
-                .into_iter()
-                .map(|spending_key| spending_key.lock_script_and_witness())
                 .collect_vec();
 
             let input_utxos = input_lock_scripts_and_witnesses
@@ -1000,20 +994,19 @@ pub mod neptune_arbitrary {
                         amount.div_two();
                     }
                     let liquid_utxo = Utxo::new(
-                        generation_address::GenerationSpendingKey::derive_from_seed(*seed)
-                            .to_address()
-                            .lock_script()
+                        LockScriptAndWitness::genaddr_like_hash_lock_from_seed(*seed)
+                            .program
                             .hash(),
                         amount.to_native_coins(),
                     );
                     let mut utxos = vec![liquid_utxo];
                     if let Some(release_date) = timelock_until {
-                        let lock_script =
-                            generation_address::GenerationSpendingKey::derive_from_seed(*seed)
-                                .to_address()
-                                .lock_script();
+                        let lock_script_hash =
+                            LockScriptAndWitness::genaddr_like_hash_lock_from_seed(*seed)
+                                .program
+                                .hash();
                         let timelocked_utxo = Utxo::new(
-                            lock_script.hash(),
+                            lock_script_hash,
                             [
                                 amount.to_native_coins(),
                                 vec![TimeLock::until(release_date)],

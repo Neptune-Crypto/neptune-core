@@ -475,6 +475,17 @@ mod tests {
                 assert_eq!(spending_key, deserialized_key);
             }
         }
+
+        #[test]
+        fn genaddr_hash_lock_from_seed_matches_generation_address() {
+            for _ in 0..10 {
+                let seed: Digest = rand::random();
+                let from_key =
+                    GenerationSpendingKey::derive_from_seed(seed).lock_script_and_witness();
+                let from_seed = LockScriptAndWitness::genaddr_like_hash_lock_from_seed(seed);
+                assert_eq!(from_key.program, from_seed.program);
+            }
+        }
     }
 
     #[test]
