@@ -795,8 +795,6 @@ pub mod tests {
         use tasm_lib::twenty_first::bfe;
 
         use super::*;
-        use crate::api::export::GenerationSpendingKey;
-        use crate::api::export::UnlockedUtxo;
         use crate::protocol::consensus::transaction::utxo::Utxo;
 
         #[proptest(cases = 5)]
@@ -848,11 +846,13 @@ pub mod tests {
             test_runner: &mut TestRunner,
             include_lustration: bool,
         ) -> TransactionKernel {
-            let a_key = GenerationSpendingKey::derive_from_seed(Digest::default());
-            let lock_script_and_witness = a_key.lock_script_and_witness();
+            use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
+
+            let lock_script_and_witness =
+                LockScriptAndWitness::genaddr_like_hash_lock_from_seed(Digest::default());
 
             let input_utxo = Utxo::new_native_currency(
-                a_key.to_address().lock_script().hash(),
+                lock_script_and_witness.program.hash(),
                 NativeCurrencyAmount::coins(12),
             );
 
@@ -873,16 +873,16 @@ pub mod tests {
             let mut kernel = primitive_witness.kernel.clone();
 
             if include_lustration {
-                let input = UnlockedUtxo::unlock(
-                    input_utxo,
-                    lock_script_and_witness,
-                    primitive_witness.input_membership_proofs[0].clone(),
-                );
+                let msmp = &primitive_witness.input_membership_proofs[0];
+                let input = TransparentInput {
+                    utxo: input_utxo.clone(),
+                    aocl_leaf_index: msmp.aocl_leaf_index,
+                    sender_randomness: msmp.sender_randomness,
+                    receiver_preimage: msmp.receiver_preimage,
+                };
                 kernel
                     .announcements
-                    .push(Announcement::lustration_announcement(
-                        &TransparentInput::from(input),
-                    ));
+                    .push(Announcement::lustration_announcement(&input));
             }
 
             kernel
