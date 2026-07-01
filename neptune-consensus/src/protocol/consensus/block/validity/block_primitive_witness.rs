@@ -207,19 +207,22 @@ mod test_support {
             &self.predecessor_block
         }
 
-        pub fn arbitrary() -> BoxedStrategy<BlockPrimitiveWitness> {
+        pub fn arbitrary(network: Network) -> BoxedStrategy<BlockPrimitiveWitness> {
             (1..BFieldElement::MAX)
-                .prop_flat_map(|block_height_as_u64| {
+                .prop_flat_map(move |block_height_as_u64| {
                     let block_height = BlockHeight::new(bfe!(block_height_as_u64));
-                    Self::arbitrary_with_block_height(block_height)
+                    Self::arbitrary_with_block_height(block_height, network)
                 })
                 .boxed()
         }
 
-        pub fn deterministic_with_block_height(block_height: BlockHeight) -> Self {
+        pub fn deterministic_with_block_height(
+            block_height: BlockHeight,
+            network: Network,
+        ) -> Self {
             let mut test_runner = TestRunner::deterministic();
 
-            Self::arbitrary_with_block_height(block_height)
+            Self::arbitrary_with_block_height(block_height, network)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current()
@@ -228,10 +231,11 @@ mod test_support {
         pub fn deterministic_with_block_height_and_difficulty(
             block_height: BlockHeight,
             difficulty: Difficulty,
+            network: Network,
         ) -> Self {
             let mut test_runner = TestRunner::deterministic();
 
-            Self::arbitrary_with_height_and_difficulty(block_height, difficulty)
+            Self::arbitrary_with_height_and_difficulty(block_height, difficulty, network)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current()
@@ -240,9 +244,9 @@ mod test_support {
         pub fn arbitrary_with_height_and_difficulty(
             block_height: BlockHeight,
             difficulty: Difficulty,
+            network: Network,
         ) -> BoxedStrategy<BlockPrimitiveWitness> {
             const NUM_INPUTS: usize = 2;
-            let network = Network::Main;
 
             (
                 NativeCurrencyAmount::arbitrary_non_negative(),
@@ -374,6 +378,7 @@ mod test_support {
                                             coinbase_amount,
                                             timestamp,
                                             block_height,
+                                            network,
                                         )
                                         .prop_map(
                                             move |block_tx| {
@@ -394,11 +399,12 @@ mod test_support {
 
         pub fn arbitrary_with_block_height(
             block_height: BlockHeight,
+            network: Network,
         ) -> BoxedStrategy<BlockPrimitiveWitness> {
             let difficulty = arb::<Difficulty>();
             difficulty
                 .prop_flat_map(move |difficulty| {
-                    Self::arbitrary_with_height_and_difficulty(block_height, difficulty)
+                    Self::arbitrary_with_height_and_difficulty(block_height, difficulty, network)
                 })
                 .boxed()
         }
@@ -415,8 +421,8 @@ mod test_support {
         coinbase_amount: NativeCurrencyAmount,
         timestamp: Timestamp,
         block_height: BlockHeight,
+        network: Network,
     ) -> BoxedStrategy<BlockTransaction> {
-        let network = Network::Main; // explicit assumption
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         (
         PrimitiveWitness::arbitrary_pair_with_coinbase_and_inputs_respectively_from_msa_and_records(
@@ -477,19 +483,15 @@ mod test_support {
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
-pub fn deterministic_block_primitive_witness() -> BlockPrimitiveWitness {
+pub fn deterministic_block_primitive_witness(network: Network) -> BlockPrimitiveWitness {
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
 
     let mut test_runner = TestRunner::deterministic();
 
-    BlockPrimitiveWitness::arbitrary()
+    BlockPrimitiveWitness::arbitrary(network)
         .new_tree(&mut test_runner)
         .unwrap()
         .current()
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub(crate) mod tests {}

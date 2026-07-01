@@ -114,17 +114,7 @@ impl BlockHeader {
             },
             cumulative_proof_of_work: ProofOfWork::zero(),
 
-            #[cfg(not(any(test, feature = "test-helpers")))]
             difficulty: network.genesis_difficulty(),
-
-            // Avoid setting this too high when running tests, otherwise CI
-            // fails and tests take forever. Gated on `test-helpers` (not just
-            // `test`) so the override also applies to downstream crates' test
-            // builds, where this crate is compiled as a non-test dependency.
-            // Production binaries don't enable `test-helpers`, so the genesis
-            // block they build is unaffected.
-            #[cfg(any(test, feature = "test-helpers"))]
-            difficulty: Difficulty::MINIMUM,
 
             guesser_receiver_data: GuesserReceiverData {
                 receiver_digest: Digest::new(bfe_array![

@@ -92,12 +92,6 @@ pub enum TritonProofVersion {
 
 impl TritonProofVersion {
     /// The version value used in Triton VM's claim
-    // Only called from the production (non-`test-helpers`) proof-claim branches
-    // and from this crate's own tests. In a downstream crate's `test-helpers`
-    // build (feature on, but `test` off) both caller sets are compiled out, so
-    // it is dead there only. `expect` rather than `allow` so we get warned to
-    // remove this attribute if the method gains a caller in that configuration.
-    #[cfg_attr(all(feature = "test-helpers", not(test)), expect(dead_code))]
     pub(crate) fn version(&self) -> u32 {
         match self {
             TritonProofVersion::V0 => 0,
@@ -516,15 +510,19 @@ pub(crate) mod tests {
     fn allow_non_zero_version() {
         // Start well into hardfork gamma
         let init_block_heigth = BlockHeight::from(59998u64);
+        let network = Network::Main;
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
             init_block_heigth,
             Difficulty::MINIMUM,
+            network,
         );
 
-        tokio_runtime().block_on(new_block_allow_non_zero_version(bpw));
+        tokio_runtime().block_on(new_block_allow_non_zero_version(bpw, network));
 
-        async fn new_block_allow_non_zero_version(block_primitive_witness: BlockPrimitiveWitness) {
-            let network = Network::Main;
+        async fn new_block_allow_non_zero_version(
+            block_primitive_witness: BlockPrimitiveWitness,
+            network: Network,
+        ) {
             let (invalid_block, mut valid_successor) =
                 Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
                     .await;

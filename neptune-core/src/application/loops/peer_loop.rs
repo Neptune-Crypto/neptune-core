@@ -4287,6 +4287,7 @@ mod tests {
             // notification of first block after hardfork. Must accept all
             // blocks from peer, not punish peer, and send blocks to main
             // loop. Can be expanded for new hardforks when they are planned.
+            let network = Network::Main;
             let hf_alpha = (
                 BlockHeight::from(14999u64),
                 ConsensusRuleSet::Reboot,
@@ -4306,12 +4307,14 @@ mod tests {
                 let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
                     init_block_height,
                     Difficulty::MINIMUM,
+                    network,
                 );
                 tokio_runtime().block_on(runner(
                     bpw,
                     start_rules,
                     end_rules,
                     init_block_height.next(),
+                    network,
                 ));
             }
 
@@ -4320,8 +4323,8 @@ mod tests {
                 start_consensus_rule_set: ConsensusRuleSet,
                 end_consensus_rule_set: ConsensusRuleSet,
                 first_block_height_after_hardfork: BlockHeight,
+                network: Network,
             ) {
-                let network = Network::Main;
                 let (hard_fork_minus_2, hard_fork_minus_1_no_pow) =
                     Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
                         .await;

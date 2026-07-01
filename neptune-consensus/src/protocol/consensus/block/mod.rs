@@ -1442,7 +1442,6 @@ pub(crate) mod tests {
     use proptest_arbitrary_interop::arb;
     use rand::rng;
     use rand::Rng;
-    use strum::IntoEnumIterator;
 
     use super::*;
     use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
@@ -1477,11 +1476,16 @@ pub(crate) mod tests {
 
     #[test]
     fn guess_nonce_happy_path() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let genesis = Block::genesis(network);
         let parent_target = genesis.header().difficulty.target();
 
-        for consensus_rule_set in ConsensusRuleSet::iter() {
+        // Only loop over non-memory hard PoW algorithms since the memory-hard
+        // are too expensive for tests.
+        for consensus_rule_set in [
+            ConsensusRuleSet::HardforkBeta,
+            ConsensusRuleSet::HardforkGamma,
+        ] {
             let mut invalid_block = invalid_empty_block(&genesis, network);
             let mast_auth_paths = invalid_block.pow_mast_paths();
             let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);

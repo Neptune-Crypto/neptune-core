@@ -44,34 +44,25 @@ impl BlockProgram {
     const ILLEGAL_FEE: i128 = 1_000_210;
     const PROOF_SIZE_INDICATOR_TOO_BIG: i128 = 1_000_211;
 
-    #[allow(clippy::used_underscore_binding)]
     pub fn claim(
         block_body: &BlockBody,
         appendix: &BlockAppendix,
-        _consensus_rule_set: ConsensusRuleSet,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> Claim {
         let (program_hash, proof_version) = {
-            #[cfg(any(test, feature = "test-helpers"))]
-            {
-                (Self.hash(), tasm_lib::triton_vm::proof::CURRENT_VERSION)
-            }
-
-            #[cfg(not(any(test, feature = "test-helpers")))]
-            {
-                const PRE_HF_GAMMA_PROGRAM_HASH: &str =
+            const PRE_HF_GAMMA_PROGRAM_HASH: &str =
                 "72d46afed8a1bf162814a432cf1ebe0f16a1cdb84bd339badc6fbd499172c3474c285dd0d5ba4e0c";
-                let hash = match _consensus_rule_set {
-                    ConsensusRuleSet::Reboot
-                    | ConsensusRuleSet::HardforkAlpha
-                    | ConsensusRuleSet::TvmProofVersion1
-                    | ConsensusRuleSet::HardforkBeta => {
-                        Digest::try_from_hex(PRE_HF_GAMMA_PROGRAM_HASH).unwrap()
-                    }
-                    ConsensusRuleSet::HardforkGamma => Self.hash(),
-                };
+            let hash = match consensus_rule_set {
+                ConsensusRuleSet::Reboot
+                | ConsensusRuleSet::HardforkAlpha
+                | ConsensusRuleSet::TvmProofVersion1
+                | ConsensusRuleSet::HardforkBeta => {
+                    Digest::try_from_hex(PRE_HF_GAMMA_PROGRAM_HASH).unwrap()
+                }
+                ConsensusRuleSet::HardforkGamma => Self.hash(),
+            };
 
-                (hash, _consensus_rule_set.triton_proof_version().version())
-            }
+            (hash, consensus_rule_set.triton_proof_version().version())
         };
         Claim::new(program_hash)
             .with_input(block_body.mast_hash().reversed().values().to_vec())
@@ -432,7 +423,8 @@ pub(crate) mod tests {
     #[traced_test]
     #[test]
     fn block_program_halts_gracefully() {
-        let block_primitive_witness = deterministic_block_primitive_witness();
+        let network = Network::Main;
+        let block_primitive_witness = deterministic_block_primitive_witness(network);
         let block_body_mast_hash_as_input = PublicInput::new(
             block_primitive_witness
                 .body()
@@ -476,7 +468,8 @@ pub(crate) mod tests {
 
     #[test]
     fn can_verify_block_program_with_two_claims() {
-        let block_primitive_witness = deterministic_block_primitive_witness();
+        let network = Network::Main;
+        let block_primitive_witness = deterministic_block_primitive_witness(network);
         let block_body_mast_hash_as_input = PublicInput::new(
             block_primitive_witness
                 .body()

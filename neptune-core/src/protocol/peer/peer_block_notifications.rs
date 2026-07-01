@@ -28,12 +28,15 @@ impl From<&Block> for PeerBlockNotification {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_consensus::protocol::consensus::network::Network;
+
     use super::PeerBlockNotification;
     use crate::protocol::consensus::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
 
     #[test]
     fn block_notification_hash_matches_block_hash() {
-        let witness = deterministic_block_primitive_witness();
+        let network = Network::Main;
+        let witness = deterministic_block_primitive_witness(network);
         let a_block = witness.predecessor_block();
         let as_notification: PeerBlockNotification = a_block.into();
         assert_eq!(

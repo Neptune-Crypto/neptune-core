@@ -229,16 +229,19 @@ fn new_blocks_at_block_height_10_000() {
     // witness once, in this synchronous wrapper, and continue
     // asynchronously with the helper function.
 
+    let network = Network::Main;
     let init_block_heigth = BlockHeight::from(10_000u64);
-    let bpw = BlockPrimitiveWitness::deterministic_with_block_height(init_block_heigth);
+    let bpw = BlockPrimitiveWitness::deterministic_with_block_height(init_block_heigth, network);
 
-    tokio_runtime().block_on(new_blocks_at_block_height_10_000_async(bpw));
+    tokio_runtime().block_on(new_blocks_at_block_height_10_000_async(bpw, network));
 }
 
-async fn new_blocks_at_block_height_10_000_async(block_primitive_witness: BlockPrimitiveWitness) {
+async fn new_blocks_at_block_height_10_000_async(
+    block_primitive_witness: BlockPrimitiveWitness,
+    network: Network,
+) {
     // 1. generate state synced to height
     let mut rng = StdRng::seed_from_u64(55512345);
-    let network = Network::Main;
     let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
     let cli = cli_args::Args {
         network,
@@ -314,18 +317,22 @@ fn hard_fork_alpha() {
     // Start at hard fork block height minus 2
     // Then mine enough blocks to activate the hard fork. Verify that all
     // blocks are valid under the expected consensus rule set.
+    let network = Network::Main;
     let init_block_heigth = BlockHeight::from(14998u64);
     let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
         init_block_heigth,
         Difficulty::MINIMUM,
+        network,
     );
 
-    tokio_runtime().block_on(new_blocks_hardfork_alpha(bpw));
+    tokio_runtime().block_on(new_blocks_hardfork_alpha(bpw, network));
 
-    async fn new_blocks_hardfork_alpha(block_primitive_witness: BlockPrimitiveWitness) {
+    async fn new_blocks_hardfork_alpha(
+        block_primitive_witness: BlockPrimitiveWitness,
+        network: Network,
+    ) {
         // 1. generate state synced to height
         let mut rng = StdRng::seed_from_u64(55512345);
-        let network = Network::Main;
         let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
         let cli = cli_args::Args {
             network,
@@ -607,6 +614,7 @@ async fn lustration_counter_errors() {
 #[test]
 fn hard_fork_beta() {
     // Start at hard fork block height minus 2
+    let network = Network::Main;
     let init_block_heigth = BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET
         .previous()
         .unwrap()
@@ -615,14 +623,18 @@ fn hard_fork_beta() {
     let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
         init_block_heigth,
         Difficulty::MINIMUM,
+        network,
     );
 
-    tokio_runtime().block_on(new_blocks_hardfork_beta(bpw));
+    tokio_runtime().block_on(new_blocks_hardfork_beta(bpw, network));
 
-    async fn new_blocks_hardfork_beta(block_primitive_witness: BlockPrimitiveWitness) {
+    async fn new_blocks_hardfork_beta(
+        block_primitive_witness: BlockPrimitiveWitness,
+        network: Network,
+    ) {
         // 1. generate state synced to height
         let mut rng = StdRng::seed_from_u64(5551234665);
-        let network = Network::Main;
+
         let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
         let cli = cli_args::Args {
             network,
@@ -979,6 +991,7 @@ fn hard_fork_beta() {
 #[test]
 fn hard_fork_gamma() {
     // Start at hard fork block height minus 2
+    let network = Network::Main;
     let init_block_heigth = BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET
         .previous()
         .unwrap()
@@ -987,14 +1000,17 @@ fn hard_fork_gamma() {
     let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
         init_block_heigth,
         Difficulty::MINIMUM,
+        network,
     );
 
-    tokio_runtime().block_on(new_blocks_hardfork_gamma(bpw));
+    tokio_runtime().block_on(new_blocks_hardfork_gamma(bpw, network));
 
-    async fn new_blocks_hardfork_gamma(block_primitive_witness: BlockPrimitiveWitness) {
+    async fn new_blocks_hardfork_gamma(
+        block_primitive_witness: BlockPrimitiveWitness,
+        network: Network,
+    ) {
         // 1. generate state synced to height
         let mut rng = StdRng::seed_from_u64(5551234665);
-        let network = Network::Main;
         let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
         let cli = cli_args::Args {
             network,

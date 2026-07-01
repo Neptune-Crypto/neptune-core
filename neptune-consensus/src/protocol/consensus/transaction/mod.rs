@@ -372,31 +372,30 @@ pub(crate) mod tests {
             assert!(updated_tx.is_valid(network, consensus_rule_set).await)
         }
 
-        for consensus_rule_set in ConsensusRuleSet::iter() {
-            for (to_be_updated_params, mined_params) in [
-                ((4, 4, 4), (3, 3, 3)),
-                ((1, 0, 1), (1, 1, 0)),
-                ((1, 1, 0), (1, 0, 0)),
-                ((6, 2, 1), (1, 1, 1)),
-                ((2, 2, 2), (2, 2, 2)),
-            ] {
-                println!("consensus_rule_set: {consensus_rule_set}");
-                println!("to_be_updated_params: {to_be_updated_params:?}");
-                println!("mined_params: {mined_params:?}");
-                let mut test_runner = TestRunner::deterministic();
-                let [to_be_updated, mined] =
-                    PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
-                        to_be_updated_params,
-                        mined_params,
-                    ])
-                    .new_tree(&mut test_runner)
-                    .unwrap()
-                    .current();
-                assert!(to_be_updated.validate().await.is_ok());
-                assert!(mined.validate().await.is_ok());
+        let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+        for (to_be_updated_params, mined_params) in [
+            ((4, 4, 4), (3, 3, 3)),
+            ((1, 0, 1), (1, 1, 0)),
+            ((1, 1, 0), (1, 0, 0)),
+            ((6, 2, 1), (1, 1, 1)),
+            ((2, 2, 2), (2, 2, 2)),
+        ] {
+            println!("consensus_rule_set: {consensus_rule_set}");
+            println!("to_be_updated_params: {to_be_updated_params:?}");
+            println!("mined_params: {mined_params:?}");
+            let mut test_runner = TestRunner::deterministic();
+            let [to_be_updated, mined] =
+                PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+                    to_be_updated_params,
+                    mined_params,
+                ])
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            assert!(to_be_updated.validate().await.is_ok());
+            assert!(mined.validate().await.is_ok());
 
-                prop(to_be_updated.clone(), mined.clone(), consensus_rule_set).await;
-            }
+            prop(to_be_updated.clone(), mined.clone(), consensus_rule_set).await;
         }
     }
 
