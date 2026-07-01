@@ -1030,7 +1030,7 @@ mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn sync_challenge_response_pow_witnesses_must_be_a_chain() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let genesis = Block::genesis(network);
         let mut rng = rand::rng();
         let ten_blocks: [Block; SYNC_CHALLENGE_POW_WITNESS_LENGTH] =

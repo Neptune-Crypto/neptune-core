@@ -102,7 +102,7 @@ mod tests {
         use crate::tests::shared::globalstate::mock_genesis_global_state;
 
         pub(super) async fn can_spend_from_address_type(key_type: KeyType) {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let cli = cli_args::Args {
                 network,
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
@@ -187,7 +187,7 @@ mod tests {
             let tx_from_address = state
                 .api_mut()
                 .tx_sender_mut()
-                .send(to_third_party, ChangePolicy::Burn, fee, timestamp, false)
+                .send(to_third_party, ChangePolicy::Burn, fee, timestamp, true)
                 .await
                 .unwrap();
 

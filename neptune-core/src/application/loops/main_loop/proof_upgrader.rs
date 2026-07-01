@@ -1031,7 +1031,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn dont_upgrade_foreign_proof_collection_if_fee_too_low() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         // Alice is premine recipient, so she can make a transaction (after
         // expiry of timelock). Rando is not premine recipient.
@@ -1092,7 +1092,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn happy_path() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         for proving_capability in [
             TxProvingCapability::ProofCollection,
@@ -1172,7 +1172,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn race_condition_with_one_new_block() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let proving_capabilities = [
             TxProvingCapability::ProofCollection,
             TxProvingCapability::SingleProof,
@@ -1277,7 +1277,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn merge_after_single_proof_upgrade() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
         let cli = cli_args::Args {
@@ -1382,7 +1382,7 @@ mod tests {
     async fn reward_mining_address_with_gobbling_fee() {
         // Ensure that gobbling fee goes to the right address, the one set in
         // the CLI arguments, if one such is set.
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
         let rando = WalletEntropy::new_pseudorandom(rng.random());
@@ -1431,7 +1431,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn dont_share_partly_mined_merge_upgrade() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         // Alice is premine recipient and has mined one block, so she can make
         // (at least) two transaction.

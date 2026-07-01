@@ -109,7 +109,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn from_transfer_block() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         // note: we have to generate a block because
         // TransferBlock::into() will panic if it
         // encounters the genesis block.

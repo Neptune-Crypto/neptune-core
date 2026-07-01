@@ -1906,13 +1906,15 @@ pub mod tests {
     /// endpoint element-by-element.
     #[apply(shared_tokio_runtime)]
     async fn batch_are_bloom_indices_set_matches_single_set() {
-        let mut rpc_server = test_rpc_server().await;
+        let mut rpc_cli = cli_args::Args::default_with_network(Network::Testnet(42));
+        rpc_cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
+        let mut rpc_server = test_rpc_server_with_cli_args(rpc_cli).await;
         let network = rpc_server.state.cli().network;
 
         // Have the devnet wallet spend the premine into the rpc_server's wallet.
         // Once the resulting block is applied, the spent premine input's absolute
         // index set is "set", while the freshly received output's set is not.
-        let mut cli = cli_args::Args::default_with_network(Network::Main);
+        let mut cli = cli_args::Args::default_with_network(network);
         cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
         let mut devnet_node =
             mock_genesis_global_state(0, WalletEntropy::devnet_wallet(), cli).await;
@@ -2270,7 +2272,7 @@ pub mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn remote_wallets_behave_correctly() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let rpc_cli = cli_args::Args::default_with_network(network);
         let mut rpc_server = test_rpc_server_with_cli_args_and_wallet(
             rpc_cli,
@@ -2402,7 +2404,13 @@ pub mod tests {
     async fn mining_scenarios_validated_properly() {
         use crate::application::json_rpc::core::api::rpc::SubmitBlockError;
 
-        let mut rpc_server = test_rpc_server().await;
+        let network = Network::Testnet(42);
+        let rpc_cli = cli_args::Args::default_with_network(network);
+        let mut rpc_server = test_rpc_server_with_cli_args_and_wallet(
+            rpc_cli,
+            WalletEntropy::new_pseudorandom([0u8; 32]),
+        )
+        .await;
         let network = rpc_server.state.cli().network;
 
         let genesis = Block::genesis(network);
@@ -2803,7 +2811,7 @@ pub mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn send_from_premine_receiver() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let cli = cli_args::Args {
                 network,
                 rpc_modules: vec![Namespace::Personal, Namespace::Mempool],
@@ -2859,7 +2867,7 @@ pub mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn incoming_history_no_filter() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let num_transactions = 25;
             let amt_per_tx = NativeCurrencyAmount::from_nau(17);
             let fee_per_tx = NativeCurrencyAmount::from_nau(2);
@@ -2919,7 +2927,7 @@ pub mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn incoming_history_filter_lock_script_hash() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let num_transactions = 19;
             let amt_per_tx = NativeCurrencyAmount::from_nau(18);
             let fee_per_tx = NativeCurrencyAmount::from_nau(23);
@@ -2989,7 +2997,7 @@ pub mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn incoming_history_pagination() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
 
             // total num monitored UTXOS: {num_transactions} * 2 + 1 = 17
             let num_transactions = 8;
@@ -3034,7 +3042,7 @@ pub mod tests {
         async fn outgoing_history_is_consistent() {
             // Verify that transaction filtering works.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let num_transactions = 20;
             let amt_per_tx = NativeCurrencyAmount::one_nau();
             let fee_per_tx = NativeCurrencyAmount::one_nau();

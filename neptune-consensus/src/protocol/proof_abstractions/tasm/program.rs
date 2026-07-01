@@ -290,24 +290,6 @@ pub mod spec {
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
-impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
-    fn from(job_priority: TritonVmJobPriority) -> Self {
-        let job_settings = ProverJobSettings {
-            tx_proving_capability:
-                crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability::SingleProof,
-            proof_type:
-                crate::protocol::consensus::transaction::transaction_proof::TransactionProofType::SingleProof,
-            ..Default::default()
-        };
-        Self {
-            job_priority,
-            job_settings,
-            cancel_job_rx: None,
-        }
-    }
-}
-
-#[cfg(any(test, feature = "test-helpers"))]
 impl TritonVmProofJobOptions {
     pub fn default_with_network(network: crate::protocol::consensus::network::Network) -> Self {
         let job_settings = ProverJobSettings {

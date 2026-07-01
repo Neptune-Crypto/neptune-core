@@ -193,9 +193,10 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
     #[traced_test]
@@ -272,7 +273,7 @@ mod tests {
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
                     TritonVmJobQueue::get_instance(),
-                    TritonVmJobPriority::default().into(),
+                    TritonVmProofJobOptions::default_with_network(Network::Main),
                 ))
                 .unwrap();
 

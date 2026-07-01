@@ -25,7 +25,7 @@ use crate::tests::shared_tokio_runtime;
 async fn disallow_empty_transaction_with_non_zero_fee() {
     // Ensure that we cannot create a transaction with non-zero fee when
     // transaction has no inputs or outputs.
-    let network = Network::Main;
+    let network = Network::Testnet(42);
     let genesis = Block::genesis(network);
 
     let msa = genesis.mutator_set_accumulator_after().unwrap();
@@ -41,7 +41,7 @@ async fn disallow_empty_transaction_with_non_zero_fee() {
     );
 
     let fee_tx = fee_tx.primitive_witness();
-    let consensus_rule_set = ConsensusRuleSet::Reboot;
+    let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
     let fee_sp_error = produce_single_proof(
         &fee_tx,
         vm_job_queue(),

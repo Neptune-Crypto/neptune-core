@@ -254,7 +254,6 @@ pub(crate) mod tests {
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::random;
-    use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
     use tests::primitive_witness::SaltedUtxos;
     use tests::utxo::Utxo;
@@ -267,7 +266,6 @@ pub(crate) mod tests {
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 
     impl Transaction {
         /// Create a new [`Transaction`], backed by a [`SingleProof`].
@@ -343,7 +341,7 @@ pub(crate) mod tests {
             let as_single_proof = produce_single_proof(
                 &to_be_updated,
                 TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
+                TritonVmProofJobOptions::default_with_network(network),
                 consensus_rule_set,
             )
             .await
@@ -362,7 +360,7 @@ pub(crate) mod tests {
                 &mutator_set_update,
                 original_tx.proof.into_single_proof(),
                 TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
+                TritonVmProofJobOptions::default_with_network(network),
                 None,
                 consensus_rule_set,
             )

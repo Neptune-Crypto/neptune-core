@@ -5,6 +5,8 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use neptune_consensus::protocol::consensus::network::Network;
+
 use super::super::wallet::address::SpendingKey;
 use super::super::wallet::change_policy::ChangePolicy;
 use super::super::wallet::utxo_notification::UtxoNotificationMedium;
@@ -42,6 +44,11 @@ impl TxCreationConfig {
         notification_medium: UtxoNotificationMedium,
     ) -> Self {
         self.change_policy = ChangePolicy::recover_to_provided_key(change_key, notification_medium);
+        self
+    }
+
+    pub(crate) fn with_network(mut self, network: Network) -> Self {
+        self.proof_job_options.job_settings.set_network(network);
         self
     }
 

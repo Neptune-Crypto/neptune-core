@@ -2440,7 +2440,7 @@ pub(super) mod tests {
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::state::archival_state::ArchivalState;
@@ -3134,7 +3134,7 @@ pub(super) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let cli_args = Args::default_with_network(network);
         let premine_rec_ws =
             mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
@@ -3257,7 +3257,7 @@ pub(super) mod tests {
             light_state.tip(),
             &premine_rec,
             in_seven_months,
-            TritonVmJobPriority::Normal.into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -3267,7 +3267,7 @@ pub(super) mod tests {
             tx_to_alice_and_bob.into(),
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set_0,
         )
         .await
@@ -3279,7 +3279,7 @@ pub(super) mod tests {
             block_tx,
             in_seven_months,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -3515,7 +3515,7 @@ pub(super) mod tests {
             light_state_premine.tip(),
             &premine_rec,
             in_seven_months,
-            TritonVmJobPriority::Normal.into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -3524,7 +3524,7 @@ pub(super) mod tests {
             tx_from_alice.into(),
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set_1,
         )
         .await
@@ -3534,7 +3534,7 @@ pub(super) mod tests {
             tx_from_bob.into(),
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set_1,
         )
         .await
@@ -3544,7 +3544,7 @@ pub(super) mod tests {
             block_tx2,
             in_seven_months + network.minimum_block_time(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();

@@ -2521,8 +2521,8 @@ pub(crate) mod tests {
         let config2 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-        let block_height_1 = block1.header().height;
-        let consensus_rule_set_1 = ConsensusRuleSet::infer_from(network, block_height_1);
+        let consensus_rule_set_2 =
+            ConsensusRuleSet::infer_from(network, block1.header().height.next());
         let tx_block2 = bob
             .api()
             .tx_initiator_internal()
@@ -2531,7 +2531,7 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
                 config2,
-                consensus_rule_set_1,
+                consensus_rule_set_2,
             )
             .await
             .unwrap()
@@ -2568,7 +2568,8 @@ pub(crate) mod tests {
         let config3 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-        let consensus_rule_set_2 = ConsensusRuleSet::infer_from(network, block2.header().height);
+        let consensus_rule_set_3 =
+            ConsensusRuleSet::infer_from(network, block2.header().height.next());
         let tx_block3 = bob
             .api()
             .tx_initiator_internal()
@@ -2577,7 +2578,7 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(22),
                 config3,
-                consensus_rule_set_2,
+                consensus_rule_set_3,
             )
             .await
             .unwrap()
@@ -3266,7 +3267,7 @@ pub(crate) mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn registers_guesser_fee_utxos_correctly() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let genesis_block = Block::genesis(network);
             let mut bob = mock_genesis_global_state(
                 3,
@@ -3546,7 +3547,7 @@ pub(crate) mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn confirmed_and_unconfirmed_balance() -> Result<()> {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(664505904);
             let mut global_state_lock = mock_genesis_global_state(
                 0,
@@ -3604,6 +3605,7 @@ pub(crate) mod tests {
 
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key)
+                    .with_network(network)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 let consensus_rule_set =
                     ConsensusRuleSet::infer_from(network, BlockHeight::genesis().next());
@@ -5138,7 +5140,7 @@ pub(crate) mod tests {
             let mut rng = StdRng::from_seed(seed);
 
             // set up premine recipient
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let cli_args = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 network,
@@ -5174,16 +5176,50 @@ pub(crate) mod tests {
                 .await;
             let now = network.launch_date() + Timestamp::months(7);
             let dummy_queue = TritonVmJobQueue::get_instance();
+            let job_options = TritonVmProofJobOptions::default_with_network(network);
+
+            // On networks where the gamma rule set (and thus lustration) is
+            // active from genesis, block 1 *defines* the lustration status and
+            // its transactions are exempt; only blocks at height 2 and above
+            // enforce lustration. So mine an empty block 1 first and create the
+            // transaction against *that* tip -- then it carries the lustration
+            // announcements that the later blocks require.
+            let block1_timestamp = network.launch_date() + Timestamp::months(6);
+            let (block1_tx, _) = create_block_transaction(
+                &genesis_block,
+                alice.clone(),
+                block1_timestamp,
+                job_options.clone(),
+            )
+            .await
+            .unwrap();
+            let block1 = Block::compose(
+                genesis_block.clone(),
+                block1_tx,
+                block1_timestamp,
+                dummy_queue.clone(),
+                job_options.clone(),
+            )
+            .await
+            .unwrap();
+            alice
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block1.clone())
+                .await
+                .unwrap();
 
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(change_key.into())
+                .with_network(network)
                 .with_prover_capability(TxProvingCapability::ProofCollection);
 
-            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
+            let consensus_rule_set1 =
+                ConsensusRuleSet::infer_from(network, BlockHeight::genesis().next());
             let proof_collection_transaction = alice
                 .api()
                 .tx_initiator_internal()
-                .create_transaction(tx_outputs.into(), fee, now, config, consensus_rule_set)
+                .create_transaction(tx_outputs.into(), fee, now, config, consensus_rule_set1)
                 .await
                 .unwrap()
                 .transaction;
@@ -5200,6 +5236,12 @@ pub(crate) mod tests {
             };
             let mut rando =
                 mock_genesis_global_state(2, rando_wallet_secret.clone(), rando_cli_args).await;
+            rando
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block1.clone())
+                .await
+                .unwrap();
             let upgrade_incentive = UpgradeIncentive::Gobble(fee);
             let (gobble_fee_recipient, recipient_preimage) = rando
                 .global_state_lock
@@ -5213,7 +5255,7 @@ pub(crate) mod tests {
                         .proof
                         .clone()
                         .into_proof_collection(),
-                    genesis_block.mutator_set_accumulator_after().unwrap(),
+                    block1.mutator_set_accumulator_after().unwrap(),
                     upgrade_incentive,
                     gobble_fee_recipient,
                     recipient_preimage,
@@ -5237,46 +5279,42 @@ pub(crate) mod tests {
 
             // create block ignoring that transaction. Rando has upgraded tx
             // in mempool, alice does not. Alice composes block.
-            let (block_transaction, _composer_utxos) = create_block_transaction(
-                &genesis_block,
-                alice.clone(),
-                now,
-                TritonVmProofJobOptions::default(),
-            )
-            .await
-            .unwrap();
-            let block_one = Block::compose(
-                genesis_block.clone(),
+            let (block_transaction, _composer_utxos) =
+                create_block_transaction(&block1, alice.clone(), now, job_options.clone())
+                    .await
+                    .unwrap();
+            let block2 = Block::compose(
+                block1.clone(),
                 block_transaction,
                 now,
                 dummy_queue.clone(),
-                TritonVmProofJobOptions::default(),
+                job_options.clone(),
             )
             .await
             .unwrap();
             alice
                 .lock_guard_mut()
                 .await
-                .set_new_tip(block_one.clone())
+                .set_new_tip(block2.clone())
                 .await
                 .unwrap();
             rando
                 .lock_guard_mut()
                 .await
-                .set_new_tip(block_one.clone())
+                .set_new_tip(block2.clone())
                 .await
                 .unwrap();
 
             // upgrade transaction again
             // this time mutator set data
-            let genesis_mutator_set = genesis_block.mutator_set_accumulator_after().unwrap();
+            let block1_mutator_set = block1.mutator_set_accumulator_after().unwrap();
             let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
-                genesis_mutator_set,
-                block_one.mutator_set_update().unwrap(),
+                block1_mutator_set,
+                block2.mutator_set_update().unwrap(),
                 upgrade_incentive,
-                consensus_rule_set,
+                consensus_rule_set1,
             ));
             let (channel_to_nowhere_two, nowhere_two) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
@@ -5303,34 +5341,34 @@ pub(crate) mod tests {
             // merge with some other transaction to set merge bit, Alice gets
             // composer rewards.
             let (some_other_transaction, _) = create_block_transaction(
-                &block_one,
+                &block2,
                 alice,
-                block_one.header().timestamp + Timestamp::minutes(10),
-                TritonVmProofJobOptions::default(),
+                block2.header().timestamp + Timestamp::minutes(10),
+                job_options.clone(),
             )
             .await
             .unwrap();
 
-            let consensus_rule_set_one =
-                ConsensusRuleSet::infer_from(network, block_one.header().height);
-            let block_two_transaction = BlockTransaction::merge(
+            let consensus_rule_set3 =
+                ConsensusRuleSet::infer_from(network, block2.header().height.next());
+            let block3_transaction = BlockTransaction::merge(
                 some_other_transaction.into(),
                 upgraded_transaction,
                 rng.random(),
                 dummy_queue.clone(),
-                TritonVmProofJobOptions::default(),
-                consensus_rule_set_one,
+                job_options.clone(),
+                consensus_rule_set3,
             )
             .await
             .unwrap();
 
             // create block with that transaction
-            let block_two = Block::compose(
-                block_one,
-                block_two_transaction,
+            let block3 = Block::compose(
+                block2,
+                block3_transaction,
                 now + Timestamp::minutes(10),
                 dummy_queue,
-                TritonVmProofJobOptions::default(),
+                job_options,
             )
             .await
             .unwrap();
@@ -5345,7 +5383,7 @@ pub(crate) mod tests {
             rando
                 .lock_guard_mut()
                 .await
-                .set_new_tip(block_two.clone())
+                .set_new_tip(block3.clone())
                 .await
                 .unwrap();
 

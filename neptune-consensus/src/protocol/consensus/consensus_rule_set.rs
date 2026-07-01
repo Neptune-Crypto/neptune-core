@@ -65,7 +65,6 @@ pub enum ConsensusRuleSet {
     HardforkAlpha,
 
     /// Upgrade from Triton VM proof version v0 to v1
-    #[default]
     TvmProofVersion1,
 
     /// Remove memory hardness from PoW algorithm, add lustration barrier for
@@ -80,6 +79,7 @@ pub enum ConsensusRuleSet {
     ///
     /// Also restarts the lustration counting since all past proofs have been
     /// found to be unsound.
+    #[default]
     HardforkGamma,
 }
 

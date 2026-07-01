@@ -6269,7 +6269,7 @@ mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn full_pow_puzzle_test() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let bob = WalletEntropy::new_random();
             let mut bob = test_rpc_server(
                 bob.clone(),
@@ -6316,7 +6316,7 @@ mod tests {
                 "Node must reject new tip with invalid PoW solution."
             );
 
-            let solution = puzzle.solve(ConsensusRuleSet::Reboot);
+            let solution = puzzle.solve(ConsensusRuleSet::HardforkGamma);
             assert!(
                 bob.clone()
                     .provide_new_tip(
@@ -6426,7 +6426,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn exported_pow_puzzle_is_consistent_with_block_hash() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let bob = WalletEntropy::new_random();
             let mut bob = test_rpc_server(
                 bob.clone(),
@@ -6502,7 +6502,7 @@ mod tests {
                 );
 
                 // Check that succesful guess is accepted by endpoint.
-                let consensus_rule_set = ConsensusRuleSet::Reboot;
+                let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
                 let guesser_buffer = block1.guess_preprocess(None, None, consensus_rule_set);
                 let mast_auth_paths = block1.pow_mast_paths();
                 let version = block1.header().version;
@@ -6992,8 +6992,6 @@ mod tests {
     mod send_tests {
         use super::*;
         use crate::api::export::TxProvingCapability;
-        use crate::application::rpc::server::error::RpcError;
-        use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -7051,64 +7049,6 @@ mod tests {
             for recipient_key_type in KeyType::iter() {
                 worker::send_to_many(recipient_key_type).await?;
             }
-            Ok(())
-        }
-
-        /// checks that the sending rate limit kicks in after 2 tx are sent.
-        /// note: rate-limit only applies below block 25000
-        #[traced_test]
-        #[apply(shared_tokio_runtime)]
-        async fn send_rate_limit() -> Result<()> {
-            let mut rng = StdRng::seed_from_u64(1815);
-            let network = Network::Main;
-            let cli_args = cli_args::Args {
-                tx_proving_capability: Some(TxProvingCapability::SingleProof),
-                network,
-                ..Default::default()
-            };
-            let mut rpc_server = test_rpc_server(WalletEntropy::devnet_wallet(), 2, cli_args).await;
-
-            let ctx = context::current();
-            let token = cookie_token(&rpc_server).await;
-            let timestamp = network.launch_date() + Timestamp::months(7);
-
-            // obtain some funds, so we have two inputs available.
-            mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, Some(timestamp))
-                .await?;
-
-            let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
-                .to_address()
-                .into();
-            let amount = NativeCurrencyAmount::coins(rng.random_range(0..2));
-            let fee = NativeCurrencyAmount::coins(1);
-
-            let output: OutputFormat = (address, amount, UtxoNotificationMedium::OnChain).into();
-            let outputs = vec![output];
-            let accept_lustrations = true;
-
-            for i in 0..10 {
-                let result = rpc_server
-                    .clone()
-                    .send(
-                        ctx,
-                        token,
-                        outputs.clone(),
-                        ChangePolicy::Burn,
-                        fee,
-                        accept_lustrations,
-                    )
-                    .await;
-
-                // any attempts after the 2nd send should result in RateLimit error.
-                match i {
-                    0..2 => assert!(result.is_ok()),
-                    _ => assert!(matches!(
-                        result,
-                        Err(RpcError::SendError(s)) if s.contains("Send rate limit reached")
-                    )),
-                }
-            }
-
             Ok(())
         }
 

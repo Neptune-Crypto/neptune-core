@@ -903,11 +903,12 @@ pub mod test_helpers {
     use super::UpdateWitness;
     use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
     use crate::protocol::consensus::transaction::PrimitiveWitness;
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::transaction::TransactionKernelModifier;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
     /// Return an update witness where the mutator set has had both elements
@@ -957,7 +958,7 @@ pub mod test_helpers {
         let old_proof = produce_single_proof(
             &old_pw,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(Network::Main),
             consensus_rule_set,
         )
         .await
@@ -986,9 +987,7 @@ pub mod test_helpers {
         num_pub_announcements: usize,
         consensus_rule_set: ConsensusRuleSet,
     ) -> UpdateWitness {
-        // TODO: Currently only tests a new mutator set with more AOCL leafs.
-        // Should also test for removed records in the new mutator set
-        // accumulator.
+        let network = Network::Main;
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(
             Some(num_inputs),
@@ -1025,7 +1024,7 @@ pub mod test_helpers {
         let old_proof = produce_single_proof(
             &primitive_witness,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await

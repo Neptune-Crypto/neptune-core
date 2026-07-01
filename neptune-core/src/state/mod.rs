@@ -3494,7 +3494,7 @@ mod tests {
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::protocol::consensus::transaction::utxo::Utxo;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -5467,7 +5467,7 @@ mod tests {
         // around.
 
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce12210c467f93u64);
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
@@ -5500,7 +5500,7 @@ mod tests {
                 &genesis_block,
                 &premine_receiver,
                 in_seven_months,
-                TritonVmJobPriority::Normal.into(),
+                TritonVmProofJobOptions::default_with_network(network),
             )
             .await
             .unwrap();
@@ -5607,7 +5607,7 @@ mod tests {
             tx_to_alice_and_bob,
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -5618,7 +5618,7 @@ mod tests {
             block_transaction,
             in_seven_months,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -5736,6 +5736,7 @@ mod tests {
 
         let config_alice = TxCreationConfig::default()
             .recover_change_off_chain(alice_spending_key.into())
+            .with_network(network)
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_alice = alice
             .api()
@@ -5743,7 +5744,7 @@ mod tests {
             .create_transaction(
                 tx_outputs_from_alice.clone().into(),
                 NativeCurrencyAmount::coins(1),
-                in_seven_months,
+                in_eight_months,
                 config_alice,
                 consensus_rule_set,
             )
@@ -5772,6 +5773,7 @@ mod tests {
 
         let config_bob = TxCreationConfig::default()
             .recover_change_off_chain(bob_spending_key.into())
+            .with_network(network)
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_bob = bob
             .api()
@@ -5779,7 +5781,7 @@ mod tests {
             .create_transaction(
                 tx_outputs_from_bob.clone().into(),
                 NativeCurrencyAmount::coins(1),
-                in_seven_months,
+                in_eight_months,
                 config_bob,
                 consensus_rule_set,
             )
@@ -5810,8 +5812,8 @@ mod tests {
         let (coinbase_transaction2, _expected_utxo) = make_coinbase_transaction_from_state_lock(
             light_state.tip(),
             &premine_receiver,
-            in_seven_months,
-            TritonVmJobPriority::Normal.into(),
+            in_eight_months,
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -5828,7 +5830,7 @@ mod tests {
             tx_from_alice.into(),
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -5838,7 +5840,7 @@ mod tests {
             tx_from_bob.into(),
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -5857,7 +5859,7 @@ mod tests {
             block_transaction2,
             in_eight_months,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -5872,7 +5874,7 @@ mod tests {
     async fn mock_global_state_is_valid() {
         // Verify that the states, not just the blocks, are valid.
 
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let mut global_state_lock = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
@@ -6798,7 +6800,7 @@ mod tests {
             change_key_type: KeyType,
         ) {
             // setup initial conditions
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(10001);
 
             let genesis_block = Block::genesis(network);
@@ -6922,7 +6924,7 @@ mod tests {
                     &genesis_block,
                     charlie_state_lock,
                     seven_months_post_launch,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmProofJobOptions::default_with_network(network),
                     TxMergeOrigin::ExplicitList(vec![Arc::into_inner(alice_to_bob_tx).unwrap()]),
                 )
                 .await
@@ -6932,7 +6934,7 @@ mod tests {
                     block_1_tx,
                     seven_months_post_launch,
                     TritonVmJobQueue::get_instance(),
-                    TritonVmJobPriority::default().into(),
+                    TritonVmProofJobOptions::default_with_network(network),
                 )
                 .await
                 .unwrap();

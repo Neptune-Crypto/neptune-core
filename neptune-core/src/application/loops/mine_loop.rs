@@ -1099,23 +1099,17 @@ pub(crate) async fn mine(
 pub(crate) mod tests {
     use std::hint::black_box;
 
-    use arbitrary::Arbitrary;
-    use block_appendix::BlockAppendix;
-    use block_body::BlockBody;
     use difficulty_control::Difficulty;
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use neptune_job_queue::errors::JobHandleError;
     use neptune_mutator_set::test_shared::pseudorandom_addition_record;
-    use neptune_mutator_set::test_shared::random_mmra;
-    use neptune_mutator_set::test_shared::random_mutator_set_accumulator;
     use neptune_primitives::mast_hash::MastHash;
     use neptune_primitives::timestamp::Timestamp;
     use num_bigint::BigUint;
     use num_traits::One;
     use num_traits::Pow;
     use num_traits::Zero;
-    use rand::RngCore;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1129,7 +1123,6 @@ pub(crate) mod tests {
     use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
     use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash;
-    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
@@ -1353,7 +1346,7 @@ pub(crate) mod tests {
         // scenario: Alice has an outdated transaction in her mempool which she
         // must use to create a block transaction by first updating the
         // transaction and then merging it into the coinbase transaction.
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let mut alice = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
@@ -1438,7 +1431,7 @@ pub(crate) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn block_proposal_for_height_one_is_valid_for_various_guesser_fee_fractions() {
         // Verify that a block template made with transaction from the mempool is a valid block
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         let mut alice = mock_genesis_global_state(
             2,
@@ -1520,7 +1513,7 @@ pub(crate) mod tests {
                 transaction_empty_mempool,
                 now,
                 TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::High.into(),
+                TritonVmProofJobOptions::default_with_network(network),
             )
             .await
             .unwrap();
@@ -1545,7 +1538,7 @@ pub(crate) mod tests {
                     &genesis_block,
                     alice.clone(),
                     now,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmProofJobOptions::default_with_network(network),
                 )
                 .await
                 .unwrap()
@@ -1570,7 +1563,7 @@ pub(crate) mod tests {
                 transaction_non_empty_mempool,
                 now,
                 TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
+                TritonVmProofJobOptions::default_with_network(network),
             )
             .await
             .unwrap();
@@ -1589,7 +1582,7 @@ pub(crate) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn block_proposal_for_height_two_is_valid() {
         // Verify that block proposals of both height 1 and 2 are valid.
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         // force SingleProof capability.
         let cli = cli_args::Args {
@@ -1645,7 +1638,7 @@ pub(crate) mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn block_proposal_with_custom_coinbase_distribution_is_valid() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let cli = cli_args::Args {
             network,
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
@@ -1786,7 +1779,7 @@ pub(crate) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn block_timestamp_represents_time_guessing_started() -> Result<()> {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
             network,
@@ -2276,129 +2269,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// Return two blocks: Parent and successor. One of them will have the
-    /// defined difficulty, the other will have a random difficulty. Which one
-    /// has the defined difficulty is determined by the 2nd argument.
-    fn mock_blocks_for_difficulty_check(
-        difficulty: Difficulty,
-        set_parent_difficulty: bool,
-    ) -> (Block, Block) {
-        let mut rng = rand::rng();
-        let mut unstructured_source = vec![0u8; TransactionKernelProxy::size_hint(2).0];
-        rng.fill_bytes(&mut unstructured_source);
-        let mut unstructured = arbitrary::Unstructured::new(&unstructured_source);
-
-        let mut predecessor_header = rng.random::<BlockHeader>();
-        if set_parent_difficulty {
-            predecessor_header.difficulty = difficulty;
-        }
-        let predecessor_body = BlockBody::new(
-            TransactionKernelProxy::arbitrary(&mut unstructured)
-                .unwrap()
-                .into_kernel(),
-            random_mutator_set_accumulator(),
-            random_mmra(),
-            random_mmra(),
-        );
-        let appendix = BlockAppendix::default();
-        let predecessor_block = Block::new(
-            predecessor_header,
-            predecessor_body,
-            appendix.clone(),
-            BlockProof::Invalid,
-        );
-
-        let mut successor_header = rng.random::<BlockHeader>();
-        if !set_parent_difficulty {
-            successor_header.difficulty = difficulty;
-        }
-
-        successor_header.prev_block_digest = predecessor_block.hash();
-        let successor_body = BlockBody::new(
-            TransactionKernelProxy::arbitrary(&mut unstructured)
-                .unwrap()
-                .into_kernel(),
-            random_mutator_set_accumulator(),
-            random_mmra(),
-            random_mmra(),
-        );
-
-        let successor_block = Block::new(
-            successor_header,
-            successor_body.clone(),
-            appendix,
-            BlockProof::Invalid,
-        );
-
-        (predecessor_block, successor_block)
-    }
-
-    #[traced_test]
-    #[test]
-    fn hash_relates_to_predecessor_difficulty_prior_to_hf_beta_and_own_after() {
-        let difficulty = 100u32;
-
-        // Difficulty X means we expect X trials before success.
-        // Modeling the process as a geometric distribution gives the
-        // probability of success in a single trial, p = 1/X.
-        // Then the probability of seeing k failures is (1-1/X)^k.
-        // We want this to be five nines certain that we do get a success
-        // after k trials, so this quantity must be less than 0.0001.
-        // So: log_10 0.0001 = -4 > log_10 (1-1/X)^k = k * log_10 (1 - 1/X).
-        // Difficulty 100 sets k = 917.
-        let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
-        let k = (-4.0 / cofactor).ceil() as usize;
-        let difficulty: Difficulty = difficulty.into();
-
-        for consensus_rule_set in [
-            ConsensusRuleSet::TvmProofVersion1,
-            ConsensusRuleSet::HardforkBeta,
-        ] {
-            let use_parent_difficulty = consensus_rule_set.use_parent_difficulty();
-            let (predecessor, mut sucessor) =
-                mock_blocks_for_difficulty_check(difficulty, use_parent_difficulty);
-
-            let target = if use_parent_difficulty {
-                predecessor.header().difficulty.target()
-            } else {
-                sucessor.header().difficulty.target()
-            };
-            let guesser_buffer = sucessor.guess_preprocess(None, None, consensus_rule_set);
-            let mast_auth_paths = sucessor.pow_mast_paths();
-            let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
-            let version = sucessor.header().version;
-            let mut rng = rand::rng();
-            let mut counter = 0;
-            loop {
-                if let Some(pow) = BlockPow::guess(
-                    &guesser_buffer,
-                    &mast_auth_paths,
-                    index_picker_preimage,
-                    rng.random(),
-                    target,
-                    None,
-                    Some(version),
-                ) {
-                    println!("found solution after {counter} guesses.");
-                    let parent_target = predecessor.header().difficulty.target();
-                    sucessor.set_header_pow(pow);
-                    assert!(
-                        sucessor.pow_verify_for_tests(parent_target, consensus_rule_set),
-                        "Found PoW must be valid for {consensus_rule_set} rules"
-                    );
-                    break;
-                }
-
-                counter += 1;
-
-                assert!(
-                    counter < k,
-                    "number of hash trials before finding valid pow exceeds statistical limit"
-                )
-            }
-        }
-    }
-
     // tests that a job cancel message cancels composing and results in JobCancelled error
     //
     // This test spawns a task that executes create_block_transaction_from()
@@ -2408,7 +2278,7 @@ pub(crate) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn job_cancel_msg_cancels_composing() -> anyhow::Result<()> {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let cli_args = cli_args::Args {
             compose: true,
             network,
@@ -2594,10 +2464,8 @@ pub(crate) mod tests {
     ///
     /// For each normal block (without difficulty reset):
     ///  + asserts block difficulty does NOT match Network::genesis_difficulty()
-    #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn testnet_mock_reset_difficulty() -> anyhow::Result<()> {
-        // we are testing the TestnetMock network.
         let network = Network::TestnetMock;
 
         // basic setup
@@ -2617,21 +2485,25 @@ pub(crate) mod tests {
         // obtain previous (genesis) block
         let mut prev_block = global_state_lock.lock_guard().await.chain.tip().clone();
 
+        let genesis_difficulty = network.genesis_difficulty();
+
         // generate 20 blocks
-        for i in 1..=num_blocks {
+        for block_height in 1..=num_blocks {
             // we simulate a block_interval since doing this in real-time would
             // be too slow.
 
             // height 1 resets because interval since genesis block is large.
             // 5,10,15 we choose arbitrarily.
             let reset_interval = network.difficulty_reset_interval().unwrap();
-            let (block_interval, should_reset) = if [1, 5, 10, 15].contains(&i) {
+            let (block_interval, should_reset) = if [1, 5, 10, 15].contains(&block_height) {
                 (reset_interval, true)
             } else {
-                // generate random interval between min_block_time and difficulty_reset_interval.
-                // this encourages difficulty_control() to modify the difficulty.
+                // generate random interval between less than target block
+                // interval, ensuring that difficulty always increases unless
+                // difficulty is reset.
                 let interval_millis = rng.random_range(
-                    network.minimum_block_time().to_millis()..reset_interval.to_millis(),
+                    network.minimum_block_time().to_millis()
+                        ..network.target_block_interval().to_millis(),
                 );
                 (Timestamp::millis(interval_millis), false)
             };
@@ -2687,12 +2559,18 @@ pub(crate) mod tests {
                 .await
                 .is_ok());
 
+            let observed_difficulty = block.header().difficulty;
+            println!("observed_difficulty: {observed_difficulty}");
             if should_reset {
-                // verify difficulty matches genesis difficulty
-                assert_eq!(block.header().difficulty, network.genesis_difficulty());
+                assert_eq!(
+                    observed_difficulty, genesis_difficulty,
+                    "block height: {block_height}. Difficulty must be reset."
+                );
             } else {
-                // verify difficulty does NOT match genesis difficulty
-                assert_ne!(block.header().difficulty, network.genesis_difficulty());
+                assert_ne!(
+                    observed_difficulty, genesis_difficulty,
+                    "block height: {block_height}. Difficulty must not be reset."
+                );
             }
 
             prev_block = block;

@@ -1490,7 +1490,6 @@ mod tests {
     use crate::protocol::consensus::transaction::Transaction;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::protocol::shared::SIZE_20MB_IN_BYTES;
@@ -1748,7 +1747,7 @@ mod tests {
         let left_single_proof = produce_single_proof(
             &left,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(Network::Main),
             consensus_rule_set,
         )
         .await
@@ -1756,7 +1755,7 @@ mod tests {
         let right_single_proof = produce_single_proof(
             &right,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(Network::Main),
             consensus_rule_set,
         )
         .await
@@ -1780,7 +1779,7 @@ mod tests {
             right.clone(),
             shuffle_seed,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(Network::Main),
             consensus_rule_set,
         )
         .await
@@ -1805,6 +1804,7 @@ mod tests {
         Transaction,
         MutatorSetAccumulator,
     ) {
+        let network = Network::Main;
         let mut test_runner = TestRunner::deterministic();
         let txs: [PrimitiveWitness; 4] =
             PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
@@ -1824,7 +1824,7 @@ mod tests {
                 produce_single_proof(
                     tx,
                     TritonVmJobQueue::get_instance(),
-                    TritonVmJobPriority::default().into(),
+                    TritonVmProofJobOptions::default_with_network(network),
                     consensus_rule_set,
                 )
                 .await
@@ -1852,7 +1852,7 @@ mod tests {
             txs[1].clone(),
             shuffle_seed,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -1862,7 +1862,7 @@ mod tests {
             txs[3].clone(),
             shuffle_seed,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -1872,7 +1872,7 @@ mod tests {
             right.clone(),
             shuffle_seed,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -2123,7 +2123,7 @@ mod tests {
         // transaction-proof upgrader such that single-proof backed transactions
         // survive across block updates.
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         let bob_wallet_secret = WalletEntropy::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -2261,7 +2261,7 @@ mod tests {
             light_state.tip(),
             &bob,
             in_seven_months,
-            TritonVmJobPriority::Normal.into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -2270,7 +2270,7 @@ mod tests {
             tx_by_bob,
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -2333,7 +2333,7 @@ mod tests {
             &tip_alice,
             &alice,
             block_5_timestamp,
-            TritonVmJobPriority::Normal.into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -2342,7 +2342,7 @@ mod tests {
             tx_by_alice_updated,
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -2370,7 +2370,6 @@ mod tests {
         // Verify that a merged transaction replaces the two transactions that
         // are the input into the merge.
         let network = Network::Main;
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(
             ByteSize::gb(1),
@@ -2378,6 +2377,7 @@ mod tests {
             &genesis_block,
         );
 
+        let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
         let (((left, right), merged), _) = merge_tx_triplet(consensus_rule_set).await;
         mempool.insert(left.clone(), UpgradePriority::Irrelevant);
         mempool.insert(right.clone(), UpgradePriority::Irrelevant);
@@ -2445,14 +2445,13 @@ mod tests {
     async fn mempool_insertion_is_stable_on_mergers() {
         // Ensure that the mempool state does not change once all
         // transactions in a merge tree has been seen by the mempool.
-        let consensus_rule_set = ConsensusRuleSet::Reboot;
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let mut mempool = Mempool::new(
             ByteSize::gb(1),
             TxProvingCapability::SingleProof,
             &Block::genesis(network),
         );
-        let (bottom, middle, final_tx, _) = nested_mergers(consensus_rule_set).await;
+        let (bottom, middle, final_tx, _) = nested_mergers(ConsensusRuleSet::HardforkGamma).await;
         let tx_msa_hash = final_tx.kernel.mutator_set_hash;
 
         for tx in bottom.clone() {
@@ -2539,7 +2538,6 @@ mod tests {
     async fn reorganization_clears_mempool_and_merge_input_cache() {
         let network = Network::Main;
         let genesis = Block::genesis(network);
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
 
         let block_1a = invalid_empty_block_with_timestamp(
             &genesis,
@@ -2553,6 +2551,8 @@ mod tests {
         );
         let mut mempool =
             Mempool::new(ByteSize::gb(1), TxProvingCapability::SingleProof, &block_1a);
+
+        let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
         let (((a, b), c), _) = merge_tx_triplet(consensus_rule_set).await;
         mempool.insert(a.clone(), UpgradePriority::Irrelevant);
         mempool.insert(b.clone(), UpgradePriority::Irrelevant);
@@ -2589,8 +2589,9 @@ mod tests {
         // non-empty. Then mine a a block 1b that also does not contain this
         // transaction. Mempool state updater must not crash when changing tip
         // from 1a to 1b.
-        let network = Network::Main;
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
+        let network = Network::Testnet(42);
+        let consensus_rule_set =
+            ConsensusRuleSet::infer_from(network, BlockHeight::genesis().next());
         let alice_wallet = WalletEntropy::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let proving_capability = TxProvingCapability::SingleProof;
@@ -3039,7 +3040,7 @@ mod tests {
             // merge: (a, b) -> c
             // Scenario: a is mined => b is in mempool after block update
             let network = Network::Main;
-            let consensus_rule_set = ConsensusRuleSet::Reboot;
+            let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
             let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
             let block1 = invalid_block_with_kernel_and_mutator_set(b.kernel.clone(), mutator_set);
 
@@ -3075,7 +3076,7 @@ mod tests {
             // merge: (a, b) -> c
             // Scenario: c is mined => mempool is empty after block update
             let network = Network::Main;
-            let consensus_rule_set = ConsensusRuleSet::Reboot;
+            let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
             let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
             let block1 = invalid_block_with_kernel_and_mutator_set(c.kernel.clone(), mutator_set);
 
@@ -3107,10 +3108,9 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn nested_mergers_behave() {
-            let consensus_rule_set = ConsensusRuleSet::Reboot;
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (bottom, [left, right], final_tx, mutator_set) =
-                nested_mergers(consensus_rule_set).await;
+                nested_mergers(ConsensusRuleSet::HardforkGamma).await;
             let block_bottom = invalid_block_with_kernel_and_mutator_set(
                 bottom[0].kernel.clone(),
                 mutator_set.clone(),
@@ -3355,7 +3355,7 @@ mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn tx_ms_updating() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let fee = NativeCurrencyAmount::coins(1);
 
             let genesis_block = Block::genesis(network);
@@ -3422,7 +3422,7 @@ mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn sp_update_only_returns_unsynced_txs() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let fee = NativeCurrencyAmount::coins(1);
             let sp_tx =
                 genesis_tx_with_proof_type(TxProvingCapability::SingleProof, network, fee).await;
@@ -3573,7 +3573,7 @@ mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn always_preserve_primitive_witness_if_available() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let fee = NativeCurrencyAmount::coins(1);
             let pw_tx =
                 genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
@@ -3618,7 +3618,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn single_proof_always_replaces_primitive_witness() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let pw_high_fee = genesis_tx_with_proof_type(
                 TxProvingCapability::PrimitiveWitness,
                 network,
@@ -3650,7 +3650,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn single_proof_always_replaces_proof_collection() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let pc_high_fee = genesis_tx_with_proof_type(
                 TxProvingCapability::ProofCollection,
                 network,

@@ -161,6 +161,7 @@ pub(crate) async fn genesis_tx_with_proof_type(
     let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
     let config = TxCreationConfig::default()
         .recover_change_on_chain(bob_spending_key.into())
+        .with_network(network)
         .with_prover_capability(proof_type);
 
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());

@@ -794,7 +794,6 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::protocol::consensus::network::Network;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::transaction::validity::single_proof::SingleProof;
     use crate::protocol::consensus::transaction::validity::single_proof::SingleProofWitness;
@@ -933,7 +932,7 @@ pub(crate) mod tests {
             let good_proof_collection = ProofCollection::produce(
                 &good_primitive_witness,
                 TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
+                TritonVmProofJobOptions::default_with_network(Network::Main),
             )
             .await
             .unwrap();
@@ -951,7 +950,7 @@ pub(crate) mod tests {
             let bad_proof_collection = ProofCollection::produce(
                 &bad_primitive_witness,
                 TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
+                TritonVmProofJobOptions::default_with_network(Network::Main),
             )
             .await
             .unwrap();
@@ -984,7 +983,7 @@ pub(crate) mod tests {
             let proof_collection = ProofCollection::produce(
                 &primitive_witness,
                 TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
+                TritonVmProofJobOptions::default_with_network(Network::Main),
             )
             .await
             .unwrap();
@@ -1024,7 +1023,7 @@ pub(crate) mod tests {
             let proof_collection = ProofCollection::produce(
                 &primitive_witness,
                 TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
+                TritonVmProofJobOptions::default_with_network(Network::Main),
             )
             .await
             .unwrap();

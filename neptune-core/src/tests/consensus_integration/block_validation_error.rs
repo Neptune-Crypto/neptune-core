@@ -583,7 +583,7 @@ async fn bad_lustration_status_encoding_fails_parent_2n(
 async fn bad_lustration_status_aocl_threshold_2q(
     #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
 ) {
-    let network = Network::Main;
+    let network = Network::Testnet(42);
     let (mut b_prev, ts, rness) = s;
 
     prop_assume!(b_prev.header().height > ConsensusRuleSet::first_lustration_block(network));
@@ -644,19 +644,16 @@ async fn bad_lustration_status_counter_2p(
     ));
 }
 
-#[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
-async fn bad_lustration_status_counter_exceeds_initial_value_2p(
-    #[strategy(setup_with_height(BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET.previous().unwrap()))] s: (
-        Block,
-        Timestamp,
-        Randomness<2, 2>,
-    ),
-) {
-    let network = Network::Main;
-    let (b_prev, ts, rness) = s;
+#[tokio::test]
+async fn bad_lustration_status_counter_exceeds_initial_value_2p() {
+    let network = Network::Testnet(42);
+    let rness = Default::default();
+    let b_prev = Block::genesis(network);
+    let ts = b_prev.header().timestamp + Timestamp::hours(1);
 
     let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+    assert_eq!(ConsensusRuleSet::HardforkGamma, consensus_rule_set);
     cache_true_claims([BlockProgram::claim(
         b_new.body(),
         b_new.kernel.appendix(),
@@ -689,16 +686,12 @@ async fn bad_lustration_status_counter_exceeds_initial_value_2p(
     ));
 }
 
-#[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
-async fn bad_lustration_status_counter_bad_initial_threshold_2q(
-    #[strategy(setup_with_height(BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET.previous().unwrap()))] s: (
-        Block,
-        Timestamp,
-        Randomness<2, 2>,
-    ),
-) {
-    let network = Network::Main;
-    let (b_prev, ts, rness) = s;
+#[tokio::test]
+async fn bad_lustration_status_counter_bad_initial_threshold_2q() {
+    let network = Network::Testnet(42);
+    let rness = Default::default();
+    let b_prev = Block::genesis(network);
+    let ts = b_prev.header().timestamp + Timestamp::hours(1);
 
     let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
 

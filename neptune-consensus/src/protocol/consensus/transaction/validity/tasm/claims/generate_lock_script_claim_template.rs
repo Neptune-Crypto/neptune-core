@@ -89,10 +89,11 @@ mod tests {
     use tasm_lib::twenty_first::bfe;
 
     use super::GenerateLockScriptClaimTemplate;
+    use crate::protocol::consensus::network::Network;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
     use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
     use crate::protocol::consensus::transaction::validity::tasm::claims::new_claim::NewClaim;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
     impl Function for GenerateLockScriptClaimTemplate {
@@ -141,7 +142,7 @@ mod tests {
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
                     TritonVmJobQueue::get_instance(),
-                    TritonVmJobPriority::default().into(),
+                    TritonVmProofJobOptions::default_with_network(Network::Main),
                 ))
                 .unwrap();
 

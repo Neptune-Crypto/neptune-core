@@ -38,8 +38,7 @@ impl MockBlockGenerator {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor, block_tx, network);
 
         let body = primitive_witness.body().to_owned();
-        let mut header =
-            primitive_witness.header(timestamp, Network::RegTest.target_block_interval());
+        let mut header = primitive_witness.header(timestamp, network.target_block_interval());
         header.guesser_receiver_data.receiver_digest = guesser_address.privacy_digest();
         header.guesser_receiver_data.lock_script_hash = guesser_address.lock_script_hash();
 

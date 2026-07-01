@@ -87,7 +87,7 @@ pub(crate) async fn next_block(
         parent.clone(),
         global_state_lock.clone(),
         coinbase_timestamp,
-        TritonVmProofJobOptions::default(),
+        TritonVmProofJobOptions::default_with_network(network),
     )
     .await
     .unwrap();
@@ -389,13 +389,14 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     let tip = global_state_lock.lock_guard().await.chain.tip().to_owned();
 
     let timestamp = timestamp.unwrap_or_else(|| tip.header().timestamp + Timestamp::minutes(10));
-
+    let network = global_state_lock.cli().network;
+    let job_options = TritonVmProofJobOptions::default_with_network(network);
     let (transaction, expected_composer_utxos) =
         crate::application::loops::mine_loop::create_block_transaction(
             &tip,
             global_state_lock.clone(),
             timestamp,
-            Default::default(),
+            job_options,
         )
         .await?;
 
@@ -403,7 +404,6 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .lock_guard()
         .await
         .mining_rewards_address();
-    let network = global_state_lock.cli().network;
     let mut block =
         Block::block_template_invalid_proof(&tip, transaction, timestamp, None, network);
     block.set_header_guesser_data(guesser_address.into());

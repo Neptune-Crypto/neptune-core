@@ -1156,7 +1156,7 @@ pub(crate) mod tests {
                 Pow::<MERKLE_TREE_HEIGHT>::preprocess(
                     mast_auth_paths,
                     Some(&tx),
-                    ConsensusRuleSet::default(),
+                    ConsensusRuleSet::Reboot,
                     prev_block_digest,
                 )
             });

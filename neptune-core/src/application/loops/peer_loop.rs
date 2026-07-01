@@ -2760,22 +2760,10 @@ mod tests {
     }
 
     mod blocks {
-        use futures::channel::oneshot;
         use itertools::Itertools;
 
         use super::*;
-        use crate::application::loops::channel::NewBlockFound;
-        use crate::application::loops::mine_loop::guess_nonce;
-        use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
-        use crate::protocol::consensus::block::difficulty_control::Difficulty;
-        use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
-        use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
-        use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET;
-        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
-        use crate::tests::shared::blocks::next_block;
-        use crate::tests::shared::globalstate::test_setup_custom_genesis_block;
-        use crate::tests::tokio_runtime;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -2784,7 +2772,7 @@ mod tests {
             // hardcoded. This should lead to the closing of the connection to this peer
             // and a ban.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -2864,16 +2852,10 @@ mod tests {
             Ok(())
         }
 
-        /// Return five blocks:
-        /// - one with invalid PoW and invalid mock-PoW
-        /// - one with invalid PoW and valid mock-Pow
-        /// - one with valid reboot PoW
-        /// - one with valid hardfork PoW
-        /// - one with valid hardfork TVM proof v1
-        async fn pow_related_blocks(
-            network: Network,
-            predecessor: &Block,
-        ) -> (Block, Block, Block, Block, Block) {
+        /// Return two blocks:
+        /// - one with invalid PoW
+        /// - one with valid PoW
+        async fn pow_related_blocks(network: Network, predecessor: &Block) -> (Block, Block) {
             let rng = StdRng::seed_from_u64(5550001).random();
             let block = fake_valid_block_proposal_successor_for_test(
                 predecessor,
@@ -2887,54 +2869,18 @@ mod tests {
 
             let mut invalid_pow = block.clone();
             invalid_pow.set_header_pow(Default::default());
-            assert!(!invalid_pow.is_valid_mock_pow(difficulty.target()));
             assert!(!invalid_pow.has_proof_of_work(network, predecessor.header()));
 
-            let mut block_with_valid_mock_pow = block.clone();
-            block_with_valid_mock_pow.satisfy_mock_pow(
-                difficulty,
-                rand::random(),
-                block_with_valid_mock_pow
-                    .header()
-                    .pow
-                    .lustration_status()
-                    .ok(),
-                block_with_valid_mock_pow.header().version,
-            );
-            assert!(block_with_valid_mock_pow.is_valid_mock_pow(difficulty.target()));
-            assert!(!block_with_valid_mock_pow.has_proof_of_work(network, predecessor.header()));
+            let mut block_with_valid_gamma_pow = block.clone();
+            block_with_valid_gamma_pow.satisfy_pow(difficulty, ConsensusRuleSet::HardforkGamma);
 
-            let mut block_with_valid_reboot_pow = block.clone();
-            block_with_valid_reboot_pow.satisfy_pow(difficulty, ConsensusRuleSet::Reboot);
-            assert!(block_with_valid_reboot_pow.is_valid_mock_pow(difficulty.target()));
-            assert!(block_with_valid_reboot_pow
-                .pow_verify_for_tests(difficulty.target(), ConsensusRuleSet::Reboot));
-
-            let mut block_with_valid_alpha_pow = block.clone();
-            block_with_valid_alpha_pow.satisfy_pow(difficulty, ConsensusRuleSet::HardforkAlpha);
-            assert!(block_with_valid_alpha_pow.is_valid_mock_pow(difficulty.target()));
-            assert!(block_with_valid_alpha_pow
-                .pow_verify_for_tests(difficulty.target(), ConsensusRuleSet::HardforkAlpha));
-
-            let mut block_with_valid_tvmv1_pow = block.clone();
-            block_with_valid_tvmv1_pow.satisfy_pow(difficulty, ConsensusRuleSet::TvmProofVersion1);
-            assert!(block_with_valid_tvmv1_pow.is_valid_mock_pow(difficulty.target()));
-            assert!(block_with_valid_tvmv1_pow
-                .pow_verify_for_tests(difficulty.target(), ConsensusRuleSet::TvmProofVersion1));
-
-            (
-                invalid_pow,
-                block_with_valid_mock_pow,
-                block_with_valid_reboot_pow,
-                block_with_valid_alpha_pow,
-                block_with_valid_tvmv1_pow,
-            )
+            (invalid_pow, block_with_valid_gamma_pow)
         }
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn handle_blocks_rejects_blocks_with_invalid_pow() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 _from_main_rx_clone,
@@ -2968,34 +2914,21 @@ mod tests {
                 1,
             );
 
-            let (
-                block_without_any_pow,
-                block_with_valid_mock_pow,
-                valid_pow_reboot,
-                valid_pow_alpha,
-                valid_pow_tvmv1,
-            ) = pow_related_blocks(network, &genesis).await;
+            let (invalid_pow, valid_pow) = pow_related_blocks(network, &genesis).await;
 
-            for invalid_pow_block in [
-                block_without_any_pow,
-                block_with_valid_mock_pow,
-                valid_pow_alpha,
-                valid_pow_tvmv1,
-            ] {
-                assert!(
-                    peer_loop_handler
-                        .handle_blocks(vec![invalid_pow_block], genesis.clone())
-                        .await
-                        .unwrap()
-                        .is_none(),
-                    "Must return None on invalid Pow"
-                );
-            }
+            assert!(
+                peer_loop_handler
+                    .handle_blocks(vec![invalid_pow], genesis.clone())
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "Must return None on invalid Pow"
+            );
 
             assert_eq!(
                 BlockHeight::genesis().next(),
                 peer_loop_handler
-                    .handle_blocks(vec![valid_pow_reboot], genesis.clone())
+                    .handle_blocks(vec![valid_pow], genesis.clone())
                     .await
                     .unwrap()
                     .unwrap(),
@@ -3009,7 +2942,7 @@ mod tests {
             // In this scenario, a block without a valid PoW is received. This block should be rejected
             // by the peer loop and a notification should never reach the main loop.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 peer_broadcast_tx,
                 _from_main_rx_clone,
@@ -3022,50 +2955,43 @@ mod tests {
             ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
             let peer_address = get_dummy_socket_address(0);
 
-            let (no_pow, mock_pow, _, alpha_pow, tvmv1_pow) =
-                pow_related_blocks(network, &Block::genesis(network)).await;
-            for (i, block_without_valid_pow) in [no_pow, mock_pow, alpha_pow, tvmv1_pow]
-                .into_iter()
-                .enumerate()
-            {
-                println!("i: {i}");
+            let (no_pow, _valid_pow) = pow_related_blocks(network, &Block::genesis(network)).await;
 
-                // Sending an invalid block will not necessarily result in a ban. This depends on the peer
-                // tolerance that is set in the client. For this reason, we include a "Bye" here.
-                let mock = Mock::new(vec![
-                    Action::Read(PeerMessage::Block(Box::new(
-                        block_without_valid_pow.clone().try_into().unwrap(),
-                    ))),
-                    Action::Read(PeerMessage::Bye),
-                ]);
+            // Sending an invalid block will not necessarily result in a ban. This depends on the peer
+            // tolerance that is set in the client. For this reason, we include a "Bye" here.
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::Block(Box::new(
+                    no_pow.clone().try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
 
-                let from_main_rx_clone = peer_broadcast_tx.subscribe();
+            let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-                let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
-                    to_main_tx.clone(),
-                    state_lock.clone(),
-                    pseudorandom_peer_id(&peer_address),
-                    socketaddr_to_multiaddr(peer_address),
-                    hsd,
-                    true,
-                    1,
-                    block_without_valid_pow.header().timestamp,
-                );
-                peer_loop_handler
-                    .run_wrapper(mock, from_main_rx_clone)
-                    .await
-                    .expect("sending (one) invalid block should not result in closed connection");
+            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                true,
+                1,
+                no_pow.header().timestamp,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .expect("sending (one) invalid block should not result in closed connection");
 
-                // Verify that no further message was sent to main loop
-                match to_main_rx1.try_recv() {
-                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
-                    Ok(msg) => panic!(
-                        "Unexpected message of type {} sent to main loop",
-                        msg.get_type()
-                    ),
-                    Err(err) => panic!("Unexpected error: {err}"),
-                };
-            }
+            // Verify that no further message was sent to main loop
+            match to_main_rx1.try_recv() {
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
+                Ok(msg) => panic!(
+                    "Unexpected message of type {} sent to main loop",
+                    msg.get_type()
+                ),
+                Err(err) => panic!("Unexpected error: {err}"),
+            };
 
             // We need to have the transmitter in scope until we have received from it
             // otherwise the receiver will report the disconnected error when we attempt
@@ -3098,7 +3024,7 @@ mod tests {
             // known and stored. The expected behavior is to ignore the block and not send
             // a message to the main task.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 peer_broadcast_tx,
                 _from_main_rx_clone,
@@ -3163,7 +3089,7 @@ mod tests {
             // Scenario: Six blocks (including genesis) are known. Peer requests
             // from all possible starting points, and client responds with the
             // correct list of blocks.
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -3248,7 +3174,7 @@ mod tests {
             // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
             // are returned.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -3376,7 +3302,7 @@ mod tests {
             // The blocks will be supplied in the correct order but starting from the first digest in
             // the list that is known and canonical.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -3528,7 +3454,7 @@ mod tests {
             // A peer requests a block at height 2. Verify that the correct block at height 2 is
             // returned.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -3599,7 +3525,7 @@ mod tests {
         async fn receival_of_block_notification_height_1() {
             // Scenario: client only knows genesis block. Then receives block
             // notification of height 1. Must request block 1.
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(5552401);
             let (
                 _peer_broadcast_tx,
@@ -3645,7 +3571,7 @@ mod tests {
         async fn receive_block_request_by_height_block_7() {
             // Scenario: client only knows blocks up to height 7. Then receives block-
             // request-by-height for height 7. Must respond with block 7.
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(5552401);
             let (
                 _peer_broadcast_tx,
@@ -3705,7 +3631,7 @@ mod tests {
         async fn test_peer_loop_receival_of_first_block() -> Result<()> {
             // Scenario: client only knows genesis block. Then receives block 1.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(5550001);
             let (
                 _peer_broadcast_tx,
@@ -3760,7 +3686,7 @@ mod tests {
             // In this scenario, the client only knows the genesis block (block 0) and then
             // receives block 2, meaning that block 1 will have to be requested.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -3838,7 +3764,7 @@ mod tests {
             // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
             // process as the alternative is that the program will crash because it runs out of RAM.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(5550001);
             let (
                 _peer_broadcast_tx,
@@ -3919,7 +3845,7 @@ mod tests {
             // In this scenario, the client know the genesis block (block 0) and block 1, it
             // then receives block 4, meaning that block 3 and 2 will have to be requested.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -3992,7 +3918,7 @@ mod tests {
             // In this scenario, the client only knows the genesis block (block 0) and then
             // receives block 3, meaning that block 2 and 1 will have to be requested.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -4073,7 +3999,7 @@ mod tests {
             // But the requests are interrupted by the peer sending another message: a new block
             // notification.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -4177,7 +4103,7 @@ mod tests {
             // But the requests are interrupted by the peer sending another message: a request
             // for a list of peers.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -4277,174 +4203,6 @@ mod tests {
             );
 
             Ok(())
-        }
-
-        #[traced_test]
-        #[test]
-        fn hardforks_happy_cases() {
-            // Ensure that valid blocks are all accepted across hardforks
-            // Scenario: Current height is hardfork minus 2. Then receives peer
-            // notification of first block after hardfork. Must accept all
-            // blocks from peer, not punish peer, and send blocks to main
-            // loop. Can be expanded for new hardforks when they are planned.
-            let network = Network::Main;
-            let hf_alpha = (
-                BlockHeight::from(14999u64),
-                ConsensusRuleSet::Reboot,
-                ConsensusRuleSet::HardforkAlpha,
-            );
-            let hf_beta = (
-                BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET.previous().unwrap(),
-                ConsensusRuleSet::TvmProofVersion1,
-                ConsensusRuleSet::HardforkBeta,
-            );
-            let hf_gamma = (
-                BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET.previous().unwrap(),
-                ConsensusRuleSet::HardforkBeta,
-                ConsensusRuleSet::HardforkGamma,
-            );
-            for (init_block_height, start_rules, end_rules) in [hf_alpha, hf_beta, hf_gamma] {
-                let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
-                    init_block_height,
-                    Difficulty::MINIMUM,
-                    network,
-                );
-                tokio_runtime().block_on(runner(
-                    bpw,
-                    start_rules,
-                    end_rules,
-                    init_block_height.next(),
-                    network,
-                ));
-            }
-
-            async fn runner(
-                block_primitive_witness: BlockPrimitiveWitness,
-                start_consensus_rule_set: ConsensusRuleSet,
-                end_consensus_rule_set: ConsensusRuleSet,
-                first_block_height_after_hardfork: BlockHeight,
-                network: Network,
-            ) {
-                let (hard_fork_minus_2, hard_fork_minus_1_no_pow) =
-                    Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness)
-                        .await;
-
-                let (
-                    _peer_broadcast_tx,
-                    from_main_rx_clone,
-                    to_main_tx,
-                    mut to_main_rx1,
-                    _,
-                    _,
-                    state_lock,
-                    hsd,
-                ) = test_setup_custom_genesis_block(
-                    1,
-                    cli_args::Args::default_with_network(network),
-                    hard_fork_minus_2.clone(),
-                )
-                .await
-                .unwrap();
-
-                // Solve PoW for 1st block after genesis
-                let (guesser_tx_b, guesser_rx) = oneshot::channel::<NewBlockFound>();
-                let guesser_timestamp = hard_fork_minus_1_no_pow.header().timestamp;
-                let rng = StdRng::seed_from_u64(55512345);
-                guess_nonce(
-                    network,
-                    hard_fork_minus_1_no_pow,
-                    *hard_fork_minus_2.header(),
-                    guesser_tx_b,
-                    GuessingConfiguration {
-                        num_guesser_threads: state_lock.cli().guesser_threads,
-                        address: GenerationReceivingAddress::derive_from_seed(Digest::default())
-                            .into(),
-                        // For deterministic pow-guessing, both RNG and timestamp
-                        // must be deterministic.
-                        override_rng: Some(rng),
-                        override_timestamp: Some(guesser_timestamp),
-                    },
-                )
-                .await;
-
-                let hard_fork_minus_1 = *guesser_rx.await.unwrap().block;
-
-                let cb_timestamp = hard_fork_minus_1.header().timestamp + Timestamp::minutes(12);
-                let first_block_after_hardfork = next_block(
-                    state_lock.clone(),
-                    hard_fork_minus_1.clone(),
-                    Some(cb_timestamp),
-                )
-                .await;
-
-                // Verify assumption about block height of hardfork
-                assert!(hard_fork_minus_1.pow_verify_for_tests(
-                    hard_fork_minus_2.header().difficulty.target(),
-                    start_consensus_rule_set
-                ));
-                assert!(first_block_after_hardfork.pow_verify_for_tests(
-                    hard_fork_minus_2.header().difficulty.target(),
-                    end_consensus_rule_set
-                ));
-
-                // Declare expected order of messages
-                let mock = Mock::new(vec![
-                    Action::Read(PeerMessage::BlockNotification(
-                        (&first_block_after_hardfork).into(),
-                    )),
-                    Action::Write(PeerMessage::BlockRequestByHeight(
-                        first_block_height_after_hardfork,
-                    )),
-                    Action::Read(PeerMessage::Block(Box::new(
-                        first_block_after_hardfork.clone().try_into().unwrap(),
-                    ))),
-                    Action::Write(PeerMessage::BlockRequestByHash(hard_fork_minus_1.hash())),
-                    Action::Read(PeerMessage::Block(Box::new(
-                        hard_fork_minus_1.clone().try_into().unwrap(),
-                    ))),
-                    Action::Read(PeerMessage::Bye),
-                ]);
-
-                let peer_address = get_dummy_socket_address(0);
-                let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
-                    to_main_tx.clone(),
-                    state_lock.clone(),
-                    pseudorandom_peer_id(&peer_address),
-                    socketaddr_to_multiaddr(peer_address),
-                    hsd,
-                    false,
-                    1,
-                    first_block_after_hardfork.header().timestamp,
-                );
-                peer_loop_handler
-                    .run_wrapper(mock, from_main_rx_clone)
-                    .await
-                    .unwrap();
-
-                match to_main_rx1.recv().await {
-                    Some(PeerTaskToMain::NewBlocks(blocks)) => {
-                        assert_eq!(
-                            vec![hard_fork_minus_1, first_block_after_hardfork],
-                            blocks,
-                            "Two blocks must be sent to main loop in right order"
-                        );
-                    }
-                    _ => panic!("Did not find msg sent to main task"),
-                };
-
-                // Verify that peer is not sanctioned
-                assert!(!state_lock
-                    .lock_guard()
-                    .await
-                    .net
-                    .get_peer_standing_from_database(peer_address.ip())
-                    .await
-                    .unwrap()
-                    .standing
-                    .is_negative());
-
-                drop(to_main_rx1);
-            }
         }
     }
 
@@ -4712,8 +4470,7 @@ mod tests {
             //
             // Both ProofCollection and SingleProof backed transactions are
             // tested.
-
-            let network = Network::Main;
+            let network = Network::Testnet(42);
 
             for proof_type in TransactionProofQuality::iter() {
                 let proof_job_options = TritonVmProofJobOptions::default();
@@ -5022,7 +4779,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn reject_foreign_block_proposals_and_notifications() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let reject_all = cli_args::Args {
                 ignore_foreign_compositions: true,
                 network,
@@ -5083,10 +4840,11 @@ mod tests {
             // and must accept this. Verify that main loop is informed of block
             // proposal. Even though node is composing, proposal must still be
             // accepted since foreign proposals are not ignored.
-            let not_composer = cli_args::Args::default();
+            let not_composer = cli_args::Args::default_with_network(Network::Testnet(42));
             let composer = cli_args::Args {
                 compose: true,
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                network: Network::Testnet(42),
                 ..Default::default()
             };
 
@@ -5133,7 +4891,7 @@ mod tests {
             // Node knows genesis block, receives a block proposal notification
             // for block 1 and must accept this by requesting the block
             // proposal from peer.
-            let cli = cli_args::Args::default();
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
             let TestSetup {
                 peer_broadcast_tx,
                 mut peer_loop_handler,
@@ -5224,7 +4982,7 @@ mod tests {
             // already knows, and it's tested that it checks the proof quality
             // field and verifies that it exceeds the proof in the mempool
             // before requesting the transasction.
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let proof_collection_tx =
                 tx_of_proof_quality(network, TransactionProofQuality::ProofCollection).await;
             let single_proof_tx =
@@ -5336,7 +5094,7 @@ mod tests {
             // Criterium: Challenge height may not exceed that of tip in the
             // request.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _alice_main_to_peer_tx,
                 alice_main_to_peer_rx,
@@ -5477,7 +5235,7 @@ mod tests {
             // sync mode.
 
             let mut rng = rand::rng();
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let genesis_block: Block = Block::genesis(network);
 
             const ALICE_SYNC_MODE_THRESHOLD: usize = 10;

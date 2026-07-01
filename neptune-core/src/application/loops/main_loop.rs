@@ -2900,13 +2900,15 @@ mod tests {
             // transaction is updated to be valid under the new mutator set
             // after the application of the block and the invocation of the
             // relevant functions.
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let fee = NativeCurrencyAmount::coins(1);
+            let proof_job_options = TritonVmProofJobOptions::default_with_network(network);
 
             let genesis_block = Block::genesis(network);
             let block1 = fake_valid_deterministic_successor(&genesis_block, network).await;
             let cli = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                network,
                 ..Default::default()
             };
             for tx_proving_capability in [
@@ -2952,7 +2954,7 @@ mod tests {
                     update_jobs,
                     vm_job_queue(),
                     update_sender,
-                    TritonVmProofJobOptions::default(),
+                    proof_job_options.clone(),
                 )
                 .await;
 
@@ -3057,7 +3059,7 @@ mod tests {
 
             // Force instance to create SingleProofs, otherwise CI and other
             // weak machines fail.
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let cli = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 tx_proof_upgrading: true,

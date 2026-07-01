@@ -770,8 +770,8 @@ pub mod tests {
     use crate::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::protocol::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::protocol::proof_abstractions::tasm::program::TritonError;
+    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::proof_abstractions::verifier::verify;
 
@@ -1314,7 +1314,7 @@ pub mod tests {
                 salted_input_utxos_hash,
                 salted_output_utxos_hash,
                 TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
+                TritonVmProofJobOptions::default_with_network(network),
             )
             .await
             .unwrap();

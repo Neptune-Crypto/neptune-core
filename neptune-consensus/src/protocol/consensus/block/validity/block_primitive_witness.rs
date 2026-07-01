@@ -199,7 +199,6 @@ mod test_support {
     use crate::protocol::consensus::transaction::TransactionProof;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
     impl BlockPrimitiveWitness {
@@ -440,7 +439,7 @@ mod test_support {
             let rt = crate::protocol::proof_abstractions::test_runtime::tokio_runtime();
             let _guard = rt.enter();
 
-            let proof_job_options = TritonVmProofJobOptions::from(TritonVmJobPriority::default());
+            let proof_job_options = TritonVmProofJobOptions::default_with_network(network);
 
             let single_proof_coinbase = rt
                 .block_on(produce_single_proof(

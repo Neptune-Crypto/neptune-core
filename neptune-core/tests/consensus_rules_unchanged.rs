@@ -26,7 +26,6 @@ use crate::common::genesis_node::GenesisNode;
 const MAIN_NET_GENESIS_HASH: &str =
     "7962e48729acd97e08efa77b5b28d49f2dc0e5609a4f1f1affca5b4549c78e520462a7f955371386";
 
-/// test: Verify that the genesis block on main net has not changed.
 #[test]
 pub fn genesis_block_hasnt_changed_main_net() {
     assert_eq!(
@@ -35,7 +34,6 @@ pub fn genesis_block_hasnt_changed_main_net() {
     );
 }
 
-/// test: Verify that the genesis block on testnet-0 has not changed.
 #[test]
 pub fn genesis_block_hasnt_changed_testnet_0() {
     assert_eq!(
@@ -53,7 +51,7 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
     const BLOCK2B_HASH: &str =
         "12e6e69d7447691dba85c462c9b214274064ea1dd8835c2dd731618add0320588706d4cc0b000000";
 
-    let network = Network::Testnet(0);
+    let network = Network::Main;
     let expected_blk_files = ["blk0.dat"];
     let test_data_dir =
         ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network, None).await;
@@ -81,7 +79,7 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn gamma_hardfork_on_tesnet() {
+async fn gamma_hardfork_on_tesnet0() {
     // Verify that blocks spanning consensus rule change on testnet are
     // considered valid.
     logging::tracing_logger();

@@ -15,7 +15,6 @@ use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
@@ -28,14 +27,15 @@ use crate::GlobalStateLock;
 #[traced_test]
 #[apply(shared_tokio_runtime)]
 async fn disallow_double_spends_across_blocks() {
-    async fn mine_tx(state: &GlobalStateLock, tx: Transaction, timestamp: Timestamp) -> Block {
+    async fn mine_txs(state: &GlobalStateLock, txs: Vec<Transaction>, timestamp: Timestamp) -> Block {
         let predecessor = state.lock_guard().await.chain.tip().to_owned();
+        let job_options = TritonVmProofJobOptions::default_with_network(state.cli().network);
         let (block_tx, _) = create_block_transaction_from(
             &predecessor,
             state.clone(),
             timestamp,
-            TritonVmProofJobOptions::default(),
-            TxMergeOrigin::ExplicitList(vec![tx]),
+            job_options.clone(),
+            TxMergeOrigin::ExplicitList(txs),
         )
         .await
         .unwrap();
@@ -45,18 +45,21 @@ async fn disallow_double_spends_across_blocks() {
             block_tx,
             timestamp,
             TritonVmJobQueue::get_instance(),
-            TritonVmProofJobOptions::default(),
+            job_options.clone(),
         )
         .await
         .unwrap()
     }
 
-    let network = Network::Main;
+    let network = Network::Testnet(42);
     let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
     let alice_wallet = WalletEntropy::devnet_wallet();
-    let mut alice =
-        mock_genesis_global_state(3, WalletEntropy::devnet_wallet(), cli_args::Args::default())
-            .await;
+    let mut alice = mock_genesis_global_state(
+        3,
+        WalletEntropy::devnet_wallet(),
+        cli_args::Args::default_with_network(network),
+    )
+    .await;
 
     let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
     let fee = NativeCurrencyAmount::coins(1);
@@ -68,13 +71,25 @@ async fn disallow_double_spends_across_blocks() {
     );
 
     let genesis_block = Block::genesis(network);
+
+    // On networks where the gamma rule set (and thus lustration) is active from
+    // genesis, block 1 *defines* the lustration status and its transactions are
+    // exempt; only blocks at height 2 and above enforce lustration. So mine an
+    // empty block 1 first and create the transaction against *that* tip -- then
+    // it carries the lustration announcements that block 2, and the update into
+    // block 3, require.
+    let block1_timestamp = genesis_block.header().timestamp + Timestamp::months(11);
+    let block1 = mine_txs(&alice, vec![], block1_timestamp).await;
+    alice.set_new_tip(block1.clone()).await.unwrap();
+
     let now = genesis_block.header().timestamp + Timestamp::months(12);
     let config = TxCreationConfig::default()
         .recover_change_off_chain(alice_key.into())
+        .with_network(network)
         .with_prover_capability(TxProvingCapability::SingleProof);
 
     let consensus_rule_set =
-        ConsensusRuleSet::infer_from(network, genesis_block.header().height.next());
+        ConsensusRuleSet::infer_from(network, block1.header().height.next());
     let tx: Transaction = alice
         .api()
         .tx_initiator_internal()
@@ -83,29 +98,29 @@ async fn disallow_double_spends_across_blocks() {
         .unwrap()
         .transaction
         .into();
-    let block1 = mine_tx(&alice, tx.clone(), now).await;
-    alice.set_new_tip(block1.clone()).await.unwrap();
+    let block2 = mine_txs(&alice, vec![tx.clone()], now).await;
+    alice.set_new_tip(block2.clone()).await.unwrap();
 
-    // Update transaction, stick it into block 2, and verify that block 2
+    // Update transaction, stick it into block 3, and verify that block 3
     // is invalid.
     let later = now + Timestamp::months(1);
     let tx = Transaction::new_with_updated_mutator_set_records_given_proof(
         tx.kernel,
-        &genesis_block.mutator_set_accumulator_after().unwrap(),
-        &block1.mutator_set_update().unwrap(),
+        &block1.mutator_set_accumulator_after().unwrap(),
+        &block2.mutator_set_update().unwrap(),
         tx.proof.into_single_proof(),
         TritonVmJobQueue::get_instance(),
-        TritonVmJobPriority::default().into(),
+        TritonVmProofJobOptions::default_with_network(network),
         Some(later),
         consensus_rule_set,
     )
     .await
     .unwrap();
 
-    let block2 = mine_tx(&alice, tx, later).await;
+    let block3 = mine_txs(&alice, vec![tx], later).await;
     assert_eq!(
         BlockValidationError::RemovalRecordsValidity,
-        block2.validate(&block1, later, network,).await.unwrap_err(),
+        block3.validate(&block2, later, network,).await.unwrap_err(),
         "Block doing a double-spend must be invalid."
     );
 }

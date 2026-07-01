@@ -1,6 +1,7 @@
 use itertools::Itertools;
 use macro_rules_attr::apply;
 use neptune_archival_mmr::ArchivalMmr;
+use neptune_consensus::protocol::consensus::block::block_validation_error::BlockValidationError;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;
 use neptune_database::NeptuneLevelDb;
 use neptune_primitives::timestamp::Timestamp;
@@ -36,7 +37,6 @@ use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
@@ -155,7 +155,7 @@ async fn test_difficulty_control_matches() {
 
 #[apply(shared_tokio_runtime)]
 async fn block_with_wrong_mmra_is_invalid() {
-    let network = Network::Main;
+    let network = Network::Testnet(42);
     let genesis_block = Block::genesis(network);
     let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
     let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
@@ -181,7 +181,13 @@ async fn block_with_wrong_mmra_is_invalid() {
 
     for bad_new_mmr in bad_new_mmrs {
         block1.kernel_mut().body.block_mmr_accumulator = bad_new_mmr;
-        assert!(!block1.is_valid(&genesis_block, timestamp, network).await);
+        assert_eq!(
+            BlockValidationError::BlockMmrUpdate,
+            block1
+                .validate(&genesis_block, timestamp, network)
+                .await
+                .unwrap_err()
+        );
     }
 }
 
@@ -291,7 +297,7 @@ mod block_is_valid {
     use crate::tests::shared_tokio_runtime;
 
     async fn deterministic_empty_block1_proposal() -> (Block, Timestamp, Network, Block) {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let genesis = Block::genesis(network);
         let plus_one_hour = genesis.kernel.header.timestamp + Timestamp::hours(1);
 
@@ -309,7 +315,7 @@ mod block_is_valid {
         )
         .await;
 
-        let job_options = TritonVmProofJobOptions::default();
+        let job_options = TritonVmProofJobOptions::default_with_network(network);
         let (transaction, _) = create_block_transaction_from(
             &genesis,
             alice.clone(),
@@ -400,7 +406,7 @@ mod block_is_valid {
         // when calculating the expected state of the new mutator set.
         // Cf., the bug fixed in 4d6b7013624e593c40e76ce93cb6b288b6b3f48b.
 
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let genesis_block = Block::genesis(network);
         let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
@@ -570,7 +576,7 @@ mod block_is_valid {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn block_with_far_future_timestamp_is_invalid() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let genesis_block = Block::genesis(network);
         let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
@@ -829,10 +835,11 @@ mod guesser_fee_utxos {
 /// spend the same UTXOs over and over. To avoid doing this, you insert the
 /// transaction into the mempool thus making the wallet aware of this
 /// transaction and avoiding a double-spend of a UTXO.
+#[traced_test]
 #[apply(shared_tokio_runtime)]
 async fn avoid_reselecting_same_input_utxos() {
     let mut rng = StdRng::seed_from_u64(893423984854);
-    let network = Network::Main;
+    let network = Network::Testnet(42);
     let devnet_wallet = WalletEntropy::devnet_wallet();
     let mut alice = mock_genesis_global_state(
         0,
@@ -853,6 +860,7 @@ async fn avoid_reselecting_same_input_utxos() {
     // She needs to ensure the two transactions she merges in do not spend
     // the same UTXO.
     let launch_date = network.launch_date();
+    let proof_job_options = TritonVmProofJobOptions::default_with_network(network);
     let mut now = launch_date + Timestamp::months(6);
     for i in 1..3 {
         now += network.target_block_interval();
@@ -862,7 +870,7 @@ async fn avoid_reselecting_same_input_utxos() {
             &blocks[i - 1],
             &alice,
             now,
-            TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
+            proof_job_options.clone(),
         )
         .await
         .unwrap();
@@ -898,6 +906,7 @@ async fn avoid_reselecting_same_input_utxos() {
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(change_key.into())
                 .with_prover_capability(TxProvingCapability::SingleProof)
+                .with_network(network)
                 .use_job_queue(job_queue.clone());
             let transaction_creation_artifacts = alice
                 .api()
@@ -919,7 +928,7 @@ async fn avoid_reselecting_same_input_utxos() {
                 (*self_spending_transaction).clone(),
                 rng.random(),
                 job_queue.clone(),
-                TritonVmProofJobOptions::default_with_network(network),
+                proof_job_options.clone(),
                 consensus_rule_set,
             )
             .await
@@ -941,7 +950,7 @@ async fn avoid_reselecting_same_input_utxos() {
             ),
             now,
             job_queue.clone(),
-            TritonVmProofJobOptions::default(),
+            proof_job_options.clone(),
         )
         .await
         .unwrap();

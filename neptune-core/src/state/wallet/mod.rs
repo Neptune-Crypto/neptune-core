@@ -63,7 +63,7 @@ mod tests {
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
@@ -382,7 +382,7 @@ mod tests {
         // Bob is premine receiver, Alice is not. They send coins back and forth
         // and the blockchain forks.
 
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
             number_of_mps_per_utxo: 20,
@@ -706,7 +706,7 @@ mod tests {
             &block_2_b,
             &alice,
             block_2_b.header().timestamp + network.minimum_block_time(),
-            TritonVmJobPriority::Normal.into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -715,7 +715,7 @@ mod tests {
             tx_from_bob,
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set_2_b,
         )
         .await
@@ -726,7 +726,7 @@ mod tests {
             merged_tx,
             timestamp,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -822,7 +822,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn allow_consumption_of_genesis_output_test() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let genesis_block = Block::genesis(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let bob = mock_genesis_global_state(
@@ -849,7 +849,7 @@ mod tests {
             light_state.tip(),
             &bob,
             in_seven_months,
-            TritonVmJobPriority::Normal.into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -883,7 +883,7 @@ mod tests {
             sender_tx,
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -893,7 +893,7 @@ mod tests {
             tx_for_block,
             in_seven_months,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();

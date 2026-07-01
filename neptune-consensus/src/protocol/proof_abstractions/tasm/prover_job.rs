@@ -170,6 +170,10 @@ impl ProverJobSettings {
         }
     }
 
+    pub fn set_network(&mut self, network: Network) {
+        self.network = network;
+    }
+
     pub fn max_log2_padded_height_for_proofs(&self) -> Option<u8> {
         self.max_log2_padded_height_for_proofs
     }
