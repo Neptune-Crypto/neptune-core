@@ -339,9 +339,9 @@ impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub mod tests {
+pub(crate) mod proof_cache {
     use std::fs::create_dir_all;
     use std::fs::File;
     use std::io::stdout;
@@ -351,22 +351,17 @@ pub mod tests {
     use std::time::SystemTime;
 
     use itertools::Itertools;
-    use macro_rules_attr::apply;
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::stark::Stark;
     use tracing::debug;
 
     use super::*;
-    use crate::protocol::proof_abstractions::test_helpers::headers_for_proof_server_request;
-    use crate::protocol::proof_abstractions::test_helpers::load_test_proof_servers;
     use crate::protocol::proof_abstractions::test_helpers::test_helper_data_dir;
     use crate::protocol::proof_abstractions::test_helpers::try_fetch_file;
-    use crate::protocol::proof_abstractions::test_helpers::try_fetch_from_server;
     use crate::protocol::proof_abstractions::test_helpers::try_load_file_from_disk;
-    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
 
     /// Derive a file name from the claim, includes the extension
-    fn proof_filename(claim: &Claim) -> String {
+    pub(crate) fn proof_filename(claim: &Claim) -> String {
         let base_name = Tip5::hash(claim).to_hex();
 
         format!("{base_name}.proof")
@@ -466,7 +461,7 @@ pub mod tests {
         Some(proof)
     }
 
-    fn decode_proof_from_server(data: Vec<u8>, server: &str) -> Option<Proof> {
+    pub(crate) fn decode_proof_from_server(data: Vec<u8>, server: &str) -> Option<Proof> {
         let mut proof_data = vec![];
         for ch in data.chunks(8) {
             if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
@@ -496,59 +491,9 @@ pub mod tests {
         Some((proof, server.to_string()))
     }
 
-    #[apply(shared_tokio_runtime)]
-    async fn verify_all_proof_servers_work() {
-        // Ensure file exists on machine, in case this machine syncs
-        // automatically with proof server.
-        let program = triton_program!(halt);
-        let claim = Claim::about_program(&program);
-        prove_triton_program(
-            program,
-            claim.clone(),
-            NonDeterminism::default(),
-            TritonVmJobQueue::get_instance(),
-            TritonVmProofJobOptions::default(),
-        )
-        .await
-        .unwrap();
-
-        // Then verify that the proof server has this file
-        let filename = proof_filename(&claim);
-        let servers = load_test_proof_servers();
-        let headers = headers_for_proof_server_request();
-        for server in servers {
-            let response = try_fetch_from_server(filename.clone(), server.clone(), headers.clone());
-
-            let proof = match response {
-                Some(data) => decode_proof_from_server(data, &server)
-                    .expect("Returned data must be decodable as proof"),
-                None => panic!("Server: {server} failed to respond with a proof"),
-            };
-
-            assert!(
-                triton_vm::verify(Stark::default(), &claim, &proof),
-                "Returned proof from {server} must be valid"
-            );
-        }
-    }
-
-    #[test]
-    fn deterministic_proof_is_deterministic() {
-        let program = triton_program!(halt);
-        let claim = Claim::about_program(&program);
-        let nondeterminism = NonDeterminism::default();
-        let proof1 = produce_non_zk_deterministic_proof_for_test(
-            &claim,
-            program.clone(),
-            nondeterminism.clone(),
-        );
-        let proof2 = produce_non_zk_deterministic_proof_for_test(&claim, program, nondeterminism);
-        assert_eq!(proof1, proof2, "Deterministic proofs must be deterministic");
-    }
-
     /// Do *not* under any circumstances use this function outside of tests,
     /// since it will leak your secrets!
-    fn produce_non_zk_deterministic_proof_for_test(
+    pub(crate) fn produce_non_zk_deterministic_proof_for_test(
         claim: &Claim,
         program: Program,
         nondeterminism: NonDeterminism,
@@ -609,6 +554,73 @@ pub mod tests {
         output_file
             .write_all(&proof_data)
             .expect("cannot write to file");
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub mod tests {
+    use macro_rules_attr::apply;
+    use tasm_lib::triton_vm;
+    use tasm_lib::triton_vm::stark::Stark;
+
+    use super::proof_cache::decode_proof_from_server;
+    use super::proof_cache::produce_non_zk_deterministic_proof_for_test;
+    use super::proof_cache::proof_filename;
+    use super::*;
+    use crate::protocol::proof_abstractions::test_helpers::headers_for_proof_server_request;
+    use crate::protocol::proof_abstractions::test_helpers::load_test_proof_servers;
+    use crate::protocol::proof_abstractions::test_helpers::try_fetch_from_server;
+    use crate::protocol::proof_abstractions::test_runtime::shared_tokio_runtime;
+
+    #[apply(shared_tokio_runtime)]
+    async fn verify_all_proof_servers_work() {
+        // Ensure file exists on machine, in case this machine syncs
+        // automatically with proof server.
+        let program = triton_program!(halt);
+        let claim = Claim::about_program(&program);
+        prove_triton_program(
+            program,
+            claim.clone(),
+            NonDeterminism::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmProofJobOptions::default(),
+        )
+        .await
+        .unwrap();
+
+        // Then verify that the proof server has this file
+        let filename = proof_filename(&claim);
+        let servers = load_test_proof_servers();
+        let headers = headers_for_proof_server_request();
+        for server in servers {
+            let response = try_fetch_from_server(filename.clone(), server.clone(), headers.clone());
+
+            let proof = match response {
+                Some(data) => decode_proof_from_server(data, &server)
+                    .expect("Returned data must be decodable as proof"),
+                None => panic!("Server: {server} failed to respond with a proof"),
+            };
+
+            assert!(
+                triton_vm::verify(Stark::default(), &claim, &proof),
+                "Returned proof from {server} must be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn deterministic_proof_is_deterministic() {
+        let program = triton_program!(halt);
+        let claim = Claim::about_program(&program);
+        let nondeterminism = NonDeterminism::default();
+        let proof1 = produce_non_zk_deterministic_proof_for_test(
+            &claim,
+            program.clone(),
+            nondeterminism.clone(),
+        );
+        let proof2 = produce_non_zk_deterministic_proof_for_test(&claim, program, nondeterminism);
+        assert_eq!(proof1, proof2, "Deterministic proofs must be deterministic");
     }
 
     /// Test for regressions in a Triton program.

@@ -66,9 +66,12 @@ impl std::fmt::Display for LustrationStatus {
 }
 
 /// Determines the number of leafs in the Merkle tree in the guesser buffer.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-helpers")))]
 pub(crate) const POW_MEMORY_PARAMETER: usize = 1 << 29;
-#[cfg(test)] // Set to smaller value to allow for testing of PoW
+// Set to smaller value to allow for testing of PoW. Gated on `test-helpers`
+// (not just `test`) so downstream crates' test builds, where this crate is
+// compiled as a non-test dependency, also get the reduced parameter.
+#[cfg(any(test, feature = "test-helpers"))]
 pub(crate) const POW_MEMORY_PARAMETER: usize = 1 << 10;
 
 pub const POW_MEMORY_TREE_HEIGHT: usize = POW_MEMORY_PARAMETER.ilog2() as usize;

@@ -92,6 +92,12 @@ pub enum TritonProofVersion {
 
 impl TritonProofVersion {
     /// The version value used in Triton VM's claim
+    // Only called from the production (non-`test-helpers`) proof-claim branches
+    // and from this crate's own tests. In a downstream crate's `test-helpers`
+    // build (feature on, but `test` off) both caller sets are compiled out, so
+    // it is dead there only. `expect` rather than `allow` so we get warned to
+    // remove this attribute if the method gains a caller in that configuration.
+    #[cfg_attr(all(feature = "test-helpers", not(test)), expect(dead_code))]
     pub(crate) fn version(&self) -> u32 {
         match self {
             TritonProofVersion::V0 => 0,

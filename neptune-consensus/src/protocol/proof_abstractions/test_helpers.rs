@@ -28,7 +28,7 @@ pub fn load_test_proof_servers() -> Vec<String> {
     server_list_path.push(Path::new("proof_servers").with_extension("txt"));
     let Ok(mut input_file) = File::open(server_list_path.clone()) else {
         debug!(
-            "cannot proof-server list '{}' -- file might not exist",
+            "cannot find proof-server list '{}' -- file might not exist",
             server_list_path.display()
         );
         return vec![];

@@ -1361,7 +1361,7 @@ mod test_support {
             println!("Trying to guess for difficulty: {difficulty}");
             assert!(
                 difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
-                "Don't use high difficulty in test"
+                "Don't use high difficulty in test. Got: {difficulty}"
             );
 
             let puzzle = ProofOfWorkPuzzle::new(self.clone(), difficulty);

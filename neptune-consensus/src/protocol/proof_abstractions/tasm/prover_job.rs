@@ -330,10 +330,10 @@ impl ProverJob {
             return ProverProcessCompletion::Finished(proof).into();
         }
 
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-helpers"))]
         let result = self.prove_for_unit_testing(rx).await;
 
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-helpers")))]
         let result = self.prove_out_of_process(rx).await;
 
         job_completion_from_prover_result(result)
@@ -620,11 +620,11 @@ mod process_util {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-helpers"))]
+pub(crate) mod unit_testing_prover {
 
     use super::*;
-    use crate::protocol::proof_abstractions::tasm::program::tests::load_proof_or_produce_and_save;
+    use crate::protocol::proof_abstractions::tasm::program::proof_cache::load_proof_or_produce_and_save;
 
     impl ProverJob {
         pub(crate) async fn prove_for_unit_testing(

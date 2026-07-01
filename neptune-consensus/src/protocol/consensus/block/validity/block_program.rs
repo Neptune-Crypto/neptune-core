@@ -51,12 +51,12 @@ impl BlockProgram {
         _consensus_rule_set: ConsensusRuleSet,
     ) -> Claim {
         let (program_hash, proof_version) = {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-helpers"))]
             {
                 (Self.hash(), tasm_lib::triton_vm::proof::CURRENT_VERSION)
             }
 
-            #[cfg(not(test))]
+            #[cfg(not(any(test, feature = "test-helpers")))]
             {
                 const PRE_HF_GAMMA_PROGRAM_HASH: &str =
                 "72d46afed8a1bf162814a432cf1ebe0f16a1cdb84bd339badc6fbd499172c3474c285dd0d5ba4e0c";

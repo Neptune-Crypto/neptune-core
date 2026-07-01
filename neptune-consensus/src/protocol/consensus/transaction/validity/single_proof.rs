@@ -299,7 +299,7 @@ pub async fn produce_single_proof(
     proof_job_options: TritonVmProofJobOptions,
     _consensus_rule_set: ConsensusRuleSet,
 ) -> Result<Proof, CreateProofError> {
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-helpers")))]
     match _consensus_rule_set {
         ConsensusRuleSet::HardforkGamma => {
             SingleProof::produce(primitive_witness, triton_vm_job_queue, proof_job_options).await
@@ -307,7 +307,7 @@ pub async fn produce_single_proof(
         _ => Err(CreateProofError::DeprecatedConsensusRules),
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-helpers"))]
     SingleProof::produce(primitive_witness, triton_vm_job_queue, proof_job_options).await
 }
 
@@ -319,7 +319,7 @@ pub fn single_proof_claim(
     tx_kernel_mast_hash: Digest,
     _consensus_rule_set: ConsensusRuleSet,
 ) -> Claim {
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-helpers")))]
     {
         const V0_SINGLE_PROOF_PROGRAM_DIGEST: &str =
             "9ed47e4aff83681ce46618c59971cc5eca2ef5a063b3f35828946f4810295871338072751af633e0";
@@ -340,7 +340,7 @@ pub fn single_proof_claim(
         claim.about_version(_consensus_rule_set.triton_proof_version().version())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-helpers"))]
     SingleProof::claim(tx_kernel_mast_hash)
 }
 
