@@ -115,6 +115,99 @@ async fn gamma_hardfork_on_tesnet0() {
     }
 }
 
+/// Assert that a single main-net `blk` file whose blocks span a consensus-rule-set
+/// change (hard fork) validates end to end: every block is valid relative to its
+/// predecessor and carries valid proof-of-work, across the fork boundary.
+async fn assert_hardfork_boundary_blocks_are_valid(
+    sub_dir: &str,
+    blk_file: &str,
+    end_consensus_rules: ConsensusRuleSet,
+) {
+    logging::tracing_logger();
+
+    let network = Network::Main;
+
+    // Pre-gamma main-net proofs were retroactively found unsound, so their
+    // validity is asserted via the checkpoint rather than re-verification.
+    // Without it, pre-hardfork blocks fail.
+    ArchivalState::accept_checkpoint(network).await;
+
+    // Keep the file in its own subdirectory so it does not interfere with other
+    // tests that import the entire main-net data directory.
+    let test_data_dir =
+        ensure_blocks_in_test_data_dir(vec![blk_file], network, Some(sub_dir)).await;
+    let block_file_paths =
+        ArchivalState::read_block_file_names_from_directory(&test_data_dir).unwrap();
+    let block_file_paths: Vec<_> = block_file_paths
+        .into_iter()
+        .filter(|x| x.to_string_lossy().contains(blk_file))
+        .collect();
+    let blocks = ArchivalState::blocks_from_file_without_record(&block_file_paths[0])
+        .await
+        .unwrap();
+
+    // The file must actually straddle the hard fork, otherwise this test would
+    // silently stop exercising the rule-set transition.
+    let first_rule_set = ConsensusRuleSet::infer_from(network, blocks[0].header().height);
+    let last_rule_set =
+        ConsensusRuleSet::infer_from(network, blocks.last().unwrap().header().height);
+    assert_ne!(
+        first_rule_set, last_rule_set,
+        "{blk_file} must span a consensus-rule-set change"
+    );
+    assert_eq!(
+        end_consensus_rules, last_rule_set,
+        "last block in {blk_file} must follow {end_consensus_rules}"
+    );
+
+    let now = Timestamp::now();
+    let mut latest = blocks[0].clone();
+    for block in blocks.into_iter().skip(1) {
+        let height = block.header().height;
+        let hash = block.hash();
+        println!("Checking validity of main-net block of height {height}; hash: {hash:x}");
+        block.validate(&latest, now, network).await.unwrap();
+        assert!(block.has_proof_of_work(network, latest.header()));
+        latest = block;
+    }
+}
+
+/// Verify that the sequence of main-net blocks spanning the hardfork-alpha
+/// boundary (height 15,000) is valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn alpha_hardfork_on_main_net() {
+    assert_hardfork_boundary_blocks_are_valid(
+        "hf-alpha-validity",
+        "blk121.dat",
+        ConsensusRuleSet::HardforkAlpha,
+    )
+    .await;
+}
+
+/// Verify that the sequence of main-net blocks spanning the hardfork-beta
+/// boundary (height 38,000) is valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn beta_hardfork_on_main_net() {
+    assert_hardfork_boundary_blocks_are_valid(
+        "hf-beta-validity",
+        "blk325.dat",
+        ConsensusRuleSet::HardforkBeta,
+    )
+    .await;
+}
+
+/// Verify that the sequence of main-net blocks spanning the hardfork-gamma
+/// boundary (height 40,300) is valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn gamma_hardfork_on_main_net() {
+    assert_hardfork_boundary_blocks_are_valid(
+        "hf-gamma-validity",
+        "blk344.dat",
+        ConsensusRuleSet::HardforkGamma,
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn blockprogram_claim_has_not_changed_40068_hf_beta() {
     logging::tracing_logger();
