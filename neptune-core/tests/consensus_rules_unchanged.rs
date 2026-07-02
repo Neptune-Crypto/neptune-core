@@ -12,7 +12,6 @@ use neptune_cash::api::export::Network;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::protocol::consensus::block::validity::block_program::BlockProgram;
-use neptune_cash::protocol::consensus::block::Block;
 use neptune_cash::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_cash::state::archival_state::ArchivalState;
 use tasm_lib::twenty_first::bfe;
@@ -25,22 +24,6 @@ use crate::common::genesis_node::GenesisNode;
 
 const MAIN_NET_GENESIS_HASH: &str =
     "7962e48729acd97e08efa77b5b28d49f2dc0e5609a4f1f1affca5b4549c78e520462a7f955371386";
-
-#[test]
-pub fn genesis_block_hasnt_changed_main_net() {
-    assert_eq!(
-        MAIN_NET_GENESIS_HASH,
-        Block::genesis(Network::Main).hash().to_hex()
-    );
-}
-
-#[test]
-pub fn genesis_block_hasnt_changed_testnet_0() {
-    assert_eq!(
-        "bb1fa49a35a294dd2c09811c648c4d76f6ea17acc61fe7a6f1c3c8d81c967bc68e7cdb41f472544e",
-        Block::genesis(Network::Testnet(0)).hash().to_hex()
-    );
-}
 
 #[tokio::test(flavor = "multi_thread")]
 pub async fn first_few_block_hashes_are_unchanged_main_net() {

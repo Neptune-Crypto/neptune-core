@@ -58,6 +58,8 @@ use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::protocol::proof_abstractions::verifier::cache_true_claims;
+use crate::protocol::proof_abstractions::verifier::CHECKPOINT_MAIN;
+use crate::protocol::proof_abstractions::verifier::CHECKPOINT_TESTNET_0;
 use crate::state::archival_state::rusty_utxo_index::RustyUtxoIndex;
 use crate::state::database::BlockFileLocation;
 use crate::state::database::BlockIndexKey;
@@ -2380,11 +2382,9 @@ impl ArchivalState {
     /// Populate the true claims cache with the claims derived from the blocks
     /// defined by the checkpoint as valid.
     pub async fn accept_checkpoint(network: Network) {
-        const CHECKPOINT_MAIN: &str = include_str!("../assets/main/checkpoint.dat");
-        const CHECKPOINT_TESTNET0: &str = include_str!("../assets/testnet-0/checkpoint.dat");
         let checkpoint = match network {
             Network::Main => CHECKPOINT_MAIN,
-            Network::Testnet(0) => CHECKPOINT_TESTNET0,
+            Network::Testnet(0) => CHECKPOINT_TESTNET_0,
             _ => return,
         };
 

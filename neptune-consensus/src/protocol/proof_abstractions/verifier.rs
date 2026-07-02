@@ -6,6 +6,16 @@ use tokio::task;
 use crate::protocol::consensus::network::Network;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 
+/// Historical block claims that define the main-net checkpoint: one hex-encoded,
+/// bincode-serialized [`Claim`] per line, each prefixed by its block height.
+/// Feeding these into [`cache_true_claims`] marks the corresponding historical
+/// blocks as valid without re-verifying their proofs.
+pub const CHECKPOINT_MAIN: &str = include_str!("../../assets/main/checkpoint.dat");
+
+/// Historical block claims that define the testnet-0 checkpoint; see
+/// [`CHECKPOINT_MAIN`] for the format.
+pub const CHECKPOINT_TESTNET_0: &str = include_str!("../../assets/testnet-0/checkpoint.dat");
+
 /// This claims-cache contains claims that are simply defined to be true.
 ///
 /// If the claim is in the cache, then the Triton VM verifier is by-passed
@@ -13,27 +23,6 @@ use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 ///
 /// Besides tests, it is used for *checkpoints*, where we define historical
 /// blocks to be valid.
-//
-// The cache enables mock proofs to be generated and validated immediately
-// which enables mock blocks and transactions.
-//
-// important:  for regtest mode to work properly, peers must be able to
-// verify eachother's proofs. There is presently no mechanism to sync
-// the cache between peers, though that could be a possibility.
-//
-// HOWEVER: given that this is a process-wide cache, it is actually shared
-// between in-process peers such as when executing integration tests.
-//
-// In other words, distributed proving works for integration tests, but not
-// yet in a "real" regtest multi-node network.
-//
-// RAM Usage:
-//
-// Presently claims are never expired. So there is a very real chance of
-// blowing up RAM.  Maybe not so problematic since regtest is generally started
-// from genesis block anyway.
-//
-// see: https://github.com/Neptune-Crypto/neptune-core/issues/539
 static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::HashSet<Claim>>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashSet::new()));
 
