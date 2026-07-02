@@ -5,7 +5,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use neptune_consensus::protocol::consensus::network::Network;
+use neptune_consensus::network::Network;
 
 use super::super::wallet::address::SpendingKey;
 use super::super::wallet::change_policy::ChangePolicy;

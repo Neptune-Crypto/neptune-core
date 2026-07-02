@@ -1,0 +1,164 @@
+use get_size2::GetSize;
+use itertools::Itertools;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use neptune_primitives::mast_hash::HasDiscriminant;
+use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::timestamp::Timestamp;
+use num_traits::CheckedSub;
+use serde::Deserialize;
+use serde::Serialize;
+use strum::EnumCount;
+use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+
+use super::block_appendix::BlockAppendix;
+use super::block_body::BlockBody;
+use super::block_header::BlockHeader;
+use crate::block::block_validation_error::BlockValidationError;
+use crate::block::mutator_set_update::MutatorSetUpdate;
+use crate::transaction::utxo::Utxo;
+
+/// The kernel of a block contains all data that is not proof data
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
+pub struct BlockKernel {
+    pub header: BlockHeader,
+    pub body: BlockBody,
+
+    pub(crate) appendix: BlockAppendix,
+}
+
+impl BlockKernel {
+    pub fn new(header: BlockHeader, body: BlockBody, appendix: BlockAppendix) -> Self {
+        Self {
+            header,
+            body,
+            appendix,
+        }
+    }
+
+    /// The block's appendix.
+    pub fn appendix(&self) -> &BlockAppendix {
+        &self.appendix
+    }
+
+    /// Get the block's guesser fee UTXOs.
+    ///
+    /// The amounts in the UTXOs are taken from the transaction fee.
+    ///
+    /// The genesis block does not have a guesser reward.
+    pub fn guesser_fee_utxos(&self) -> Result<Vec<Utxo>, BlockValidationError> {
+        const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
+
+        if self.header.height.is_genesis() {
+            return Ok(vec![]);
+        }
+
+        let total_guesser_reward = self.body.total_guesser_reward()?;
+        let mut value_timelocked = total_guesser_reward;
+        value_timelocked.div_two();
+        let value_unlocked = total_guesser_reward.checked_sub(&value_timelocked).unwrap();
+
+        let coins_unlocked = value_unlocked.to_native_coins();
+        let coins_timelocked = value_timelocked.to_native_coins();
+        let lock_script_hash = self.header.guesser_receiver_data.lock_script_hash;
+        let unlocked_utxo = Utxo::new(lock_script_hash, coins_unlocked);
+        let locked_utxo = Utxo::new(lock_script_hash, coins_timelocked)
+            .with_time_lock(self.header.timestamp + MINER_REWARD_TIME_LOCK_PERIOD);
+
+        Ok(vec![locked_utxo, unlocked_utxo])
+    }
+
+    /// Compute the addition records that correspond to the UTXOs generated for
+    /// the block's guesser
+    ///
+    /// The genesis block does not have this addition record.
+    pub fn guesser_fee_addition_records(
+        &self,
+        block_hash: Digest,
+    ) -> Result<Vec<AdditionRecord>, BlockValidationError> {
+        Ok(self
+            .guesser_fee_utxos()?
+            .into_iter()
+            .map(|utxo| {
+                let item = Tip5::hash(&utxo);
+
+                // Adding the block hash to the mutator set here means that no
+                // composer can start proving before solving the PoW-race;
+                // production of future proofs is impossible as they depend on
+                // inputs hidden behind the veil of future PoW.
+                let sender_randomness = block_hash;
+                let receiver_digest = self.header.guesser_receiver_data.receiver_digest;
+
+                commit(item, sender_randomness, receiver_digest)
+            })
+            .collect_vec())
+    }
+
+    /// Return the mutator set update, including guesser fee outputs, invoked by
+    /// this block.
+    pub fn mutator_set_update(
+        &self,
+        block_hash: Digest,
+    ) -> Result<MutatorSetUpdate, BlockValidationError> {
+        let outputs = self.all_addition_records(block_hash)?;
+        let inputs = RemovalRecordList::try_unpack(self.body.transaction_kernel.inputs.clone())
+            .map_err(BlockValidationError::from)?;
+
+        Ok(MutatorSetUpdate::new(inputs, outputs))
+    }
+
+    /// Return all addition records, including guesser fee outputs, invoked by
+    /// this block.
+    pub fn all_addition_records(
+        &self,
+        block_hash: Digest,
+    ) -> Result<Vec<AdditionRecord>, BlockValidationError> {
+        let mut addition_records = self.body.transaction_kernel.outputs.clone();
+        let guesser_addition_records = self.guesser_fee_addition_records(block_hash)?;
+        addition_records.extend(guesser_addition_records);
+
+        Ok(addition_records)
+    }
+}
+
+#[derive(Debug, Copy, Clone, EnumCount)]
+pub enum BlockKernelField {
+    Header,
+    Body,
+    Appendix,
+}
+
+impl HasDiscriminant for BlockKernelField {
+    fn discriminant(&self) -> usize {
+        *self as usize
+    }
+}
+
+impl MastHash for BlockKernel {
+    type FieldEnum = BlockKernelField;
+
+    fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
+        let sequences = vec![
+            self.header.mast_hash().encode(),
+            self.body.mast_hash().encode(),
+            self.appendix.encode(),
+        ];
+        sequences
+    }
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+impl rand::distr::Distribution<BlockKernel> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockKernel {
+        BlockKernel {
+            header: rng.random(),
+            body: rng.random(),
+            appendix: rng.random(),
+        }
+    }
+}

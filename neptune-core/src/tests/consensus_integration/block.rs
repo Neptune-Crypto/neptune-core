@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use macro_rules_attr::apply;
 use neptune_archival_mmr::ArchivalMmr;
-use neptune_consensus::protocol::consensus::block::block_validation_error::BlockValidationError;
+use neptune_consensus::block::block_validation_error::BlockValidationError;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;
 use neptune_database::NeptuneLevelDb;
 use neptune_primitives::timestamp::Timestamp;

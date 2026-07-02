@@ -27,7 +27,11 @@ use crate::GlobalStateLock;
 #[traced_test]
 #[apply(shared_tokio_runtime)]
 async fn disallow_double_spends_across_blocks() {
-    async fn mine_txs(state: &GlobalStateLock, txs: Vec<Transaction>, timestamp: Timestamp) -> Block {
+    async fn mine_txs(
+        state: &GlobalStateLock,
+        txs: Vec<Transaction>,
+        timestamp: Timestamp,
+    ) -> Block {
         let predecessor = state.lock_guard().await.chain.tip().to_owned();
         let job_options = TritonVmProofJobOptions::default_with_network(state.cli().network);
         let (block_tx, _) = create_block_transaction_from(
@@ -88,8 +92,7 @@ async fn disallow_double_spends_across_blocks() {
         .with_network(network)
         .with_prover_capability(TxProvingCapability::SingleProof);
 
-    let consensus_rule_set =
-        ConsensusRuleSet::infer_from(network, block1.header().height.next());
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block1.header().height.next());
     let tx: Transaction = alice
         .api()
         .tx_initiator_internal()

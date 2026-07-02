@@ -28,7 +28,7 @@ impl From<&Block> for PeerBlockNotification {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neptune_consensus::protocol::consensus::network::Network;
+    use neptune_consensus::network::Network;
 
     use super::PeerBlockNotification;
     use crate::protocol::consensus::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
