@@ -10,9 +10,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use super::difficulty_control::Difficulty;
-use super::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::difficulty_control::Difficulty;
+use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
 use crate::protocol::consensus::block::pow::LustrationStatus;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;

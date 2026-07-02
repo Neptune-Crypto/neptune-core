@@ -2,7 +2,6 @@ pub mod block_appendix;
 pub mod block_body;
 pub mod block_header;
 pub mod block_height;
-pub mod block_info;
 pub mod block_kernel;
 pub mod block_transaction;
 pub mod block_validation_error;
@@ -1065,7 +1064,7 @@ impl Block {
     // recursive block validation, where we need to test a block's size against
     // the limit. The size is easier to calculate if it relates to a block's
     // encoding on the VM, rather than its serialization as a vector of bytes.
-    pub(crate) fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.encode().len()
     }
 
