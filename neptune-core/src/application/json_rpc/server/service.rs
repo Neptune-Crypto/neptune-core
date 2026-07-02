@@ -2411,7 +2411,6 @@ pub mod tests {
             WalletEntropy::new_pseudorandom([0u8; 32]),
         )
         .await;
-        let network = rpc_server.state.cli().network;
 
         let genesis = Block::genesis(network);
         let block1 = fake_valid_deterministic_successor(&genesis, network).await;
