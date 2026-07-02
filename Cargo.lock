@@ -3763,8 +3763,10 @@ version = "0.12.0"
 dependencies = [
  "anyhow",
  "arbitrary",
+ "get-size2",
  "itertools",
  "neptune-consensus",
+ "neptune-mutator-set",
  "neptune-primitives",
  "neptune-wallet",
  "num-traits",

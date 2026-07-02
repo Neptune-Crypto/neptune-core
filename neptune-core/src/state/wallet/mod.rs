@@ -1,7 +1,7 @@
 pub mod address;
 pub mod change_policy;
 pub use neptune_wallet::coin_with_possible_timelock;
-pub mod expected_utxo;
+pub use neptune_wallet::expected_utxo;
 pub mod incoming_utxo;
 pub mod input_candidate;
 pub(crate) mod migrate_db;
@@ -12,7 +12,7 @@ pub(crate) use neptune_wallet::scan_mode_configuration;
 pub mod secret_key_material;
 pub mod sent_transaction;
 pub mod transaction_output;
-pub mod unlocked_utxo;
+pub use neptune_wallet::unlocked_utxo;
 pub mod utxo_notification;
 pub(crate) mod wallet_configuration;
 pub(crate) mod wallet_db_tables;

@@ -2,7 +2,9 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 use neptune_consensus::transaction::lock_script::LockScriptAndWitness;
+use neptune_consensus::transaction::transparent_input::TransparentInput;
 use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
@@ -10,11 +12,8 @@ use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::Tip5;
-
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::TransparentInput;
-use crate::tasm_lib::prelude::Digest;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnlockedUtxo {
@@ -49,13 +48,13 @@ impl UnlockedUtxo {
         &self.lock_script_and_witness
     }
 
-    pub(crate) fn removal_record(&self, mutator_set: &MutatorSetAccumulator) -> RemovalRecord {
+    pub fn removal_record(&self, mutator_set: &MutatorSetAccumulator) -> RemovalRecord {
         let item = self.mutator_set_item();
         let msmp = &self.membership_proof;
         mutator_set.drop(item, msmp)
     }
 
-    pub(crate) fn addition_record(&self) -> AdditionRecord {
+    pub fn addition_record(&self) -> AdditionRecord {
         commit(
             self.mutator_set_item(),
             self.membership_proof.sender_randomness,

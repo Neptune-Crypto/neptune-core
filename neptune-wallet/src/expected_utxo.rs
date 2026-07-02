@@ -39,8 +39,7 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 /// See issue #176.
 /// <https://github.com/Neptune-Crypto/neptune-core/issues/176>
 ///
-/// see [IncomingUtxo](crate::state::wallet::incoming_utxo::IncomingUtxo),
-/// [UtxoNotificationPayLoad](crate::state::wallet::utxo_notification::UtxoNotificationPayload)
+/// see `IncomingUtxo`, `UtxoNotificationPayload`
 #[derive(Clone, Debug, Hash, GetSize, Serialize, Deserialize)]
 pub struct ExpectedUtxo {
     pub utxo: Utxo,

@@ -15,6 +15,7 @@ arbitrary-impls = [
     "dep:proptest",
     "dep:proptest-arbitrary-interop",
     "neptune-consensus/arbitrary-impls",
+    "neptune-mutator-set/arbitrary-impls",
     "neptune-primitives/arbitrary-impls",
 ]
 
@@ -26,6 +27,7 @@ arbitrary-impls = [
 
 anyhow = { version = "1.0", features = ["backtrace"] }
 arbitrary = { version = "1.4.1", features = ["derive"], optional = true }
+get-size2 = { version = "0.7", features = ["derive"] }
 itertools = "0.14"
 num-traits = "0.2"
 proptest = { version = "1.7", optional = true }
@@ -38,6 +40,7 @@ tiny-bip39 = "1.0"
 zeroize = "1.8.1"
 
 neptune-consensus = { version = "0.12.0", path = "../neptune-consensus" }
+neptune-mutator-set = { version = "0.12.0", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.12.0", path = "../neptune-primitives" }
 
 [dev-dependencies]

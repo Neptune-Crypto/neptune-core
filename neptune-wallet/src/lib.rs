@@ -6,4 +6,6 @@
 //! persisted; that is left to consumers such as neptune-core.
 
 pub mod coin_with_possible_timelock;
+pub mod expected_utxo;
 pub mod scan_mode_configuration;
+pub mod unlocked_utxo;
