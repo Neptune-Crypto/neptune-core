@@ -14,7 +14,7 @@ use neptune_consensus::block::Block;
 /// message is observed, the derivation index counter is updated accordingly.
 /// The number of future indices to scan for is a tunable parameter.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ScanModeConfiguration {
+pub struct ScanModeConfiguration {
     num_future_keys: usize,
     first_block_height: BlockHeight,
     last_block_height: Option<BlockHeight>,
@@ -51,18 +51,18 @@ impl ScanModeConfiguration {
     /// ```notest
     /// let config = ScanModeConfiguration::scan().blocks(1..=2).for_many_future_keys(3);
     /// ```
-    pub(crate) fn scan() -> Self {
+    pub fn scan() -> Self {
         Default::default()
     }
 
     /// Constructor-helper for setting the number of future keys to scan for.
-    pub(crate) fn for_many_future_keys(mut self, num_future_keys: usize) -> Self {
+    pub fn for_many_future_keys(mut self, num_future_keys: usize) -> Self {
         self.num_future_keys = num_future_keys;
         self
     }
 
     /// Constructor-helper for setting the range of blocks to scan.
-    pub(crate) fn blocks<T: Into<u64> + Copy>(mut self, block_heights: RangeInclusive<T>) -> Self {
+    pub fn blocks<T: Into<u64> + Copy>(mut self, block_heights: RangeInclusive<T>) -> Self {
         let first_height: u64 = block_heights.start().to_owned().into();
         let last_height: u64 = block_heights.end().to_owned().into();
 
@@ -74,32 +74,32 @@ impl ScanModeConfiguration {
     }
 
     /// Set the guesser fraction to `Some` value.
-    pub(crate) fn set_guesser_fraction(&mut self, fraction: f64) {
+    pub fn set_guesser_fraction(&mut self, fraction: f64) {
         self.maybe_guesser_fraction = Some(fraction);
     }
 
     /// Determine whether to scan a block given its height.
     ///
-    /// Marked `pub(crate)` for testing. Not part of the API. Use
+    /// Exposed (but hidden) for testing only. Not part of the stable API; use
     /// [`Self::block_is_in_range`] instead.
     #[doc(hidden)]
-    pub(crate) fn block_height_is_in_range(&self, block_height: BlockHeight) -> bool {
+    pub fn block_height_is_in_range(&self, block_height: BlockHeight) -> bool {
         self.first_block_height <= block_height
             && self.last_block_height.is_none_or(|lbh| lbh >= block_height)
     }
 
     /// Determine whether to scan the given block.
-    pub(crate) fn block_is_in_range(&self, block: &Block) -> bool {
+    pub fn block_is_in_range(&self, block: &Block) -> bool {
         let block_height = block.header().height;
         self.block_height_is_in_range(block_height)
     }
 
     /// How many future keys to scan for.
-    pub(crate) fn num_future_keys(&self) -> usize {
+    pub fn num_future_keys(&self) -> usize {
         self.num_future_keys
     }
 
-    pub(crate) fn maybe_guesser_fraction(&self) -> Option<f64> {
+    pub fn maybe_guesser_fraction(&self) -> Option<f64> {
         self.maybe_guesser_fraction
     }
 }

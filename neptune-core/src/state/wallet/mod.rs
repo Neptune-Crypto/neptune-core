@@ -1,6 +1,6 @@
 pub mod address;
 pub mod change_policy;
-pub mod coin_with_possible_timelock;
+pub use neptune_wallet::coin_with_possible_timelock;
 pub mod expected_utxo;
 pub mod incoming_utxo;
 pub mod input_candidate;
@@ -8,7 +8,7 @@ pub(crate) mod migrate_db;
 pub(crate) mod monitored_utxo;
 pub(crate) mod monitored_utxo_state;
 pub(crate) mod rusty_wallet_database;
-pub(crate) mod scan_mode_configuration;
+pub(crate) use neptune_wallet::scan_mode_configuration;
 pub mod secret_key_material;
 pub mod sent_transaction;
 pub mod transaction_output;

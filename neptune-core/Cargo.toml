@@ -50,7 +50,7 @@ track-lock-location = ["neptune-locks/track-lock-location"]
 track-lock-time = ["neptune-locks/track-lock-time"]
 
 # implements arbitrary::Arbitrary for various types
-arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest", "neptune-consensus/arbitrary-impls", "neptune-mutator-set/arbitrary-impls", "neptune-primitives/arbitrary-impls"]
+arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest", "neptune-consensus/arbitrary-impls", "neptune-mutator-set/arbitrary-impls", "neptune-primitives/arbitrary-impls", "neptune-wallet/arbitrary-impls"]
 
 # exposes the consensus/proof-abstraction test-support constructors and proptest
 # strategies (the `test_helpers` modules) needed by downstream crates' tests.
@@ -145,6 +145,7 @@ neptune-job-queue = { version = "0.12.0", path = "../neptune-job-queue" }
 neptune-locks = { version = "0.12.0", path = "../neptune-locks" }
 neptune-mutator-set = { version = "0.12.0", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.12.0", path = "../neptune-primitives" }
+neptune-wallet = { version = "0.12.0", path = "../neptune-wallet" }
 sha3 = "0.10.8"
 readonly = "0.2.12"
 thiserror = "1.0.65"

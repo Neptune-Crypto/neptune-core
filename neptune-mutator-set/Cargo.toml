@@ -12,7 +12,7 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
 [features]
 # implements arbitrary::Arbitrary for various types
-arbitrary-impls = ["dep:arbitrary", "dep:proptest", "dep:proptest-arbitrary-interop"]
+arbitrary-impls = ["dep:arbitrary", "dep:proptest", "dep:proptest-arbitrary-interop", "dep:rand"]
 
 # exposes proptest strategies (`strategies`) and mock constructors
 # (`test_shared`) needed by downstream crates' tests. off by default.
