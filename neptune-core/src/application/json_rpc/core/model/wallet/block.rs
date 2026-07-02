@@ -1,3 +1,4 @@
+use neptune_consensus::block::Block;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -5,7 +6,6 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::application::json_rpc::core::model::block::RpcBlockKernel;
-use crate::protocol::consensus::block::Block;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +35,12 @@ impl RpcWalletBlock {
 #[cfg(test)]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_consensus::block::block_appendix::BlockAppendix;
+    use neptune_consensus::block::block_body::BlockBody;
+    use neptune_consensus::block::block_header::BlockHeader;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
+    use neptune_consensus::block::BlockProof;
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_mutator_set::removal_record::chunk::Chunk;
     use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
@@ -48,12 +54,6 @@ mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::Network;
     use crate::api::export::Timestamp;
-    use crate::protocol::consensus::block::block_appendix::BlockAppendix;
-    use crate::protocol::consensus::block::block_body::BlockBody;
-    use crate::protocol::consensus::block::block_header::BlockHeader;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_proof_size;
-    use crate::protocol::consensus::block::BlockProof;
-    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::tests::shared::blocks::block_with_num_puts;
     use crate::tests::shared_tokio_runtime;
 

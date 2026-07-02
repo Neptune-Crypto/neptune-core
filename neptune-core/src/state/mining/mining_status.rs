@@ -2,11 +2,10 @@ use std::fmt::Display;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use neptune_consensus::block::Block;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use serde::Deserialize;
 use serde::Serialize;
-
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct GuessingWorkInfo {

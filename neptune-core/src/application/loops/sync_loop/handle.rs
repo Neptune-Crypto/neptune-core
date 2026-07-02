@@ -1,3 +1,4 @@
+use neptune_consensus::block::Block;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
@@ -10,7 +11,6 @@ use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::application::loops::sync_loop::PeerHandle;
 use crate::application::loops::sync_loop::SyncLoop;
-use crate::protocol::consensus::block::Block;
 
 /// Wraps a [`SyncLoop`] along with channels to an fro.
 ///

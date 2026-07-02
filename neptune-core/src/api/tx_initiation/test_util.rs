@@ -3,6 +3,8 @@
 //!
 //! Going forward test authors are encouraged to use the public APIs instead.
 
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+
 use crate::api::export::ChangePolicy;
 use crate::api::export::InputCandidate;
 use crate::api::export::NativeCurrencyAmount;
@@ -16,7 +18,6 @@ use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::state::StateLock;
 use crate::GlobalStateLock;

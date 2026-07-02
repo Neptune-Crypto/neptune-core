@@ -1,6 +1,8 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use neptune_consensus::transaction::lock_script::LockScriptAndWitness;
+use neptune_consensus::transaction::utxo::Utxo;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
@@ -12,8 +14,6 @@ use tasm_lib::triton_vm::prelude::Tip5;
 
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::TransparentInput;
-use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
-use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::tasm_lib::prelude::Digest;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

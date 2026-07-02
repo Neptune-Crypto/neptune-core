@@ -1,4 +1,5 @@
 use anyhow::Result;
+use neptune_consensus::block::block_height::BlockHeight;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -14,7 +15,6 @@ use zeroize::ZeroizeOnDrop;
 use super::address::ReceivingAddress;
 use crate::api::export::KeyType;
 use crate::api::export::SpendingKey;
-use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::state::wallet::address::elliptic_curve_hybrid;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::symmetric_key;

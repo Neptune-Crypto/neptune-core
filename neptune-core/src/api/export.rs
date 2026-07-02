@@ -2,6 +2,21 @@
 //!
 //! They are exported here in one location for convenience.
 
+pub use neptune_consensus::block::block_height::BlockHeight;
+pub use neptune_consensus::network::Network;
+pub use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+pub use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+pub use neptune_consensus::transaction::announcement::Announcement;
+pub use neptune_consensus::transaction::primitive_witness::WitnessValidationError;
+pub use neptune_consensus::transaction::transaction_proof::TransactionProof;
+pub use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+pub use neptune_consensus::transaction::transparent_input::TransparentInput;
+pub use neptune_consensus::transaction::transparent_transaction_info::TransparentTransactionInfo;
+pub use neptune_consensus::transaction::utxo::Utxo;
+pub use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+pub use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+pub use neptune_consensus::transaction::Transaction;
+pub use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 pub use neptune_mutator_set::addition_record::AdditionRecord;
 pub use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 pub use neptune_primitives::timestamp::Timestamp;
@@ -11,21 +26,6 @@ pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat
 pub use crate::api::tx_initiation::consolidate::ConsolidationError;
 pub use crate::api::wallet::WalletBalances;
 pub use crate::application::config::cli_args::Args;
-pub use crate::protocol::consensus::block::block_height::BlockHeight;
-pub use crate::protocol::consensus::network::Network;
-pub use crate::protocol::consensus::transaction::announcement::Announcement;
-pub use crate::protocol::consensus::transaction::primitive_witness::WitnessValidationError;
-pub use crate::protocol::consensus::transaction::transaction_proof::TransactionProof;
-pub use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-pub use crate::protocol::consensus::transaction::transparent_input::TransparentInput;
-pub use crate::protocol::consensus::transaction::transparent_transaction_info::TransparentTransactionInfo;
-pub use crate::protocol::consensus::transaction::utxo::Utxo;
-pub use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
-pub use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
-pub use crate::protocol::consensus::transaction::Transaction;
-pub use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-pub use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
-pub use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 pub use crate::state::transaction::transaction_details::TransactionDetails;
 pub use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 pub use crate::state::transaction::transaction_kernel_id::Txid;

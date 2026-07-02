@@ -1,16 +1,15 @@
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
+use neptune_consensus::block::block_appendix::BlockAppendix;
+use neptune_consensus::block::block_body::BlockBody;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::BlockProof;
+use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use serde::Deserialize;
 use serde::Serialize;
-
-use crate::protocol::consensus::block::block_appendix::BlockAppendix;
-use crate::protocol::consensus::block::block_body::BlockBody;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::block::BlockProof;
-use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 
 /// Data structure for communicating blocks with peers. The hash digest is not
 /// communicated such that the receiver is forced to calculate it themselves.
@@ -75,6 +74,7 @@ impl TryFrom<&Block> for TransferBlock {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
     use neptune_primitives::timestamp::Timestamp;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -82,7 +82,6 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
     use crate::protocol::peer::Network;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared_tokio_runtime;

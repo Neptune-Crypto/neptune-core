@@ -1,6 +1,7 @@
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+
 use crate::api::export::Transaction;
 use crate::api::export::TransactionKernelId;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 
 pub(crate) enum MempoolUpdateJobResult {
     Failure(TransactionKernelId),

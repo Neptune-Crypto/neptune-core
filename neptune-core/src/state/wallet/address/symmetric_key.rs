@@ -13,6 +13,11 @@ use anyhow::Result;
 use arbitrary::Arbitrary;
 use bech32::FromBase32;
 use bech32::ToBase32;
+use neptune_consensus::network::Network;
+use neptune_consensus::transaction::announcement::Announcement;
+use neptune_consensus::transaction::lock_script::LockScript;
+use neptune_consensus::transaction::lock_script::LockScriptAndWitness;
+use neptune_consensus::transaction::utxo::Utxo;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Tip5;
@@ -23,11 +28,6 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::announcement::Announcement;
-use crate::protocol::consensus::transaction::lock_script::LockScript;
-use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
-use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
 /// represents a symmetric key decryption error

@@ -3,8 +3,8 @@ mod common;
 use common::genesis_node::GenesisNode;
 use common::logging;
 use neptune_cash::api::export::Network;
-use neptune_cash::protocol::consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
-use neptune_cash::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 

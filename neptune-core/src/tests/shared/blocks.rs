@@ -1,5 +1,32 @@
 use futures::channel::oneshot;
 use itertools::Itertools;
+use neptune_consensus::block::block_appendix::BlockAppendix;
+use neptune_consensus::block::block_body::BlockBody;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::block_transaction::BlockTransaction;
+use neptune_consensus::block::difficulty_control::Difficulty;
+use neptune_consensus::block::difficulty_control::ProofOfWork;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::pow::Pow;
+use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+use neptune_consensus::block::test_helpers::invalid_empty_block;
+use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
+use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+use neptune_consensus::block::validity::block_program::BlockProgram;
+use neptune_consensus::block::validity::block_proof_witness::BlockProofWitness;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::BlockProof;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
+use neptune_consensus::transaction::validity::neptune_proof::Proof;
+use neptune_consensus::transaction::Transaction;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -33,33 +60,6 @@ use crate::application::loops::mine_loop::composer_parameters::ComposerParameter
 use crate::application::loops::mine_loop::guess_nonce;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
 use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-use crate::protocol::consensus::block::block_appendix::BlockAppendix;
-use crate::protocol::consensus::block::block_body::BlockBody;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-use crate::protocol::consensus::block::difficulty_control::Difficulty;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
-use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::block::pow::Pow;
-use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
-use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
-use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_proof_size;
-use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
-use crate::protocol::consensus::block::validity::block_program::BlockProgram;
-use crate::protocol::consensus::block::validity::block_proof_witness::BlockProofWitness;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::block::BlockProof;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
-use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
@@ -463,11 +463,12 @@ pub(crate) fn invalid_empty_block_with_announcements(
     network: Network,
     announcements: Vec<Announcement>,
 ) -> Block {
-    let tx = crate::protocol::consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash(
-        vec![],
-        vec![],
-        predecessor.mutator_set_accumulator_after().unwrap().hash(),
-    );
+    let tx =
+        neptune_consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash(
+            vec![],
+            vec![],
+            predecessor.mutator_set_accumulator_after().unwrap().hash(),
+        );
     let kernel = TransactionKernelModifier::default()
         .announcements(announcements)
         .clone_modify(&tx.kernel);

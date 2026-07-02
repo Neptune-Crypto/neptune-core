@@ -1,3 +1,5 @@
+use neptune_consensus::transaction::utxo::Coin;
+use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -9,8 +11,6 @@ use crate::api::export::TransactionProof;
 use crate::api::export::Utxo;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
-use crate::protocol::consensus::transaction::utxo::Coin;
-use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
 use crate::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 

@@ -1,3 +1,4 @@
+use neptune_consensus::block::block_body::BlockBody;
 use neptune_mutator_set::active_window::ActiveWindow;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use serde::Deserialize;
@@ -7,7 +8,6 @@ use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
-use crate::protocol::consensus::block::block_body::BlockBody;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

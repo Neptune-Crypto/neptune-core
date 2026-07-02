@@ -3,14 +3,13 @@ use std::str::FromStr;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::Transaction;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::prelude::MerkleTree;
-
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::Transaction;
 
 /// A unique identifier of a transaction whose value is unaffected by a
 /// transaction update.
@@ -69,7 +68,7 @@ impl Txid for TransactionKernel {
     /// transaction from [new_with_updated_mutator_set_records].
     ///
     ///
-    /// [new_with_updated_mutator_set_records]: crate::protocol::consensus::transaction::Transaction
+    /// [new_with_updated_mutator_set_records]: neptune_consensus::transaction::Transaction
     fn txid(&self) -> TransactionKernelId {
         // Since the `Update` program allows permutation of inputs, we must sort
         // the digests of the absolute indices to arrive at a digest that is
@@ -155,6 +154,8 @@ impl rand::distr::Distribution<TransactionKernelId> for rand::distr::StandardUni
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+    use neptune_consensus::transaction::Transaction;
     use proptest::prelude::Strategy;
     use proptest::prop_assert_eq;
     use proptest::strategy::ValueTree;
@@ -163,8 +164,6 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-    use crate::protocol::consensus::transaction::Transaction;
 
     #[test]
     fn txid_value_is_constant_under_transaction_update() {

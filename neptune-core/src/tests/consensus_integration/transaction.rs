@@ -1,4 +1,15 @@
 use macro_rules_attr::apply;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::network::Network;
+use neptune_consensus::proof_abstractions::error::CreateProofError;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJobError;
+use neptune_consensus::proof_abstractions::tasm::prover_job::VmProcessError;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+use neptune_consensus::transaction::validity::single_proof::produce_single_proof;
+use neptune_consensus::type_scripts::native_currency::NativeCurrency;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::isa::error::AssertionError;
@@ -6,17 +17,6 @@ use tracing_test::traced_test;
 
 use crate::api::export::TxInputs;
 use crate::api::export::TxOutputList;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
-use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::error::CreateProofError;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
-use crate::protocol::proof_abstractions::tasm::prover_job::VmProcessError;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::tests::shared_tokio_runtime;
 

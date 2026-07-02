@@ -1,3 +1,4 @@
+pub use neptune_consensus::block::arbitrary_kernel as block_with_arbkernel;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::RemovalRecord;
 // The mutator-set proptest strategies now live in the neptune-mutator-set crate;
@@ -14,7 +15,6 @@ use proptest::prelude::*;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
-pub use crate::protocol::consensus::block::arbitrary_kernel as block_with_arbkernel;
 
 // TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
@@ -24,7 +24,7 @@ pub fn make_mock_transaction_with_wallet(
     _wallet_state: &crate::state::wallet::wallet_state::WalletState,
     timestamp: Option<Timestamp>,
 ) -> proptest::prelude::BoxedStrategy<Transaction> {
-    crate::protocol::consensus::transaction::test_helpers::txkernel::with_usualtxdata(
+    neptune_consensus::transaction::test_helpers::txkernel::with_usualtxdata(
         inputs,
         outputs,
         fee,

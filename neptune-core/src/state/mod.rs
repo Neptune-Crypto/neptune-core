@@ -35,6 +35,20 @@ use mining::mining_state::MiningState;
 use mining::mining_status::ComposingWorkInfo;
 use mining::mining_status::GuessingWorkInfo;
 use mining::mining_status::MiningStatus;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::difficulty_control::ProofOfWork;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_schema::traits::StorageWriter as SW;
 use neptune_database::storage::storage_vec::traits::*;
 use neptune_locks::tokio as sync_tokio;
@@ -76,19 +90,6 @@ use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCK
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
-use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::handshake_data::VersionString;
 use crate::protocol::peer::peer_info::PeerInfo;
@@ -96,7 +97,6 @@ use crate::protocol::peer::transfer_block::TransferBlock;
 use crate::protocol::peer::SyncChallenge;
 use crate::protocol::peer::SyncChallengeResponse;
 use crate::protocol::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
-use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::claim_error::ClaimError;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
@@ -3466,6 +3466,17 @@ impl GlobalState {
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::block_transaction::BlockTransaction;
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
+    use neptune_consensus::block::Block;
+    use neptune_consensus::network::Network;
+    use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use neptune_consensus::transaction::lock_script::LockScript;
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use neptune_consensus::transaction::utxo::Utxo;
     use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
     use neptune_mutator_set::removal_record::RemovalRecord;
     use num_traits::CheckedSub;
@@ -3485,17 +3496,6 @@ mod tests {
     use crate::api::export::ReceivingAddress;
     use crate::api::export::TxOutputList;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
-    use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_timestamp;
-    use crate::protocol::consensus::block::Block;
-    use crate::protocol::consensus::network::Network;
-    use crate::protocol::consensus::transaction::lock_script::LockScript;
-    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::protocol::consensus::transaction::utxo::Utxo;
-    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::transaction_output::TxOutput;
@@ -3654,10 +3654,10 @@ mod tests {
     mod helper {
 
         use futures::future;
+        use neptune_consensus::transaction::utxo_triple::UtxoTriple;
 
         use super::*;
         use crate::api::export::AdditionRecord;
-        use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
 
         /// Create 3 branches and return them in an array.
         ///

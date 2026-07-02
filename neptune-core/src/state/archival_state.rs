@@ -26,6 +26,22 @@ use tracing::warn;
 pub(crate) mod import_blocks_from_files;
 pub mod rusty_utxo_index;
 
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
+use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::block_height::BLOCKS_PER_GENERATION;
+use neptune_consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+use neptune_consensus::block::block_kernel::BlockKernel;
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
+use neptune_consensus::block::PREMINE_MAX_SIZE;
+use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
+use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_MAIN;
+use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_TESTNET_0;
+use neptune_consensus::transaction::lock_script::LockScript;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use neptune_database::create_db_if_missing;
 use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::NeptuneLevelDb;
@@ -44,22 +60,6 @@ use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
 use crate::api::export::Utxo;
 use crate::application::config::data_directory::DataDirectory;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
-use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::block_height::BLOCKS_PER_GENERATION;
-use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
-use crate::protocol::consensus::block::block_kernel::BlockKernel;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
-use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
-use crate::protocol::consensus::transaction::lock_script::LockScript;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
-use crate::protocol::proof_abstractions::verifier::cache_true_claims;
-use crate::protocol::proof_abstractions::verifier::CHECKPOINT_MAIN;
-use crate::protocol::proof_abstractions::verifier::CHECKPOINT_TESTNET_0;
 use crate::state::archival_state::rusty_utxo_index::RustyUtxoIndex;
 use crate::state::database::BlockFileLocation;
 use crate::state::database::BlockIndexKey;
@@ -2413,6 +2413,18 @@ pub(super) mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::block_transaction::BlockTransaction;
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+    use neptune_consensus::network::Network;
+    use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::transaction::lock_script::LockScript;
+    use neptune_consensus::transaction::utxo::Utxo;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_database::storage::storage_vec::traits::*;
     use neptune_primitives::timestamp::Timestamp;
     use proptest::collection;
@@ -2431,18 +2443,6 @@ pub(super) mod tests {
     use crate::application::config::cli_args::Args;
     use crate::application::config::data_directory::DataDirectory;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
-    use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_proof_size;
-    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-    use crate::protocol::consensus::network::Network;
-    use crate::protocol::consensus::transaction::lock_script::LockScript;
-    use crate::protocol::consensus::transaction::utxo::Utxo;
-    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::state::archival_state::ArchivalState;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::address::KeyType;
@@ -5146,8 +5146,9 @@ pub(super) mod tests {
     }
 
     mod find_canonical_block_with_puts {
+        use neptune_consensus::block::test_helpers::invalid_empty_block_with_num_outputs;
+
         use super::*;
-        use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_num_outputs;
         use crate::tests::shared::blocks::block_with_num_puts;
 
         #[traced_test]
@@ -5439,8 +5440,9 @@ pub(super) mod tests {
     }
 
     mod block_hash_witness {
+        use neptune_consensus::block::test_helpers::invalid_empty_block;
+
         use super::*;
-        use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -5492,10 +5494,10 @@ pub(super) mod tests {
     /// Test of functions that require both UTXO index and other parts of the
     /// archival state
     mod utxo_index {
+        use neptune_consensus::block::test_helpers::invalid_empty_block;
         use tasm_lib::twenty_first::bfe;
 
         use super::*;
-        use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
         use crate::tests::shared::blocks::block_with_num_puts;
 
         #[apply(shared_tokio_runtime)]

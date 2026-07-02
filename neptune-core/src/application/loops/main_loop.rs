@@ -16,6 +16,14 @@ use anyhow::Result;
 use itertools::Either;
 use itertools::Itertools;
 use libp2p::PeerId;
+use neptune_consensus::block::Block;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
@@ -59,17 +67,9 @@ use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::transaction_notification::TransactionNotification;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
@@ -2594,6 +2594,8 @@ mod tests {
     use std::time::UNIX_EPOCH;
 
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::network::Network;
     use tracing_test::traced_test;
 
     use super::*;
@@ -2601,8 +2603,6 @@ mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::ReceivingAddress;
     use crate::application::config::cli_args;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
-    use crate::protocol::consensus::network::Network;
     use crate::protocol::peer::peer_info::pseudorandom_peer_id;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -3000,14 +3000,14 @@ mod tests {
     }
 
     mod proof_upgrader {
+        use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+        use neptune_consensus::transaction::Transaction;
+        use neptune_consensus::transaction::TransactionProof;
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use neptune_primitives::timestamp::Timestamp;
 
         use super::*;
         use crate::api::export::BlockHeight;
-        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-        use crate::protocol::consensus::transaction::Transaction;
-        use crate::protocol::consensus::transaction::TransactionProof;
-        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
         use crate::state::transaction::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::transaction_output::TxOutput;
@@ -3704,7 +3704,8 @@ mod tests {
         async fn new_block_from_peer_invokes_block_notify() {
             use std::fs;
 
-            use crate::protocol::proof_abstractions::test_helpers::test_helper_data_dir;
+            use neptune_consensus::proof_abstractions::test_helpers::test_helper_data_dir;
+
             use crate::tests::shared::files::unit_test_data_directory;
             use crate::tests::shared::files::wait_for_file_to_exist;
 

@@ -6,6 +6,12 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use itertools::Itertools;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::Block;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_schema::DbtVec;
 use neptune_database::storage::storage_schema::RustyKey;
 use neptune_database::storage::storage_schema::RustyValue;
@@ -56,12 +62,6 @@ use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::transaction_kernel_id::Txid;
@@ -2226,6 +2226,14 @@ pub(crate) mod tests {
 
     use generation_address::GenerationSpendingKey;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+    use neptune_consensus::network::Network;
+    use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use neptune_consensus::transaction::utxo::Coin;
+    use neptune_consensus::transaction::utxo_triple::UtxoTriple;
     use num_traits::Zero;
     use rand::prelude::*;
     use rand::random;
@@ -2237,14 +2245,6 @@ pub(crate) mod tests {
     use crate::api::export::Transaction;
     use crate::api::tx_initiation::initiator::TransactionInitiator;
     use crate::application::config::cli_args;
-    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
-    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-    use crate::protocol::consensus::network::Network;
-    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::protocol::consensus::transaction::utxo::Coin;
-    use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
@@ -3251,6 +3251,7 @@ pub(crate) mod tests {
     mod guesser_fee_utxos {
         use futures::channel::oneshot;
         use guesser_fee_utxos::composer_parameters::ComposerParameters;
+        use neptune_consensus::transaction::TransactionProof;
         use rand::rng;
 
         use super::*;
@@ -3259,7 +3260,6 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::composer_parameters;
         use crate::application::loops::mine_loop::guess_nonce;
         use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
-        use crate::protocol::consensus::transaction::TransactionProof;
         use crate::tests::shared::blocks::fake_valid_block_proposal_from_tx;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
         use crate::tests::shared::fake_create_block_transaction_for_tests;
@@ -3522,14 +3522,14 @@ pub(crate) mod tests {
 
     mod wallet_balance {
         use generation_address::GenerationReceivingAddress;
+        use neptune_consensus::block::block_height::BlockHeight;
+        use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
         use num_traits::CheckedSub;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
 
         use super::*;
         use crate::application::config::cli_args;
-        use crate::protocol::consensus::block::block_height::BlockHeight;
-        use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
         use crate::state::wallet::address::ReceivingAddress;
         use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -3983,10 +3983,11 @@ pub(crate) mod tests {
     }
 
     mod expected_utxos {
+        use neptune_consensus::transaction::lock_script::LockScript;
+        use neptune_consensus::transaction::test_helpers::make_mock_transaction;
+
         use super::*;
         use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
-        use crate::protocol::consensus::transaction::lock_script::LockScript;
-        use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction;
 
         #[apply(shared_tokio_runtime)]
         async fn no_expected_utxos_on_custom_coinbase_distribution_and_offchain_notifications() {
@@ -4263,8 +4264,9 @@ pub(crate) mod tests {
 
     /// Test wallet state's handling of UTXOs abandoned due to reorganization.
     mod abandoned_mutxos {
+        use neptune_consensus::block::test_helpers::invalid_empty_block;
+
         use super::*;
-        use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -4460,6 +4462,8 @@ pub(crate) mod tests {
     pub(crate) mod scan_mode {
         use std::hint::black_box;
 
+        use neptune_consensus::block::block_height::BlockHeight;
+        use neptune_consensus::transaction::test_helpers::txkernel;
         use proptest::collection;
         use proptest::prelude::any;
         use proptest_arbitrary_interop::arb;
@@ -4467,8 +4471,6 @@ pub(crate) mod tests {
         use super::*;
         use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-        use crate::protocol::consensus::block::block_height::BlockHeight;
-        use crate::protocol::consensus::transaction::test_helpers::txkernel;
         use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::files::unit_test_data_directory;
 
@@ -4971,6 +4973,10 @@ pub(crate) mod tests {
 
     pub(crate) mod fee_notifications {
 
+        use neptune_consensus::block::block_height::BlockHeight;
+        use neptune_consensus::block::block_transaction::BlockTransaction;
+        use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+
         use super::*;
         use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
@@ -4980,9 +4986,6 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::create_block_transaction;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
         use crate::application::loops::peer_loop::channel::MainToPeerTask;
-        use crate::protocol::consensus::block::block_height::BlockHeight;
-        use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-        use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::PEER_CHANNEL_CAPACITY;
 
         #[traced_test]

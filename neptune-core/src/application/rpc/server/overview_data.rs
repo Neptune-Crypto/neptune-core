@@ -1,3 +1,4 @@
+use neptune_consensus::block::block_header::BlockHeader;
 use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
@@ -7,7 +8,6 @@ use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::TxProvingCapability;
 use crate::application::network::overview::NetworkOverview;
-use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::state::mining::mining_status::MiningStatus;
 use crate::state::sync_status::SyncStatus;
 

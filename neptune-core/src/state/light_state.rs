@@ -1,8 +1,8 @@
+use neptune_consensus::block::Block;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::timestamp::Timestamp;
 
 use crate::api::export::Network;
-use crate::protocol::consensus::block::Block;
 
 /// LightState represents the latest accepted block,
 /// along with bookkeeping information about it
@@ -93,16 +93,16 @@ impl LightState {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use neptune_consensus::block::block_appendix::BlockAppendix;
+    use neptune_consensus::block::block_header::BlockHeader;
+    use neptune_consensus::block::Block;
+    use neptune_consensus::block::BlockProof;
+    use neptune_consensus::network::Network;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
 
     use super::*;
-    use crate::protocol::consensus::block::block_appendix::BlockAppendix;
-    use crate::protocol::consensus::block::block_header::BlockHeader;
-    use crate::protocol::consensus::block::Block;
-    use crate::protocol::consensus::block::BlockProof;
-    use crate::protocol::consensus::network::Network;
 
     #[test]
     fn update_works() {

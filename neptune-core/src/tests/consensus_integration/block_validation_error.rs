@@ -1,3 +1,26 @@
+use neptune_consensus::block::arbitrary_kernel as block_with_arbkernel;
+use neptune_consensus::block::block_appendix::BlockAppendix;
+use neptune_consensus::block::block_appendix::MAX_NUM_CLAIMS;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::block_validation_error::BlockValidationError;
+use neptune_consensus::block::difficulty_control;
+use neptune_consensus::block::difficulty_control::Difficulty;
+use neptune_consensus::block::pow::LustrationStatus;
+use neptune_consensus::block::test_helpers::invalid_empty_block;
+use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
+use neptune_consensus::block::validity::block_program::BlockProgram;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::BlockProof;
+use neptune_consensus::block::DIFFICULTY_LIMIT_FOR_TESTS;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
+use neptune_consensus::consensus_rule_set::TX_BACKDATING_LIMIT;
+use neptune_consensus::network::Network;
+use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
+use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
@@ -12,29 +35,6 @@ use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::prelude::Mmr;
 use test_strategy::proptest;
 
-use crate::protocol::consensus::block::arbitrary_kernel as block_with_arbkernel;
-use crate::protocol::consensus::block::block_appendix::BlockAppendix;
-use crate::protocol::consensus::block::block_appendix::MAX_NUM_CLAIMS;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::block_validation_error::BlockValidationError;
-use crate::protocol::consensus::block::difficulty_control;
-use crate::protocol::consensus::block::difficulty_control::Difficulty;
-use crate::protocol::consensus::block::pow::LustrationStatus;
-use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
-use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_timestamp;
-use crate::protocol::consensus::block::validity::block_program::BlockProgram;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::block::BlockProof;
-use crate::protocol::consensus::block::DIFFICULTY_LIMIT_FOR_TESTS;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
-use crate::protocol::consensus::consensus_rule_set::TX_BACKDATING_LIMIT;
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
-use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::tests::shared::blocks::fake_valid_successor_for_tests;
 use crate::tests::shared::Randomness;
 
@@ -48,7 +48,7 @@ proptest::prop_compose! {
             Timestamp::hours(1) + b.kernel.header.timestamp
         ).0.value()..=BFieldElement::MAX,
         rness in Just(rness), mut b in Just(b), difficulty in Just(d)
-    ) -> (crate::protocol::consensus::block::Block, Timestamp, Randomness<2, 2>) {
+    ) -> (neptune_consensus::block::Block, Timestamp, Randomness<2, 2>) {
         b.kernel_mut().header.difficulty = Difficulty::from(difficulty);
         (b, Timestamp(bfe![ts]), rness)
     }
@@ -64,7 +64,7 @@ proptest::prop_compose! {
             Timestamp::hours(1) + b.kernel.header.timestamp
         ).0.value()..=BFieldElement::MAX,
         rness in Just(rness), mut b in Just(b), difficulty in Just(d)
-    ) -> (crate::protocol::consensus::block::Block, Timestamp, Randomness<2, 2>) {
+    ) -> (neptune_consensus::block::Block, Timestamp, Randomness<2, 2>) {
         b.kernel_mut().header.difficulty = Difficulty::from(difficulty);
         b.set_header_height(height);
         (b, Timestamp(bfe![ts]), rness)

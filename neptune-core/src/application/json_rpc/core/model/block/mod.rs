@@ -1,3 +1,9 @@
+use neptune_consensus::block::block_appendix::BlockAppendix;
+use neptune_consensus::block::block_body::BlockBody;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_kernel::BlockKernel;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::BlockProof;
 use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
@@ -7,12 +13,6 @@ use crate::application::json_rpc::core::model::block::appendix::RpcBlockAppendix
 use crate::application::json_rpc::core::model::block::body::RpcBlockBody;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeader;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
-use crate::protocol::consensus::block::block_appendix::BlockAppendix;
-use crate::protocol::consensus::block::block_body::BlockBody;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_kernel::BlockKernel;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::block::BlockProof;
 
 pub mod appendix;
 pub mod body;

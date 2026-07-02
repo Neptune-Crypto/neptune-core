@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use neptune_consensus::block::Block;
 use rand::rng;
 use rand::RngCore;
 use tokio::fs;
@@ -8,7 +9,6 @@ use tokio::fs;
 use crate::api::export::BlockHeight;
 use crate::api::export::Network;
 use crate::application::loops::sync_loop::SynchronizationBitMask;
-use crate::protocol::consensus::block::Block;
 
 /// The state of a rapid block download process.
 ///

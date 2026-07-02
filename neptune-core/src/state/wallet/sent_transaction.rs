@@ -1,10 +1,10 @@
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::transaction_output::TxOutputList;
 

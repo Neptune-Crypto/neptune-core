@@ -6,14 +6,14 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use neptune_consensus::network::Network;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 
 use super::super::wallet::address::SpendingKey;
 use super::super::wallet::change_policy::ChangePolicy;
 use super::super::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone)]

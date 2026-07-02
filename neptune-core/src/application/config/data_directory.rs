@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use anyhow::Context;
 use anyhow::Result;
 use directories::ProjectDirs;
+use neptune_consensus::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::protocol::consensus::network::Network;
 use crate::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
 use crate::state::archival_state::BLOCK_INDEX_DB_NAME;
 use crate::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;

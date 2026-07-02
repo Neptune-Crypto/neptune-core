@@ -33,12 +33,12 @@
 //! }
 //! ```
 
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::timestamp::Timestamp;
 
 use super::error;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::initiator::TransactionInitiator;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
 use crate::state::wallet::change_policy::ChangePolicy;
 use crate::GlobalStateLock;

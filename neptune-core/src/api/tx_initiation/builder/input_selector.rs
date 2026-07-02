@@ -15,6 +15,7 @@ use std::str::FromStr;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use num_traits::Zero;
 use rand::rng;
 use rand::RngCore;
@@ -22,7 +23,6 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::api::tx_initiation::error;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::input_candidate::InputCandidate;
 
 /// defines sort ordering: ascending or descending.

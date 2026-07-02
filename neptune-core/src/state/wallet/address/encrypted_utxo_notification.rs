@@ -4,14 +4,14 @@ use anyhow::Result;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use get_size2::GetSize;
+use neptune_consensus::network::Network;
+use neptune_consensus::transaction::announcement::Announcement;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::api::export::SpendingKey;
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::state::wallet::address::common::network_hrp_char;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
@@ -128,6 +128,7 @@ mod tests {
     use arbitrary::Unstructured;
     use bech32::FromBase32;
     use bech32::ToBase32;
+    use neptune_consensus::network::Network;
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -137,7 +138,6 @@ mod tests {
     use test_strategy::proptest;
 
     use super::EncryptedUtxoNotification;
-    use crate::protocol::consensus::network::Network;
 
     impl<'a> Arbitrary<'a> for EncryptedUtxoNotification {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {

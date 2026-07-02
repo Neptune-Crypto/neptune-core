@@ -1,8 +1,8 @@
 use macro_rules_attr::apply;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::validity::tasm::single_proof::update_branch::test_helpers::deterministic_update_witness_additions_and_removals;
+use neptune_consensus::transaction::validity::tasm::single_proof::update_branch::test_helpers::deterministic_update_witness_only_additions_to_mutator_set;
 
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::validity::tasm::single_proof::update_branch::test_helpers::deterministic_update_witness_additions_and_removals;
-use crate::protocol::consensus::transaction::validity::tasm::single_proof::update_branch::test_helpers::deterministic_update_witness_only_additions_to_mutator_set;
 use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::tests::shared_tokio_runtime;
 

@@ -709,6 +709,7 @@ mod tests {
     use anyhow::bail;
     use anyhow::Result;
     use macro_rules_attr::apply;
+    use neptune_consensus::network::Network;
     use tasm_lib::twenty_first::tip5::digest::Digest;
     use test_strategy::proptest;
     use tokio_test::io::Builder;
@@ -717,7 +718,6 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
-    use crate::protocol::consensus::network::Network;
     use crate::protocol::peer::handshake_data::VersionString;
     use crate::protocol::peer::peer_info::PeerInfo;
     use crate::protocol::peer::InternalConnectionStatus;

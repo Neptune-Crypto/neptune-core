@@ -1,12 +1,12 @@
 use anyhow::bail;
 use anyhow::Result;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use serde::Deserialize;
 use serde::Serialize;
 
 use super::transfer_transaction::TransactionProofQuality;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::tasm_lib::prelude::Digest;

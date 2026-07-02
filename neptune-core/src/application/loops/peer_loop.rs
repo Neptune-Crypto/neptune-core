@@ -17,6 +17,14 @@ use futures::FutureExt;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::FUTUREDATING_LIMIT;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
+use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
+use neptune_consensus::transaction::Transaction;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
@@ -43,14 +51,6 @@ use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::channel::PeerTaskToMainTransaction;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionLustrationError;
-use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerConnectionInfo;
 use crate::protocol::peer::peer_info::PeerInfo;
@@ -2373,6 +2373,9 @@ impl PeerLoopHandler {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_consensus::network::Network;
+    use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -2382,13 +2385,10 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
-    use crate::protocol::consensus::network::Network;
-    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::protocol::peer::peer_block_notifications::PeerBlockNotification;
     use crate::protocol::peer::peer_info::pseudorandom_peer_id;
     use crate::protocol::peer::transaction_notification::TransactionNotification;
     use crate::protocol::peer::Sanction;
-    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -4207,15 +4207,15 @@ mod tests {
     }
 
     mod transactions {
+        use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+        use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+        use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
         use strum::IntoEnumIterator;
 
         use super::*;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
-        use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
         use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
-        use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-        use crate::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
@@ -4926,11 +4926,11 @@ mod tests {
 
     mod proof_qualities {
         use itertools::Itertools;
+        use neptune_consensus::transaction::Transaction;
         use strum::IntoEnumIterator;
 
         use super::*;
         use crate::application::config::cli_args;
-        use crate::protocol::consensus::transaction::Transaction;
         use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
         use crate::state::wallet::transaction_output::TxOutput;
         use crate::tests::shared::globalstate::mock_genesis_global_state;

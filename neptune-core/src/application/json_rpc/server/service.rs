@@ -6,6 +6,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use itertools::Itertools;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::FUTUREDATING_LIMIT;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_database::storage::storage_vec::traits::StorageVecStream;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use tasm_lib::prelude::Digest;
@@ -42,9 +45,6 @@ use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoin
 use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNotificationData;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::block_selector::BlockSelector;
 use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::state::transaction::transaction_kernel_id::Txid;
@@ -548,7 +548,7 @@ impl RpcApi for RpcServer {
         &self,
         request: ValidateCoinsAmountRequest,
     ) -> RpcResult<ValidateCoinsAmountResponse> {
-        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
         let Ok(amount) = NativeCurrencyAmount::coins_from_str(&request.amount_string) else {
             return Ok(ValidateCoinsAmountResponse { amount: None });
@@ -567,7 +567,7 @@ impl RpcApi for RpcServer {
         &self,
         request: ValidateNauAmountRequest,
     ) -> RpcResult<ValidateNauAmountResponse> {
-        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
         let Ok(num_naus) = request.nau_string.parse::<i128>() else {
             return Ok(ValidateNauAmountResponse { amount: None });
@@ -1813,6 +1813,16 @@ pub mod tests {
 
     use libp2p::Multiaddr;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::block_height::BlockHeight;
+    use neptune_consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
+    use neptune_consensus::block::PREMINE_MAX_SIZE;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+    use neptune_consensus::transaction::test_helpers::txkernel;
+    use neptune_consensus::transaction::Transaction;
+    use neptune_consensus::transaction::TransactionProof;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::shared::NUM_TRIALS;
     use num_traits::Zero;
@@ -1842,16 +1852,6 @@ pub mod tests {
     use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::application::network::arbitrary::arb_multiaddr;
-    use crate::protocol::consensus::block::block_height::BlockHeight;
-    use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
-    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
-    use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
-    use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
-    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-    use crate::protocol::consensus::transaction::test_helpers::txkernel;
-    use crate::protocol::consensus::transaction::Transaction;
-    use crate::protocol::consensus::transaction::TransactionProof;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::mining::block_proposal::BlockProposal;
     use crate::state::transaction::transaction_kernel_id::Txid;
@@ -2040,7 +2040,7 @@ pub mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn tip_calls_are_consistent(
         #[strategy(txkernel::with_lengths(0, 2, 2, true))]
-        tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block1: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
 
@@ -2074,7 +2074,7 @@ pub mod tests {
     async fn get_block_calls_are_consistent(
         #[strategy(0usize..8)] _num_announcements: usize,
         #[strategy(txkernel::with_lengths(0, 2, #_num_announcements, true))]
-    tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block1: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
 
@@ -2151,9 +2151,9 @@ pub mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn get_block_digests_returns_competing_blocks(
         #[strategy(txkernel::with_lengths(0, 2, 2, true))]
-    tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block1: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
         #[strategy(txkernel::with_lengths(0, 2, 2, true))]
-    tx_block2: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block2: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
 
@@ -2212,7 +2212,7 @@ pub mod tests {
     async fn utxo_calls_are_consistent(
         #[strategy(0usize..8)] _num_outputs: usize,
         #[strategy(txkernel::with_lengths(0usize, #_num_outputs, 0usize, true))]
-        transaction_kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        transaction_kernel: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
 

@@ -9,8 +9,8 @@ use neptune_cash::bench_helpers::devops_global_state_genesis;
 use neptune_cash::bench_helpers::extract_expected_utxos;
 use neptune_cash::bench_helpers::next_block_empty;
 use neptune_cash::bench_helpers::next_block_incoming_utxos;
-use neptune_cash::protocol::consensus::block::Block;
 use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_consensus::block::Block;
 
 fn main() {
     divan::main();

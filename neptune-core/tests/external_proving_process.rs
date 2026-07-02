@@ -6,9 +6,9 @@ use std::time::SystemTime;
 use itertools::Itertools;
 use neptune_cash::api::export::Claim;
 use neptune_cash::api::export::Program;
-use neptune_cash::protocol::proof_abstractions::tasm::prover_job::ProverJob;
-use neptune_cash::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
-use neptune_cash::protocol::proof_abstractions::tasm::prover_job::ProverProcessCompletion;
+use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJob;
+use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use neptune_consensus::proof_abstractions::tasm::prover_job::ProverProcessCompletion;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::isa::triton_instr;
@@ -236,12 +236,12 @@ async fn can_prove_out_of_process_fibonacci() {
 // decoration. This test module activates that guard.
 #[cfg(test)]
 pub mod tests {
-    use neptune_cash::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-    use neptune_cash::protocol::consensus::transaction::validity::kernel_to_outputs::KernelToOutputs;
-    use neptune_cash::protocol::consensus::transaction::validity::kernel_to_outputs::KernelToOutputsWitness;
-    use neptune_cash::protocol::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
-    use neptune_cash::protocol::proof_abstractions::tasm::program::TritonProgram;
-    use neptune_cash::protocol::proof_abstractions::SecretWitness;
+    use neptune_consensus::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
+    use neptune_consensus::proof_abstractions::SecretWitness;
+    use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+    use neptune_consensus::transaction::validity::kernel_to_outputs::KernelToOutputs;
+    use neptune_consensus::transaction::validity::kernel_to_outputs::KernelToOutputsWitness;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
 

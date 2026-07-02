@@ -196,13 +196,13 @@ mod migration {
     pub(super) mod schema_v1 {
         use std::collections::VecDeque;
 
+        use neptune_consensus::transaction::utxo::Utxo;
         use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
         use serde::Deserialize;
         use serde::Serialize;
         use tasm_lib::prelude::Digest;
 
         use crate::api::export::BlockHeight;
-        use crate::protocol::consensus::transaction::utxo::Utxo;
         use crate::state::Timestamp;
 
         // this is a copy of MonitoredUtxo as it was in v1 schema.
@@ -225,6 +225,8 @@ mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_consensus::network::Network;
+    use neptune_consensus::transaction::lock_script::LockScript;
     use neptune_database::storage::storage_schema::traits::StorageWriter;
     use neptune_database::storage::storage_schema::DbtSingleton;
     use neptune_database::storage::storage_schema::DbtVec;
@@ -241,8 +243,6 @@ mod tests {
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::Timestamp;
     use crate::api::export::Utxo;
-    use crate::protocol::consensus::network::Network;
-    use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::expected_utxo::UtxoNotifier;
     use crate::state::wallet::migrate_db::worker;

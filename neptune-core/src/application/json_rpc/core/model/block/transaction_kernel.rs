@@ -1,3 +1,5 @@
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::chunk::Chunk;
 use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
@@ -13,8 +15,6 @@ use crate::api::export::TransactionKernelId;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMmrMembershipProof;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
 
 pub type RpcAbsoluteIndexSet = AbsoluteIndexSet;
 

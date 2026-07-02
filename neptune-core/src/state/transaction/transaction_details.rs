@@ -2,6 +2,13 @@ use std::fmt::Display;
 
 use anyhow::Result;
 use itertools::Itertools;
+use neptune_consensus::network::Network;
+use neptune_consensus::transaction::announcement::Announcement;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_consensus::transaction::primitive_witness::WitnessValidationError;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
@@ -12,20 +19,13 @@ use tasm_lib::prelude::Digest;
 
 use super::super::wallet::transaction_output::TxOutput;
 use super::super::wallet::utxo_notification::UtxoNotificationMethod;
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::announcement::Announcement;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::primitive_witness::WitnessValidationError;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::unlocked_utxo::TxInputs;
 
 /// contains the unblinded data that a
-/// [Transaction](crate::protocol::consensus::transaction::Transaction) is
+/// [Transaction](neptune_consensus::transaction::Transaction) is
 /// generated from, minus the
-/// [TransactionProof](crate::protocol::consensus::transaction::TransactionProof).
+/// [TransactionProof](neptune_consensus::transaction::TransactionProof).
 ///
 /// conceptually, `TransactionDetails` + `TransactionProof` --> `Transaction`.
 ///

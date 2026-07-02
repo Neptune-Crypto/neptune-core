@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use neptune_consensus::network::Network;
 use tracing::info;
 
 use super::scan_mode_configuration::ScanModeConfiguration;
@@ -7,7 +8,6 @@ use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use super::wallet_file::WALLET_OUTGOING_SECRETS_FILE_NAME;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
-use crate::protocol::consensus::network::Network;
 
 /// Configuration options for [`WalletState`](super::wallet_state::WalletState).
 ///
@@ -116,9 +116,10 @@ impl WalletConfiguration {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
+    use neptune_consensus::block::block_height::BlockHeight;
+
     use super::*;
     use crate::application::config::cli_args::Args;
-    use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::tests::shared::files::unit_test_data_directory;
     #[test]
     fn scan_mode_is_off_by_default() {

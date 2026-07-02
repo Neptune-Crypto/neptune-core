@@ -2,6 +2,9 @@ use std::collections::VecDeque;
 use std::fmt::Display;
 
 use itertools::Itertools;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::Block;
+use neptune_consensus::transaction::utxo::Utxo;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
@@ -13,9 +16,6 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 

@@ -84,6 +84,7 @@ pub(super) mod migration {
     pub(in crate::state::wallet::migrate_db) mod schema_v2 {
         use std::collections::VecDeque;
 
+        use neptune_consensus::transaction::utxo::Utxo;
         use neptune_database::storage::storage_schema::DbtMap;
         use neptune_database::storage::storage_schema::DbtSingleton;
         use neptune_database::storage::storage_schema::DbtVec;
@@ -99,7 +100,6 @@ pub(super) mod migration {
 
         use crate::api::export::AdditionRecord;
         use crate::api::export::BlockHeight;
-        use crate::protocol::consensus::transaction::utxo::Utxo;
         use crate::state::wallet::expected_utxo::ExpectedUtxo;
         use crate::state::wallet::sent_transaction::SentTransaction;
         use crate::state::wallet::wallet_db_tables::StrongUtxoKey;

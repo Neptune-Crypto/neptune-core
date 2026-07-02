@@ -15,6 +15,13 @@ use clap::Parser;
 use itertools::Itertools;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
+use neptune_consensus::network::Network;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use neptune_consensus::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use num_traits::Zero;
 use tracing::error;
 
@@ -25,14 +32,7 @@ use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::parser::CliArgsParseError;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::json_rpc::core::api::ops::Namespace;
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
-use crate::protocol::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
-use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 
@@ -1115,10 +1115,11 @@ mod tests {
     use std::net::Ipv6Addr;
     use std::ops::RangeBounds;
 
+    use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+
     use super::*;
     use crate::api::export::WalletEntropy;
     use crate::application::config::parser::multiaddr::parse_to_multiaddr;
-    use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 
     // extra methods for tests.
     impl Args {

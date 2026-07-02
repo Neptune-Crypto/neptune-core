@@ -61,6 +61,21 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_header::BlockPow;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::block_kernel::BlockKernel;
+use neptune_consensus::block::difficulty_control::Difficulty;
+use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::network::Network;
+use neptune_consensus::transaction::announcement::Announcement;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_vec::traits::StorageVecBase;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
@@ -101,21 +116,6 @@ use crate::application::rpc::server::ui_utxo::UiUtxo;
 use crate::application::rpc::server::ui_utxo::UtxoStatusEvent;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_header::BlockPow;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::block_kernel::BlockKernel;
-use crate::protocol::consensus::block::difficulty_control::Difficulty;
-use crate::protocol::consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::announcement::Announcement;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
@@ -571,7 +571,7 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::state::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+    /// use neptune_consensus::block::block_height::BlockHeight;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1171,7 +1171,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::network::Network;
+    /// use neptune_consensus::network::Network;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1254,7 +1254,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    /// use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1766,7 +1766,7 @@ pub trait RPC {
     /// `fee` represents the fee in native coins to pay the miner who mines
     /// the block that initially confirms the resulting transaction.
     ///
-    /// a [Digest] of the resulting [Transaction](crate::protocol::consensus::transaction::Transaction) is returned on success, else [None].
+    /// a [Digest] of the resulting [Transaction](neptune_consensus::transaction::Transaction) is returned on success, else [None].
     ///
     /// A list of the encoded transaction notifications is also returned. The
     /// relevant notifications should be sent to the transaction receiver(s) in
@@ -1774,8 +1774,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::protocol::consensus::network::Network;
-    /// # use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    /// # use neptune_consensus::network::Network;
+    /// # use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     /// # use neptune_cash::state::wallet::address::ReceivingAddress;
     /// # use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
     /// # use neptune_cash::application::rpc::server::RPCClient;
@@ -4750,6 +4750,9 @@ pub mod error {
 mod tests {
     use anyhow::Result;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::network::Network;
+    use neptune_consensus::transaction::test_helpers::txkernel;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_primitives::mast_hash::MastHash;
     use num_traits::One;
@@ -4767,9 +4770,6 @@ mod tests {
     use crate::api::export::TxProvingCapability;
     use crate::application::config::cli_args;
     use crate::application::rpc::server::NeptuneRPCServer;
-    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
-    use crate::protocol::consensus::network::Network;
-    use crate::protocol::consensus::transaction::test_helpers::txkernel;
     use crate::protocol::peer::NegativePeerSanction;
     use crate::protocol::peer::PeerSanction;
     use crate::state::block_selector::BlockSelectorLiteral;
@@ -5653,7 +5653,7 @@ mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn utxo_origin_block_test(
         #[strategy(txkernel::with_lengths(0usize, 1usize, 0usize, false))]
-        transaction_kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        transaction_kernel: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         prop_assume!(!transaction_kernel.fee.is_negative());
 
@@ -5850,7 +5850,7 @@ mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn announcements_in_block_test(
         #[strategy(txkernel::with_lengths(0usize, 2usize, NUM_ANNOUNCEMENTS_BLOCK1, false))]
-        tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block1: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let network = Network::Main;
         let mut rpc_server = test_rpc_server(
@@ -6204,15 +6204,15 @@ mod tests {
     }
 
     mod pow_puzzle_tests {
+        use neptune_consensus::block::block_header::BlockPow;
+        use neptune_consensus::block::pow::Pow;
+        use neptune_consensus::block::test_helpers::invalid_empty_block;
+        use neptune_consensus::block::BlockProof;
+        use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+        use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
         use rand::random;
 
         use super::*;
-        use crate::protocol::consensus::block::block_header::BlockPow;
-        use crate::protocol::consensus::block::pow::Pow;
-        use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
-        use crate::protocol::consensus::block::BlockProof;
-        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-        use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
         use crate::state::mining::block_proposal::BlockProposal;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::state::wallet::address::KeyType;
@@ -6583,11 +6583,11 @@ mod tests {
 
         mod worker {
             use cli_args::Args;
+            use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+            use neptune_consensus::block::test_helpers::invalid_empty_block;
+            use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 
             use super::*;
-            use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
-            use crate::protocol::consensus::block::test_helpers::invalid_empty_block;
-            use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 
             pub(super) async fn claim_utxo_unowned(claim_after_confirmed: bool) -> Result<()> {
                 let network = Network::Main;

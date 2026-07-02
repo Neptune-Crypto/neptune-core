@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::time::SystemTime;
 
 use libp2p::PeerId;
+use neptune_consensus::block::Block;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
@@ -14,7 +15,6 @@ use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
-use crate::protocol::consensus::block::Block;
 use crate::protocol::peer::handshake_data::VersionString;
 use crate::protocol::peer::peer_info::pseudorandom_peer_id;
 use crate::protocol::peer::peer_info::PeerConnectionInfo;

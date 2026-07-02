@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
 use libp2p::Multiaddr;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::Block;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
@@ -12,10 +16,6 @@ use crate::api::export::SpendingKey;
 use crate::api::export::TxCreationArtifacts;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::network::overview::NetworkOverview;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 

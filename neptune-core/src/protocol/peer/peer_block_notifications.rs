@@ -1,10 +1,9 @@
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::difficulty_control::ProofOfWork;
+use neptune_consensus::block::Block;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
-
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
-use crate::protocol::consensus::block::Block;
 
 /// Used to tell peers that a new block has been found without having to
 /// send the entire block
@@ -28,10 +27,10 @@ impl From<&Block> for PeerBlockNotification {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_consensus::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
     use neptune_consensus::network::Network;
 
     use super::PeerBlockNotification;
-    use crate::protocol::consensus::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
 
     #[test]
     fn block_notification_hash_matches_block_hash() {

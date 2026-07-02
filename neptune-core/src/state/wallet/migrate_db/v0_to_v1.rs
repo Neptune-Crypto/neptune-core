@@ -70,11 +70,11 @@ mod migration {
     use super::*;
 
     pub mod schema_v0 {
+        use neptune_consensus::transaction::utxo::Utxo;
         use serde::Deserialize;
         use serde::Serialize;
         use tasm_lib::prelude::Digest;
 
-        use crate::protocol::consensus::transaction::utxo::Utxo;
         use crate::state::wallet::sent_transaction::AoclLeafIndex;
         use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
         use crate::state::NativeCurrencyAmount;
@@ -141,6 +141,7 @@ mod migration {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_consensus::network::Network;
     use neptune_database::storage::storage_schema::traits::StorageWriter;
     use neptune_database::storage::storage_schema::DbtSingleton;
     use neptune_database::storage::storage_schema::DbtVec;
@@ -152,7 +153,6 @@ mod tests {
 
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
-    use crate::protocol::consensus::network::Network;
     use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::state::wallet::utxo_notification::UtxoNotificationMethod;

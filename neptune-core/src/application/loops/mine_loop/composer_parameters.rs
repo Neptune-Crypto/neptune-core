@@ -1,3 +1,4 @@
+use neptune_consensus::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use tasm_lib::prelude::Digest;
@@ -6,7 +7,6 @@ use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Timestamp;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
-use crate::protocol::consensus::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::transaction_output::TxOutput;
@@ -176,13 +176,14 @@ impl ComposerParameters {
 
 #[cfg(test)]
 mod tests {
+    use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
+
     use super::*;
     use crate::api::export::BlockHeight;
     use crate::api::export::Network;
     use crate::api::export::ReceivingAddress;
     use crate::api::export::WalletEntropy;
     use crate::application::config::cli_args;
-    use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
 

@@ -3,6 +3,11 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use neptune_consensus::network::Network;
+use neptune_consensus::transaction::announcement::Announcement;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
@@ -10,11 +15,6 @@ use serde::Serialize;
 
 use super::utxo_notification::UtxoNotificationMethod;
 use crate::prelude::twenty_first::prelude::Digest;
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::announcement::Announcement;
-use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
@@ -638,6 +638,9 @@ impl TxOutputList {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_consensus::network::Network;
+    use neptune_consensus::transaction::utxo::Coin;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
@@ -646,9 +649,6 @@ mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::protocol::consensus::network::Network;
-    use crate::protocol::consensus::transaction::utxo::Coin;
-    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::address::KeyType;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;

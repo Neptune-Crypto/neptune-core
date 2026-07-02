@@ -1,12 +1,12 @@
 //! This module implements a builder for [TritonVmProofJobOptions]
 
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
-use crate::protocol::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
-use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::network::Network;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use neptune_consensus::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 
 /// a builder for [TritonVmProofJobOptions]
 ///
@@ -130,7 +130,7 @@ impl TritonVmProofJobOptionsBuilder {
     /// use neptune_cash::api::export::TransactionProof;
     /// use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
-    /// use neptune_cash::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+    /// use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     /// use std::time::Duration;
     ///
     /// async fn prove_with_timeout(tx_details: TransactionDetails, timeout: Duration) -> anyhow::Result<TransactionProof> {

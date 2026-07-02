@@ -24,6 +24,15 @@ use std::collections::HashSet;
 use bytesize::ByteSize;
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::validity::neptune_proof::Proof;
+use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_primitives::timestamp::Timestamp;
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
@@ -58,17 +67,8 @@ use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::NeptuneProof;
 use crate::api::export::TransactionProofType;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
 use crate::protocol::peer::transfer_transaction::TransactionProofQualityExt;
-use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::merge_input_cache::MergeInputCache;
@@ -1413,10 +1413,10 @@ impl Mempool {
     ///
     /// ```
     /// use bytesize::ByteSize;
-    /// use neptune_cash::protocol::consensus::network::Network;
-    /// use neptune_cash::protocol::consensus::block::Block;
+    /// use neptune_consensus::network::Network;
+    /// use neptune_consensus::block::Block;
     /// use neptune_cash::state::mempool::Mempool;
-    /// use neptune_cash::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    /// use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     ///
     /// let network = Network::Main;
     /// let genesis_block = Block::genesis(network);
@@ -1458,6 +1458,21 @@ impl Mempool {
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::block_height::BlockHeight;
+    use neptune_consensus::block::block_transaction::BlockTransaction;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+    use neptune_consensus::network::Network;
+    use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+    use neptune_consensus::transaction::test_helpers::txkernel;
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+    use neptune_consensus::transaction::validity::single_proof::produce_single_proof;
+    use neptune_consensus::transaction::Transaction;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use num_bigint::BigInt;
     use num_traits::One;
@@ -1477,21 +1492,6 @@ mod tests {
     use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
     use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
-    use crate::protocol::consensus::block::block_height::BlockHeight;
-    use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_timestamp;
-    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-    use crate::protocol::consensus::network::Network;
-    use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-    use crate::protocol::consensus::transaction::test_helpers::txkernel;
-    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-    use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
-    use crate::protocol::consensus::transaction::Transaction;
-    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-    use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use crate::protocol::shared::SIZE_20MB_IN_BYTES;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::expected_utxo::UtxoNotifier;
@@ -3192,7 +3192,7 @@ mod tests {
         #[test_strategy::proptest(async = "tokio", cases = 2)]
         async fn return_empty_vec_on_empty_input_output_set(
             #[strategy(txkernel::with_lengths(1, 1, 1, true))]
-        kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        kernel: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
             #[strategy(arb())] quality: TransactionProofType,
         ) {
             let tx = Transaction {
@@ -3218,7 +3218,7 @@ mod tests {
         #[test_strategy::proptest(async = "tokio", cases = 20)]
         async fn one_tx_in_mempool(
             #[strategy(txkernel::with_lengths(3, 3, 3, true))]
-        kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        kernel: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
             #[strategy(arb())] quality: TransactionProofType,
             #[strategy(arb())] has_synced_mutator_set: bool,
         ) {
@@ -3561,6 +3561,7 @@ mod tests {
     }
 
     mod proof_quality_tests {
+        use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
         use proptest::prop_assert;
         use proptest::prop_assert_eq;
         use proptest::prop_assert_ne;
@@ -3568,7 +3569,6 @@ mod tests {
         use test_strategy::proptest;
 
         use super::*;
-        use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
         #[apply(shared_tokio_runtime)]

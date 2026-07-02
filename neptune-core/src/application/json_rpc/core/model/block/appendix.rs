@@ -1,10 +1,10 @@
+use neptune_consensus::block::block_appendix::BlockAppendix;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::proof::Claim;
 
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
-use crate::protocol::consensus::block::block_appendix::BlockAppendix;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

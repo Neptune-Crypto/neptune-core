@@ -11,6 +11,14 @@ use std::time::SystemTime;
 
 use handshake_data::HandshakeData;
 use itertools::Itertools;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::difficulty_control::max_cumulative_pow_after;
+use neptune_consensus::block::difficulty_control::Difficulty;
+use neptune_consensus::block::difficulty_control::ProofOfWork;
+use neptune_consensus::block::Block;
+use neptune_consensus::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
@@ -32,16 +40,8 @@ use tracing::warn;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
 
-use super::consensus::block::block_header::BlockHeader;
-use super::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
-use super::consensus::block::block_height::BlockHeight;
-use super::consensus::block::difficulty_control::Difficulty;
-use super::consensus::block::difficulty_control::ProofOfWork;
-use super::consensus::block::Block;
 use crate::application::loops::channel::BlockProposalNotification;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
-use crate::protocol::consensus::block::difficulty_control::max_cumulative_pow_after;
-use crate::protocol::consensus::network::Network;
 use crate::protocol::peer::transfer_block::TransferBlock;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 
@@ -1003,12 +1003,12 @@ impl rand::distr::Distribution<PeerStanding> for rand::distr::StandardUniform {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
+    use neptune_consensus::block::Block;
     use rand::random;
     use rand::rng;
 
     use super::*;
-    use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
-    use crate::protocol::consensus::block::Block;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared_tokio_runtime;
 

@@ -1,6 +1,22 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::network::Network;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::validity::neptune_proof::Proof;
+use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
@@ -17,22 +33,6 @@ use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionPr
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
-use crate::protocol::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-use crate::protocol::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
@@ -967,15 +967,15 @@ mod tests {
     use std::collections::HashSet;
 
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
+    use neptune_consensus::block::Block;
+    use neptune_consensus::network::Network;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::protocol::consensus::block::test_helpers::invalid_empty_block_with_timestamp;
-    use crate::protocol::consensus::block::Block;
-    use crate::protocol::consensus::network::Network;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;

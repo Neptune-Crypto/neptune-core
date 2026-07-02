@@ -4,13 +4,13 @@
 //! outputs may be specified in several ways via the [OutputFormat] enum.
 //!
 //! see [builder](super) for examples of using the builders together.
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::api::export::Timestamp;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::transaction_output::TxOutputList;

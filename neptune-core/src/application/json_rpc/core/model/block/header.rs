@@ -1,3 +1,10 @@
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_header::BlockPow;
+use neptune_consensus::block::difficulty_control::Difficulty;
+use neptune_consensus::block::difficulty_control::ProofOfWork;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
+use neptune_consensus::block::pow::POW_MEMORY_TREE_HEIGHT;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use num_bigint::BigUint;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -9,13 +16,6 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use crate::api::export::BlockHeight;
 use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_header::BlockPow;
-use crate::protocol::consensus::block::difficulty_control::Difficulty;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
-use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
-use crate::protocol::consensus::block::pow::POW_MEMORY_TREE_HEIGHT;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 
 // TODO: Mirror consensus impl (RpcBlockPow = RpcPow<POW_MEMORY_TREE_HEIGHT>)
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

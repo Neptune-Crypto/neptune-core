@@ -15,12 +15,12 @@
 
 use std::str::FromStr;
 
+use neptune_consensus::block::block_height::BlockHeight;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::prelude::Digest;
 use thiserror::Error;
 
-use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::state::GlobalState;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,13 +116,14 @@ impl BlockSelector {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::transaction::test_helpers::txkernel;
+    use neptune_consensus::transaction::Transaction;
+    use neptune_consensus::transaction::TransactionProof;
+
     use super::*;
     use crate::api::export::Network;
     use crate::application::config::cli_args;
-    use crate::protocol::consensus::block::test_helpers::invalid_block_with_transaction;
-    use crate::protocol::consensus::transaction::test_helpers::txkernel;
-    use crate::protocol::consensus::transaction::Transaction;
-    use crate::protocol::consensus::transaction::TransactionProof;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::Block;
@@ -164,7 +165,7 @@ pub mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn block_selector_consistency_with_new_block(
         #[strategy(txkernel::with_lengths(0, 2, 2, true))]
-    tx_kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_kernel: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut global_state_lock = mock_genesis_global_state(
             2,

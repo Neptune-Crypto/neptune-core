@@ -1,6 +1,8 @@
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
+use neptune_consensus::network::Network;
+use neptune_consensus::transaction::announcement::Announcement;
 use sha3::digest::ExtendableOutput;
 use sha3::digest::Update;
 use sha3::Shake256;
@@ -8,8 +10,6 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::protocol::consensus::network::Network;
-use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
 /// returns human-readable-prefix for the given network

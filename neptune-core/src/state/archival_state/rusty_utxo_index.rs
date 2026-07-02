@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 use itertools::Itertools;
+use neptune_consensus::block::Block;
 use neptune_database::create_db_if_missing;
 use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::NeptuneLevelDb;
@@ -16,7 +17,6 @@ use tracing::warn;
 use crate::api::export::AdditionRecord;
 use crate::api::export::BlockHeight;
 use crate::application::config::data_directory::DataDirectory;
-use crate::protocol::consensus::block::Block;
 use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
 
 /// The maximum number of blocks stored for each [`AnnouncementFlag`]. Wallets

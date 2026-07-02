@@ -33,9 +33,9 @@ use crate::transaction::validity::neptune_proof::Proof;
 /// use neptune_cash::api::export::Program;
 /// use neptune_cash::api::export::Claim;
 /// use neptune_cash::api::export::NonDeterminism;
-/// use neptune_cash::protocol::proof_abstractions::proof_builder::ProofBuilder;
-/// use neptune_cash::protocol::proof_abstractions::error::CreateProofError;
-/// use neptune_cash::protocol::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+/// use neptune_consensus::proof_abstractions::proof_builder::ProofBuilder;
+/// use neptune_consensus::proof_abstractions::error::CreateProofError;
+/// use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 ///
 /// async fn prove_claim(program: Program, claim: Claim, nondeterminism: NonDeterminism, gsl: &GlobalStateLock) -> Result<NeptuneProof, CreateProofError> {
 ///

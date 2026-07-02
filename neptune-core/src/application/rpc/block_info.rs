@@ -2,6 +2,12 @@
 //! consumption/reporting in block explorers, cli, dashboard, etc.
 
 use itertools::Itertools;
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::difficulty_control::Difficulty;
+use neptune_consensus::block::difficulty_control::ProofOfWork;
+use neptune_consensus::block::pow::LustrationStatus;
+use neptune_consensus::block::Block;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::timestamp::Timestamp;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
@@ -9,13 +15,6 @@ use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
-
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::difficulty_control::Difficulty;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
-use crate::protocol::consensus::block::pow::LustrationStatus;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// Provides summary information about a Block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

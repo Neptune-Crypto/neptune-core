@@ -89,13 +89,13 @@ mod tests {
     use neptune_cash::application::json_rpc::core::api::rpc::RpcError;
     use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
     use neptune_cash::application::json_rpc::core::model::json::JsonError;
-    use neptune_cash::protocol::consensus::block::Block;
     use neptune_cash::state::GlobalState;
     use neptune_cash::state::GlobalStateLock;
     use neptune_cash::state::block_selector::BlockSelector;
     use neptune_cash::state::block_selector::BlockSelectorLiteral;
     use neptune_cash::state::wallet::address::generation_address::GenerationReceivingAddress;
     use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
+    use neptune_consensus::block::Block;
     use num_traits::Zero;
     use rand::distr::Alphanumeric;
     use rand::distr::SampleString;

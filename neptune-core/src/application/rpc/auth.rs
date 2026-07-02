@@ -10,6 +10,7 @@
 //! future, more types will likely be added.
 use std::path::PathBuf;
 
+use neptune_consensus::network::Network;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use serde::Deserialize;
@@ -18,7 +19,6 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
 use crate::application::config::data_directory::DataDirectory;
-use crate::protocol::consensus::network::Network;
 
 /// enumerates neptune-core RPC authentication token types
 ///

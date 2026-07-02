@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use neptune_consensus::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
 use proptest::collection::vec;
 use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
@@ -8,7 +9,6 @@ use proptest_arbitrary_interop::arb;
 use super::Timestamp;
 use super::Transaction;
 use super::TransactionProof;
-use crate::protocol::consensus::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
 
 pub(crate) fn make_mock_txs_with_primitive_witness_with_timestamp(
     count: usize,

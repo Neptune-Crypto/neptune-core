@@ -5,10 +5,10 @@ use anyhow::bail;
 use anyhow::Result;
 use itertools::Itertools;
 use memmap2::MmapOptions;
+use neptune_consensus::block::Block;
 use regex::Regex;
 
 use super::ArchivalState;
-use crate::protocol::consensus::block::Block;
 use crate::state::shared::BLOCK_FILENAME_EXTENSION;
 use crate::state::shared::BLOCK_FILENAME_PREFIX;
 

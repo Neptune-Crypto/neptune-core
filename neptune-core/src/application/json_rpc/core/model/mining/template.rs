@@ -1,3 +1,7 @@
+use neptune_consensus::block::difficulty_control::Difficulty;
+use neptune_consensus::block::pow::LustrationStatus;
+use neptune_consensus::block::pow::PowMastPaths;
+use neptune_consensus::block::Block;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -5,10 +9,6 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
-use crate::protocol::consensus::block::difficulty_control::Difficulty;
-use crate::protocol::consensus::block::pow::LustrationStatus;
-use crate::protocol::consensus::block::pow::PowMastPaths;
-use crate::protocol::consensus::block::Block;
 
 /// Data required to attempt to solve the proof-of-work puzzle that allows the
 /// minting of the next block.
@@ -80,12 +80,12 @@ pub struct RpcBlockTemplate {
 
 #[cfg(test)]
 mod tests {
+    use neptune_consensus::block::block_header::BlockPow;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
     use tasm_lib::twenty_first::bfe_array;
 
     use super::*;
     use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
-    use crate::protocol::consensus::block::block_header::BlockPow;
-    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
     use crate::BFieldElement;
 
     impl RpcBlockTemplateMetadata {

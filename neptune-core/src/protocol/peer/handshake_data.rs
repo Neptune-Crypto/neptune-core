@@ -5,12 +5,12 @@ use std::time::SystemTime;
 use arraystring::typenum::U255;
 use arraystring::typenum::U30;
 use arraystring::ArrayString;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::application::loops::connect_to_peers::PEER_TIME_DIFFERENCE_THRESHOLD;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::network::Network;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VersionString(ArrayString<U30>);
@@ -165,6 +165,7 @@ impl HandshakeData {
 pub(crate) mod test {
     use std::time::Duration;
 
+    use neptune_consensus::block::difficulty_control::Difficulty;
     use proptest::collection::vec;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
@@ -174,7 +175,6 @@ pub(crate) mod test {
 
     use super::*;
     use crate::api::export::BlockHeight;
-    use crate::protocol::consensus::block::difficulty_control::Difficulty;
 
     impl VersionString {
         /// Generate a version string that is guaranteed to parse correctly.

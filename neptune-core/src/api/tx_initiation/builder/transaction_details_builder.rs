@@ -4,10 +4,16 @@
 //! the wallet for change output(s).  see [TransactionDetailsBuilder::build()]
 //! for details.
 //!
-//! The resulting `TransactionDetails` contains all data needed for a [Transaction](crate::protocol::consensus::transaction::Transaction)
-//! except for a [TransactionProof](crate::protocol::consensus::transaction::TransactionProof).
+//! The resulting `TransactionDetails` contains all data needed for a [Transaction](neptune_consensus::transaction::Transaction)
+//! except for a [TransactionProof](neptune_consensus::transaction::TransactionProof).
 //!
 //! see [builder](super) for examples of using the builders together.
+use neptune_consensus::block::block_height::BlockHeight;
+use neptune_consensus::block::pow::LustrationStatus;
+use neptune_consensus::transaction::announcement::Announcement;
+use neptune_consensus::transaction::lock_script::LockScript;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedAdd;
@@ -18,12 +24,6 @@ use tracing::debug;
 use crate::api::export::TransparentInput;
 use crate::api::export::TransparentTransactionInfo;
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::pow::LustrationStatus;
-use crate::protocol::consensus::transaction::announcement::Announcement;
-use crate::protocol::consensus::transaction::lock_script::LockScript;
-use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::SpendingKey;

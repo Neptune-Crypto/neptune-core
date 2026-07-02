@@ -21,6 +21,10 @@ pub use receiving_address::ReceivingAddress;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_consensus::network::Network;
+    use neptune_consensus::transaction::test_helpers::make_mock_transaction;
+    use neptune_consensus::transaction::utxo::Utxo;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::Rng;
@@ -29,10 +33,6 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::protocol::consensus::network::Network;
-    use crate::protocol::consensus::transaction::test_helpers::make_mock_transaction;
-    use crate::protocol::consensus::transaction::utxo::Utxo;
-    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
     use crate::state::Digest;
 
@@ -79,6 +79,10 @@ mod tests {
     }
 
     mod worker {
+        use neptune_consensus::block::Block;
+        use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
+        use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+        use neptune_consensus::transaction::utxo_triple::UtxoTriple;
         use num_traits::CheckedSub;
 
         use super::*;
@@ -91,10 +95,6 @@ mod tests {
         use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
         use crate::api::tx_initiation::builder::input_selector::SortOrder;
         use crate::application::config::cli_args;
-        use crate::protocol::consensus::block::Block;
-        use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
-        use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-        use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
         use crate::state::wallet::address::elliptic_curve_hybrid::EcHybridAddress;
         use crate::tests::consensus_integration::consensus_rule_set::tx_with_n_outputs;

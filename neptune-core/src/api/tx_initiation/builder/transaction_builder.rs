@@ -2,10 +2,11 @@
 //!
 //! see [builder](super) for examples of using the builders together.
 
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
 use crate::state::transaction::transaction_details::TransactionDetails;
 
 /// a builder for [Transaction]
@@ -68,7 +69,7 @@ impl<'a> TransactionBuilder<'a> {
     /// Either a `TransactionKernel` or `TransactionDetails` is required.
     ///
     /// Provide a kernel if available.  Note that it can be obtained from a
-    /// [PrimitiveWitness](crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness)
+    /// [PrimitiveWitness](neptune_consensus::transaction::primitive_witness::PrimitiveWitness)
     /// and that `TransactionDetails` provides a `primitive_witness()` method.
     ///
     /// note: the builder does not validate the resulting artifacts.
