@@ -11,7 +11,7 @@ pub(crate) mod rusty_wallet_database;
 pub(crate) use neptune_wallet::scan_mode_configuration;
 pub use neptune_wallet::secret_key_material;
 pub mod sent_transaction;
-pub mod transaction_output;
+pub use neptune_wallet::transaction_output;
 pub use neptune_wallet::unlocked_utxo;
 pub use neptune_wallet::utxo_notification;
 pub(crate) mod wallet_configuration;
@@ -238,6 +238,153 @@ mod tests {
                 &wallet_dir,
                 WalletEntropy::new_random(),
             );
+        }
+    }
+
+    // Relocated from neptune-wallet's transaction_output module: exercise
+    // TxOutput::auto against a real WalletState (owned vs unowned outputs).
+    mod transaction_output {
+        use macro_rules_attr::apply;
+        use neptune_consensus::network::Network;
+        use neptune_consensus::transaction::utxo::Utxo;
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use rand::Rng;
+        use tasm_lib::prelude::Digest;
+
+        use crate::application::config::cli_args;
+        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+        use crate::state::wallet::address::KeyType;
+        use crate::state::wallet::transaction_output::TxOutput;
+        use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
+        use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
+        use crate::state::wallet::wallet_entropy::WalletEntropy;
+        use crate::tests::shared::globalstate::mock_genesis_global_state;
+        use crate::tests::shared_tokio_runtime;
+
+        #[apply(shared_tokio_runtime)]
+        async fn test_utxoreceiver_auto_not_owned_output() {
+            let network = Network::RegTest;
+            let global_state_lock = mock_genesis_global_state(
+                2,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
+
+            let state = global_state_lock.lock_guard().await;
+            let block_height = state.chain.tip().header().height;
+
+            // generate a new receiving address that is not from our wallet.
+            let mut rng = rand::rng();
+            let seed: Digest = rng.random();
+            let address = GenerationReceivingAddress::derive_from_seed(seed);
+
+            let amount = NativeCurrencyAmount::one_nau();
+            let utxo = Utxo::new_native_currency(address.lock_script().hash(), amount);
+
+            let sender_randomness = state
+                .wallet_state
+                .wallet_entropy
+                .generate_sender_randomness(block_height, address.receiver_postimage());
+
+            for owned_utxo_notification_medium in [
+                UtxoNotificationMedium::OffChain,
+                UtxoNotificationMedium::OnChain,
+            ] {
+                let tx_output = TxOutput::auto(
+                    &state.wallet_state,
+                    address.into(),
+                    amount,
+                    sender_randomness,
+                    owned_utxo_notification_medium,
+                    UtxoNotificationMedium::OnChain,
+                );
+
+                assert!(
+                    matches!(
+                        tx_output.notification_method(),
+                        UtxoNotificationMethod::OnChain(_)
+                    ),
+                    "Not owned UTXOs are, currently, always transmitted on-chain"
+                );
+                assert_eq!(tx_output.sender_randomness(), sender_randomness);
+                assert_eq!(tx_output.receiver_digest(), address.receiver_postimage());
+                assert_eq!(tx_output.utxo(), utxo);
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn test_utxoreceiver_auto_owned_output() {
+            let network = Network::RegTest;
+            let mut global_state_lock = mock_genesis_global_state(
+                2,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
+
+            // obtain next unused receiving address from our wallet.
+            let spending_key_gen = global_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation)
+                .await;
+            let address_gen = spending_key_gen.to_address();
+
+            let spending_key_view = global_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::ViewingAddress)
+                .await;
+            let address_view = spending_key_view.to_address();
+
+            let state = global_state_lock.lock_guard().await;
+            let block_height = state.chain.tip().header().height;
+
+            let amount = NativeCurrencyAmount::one_nau();
+
+            for (owned_utxo_notification_medium, address) in [
+                (UtxoNotificationMedium::OffChain, address_gen.clone()),
+                (UtxoNotificationMedium::OnChain, address_view.clone()),
+            ] {
+                let utxo = Utxo::new_native_currency(address.lock_script_hash(), amount);
+                let sender_randomness = state
+                    .wallet_state
+                    .wallet_entropy
+                    .generate_sender_randomness(block_height, address.privacy_digest());
+
+                let tx_output = TxOutput::auto(
+                    &state.wallet_state,
+                    address.clone(),
+                    amount,
+                    sender_randomness,
+                    owned_utxo_notification_medium,
+                    UtxoNotificationMedium::OnChain,
+                );
+
+                match owned_utxo_notification_medium {
+                    UtxoNotificationMedium::OnChain => assert!(matches!(
+                        tx_output.notification_method(),
+                        UtxoNotificationMethod::OnChain(_)
+                    )),
+                    UtxoNotificationMedium::OffChain => assert!(matches!(
+                        tx_output.notification_method(),
+                        UtxoNotificationMethod::OffChain(_)
+                    )),
+                };
+
+                assert_eq!(sender_randomness, tx_output.sender_randomness());
+                assert_eq!(
+                    address.lock_script_hash(),
+                    tx_output.utxo().lock_script_hash()
+                );
+
+                assert_eq!(tx_output.sender_randomness(), sender_randomness);
+                assert_eq!(tx_output.receiver_digest(), address.privacy_digest());
+                assert_eq!(tx_output.utxo(), utxo);
+            }
         }
     }
 

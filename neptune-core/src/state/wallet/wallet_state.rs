@@ -73,6 +73,7 @@ use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::rusty_wallet_database::WalletDbConnectError;
 use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::transaction_output::UtxoUnlocker;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::wallet_status::IncomingMempoolUtxo;
 use crate::state::wallet::wallet_status::OutgoingMempoolUtxo;
@@ -2221,6 +2222,13 @@ impl WalletState {
 
         WalletStatus::new(synced_utxos, unsynced_utxos)
             .with_mempool(incoming_mempool_utxos, outgoing_mempool_utxos)
+    }
+}
+
+impl UtxoUnlocker for WalletState {
+    fn can_unlock(&self, utxo: &Utxo) -> bool {
+        // resolves to the inherent method above (inherent wins over trait)
+        self.can_unlock(utxo)
     }
 }
 

@@ -19,6 +19,7 @@ pub mod expected_utxo;
 pub mod incoming_utxo;
 pub mod scan_mode_configuration;
 pub mod secret_key_material;
+pub mod transaction_output;
 pub mod unlocked_utxo;
 pub mod utxo_notification;
 pub mod wallet_entropy;

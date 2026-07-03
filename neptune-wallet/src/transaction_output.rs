@@ -12,19 +12,24 @@ use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 
-use super::utxo_notification::UtxoNotificationMethod;
-use crate::prelude::twenty_first::prelude::Digest;
-use crate::state::wallet::address::ReceivingAddress;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
-use crate::state::wallet::utxo_notification::PrivateNotificationData;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
-use crate::state::wallet::wallet_state::WalletState;
+use crate::address::ReceivingAddress;
+use crate::expected_utxo::ExpectedUtxo;
+use crate::expected_utxo::UtxoNotifier;
+use crate::utxo_notification::PrivateNotificationData;
+use crate::utxo_notification::UtxoNotificationMedium;
+use crate::utxo_notification::UtxoNotificationMethod;
+use crate::utxo_notification::UtxoNotificationPayload;
+/// Reports whether a wallet holds a spending key capable of unlocking a UTXO.
+///
+/// Implemented by neptune-core's `WalletState`; used by [`TxOutput`]'s `auto*`
+/// constructors to pick the notification medium for owned vs. unowned UTXOs.
+pub trait UtxoUnlocker {
+    fn can_unlock(&self, utxo: &Utxo) -> bool;
+}
 
-/// represents a transaction output, as used by
-/// [TransactionDetailsBuilder](crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder)
+/// represents a transaction output, as used by `TransactionDetailsBuilder`.
 ///
 /// Contains data that a UTXO recipient requires in order to be notified about
 /// and claim a given UTXO.
@@ -72,8 +77,8 @@ impl TxOutput {
     /// If the [Utxo] cannot be claimed by our wallet then the specified
     /// notification for owned UTXOs is used, otherwise the specified
     /// notification medium for unowned UTXOs is used.
-    pub(crate) fn auto(
-        wallet_state: &WalletState,
+    pub fn auto(
+        unlocker: &impl UtxoUnlocker,
         address: ReceivingAddress,
         amount: NativeCurrencyAmount,
         sender_randomness: Digest,
@@ -82,7 +87,7 @@ impl TxOutput {
     ) -> Self {
         let utxo = Utxo::new_native_currency(address.lock_script_hash(), amount);
         Self::auto_utxo_maybe_change(
-            wallet_state,
+            unlocker,
             utxo,
             address,
             sender_randomness,
@@ -92,8 +97,8 @@ impl TxOutput {
         )
     }
 
-    pub(crate) fn auto_utxo(
-        wallet_state: &WalletState,
+    pub fn auto_utxo(
+        unlocker: &impl UtxoUnlocker,
         utxo: Utxo,
         address: ReceivingAddress,
         sender_randomness: Digest,
@@ -101,7 +106,7 @@ impl TxOutput {
         unowned_utxo_notify_medium: UtxoNotificationMedium,
     ) -> Self {
         Self::auto_utxo_maybe_change(
-            wallet_state,
+            unlocker,
             utxo,
             address,
             sender_randomness,
@@ -113,7 +118,7 @@ impl TxOutput {
 
     // private!
     fn auto_utxo_maybe_change(
-        wallet_state: &WalletState,
+        unlocker: &impl UtxoUnlocker,
         utxo: Utxo,
         address: ReceivingAddress,
         sender_randomness: Digest,
@@ -121,7 +126,7 @@ impl TxOutput {
         unowned_utxo_notify_medium: UtxoNotificationMedium,
         is_change: bool,
     ) -> Self {
-        let has_matching_spending_key = wallet_state.can_unlock(&utxo);
+        let has_matching_spending_key = unlocker.can_unlock(&utxo);
 
         let receiver_digest = address.privacy_digest();
         let notification_method = if has_matching_spending_key {
@@ -155,8 +160,8 @@ impl TxOutput {
     ///
     /// Warning: If care is not taken, this is an easy way to lose funds.
     /// Don't use this constructor unless you have a good reason to.
-    #[cfg(test)]
-    pub(crate) fn no_notification(
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn no_notification(
         utxo: Utxo,
         sender_randomness: Digest,
         privacy_digest: Digest,
@@ -176,7 +181,7 @@ impl TxOutput {
     ///
     /// Warning: If care is not taken, this is an easy way to lose funds.
     /// Don't use this constructor unless you have a good reason to.
-    pub(crate) fn no_notification_as_change(
+    pub fn no_notification_as_change(
         utxo: Utxo,
         sender_randomness: Digest,
         privacy_digest: Digest,
@@ -193,7 +198,7 @@ impl TxOutput {
 
     /// Instantiate a [TxOutput] for any utxo intended for on-chain UTXO
     /// notification.
-    pub(crate) fn onchain_utxo(
+    pub fn onchain_utxo(
         utxo: Utxo,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
@@ -211,7 +216,7 @@ impl TxOutput {
 
     /// Instantiate a [TxOutput] for any utxo intended for off-chain UTXO
     /// notification.
-    pub(crate) fn offchain_utxo(
+    pub fn offchain_utxo(
         utxo: Utxo,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
@@ -248,7 +253,7 @@ impl TxOutput {
 
     /// Instantiate a [TxOutput] for native currency intended fro on-chain UTXO
     /// notification.
-    pub(crate) fn onchain_native_currency_as_change(
+    pub fn onchain_native_currency_as_change(
         amount: NativeCurrencyAmount,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
@@ -282,7 +287,7 @@ impl TxOutput {
     }
 
     /// Instantiate a [TxOutput] for native currency.
-    pub(crate) fn native_currency(
+    pub fn native_currency(
         amount: NativeCurrencyAmount,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
@@ -304,7 +309,7 @@ impl TxOutput {
 
     /// Instantiate a [TxOutput] for native currency intended for off-chain UTXO
     /// notification.
-    pub(crate) fn offchain_native_currency_as_change(
+    pub fn offchain_native_currency_as_change(
         amount: NativeCurrencyAmount,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
@@ -330,12 +335,12 @@ impl TxOutput {
 
     /// Determine whether there is a time-lock, with any release date, on the
     /// UTXO.
-    pub(crate) fn is_timelocked(&self) -> bool {
+    pub fn is_timelocked(&self) -> bool {
         self.utxo.is_timelocked()
     }
 
     /// Add to the amount with a delta.
-    pub(crate) fn add_to_amount(mut self, delta: NativeCurrencyAmount) -> Self {
+    pub fn add_to_amount(mut self, delta: NativeCurrencyAmount) -> Self {
         self.utxo = self.utxo.add_to_amount(delta);
         self
     }
@@ -366,7 +371,7 @@ impl TxOutput {
     }
 
     #[inline(always)]
-    pub(crate) fn notification_method(&self) -> &UtxoNotificationMethod {
+    pub fn notification_method(&self) -> &UtxoNotificationMethod {
         &self.notification_method
     }
 
@@ -382,10 +387,7 @@ impl TxOutput {
         }
     }
 
-    pub(crate) fn offchain_notification(
-        &self,
-        network: Network,
-    ) -> Option<(String, ReceivingAddress)> {
+    pub fn offchain_notification(&self, network: Network) -> Option<(String, ReceivingAddress)> {
         match &self.notification_method {
             UtxoNotificationMethod::OnChain(_) => None,
             UtxoNotificationMethod::OffChain(receiving_address) => {
@@ -404,7 +406,7 @@ impl TxOutput {
     ///
     /// Does nothing if there already is a time lock coin whose release date is
     /// later than the argument.
-    pub(crate) fn with_time_lock(self, release_date: Timestamp) -> Self {
+    pub fn with_time_lock(self, release_date: Timestamp) -> Self {
         Self {
             utxo: self.utxo.with_time_lock(release_date),
             sender_randomness: self.sender_randomness,
@@ -434,7 +436,7 @@ impl TxOutput {
         ExpectedUtxo::new(utxo, sender_randomness, receiver_preimage, notifier)
     }
 
-    pub(crate) fn utxo_triple(&self) -> UtxoTriple {
+    pub fn utxo_triple(&self) -> UtxoTriple {
         UtxoTriple {
             utxo: self.utxo(),
             sender_randomness: self.sender_randomness,
@@ -442,7 +444,7 @@ impl TxOutput {
         }
     }
 
-    pub(crate) fn addition_record(&self) -> AdditionRecord {
+    pub fn addition_record(&self) -> AdditionRecord {
         self.utxo_triple().addition_record()
     }
 }
@@ -509,11 +511,11 @@ impl TxOutputList {
         self.utxos_iter().into_iter().collect()
     }
 
-    pub(crate) fn sender_randomnesses(&self) -> Vec<Digest> {
+    pub fn sender_randomnesses(&self) -> Vec<Digest> {
         self.iter().map(|x| x.sender_randomness()).collect()
     }
 
-    pub(crate) fn receiver_digests(&self) -> Vec<Digest> {
+    pub fn receiver_digests(&self) -> Vec<Digest> {
         self.iter().map(|x| x.receiver_digest()).collect()
     }
 
@@ -529,7 +531,7 @@ impl TxOutputList {
 
     /// Return all on-chain UTXO notification announcement for this
     /// [`TxOutputList`].
-    pub(crate) fn announcements(&self) -> Vec<Announcement> {
+    pub fn announcements(&self) -> Vec<Announcement> {
         let mut announcements = vec![];
         for tx_output in &self.0 {
             if let Some(pa) = tx_output.announcement() {
@@ -577,12 +579,12 @@ impl TxOutputList {
         self.0.iter().any(|u| u.is_offchain())
     }
 
-    pub(crate) fn push(&mut self, tx_output: TxOutput) {
+    pub fn push(&mut self, tx_output: TxOutput) {
         self.0.push(tx_output);
     }
 
-    #[cfg(test)]
-    pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
     where
         T: IntoIterator<Item = TxOutput>,
     {
@@ -599,7 +601,7 @@ impl TxOutputList {
     ///
     /// Panics if the receiver preimage does not match the receiver digest from
     /// any transaction output.
-    pub(crate) fn expected_utxos(
+    pub fn expected_utxos(
         &self,
         utxo_notifier: UtxoNotifier,
         receiver_preimage: Digest,
@@ -634,184 +636,52 @@ impl TxOutputList {
     }
 }
 
+/// Test-only helpers on [`TxOutput`]. Inherent impls must live in this crate, so
+/// they are exposed to downstream crates' tests via the `test-helpers` feature.
+#[cfg(any(test, feature = "test-helpers"))]
+impl TxOutput {
+    pub fn with_coin(self, coin: neptune_consensus::transaction::utxo::Coin) -> Self {
+        Self {
+            utxo: self.utxo.with_coin(coin),
+            sender_randomness: self.sender_randomness,
+            receiver_digest: self.receiver_digest,
+            notification_method: self.notification_method,
+            owned: self.owned,
+            is_change: false,
+        }
+    }
+
+    pub fn replace_utxo(self, utxo: Utxo) -> Self {
+        Self {
+            utxo,
+            sender_randomness: self.sender_randomness,
+            receiver_digest: self.receiver_digest,
+            notification_method: self.notification_method,
+            owned: self.owned,
+            is_change: self.is_change,
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use macro_rules_attr::apply;
-    use neptune_consensus::network::Network;
-    use neptune_consensus::transaction::utxo::Coin;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
-    use rand::Rng;
     use test_strategy::proptest;
 
     use super::*;
-    use crate::application::config::cli_args;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::address::KeyType;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared_tokio_runtime;
-
-    impl TxOutput {
-        pub(crate) fn with_coin(self, coin: Coin) -> Self {
-            Self {
-                utxo: self.utxo.with_coin(coin),
-                sender_randomness: self.sender_randomness,
-                receiver_digest: self.receiver_digest,
-                notification_method: self.notification_method,
-                owned: self.owned,
-                is_change: false,
-            }
-        }
-
-        pub(crate) fn replace_utxo(self, utxo: Utxo) -> Self {
-            Self {
-                utxo,
-                sender_randomness: self.sender_randomness,
-                receiver_digest: self.receiver_digest,
-                notification_method: self.notification_method,
-                owned: self.owned,
-                is_change: self.is_change,
-            }
-        }
-    }
+    use crate::address::generation_address::GenerationReceivingAddress;
+    use crate::utxo_notification::UtxoNotificationMedium;
+    use crate::utxo_notification::UtxoNotificationMethod;
 
     #[test]
     fn iter_over_empty_tx_output_list_works() {
         let tx_output_list: TxOutputList = Vec::<TxOutput>::default().into();
         let mut as_iter = tx_output_list.iter();
         assert!(as_iter.next().is_none());
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn test_utxoreceiver_auto_not_owned_output() {
-        let network = Network::RegTest;
-        let global_state_lock = mock_genesis_global_state(
-            2,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default_with_network(network),
-        )
-        .await;
-
-        let state = global_state_lock.lock_guard().await;
-        let block_height = state.chain.tip().header().height;
-
-        // generate a new receiving address that is not from our wallet.
-        let mut rng = rand::rng();
-        let seed: Digest = rng.random();
-        let address = GenerationReceivingAddress::derive_from_seed(seed);
-
-        let amount = NativeCurrencyAmount::one_nau();
-        let utxo = Utxo::new_native_currency(address.lock_script().hash(), amount);
-
-        let sender_randomness = state
-            .wallet_state
-            .wallet_entropy
-            .generate_sender_randomness(block_height, address.receiver_postimage());
-
-        for owned_utxo_notification_medium in [
-            UtxoNotificationMedium::OffChain,
-            UtxoNotificationMedium::OnChain,
-        ] {
-            let tx_output = TxOutput::auto(
-                &state.wallet_state,
-                address.into(),
-                amount,
-                sender_randomness,
-                owned_utxo_notification_medium, // how to notify utxos sent to myself.
-                UtxoNotificationMedium::OnChain,
-            );
-
-            assert!(
-                matches!(
-                    tx_output.notification_method,
-                    UtxoNotificationMethod::OnChain(_)
-                ),
-                "Not owned UTXOs are, currently, always transmitted on-chain"
-            );
-            assert_eq!(tx_output.sender_randomness(), sender_randomness);
-            assert_eq!(tx_output.receiver_digest(), address.receiver_postimage());
-            assert_eq!(tx_output.utxo(), utxo);
-        }
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn test_utxoreceiver_auto_owned_output() {
-        let network = Network::RegTest;
-        let mut global_state_lock = mock_genesis_global_state(
-            2,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default_with_network(network),
-        )
-        .await;
-
-        // obtain next unused receiving address from our wallet.
-        let spending_key_gen = global_state_lock
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .next_unused_spending_key(KeyType::Generation)
-            .await;
-        let address_gen = spending_key_gen.to_address();
-
-        let spending_key_view = global_state_lock
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .next_unused_spending_key(KeyType::ViewingAddress)
-            .await;
-        let address_view = spending_key_view.to_address();
-
-        let state = global_state_lock.lock_guard().await;
-        let block_height = state.chain.tip().header().height;
-
-        let amount = NativeCurrencyAmount::one_nau();
-
-        for (owned_utxo_notification_medium, address) in [
-            (UtxoNotificationMedium::OffChain, address_gen.clone()),
-            (UtxoNotificationMedium::OnChain, address_view.clone()),
-        ] {
-            let utxo = Utxo::new_native_currency(address.lock_script_hash(), amount);
-            let sender_randomness = state
-                .wallet_state
-                .wallet_entropy
-                .generate_sender_randomness(block_height, address.privacy_digest());
-
-            let tx_output = TxOutput::auto(
-                &state.wallet_state,
-                address.clone(),
-                amount,
-                sender_randomness,
-                owned_utxo_notification_medium,
-                UtxoNotificationMedium::OnChain,
-            );
-
-            match owned_utxo_notification_medium {
-                UtxoNotificationMedium::OnChain => assert!(matches!(
-                    tx_output.notification_method,
-                    UtxoNotificationMethod::OnChain(_)
-                )),
-                UtxoNotificationMedium::OffChain => assert!(matches!(
-                    tx_output.notification_method,
-                    UtxoNotificationMethod::OffChain(_)
-                )),
-            };
-
-            assert_eq!(sender_randomness, tx_output.sender_randomness());
-            assert_eq!(
-                address.lock_script_hash(),
-                tx_output.utxo().lock_script_hash()
-            );
-
-            assert_eq!(tx_output.sender_randomness(), sender_randomness);
-            assert_eq!(tx_output.receiver_digest(), address.privacy_digest());
-            assert_eq!(tx_output.utxo(), utxo);
-        }
     }
 
     #[proptest]
