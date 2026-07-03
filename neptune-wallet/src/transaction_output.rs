@@ -21,6 +21,7 @@ use crate::utxo_notification::PrivateNotificationData;
 use crate::utxo_notification::UtxoNotificationMedium;
 use crate::utxo_notification::UtxoNotificationMethod;
 use crate::utxo_notification::UtxoNotificationPayload;
+
 /// Reports whether a wallet holds a spending key capable of unlocking a UTXO.
 ///
 /// Implemented by neptune-core's `WalletState`; used by [`TxOutput`]'s `auto*`

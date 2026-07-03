@@ -17,10 +17,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use super::super::wallet::transaction_output::TxOutput;
-use super::super::wallet::utxo_notification::UtxoNotificationMethod;
-use crate::state::wallet::transaction_output::TxOutputList;
-use crate::state::wallet::unlocked_utxo::TxInputs;
+use crate::transaction_output::TxOutput;
+use crate::transaction_output::TxOutputList;
+use crate::unlocked_utxo::TxInputs;
+use crate::utxo_notification::UtxoNotificationMethod;
 
 /// contains the unblinded data that a
 /// [Transaction](neptune_consensus::transaction::Transaction) is
@@ -111,7 +111,7 @@ impl Display for TransactionDetails {
 impl TransactionDetails {
     /// Create (`TransactionDetails` for) a nop-transaction, with no inputs and
     /// no outputs. Can be used if a merge bit needs to be flipped.
-    pub(crate) fn nop(
+    pub fn nop(
         mutator_set_accumulator: MutatorSetAccumulator,
         now: Timestamp,
         network: Network,
@@ -191,7 +191,7 @@ impl TransactionDetails {
     /// - amounts, must be balanced
     ///
     /// See also: [Self::new_without_coinbase].
-    pub(crate) fn new_with_coinbase(
+    pub fn new_with_coinbase(
         tx_outputs: impl Into<TxOutputList>,
         coinbase: NativeCurrencyAmount,
         fee: NativeCurrencyAmount,
@@ -239,7 +239,7 @@ impl TransactionDetails {
     /// Constructor for TransactionDetails with some sanity checks.
     ///
     /// This fn does not perform any validation.  use validate() instead.
-    pub(crate) fn new(
+    pub fn new(
         tx_inputs: impl Into<TxInputs>,
         tx_outputs: impl Into<TxOutputList>,
         fee: NativeCurrencyAmount,
