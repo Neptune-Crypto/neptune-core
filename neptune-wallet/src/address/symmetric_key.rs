@@ -28,7 +28,7 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
+use crate::utxo_notification::UtxoNotificationPayload;
 
 /// represents a symmetric key decryption error
 #[derive(Debug, thiserror::Error)]
@@ -94,7 +94,7 @@ pub struct SymmetricKey {
 // have any methods with outside types as parameters or return types.  for
 // example:
 //
-// pub(crate) fn generate_announcement(
+// pub fn generate_announcement(
 //     &self,
 //     utxo_notification_payload: &UtxoNotificationPayload,
 // ) -> Announcement;
@@ -164,7 +164,7 @@ impl SymmetricKey {
     /// encrypts utxo secrets (utxo, sender_randomness) into ciphertext
     ///
     /// The output of `encrypt()` should be used as the input to `decrypt()`.
-    pub(crate) fn encrypt(&self, payload: &UtxoNotificationPayload) -> Vec<BFieldElement> {
+    pub fn encrypt(&self, payload: &UtxoNotificationPayload) -> Vec<BFieldElement> {
         // 1. init randomness
         let (_randomness, nonce_bfe) = deterministically_derive_seed_and_nonce(payload);
 
@@ -204,7 +204,7 @@ impl SymmetricKey {
         LockScript::standard_hash_lock_from_after_image(self.lock_after_image())
     }
 
-    pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
+    pub fn lock_script_and_witness(&self) -> LockScriptAndWitness {
         let lock_script = self.lock_script();
         LockScriptAndWitness::new_with_nondeterminism(
             lock_script.program,
@@ -212,7 +212,7 @@ impl SymmetricKey {
         )
     }
 
-    pub(crate) fn generate_announcement(
+    pub fn generate_announcement(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
     ) -> Announcement {
@@ -225,7 +225,7 @@ impl SymmetricKey {
         encrypted_utxo_notification.into_announcement()
     }
 
-    pub(crate) fn private_utxo_notification(
+    pub fn private_utxo_notification(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
         network: Network,

@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 
+use neptune_consensus::transaction::announcement::Announcement;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::api::export::Announcement;
-use crate::api::export::ReceivingAddress;
+use crate::address::ReceivingAddress;
 
 /// Announcement meta-information, intended for use in combination with
 /// [`ReceivingAddress`]. Can be used to quickly identify if the announcement
@@ -13,7 +13,7 @@ use crate::api::export::ReceivingAddress;
 /// of an announcement, as these are interpreted as purpose, receiver ID,
 /// respectively.
 ///
-/// [`ReceivingAddress`]: crate::api::export::ReceivingAddress
+/// [`ReceivingAddress`]: crate::address::ReceivingAddress
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct AnnouncementFlag {
     /// Purpose of the announcement. E.g.: announcement for generational

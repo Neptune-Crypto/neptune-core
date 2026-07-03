@@ -9,19 +9,19 @@ use neptune_consensus::network::Network;
 use neptune_consensus::transaction::announcement::Announcement;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Digest;
 
 use super::generation_address;
 use super::symmetric_key;
-use crate::api::export::KeyType;
-use crate::state::wallet::address::elliptic_curve_hybrid;
-use crate::state::wallet::address::elliptic_curve_hybrid::ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG;
-use crate::state::wallet::address::generation_address::GENERATION_FLAG;
-use crate::state::wallet::address::symmetric_key::SYMMETRIC_KEY_FLAG;
-use crate::state::wallet::address::viewing_address;
-use crate::state::wallet::address::viewing_address::VIEWING_ADDRESS_FLAG;
-use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
-use crate::BFieldElement;
+use crate::address::elliptic_curve_hybrid;
+use crate::address::elliptic_curve_hybrid::ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG;
+use crate::address::generation_address::GENERATION_FLAG;
+use crate::address::symmetric_key::SYMMETRIC_KEY_FLAG;
+use crate::address::viewing_address;
+use crate::address::viewing_address::VIEWING_ADDRESS_FLAG;
+use crate::address::KeyType;
+use crate::utxo_notification::UtxoNotificationPayload;
 
 // note: assigning the flags to `KeyType` variants as discriminants has bonus
 // that we get a compiler verification that values do not conflict.  which is
@@ -136,7 +136,7 @@ impl ReceivingAddress {
         }
     }
 
-    pub(crate) fn flag(&self) -> BFieldElement {
+    pub fn flag(&self) -> BFieldElement {
         match self {
             ReceivingAddress::Generation(_) => GENERATION_FLAG,
             ReceivingAddress::Symmetric(_) => SYMMETRIC_KEY_FLAG,
@@ -154,7 +154,7 @@ impl ReceivingAddress {
     ///
     /// Fields |0,1| enable the receiver to determine the ciphertext
     /// is intended for them and decryption should be attempted.
-    pub(crate) fn generate_announcement(
+    pub fn generate_announcement(
         &self,
         utxo_notification_payload: UtxoNotificationPayload,
     ) -> Announcement {
@@ -174,7 +174,7 @@ impl ReceivingAddress {
         }
     }
 
-    pub(crate) fn private_notification(
+    pub fn private_notification(
         &self,
         utxo_notification_payload: UtxoNotificationPayload,
         network: Network,
@@ -208,7 +208,7 @@ impl ReceivingAddress {
 
     /// encrypts a [Utxo] and `sender_randomness` secret for purpose of transferring to payment recipient
     #[cfg(test)]
-    pub(crate) fn encrypt(
+    pub fn encrypt(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
     ) -> Vec<BFieldElement> {
@@ -364,10 +364,10 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::api::export::GenerationSpendingKey;
-    use crate::api::export::SymmetricKey;
-    use crate::state::wallet::address::elliptic_curve_hybrid::EcHybridKey;
-    use crate::state::wallet::address::viewing_address::ViewingAddress;
+    use crate::address::elliptic_curve_hybrid::EcHybridKey;
+    use crate::address::generation_address::GenerationSpendingKey;
+    use crate::address::symmetric_key::SymmetricKey;
+    use crate::address::viewing_address::ViewingAddress;
 
     fn address_from_seed(seed: Digest, key_type: KeyType) -> ReceivingAddress {
         match key_type {

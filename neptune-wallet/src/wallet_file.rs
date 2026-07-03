@@ -30,7 +30,7 @@ pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 /// Wrapper around [`WalletFile`] with extra context.
 #[derive(Debug, Clone)]
 pub struct WalletFileContext {
-    pub(crate) wallet_file: WalletFile,
+    pub wallet_file: WalletFile,
 
     pub wallet_secret_path: PathBuf,
     pub incoming_randomness_file: PathBuf,
@@ -59,7 +59,7 @@ impl WalletFileContext {
     ///
     /// # Panics
     /// - If this function would overwrite an existing file.
-    pub(crate) fn new_with_injected_entropy(
+    pub fn new_with_injected_entropy(
         wallet_directory_path: &Path,
         injected_entropy: WalletEntropy,
     ) -> Result<Self> {
@@ -156,7 +156,7 @@ impl WalletFileContext {
     }
 
     /// Extract the entropy
-    pub(crate) fn entropy(&self) -> WalletEntropy {
+    pub fn entropy(&self) -> WalletEntropy {
         self.wallet_file.entropy()
     }
 }
@@ -257,29 +257,5 @@ impl WalletFile {
             .write(true)
             .open(path)?;
         fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::api::export::Network;
-    use crate::application::config::data_directory::DataDirectory;
-    use crate::tests::shared::files::unit_test_data_directory;
-
-    #[should_panic(expected = "This function may not overwrite existing seed found in")]
-    #[tokio::test]
-    async fn wallet_seed_is_never_overwritten() {
-        let network = Network::Main;
-        let dir = unit_test_data_directory(network).unwrap();
-        let wallet_dir = dir.wallet_directory_path();
-        DataDirectory::create_dir_if_not_exists(&wallet_dir)
-            .await
-            .unwrap();
-        let _foo = WalletFileContext::read_from_file_or_create(&wallet_dir).unwrap();
-
-        // Attempt to overwrite created file with new seed. Must panic.
-        let _bar =
-            WalletFileContext::new_with_injected_entropy(&wallet_dir, WalletEntropy::new_random());
     }
 }

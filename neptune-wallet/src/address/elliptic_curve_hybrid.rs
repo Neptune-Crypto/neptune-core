@@ -10,8 +10,10 @@ use bech32::ToBase32;
 use bech32::Variant;
 use itertools::Itertools;
 use neptune_consensus::network::Network;
+use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::lock_script::LockScript;
 use neptune_consensus::transaction::lock_script::LockScriptAndWitness;
+use neptune_consensus::transaction::utxo::Utxo;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::vm::NonDeterminism;
@@ -20,13 +22,11 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::tip5::Digest;
 use tasm_lib::twenty_first::tip5::Tip5;
 
-use crate::api::export::Announcement;
-use crate::api::export::Utxo;
-use crate::state::wallet::address::common;
-use crate::state::wallet::address::common::deterministically_derive_seed_and_nonce;
-use crate::state::wallet::address::common::network_hrp_char;
-use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
+use crate::address::common;
+use crate::address::common::deterministically_derive_seed_and_nonce;
+use crate::address::common::network_hrp_char;
+use crate::address::encrypted_utxo_notification::EncryptedUtxoNotification;
+use crate::utxo_notification::UtxoNotificationPayload;
 
 pub(super) const ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG_U8: u8 = 81;
 pub const ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG: BFieldElement =
@@ -34,7 +34,7 @@ pub const ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG: BFieldElement =
 
 const ELLIPTIC_CURVE_HYBRID_AES_NONCE: [u8; 12] = [0u8; 12];
 
-pub(crate) const ECH_HRP_PREFIX: &str = "nech";
+pub const ECH_HRP_PREFIX: &str = "nech";
 
 fn receiver_id(ec_pubkey: &k256::PublicKey) -> BFieldElement {
     let pubkey_encoded = ec_pubkey.to_sec1_bytes().to_vec();
@@ -148,7 +148,7 @@ impl EcHybridKey {
         viewing_key.to_address()
     }
 
-    pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
+    pub fn lock_script_and_witness(&self) -> LockScriptAndWitness {
         let lock_script = self.to_address().lock_script();
         LockScriptAndWitness::new_with_nondeterminism(
             lock_script.program,
@@ -156,11 +156,11 @@ impl EcHybridKey {
         )
     }
 
-    pub(crate) fn receiver_identifier(&self) -> BFieldElement {
+    pub fn receiver_identifier(&self) -> BFieldElement {
         self.receiver_identifier
     }
 
-    pub(crate) fn receiver_preimage(&self) -> Digest {
+    pub fn receiver_preimage(&self) -> Digest {
         self.receiver_preimage
     }
 }
@@ -385,7 +385,7 @@ impl EcHybridAddress {
             .expect("Could not encode address as bech32m because")
     }
 
-    pub(crate) fn generate_announcement(
+    pub fn generate_announcement(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
     ) -> Announcement {
@@ -398,7 +398,7 @@ impl EcHybridAddress {
         encrypted_utxo_notification.into_announcement()
     }
 
-    pub(crate) fn private_utxo_notification(
+    pub fn private_utxo_notification(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
         network: Network,
@@ -412,7 +412,7 @@ impl EcHybridAddress {
         encrypted_utxo_notification.into_bech32m(network)
     }
 
-    pub(crate) fn encrypt(&self, payload: &UtxoNotificationPayload) -> Vec<BFieldElement> {
+    pub fn encrypt(&self, payload: &UtxoNotificationPayload) -> Vec<BFieldElement> {
         // 1. Generate an Ephemeral Keypair for ECDH, deterministically.
         let (ephemeral_secret, _nonce_bfe) = deterministically_derive_seed_and_nonce(payload);
         let ephemeral_secret = k256::SecretKey::from_slice(&ephemeral_secret)
@@ -493,7 +493,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::api::export::WalletEntropy;
+    use crate::wallet_entropy::WalletEntropy;
 
     #[test]
     fn bech32_representation_is_unchanged() {

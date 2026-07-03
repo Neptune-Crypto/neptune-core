@@ -9,7 +9,7 @@ use tasm_lib::prelude::Digest;
 
 use super::expected_utxo::UtxoNotifier;
 use super::utxo_notification::UtxoNotificationPayload;
-use crate::state::ExpectedUtxo;
+use crate::expected_utxo::ExpectedUtxo;
 
 /// A [`Utxo`] along with associated data necessary for a recipient to claim it.
 ///
@@ -21,7 +21,7 @@ use crate::state::ExpectedUtxo;
 ///    key coincides with the receiver preimage.)
 ///
 /// See [UtxoNotificationPayload], [ExpectedUtxo],
-/// [IncomingUtxoRecoveryData](super::wallet_state::IncomingUtxoRecoveryData).
+/// `IncomingUtxoRecoveryData`.
 #[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct IncomingUtxo {
@@ -70,7 +70,7 @@ impl From<&ExpectedUtxo> for IncomingUtxo {
 }
 
 impl IncomingUtxo {
-    pub(crate) fn utxo_triple(&self) -> UtxoTriple {
+    pub fn utxo_triple(&self) -> UtxoTriple {
         UtxoTriple {
             utxo: self.utxo.clone(),
             sender_randomness: self.sender_randomness,
@@ -82,7 +82,7 @@ impl IncomingUtxo {
         self.utxo_triple().addition_record()
     }
 
-    pub(crate) fn from_utxo_notification_payload(
+    pub fn from_utxo_notification_payload(
         payload: UtxoNotificationPayload,
         receiver_preimage: Digest,
     ) -> Self {
@@ -94,7 +94,7 @@ impl IncomingUtxo {
         }
     }
 
-    pub(crate) fn into_expected_utxo(self, received_from: UtxoNotifier) -> ExpectedUtxo {
+    pub fn into_expected_utxo(self, received_from: UtxoNotifier) -> ExpectedUtxo {
         ExpectedUtxo::new(
             self.utxo.to_owned(),
             self.sender_randomness,

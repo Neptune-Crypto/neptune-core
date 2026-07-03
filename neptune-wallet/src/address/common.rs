@@ -10,10 +10,10 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
+use crate::utxo_notification::UtxoNotificationPayload;
 
 /// returns human-readable-prefix for the given network
-pub(crate) fn network_hrp_char(network: Network) -> char {
+pub fn network_hrp_char(network: Network) -> char {
     match network {
         Network::Main => 'm',
         Network::Testnet(_) => 't',
@@ -169,11 +169,11 @@ pub fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) mod tests {
+    use neptune_consensus::transaction::utxo::Utxo;
     use rand::Rng;
     use rand::TryRngCore;
 
     use super::*;
-    use crate::api::export::Utxo;
 
     #[test]
     fn test_conversion_fixed_length() {

@@ -1,5 +1,6 @@
 use anyhow::bail;
 use anyhow::Result;
+use neptune_consensus::network::Network;
 use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::lock_script::LockScript;
 use neptune_consensus::transaction::lock_script::LockScriptAndWitness;
@@ -7,6 +8,7 @@ use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::utxo::Utxo;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Digest;
 use tracing::warn;
 
@@ -14,11 +16,9 @@ use super::common;
 use super::generation_address;
 use super::receiving_address::ReceivingAddress;
 use super::symmetric_key;
-use crate::api::export::Network;
-use crate::state::wallet::address::elliptic_curve_hybrid;
-use crate::state::wallet::address::viewing_address;
-use crate::state::wallet::incoming_utxo::IncomingUtxo;
-use crate::BFieldElement;
+use crate::address::elliptic_curve_hybrid;
+use crate::address::viewing_address;
+use crate::incoming_utxo::IncomingUtxo;
 
 #[derive(
     Debug,
@@ -36,7 +36,7 @@ use crate::BFieldElement;
 #[repr(u8)]
 #[non_exhaustive]
 pub enum KeyType {
-    /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]
+    /// [generation_address] built on [tasm_lib::twenty_first::math::lattice::kem]
     ///
     /// wraps a symmetric key built on aes-256-gcm
     Generation = generation_address::GENERATION_FLAG_U8,
@@ -184,7 +184,7 @@ impl From<viewing_address::ViewingAddressKey> for SpendingKey {
 // (and the key types it wraps) should not have any methods with
 // outside types as parameters.  for example:
 //
-// pub(crate) fn scan_for_announced_utxos(
+// pub fn scan_for_announced_utxos(
 //     &self,
 //     tx_kernel: &TransactionKernel,
 // ) -> Vec<IncomingUtxo> {
@@ -214,7 +214,7 @@ impl SpendingKey {
         }
     }
 
-    pub(crate) fn lock_script(&self) -> LockScript {
+    pub fn lock_script(&self) -> LockScript {
         LockScript {
             program: self.lock_script_and_witness().program,
         }
@@ -357,7 +357,7 @@ mod tests {
     use super::*;
 
     impl SpendingKey {
-        pub(crate) fn from_seed(seed: Digest, key_type: KeyType) -> Self {
+        pub fn from_seed(seed: Digest, key_type: KeyType) -> Self {
             match key_type {
                 KeyType::Generation => {
                     generation_address::GenerationSpendingKey::derive_from_seed(seed).into()

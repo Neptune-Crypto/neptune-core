@@ -55,7 +55,7 @@ arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:propt
 # exposes the consensus/proof-abstraction test-support constructors and proptest
 # strategies (the `test_helpers` modules) needed by downstream crates' tests.
 # off by default.
-test-helpers = ["arbitrary-impls", "dep:clienter", "neptune-consensus/test-helpers", "neptune-mutator-set/test-helpers"]
+test-helpers = ["arbitrary-impls", "dep:clienter", "neptune-consensus/test-helpers", "neptune-mutator-set/test-helpers", "neptune-wallet/test-helpers"]
 
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]

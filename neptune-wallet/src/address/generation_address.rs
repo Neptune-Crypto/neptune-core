@@ -42,7 +42,7 @@ use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::common::network_hrp_char;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
+use crate::utxo_notification::UtxoNotificationPayload;
 
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);
@@ -165,7 +165,7 @@ impl GenerationSpendingKey {
         }
     }
 
-    pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
+    pub fn lock_script_and_witness(&self) -> LockScriptAndWitness {
         LockScriptAndWitness::standard_hash_lock_from_preimage(self.unlock_key_preimage)
     }
 
@@ -253,7 +253,7 @@ impl GenerationSpendingKey {
 // should not have any methods with
 // outside types as parameters or return types.  for example:
 //
-// pub(crate) fn generate_announcement(
+// pub fn generate_announcement(
 //     &self,
 //     utxo_notification_payload: &UtxoNotificationPayload,
 // ) -> Announcement;
@@ -289,7 +289,7 @@ impl GenerationReceivingAddress {
         }
     }
 
-    pub(crate) fn encrypt(&self, payload: &UtxoNotificationPayload) -> Vec<BFieldElement> {
+    pub fn encrypt(&self, payload: &UtxoNotificationPayload) -> Vec<BFieldElement> {
         let (randomness, nonce_bfe) = deterministically_derive_seed_and_nonce(payload);
         let (shared_key, kem_ctxt) = lattice::kem::enc(self.encryption_key, randomness);
 
@@ -389,7 +389,7 @@ impl GenerationReceivingAddress {
         LockScript::standard_hash_lock_from_after_image(self.lock_postimage)
     }
 
-    pub(crate) fn generate_announcement(
+    pub fn generate_announcement(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
     ) -> Announcement {
@@ -402,7 +402,7 @@ impl GenerationReceivingAddress {
         encrypted_utxo_notification.into_announcement()
     }
 
-    pub(crate) fn private_utxo_notification(
+    pub fn private_utxo_notification(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
         network: Network,
@@ -440,7 +440,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::api::export::WalletEntropy;
+    use crate::wallet_entropy::WalletEntropy;
 
     mod generation_spending_key {
         use super::*;

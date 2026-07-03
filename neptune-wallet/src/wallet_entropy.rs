@@ -13,13 +13,13 @@ use tasm_lib::twenty_first::xfe;
 use zeroize::ZeroizeOnDrop;
 
 use super::address::ReceivingAddress;
-use crate::api::export::KeyType;
-use crate::api::export::SpendingKey;
-use crate::state::wallet::address::elliptic_curve_hybrid;
-use crate::state::wallet::address::generation_address;
-use crate::state::wallet::address::symmetric_key;
-use crate::state::wallet::address::viewing_address;
-use crate::state::wallet::secret_key_material::SecretKeyMaterial;
+use crate::address::elliptic_curve_hybrid;
+use crate::address::generation_address;
+use crate::address::symmetric_key;
+use crate::address::viewing_address;
+use crate::address::KeyType;
+use crate::address::SpendingKey;
+use crate::secret_key_material::SecretKeyMaterial;
 
 /// The wallet's one source of randomness, from which all keys are derived.
 ///
@@ -61,7 +61,7 @@ impl WalletEntropy {
 
     /// Returns the receiving address for prover rewards, *i.e.*, composer fee
     /// or proof-upgrader (gobbling) fee.
-    pub(crate) fn prover_fee_address(&self) -> ReceivingAddress {
+    pub fn prover_fee_address(&self) -> ReceivingAddress {
         self.composer_fee_key().to_address().into()
     }
 
@@ -180,7 +180,7 @@ impl WalletEntropy {
     // it is an improper usage.
     //
     // [wallet_state::WalletState::next_unused_generation_spending_key()] should be used
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-helpers"))]
     pub fn nth_generation_spending_key_for_tests(
         &self,
         counter: u64,
@@ -194,13 +194,13 @@ impl WalletEntropy {
     // it is an improper usage.
     //
     // [wallet_state::WalletState::next_unused_symmetric_key()] should be used
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-helpers"))]
     pub fn nth_symmetric_key_for_tests(&self, counter: u64) -> symmetric_key::SymmetricKey {
         self.nth_symmetric_key(counter)
     }
 
     /// Return a deterministic seed that can be used to seed an RNG
-    pub(crate) fn deterministic_derived_seed(&self, block_height: BlockHeight) -> Digest {
+    pub fn deterministic_derived_seed(&self, block_height: BlockHeight) -> Digest {
         const SEED_FLAG: u64 = 0x2315439570c4a85fu64;
         Tip5::hash_varlen(
             &[
@@ -212,7 +212,7 @@ impl WalletEntropy {
     }
 
     /// Return a seed used to randomize shuffling.
-    pub(crate) fn shuffle_seed(&self, block_height: BlockHeight) -> [u8; 32] {
+    pub fn shuffle_seed(&self, block_height: BlockHeight) -> [u8; 32] {
         let secure_seed_from_wallet = self.deterministic_derived_seed(block_height);
         let seed: [u8; Digest::BYTES] = secure_seed_from_wallet.into();
 
@@ -251,7 +251,7 @@ impl WalletEntropy {
     ///
     /// Used for cold-mining to derive sender randomness without relying on the
     /// wallet's own seed.
-    pub(crate) fn sender_randomness_without_own_seed(
+    pub fn sender_randomness_without_own_seed(
         block_height: BlockHeight,
         receiver_digest: Digest,
     ) -> Digest {
@@ -283,6 +283,26 @@ impl From<WalletEntropy> for SecretKeyMaterial {
     }
 }
 
+/// Test-only constructors, exposed to downstream crates' tests via the
+/// `test-helpers` feature.
+#[cfg(any(test, feature = "test-helpers"))]
+impl WalletEntropy {
+    /// Create a new `WalletEntropy` object and populate it with entropy
+    /// obtained via `rand::rng()` from the operating system.
+    pub fn new_random() -> Self {
+        Self::new_pseudorandom(rand::Rng::random(&mut rand::rng()))
+    }
+
+    /// Create a new `WalletEntropy` object and populate it by expanding a given
+    /// seed.
+    pub fn new_pseudorandom(seed: [u8; 32]) -> Self {
+        let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
+        Self {
+            secret_seed: SecretKeyMaterial(rand::Rng::random(&mut rng)),
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -291,23 +311,6 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-
-    impl WalletEntropy {
-        /// Create a new `WalletEntropy` object and populate it with entropy
-        /// obtained via `rand::rng()` from the operating system.
-        pub(crate) fn new_random() -> Self {
-            Self::new_pseudorandom(rand::Rng::random(&mut rand::rng()))
-        }
-
-        /// Create a new `WalletEntropy` object and populate it by expanding a given
-        /// seed.
-        pub(crate) fn new_pseudorandom(seed: [u8; 32]) -> Self {
-            let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
-            Self {
-                secret_seed: SecretKeyMaterial(rand::Rng::random(&mut rng)),
-            }
-        }
-    }
 
     #[proptest(cases = 10)]
     fn prover_fee_address_agrees_with_receiver_preimage(

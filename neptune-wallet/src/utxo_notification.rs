@@ -6,11 +6,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::state::wallet::address::ReceivingAddress;
+use crate::address::ReceivingAddress;
 
 /// Enumerates the medium of exchange for UTXO-notifications.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, clap::ValueEnum)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub enum UtxoNotificationMedium {
     /// The UTXO notification should be sent on-chain
     #[default]
@@ -46,7 +46,7 @@ impl FromStr for UtxoNotificationMedium {
 /// enumerates how utxos and spending information is communicated, including how
 /// to encrypt this information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub enum UtxoNotificationMethod {
     /// the utxo notification should be transferred to recipient encrypted on the blockchain
     OnChain(ReceivingAddress),
@@ -71,14 +71,14 @@ impl Display for UtxoNotificationMethod {
 }
 
 impl UtxoNotificationMethod {
-    pub(crate) fn new(medium: UtxoNotificationMedium, address: ReceivingAddress) -> Self {
+    pub fn new(medium: UtxoNotificationMedium, address: ReceivingAddress) -> Self {
         match medium {
             UtxoNotificationMedium::OnChain => Self::OnChain(address),
             UtxoNotificationMedium::OffChain => Self::OffChain(address),
         }
     }
 
-    pub(crate) fn receiving_address(&self) -> Option<&ReceivingAddress> {
+    pub fn receiving_address(&self) -> Option<&ReceivingAddress> {
         match self {
             UtxoNotificationMethod::OnChain(receiving_address) => Some(receiving_address),
             UtxoNotificationMethod::OffChain(receiving_address) => Some(receiving_address),
@@ -98,12 +98,12 @@ impl UtxoNotificationMethod {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct UtxoNotificationPayload {
-    pub(crate) utxo: Utxo,
-    pub(crate) sender_randomness: Digest,
+    pub utxo: Utxo,
+    pub sender_randomness: Digest,
 }
 
 impl UtxoNotificationPayload {
-    pub(crate) fn new(utxo: Utxo, sender_randomness: Digest) -> Self {
+    pub fn new(utxo: Utxo, sender_randomness: Digest) -> Self {
         Self {
             utxo,
             sender_randomness,

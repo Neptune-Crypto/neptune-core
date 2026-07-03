@@ -51,7 +51,7 @@ impl Default for ChangePolicy {
 impl ChangePolicy {
     /// Returns true if this change policy requires state mutation during the
     /// contruction of a transaction.
-    pub(crate) fn requires_state_mutation(&self) -> bool {
+    pub fn requires_state_mutation(&self) -> bool {
         match self {
             ChangePolicy::RecoverToNextUnusedKey { .. } => true,
             ChangePolicy::ExactChange => false,

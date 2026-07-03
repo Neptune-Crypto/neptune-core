@@ -105,6 +105,7 @@ use crate::state::utxo_validitor::UtxoValidator;
 use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
 use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+#[cfg(test)]
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;

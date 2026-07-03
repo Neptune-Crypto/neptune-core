@@ -7155,6 +7155,7 @@ mod tests {
                     KeyType::ViewingAddress => {
                         ViewingAddressKey::from_seed(key_seed).to_address().into()
                     }
+                    _ => unimplemented!(),
                 };
                 let output1: OutputFormat = (
                     external_receiving_address.clone(),

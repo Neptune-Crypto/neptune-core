@@ -1072,6 +1072,7 @@ impl WalletState {
                 self.get_future_viewing_address_keys(num_future_keys)
                     .map(|(i, key)| (i, SpendingKey::from(key))),
             ),
+            _ => unimplemented!(),
         }
     }
 
@@ -1089,6 +1090,7 @@ impl WalletState {
             KeyType::Symmetric => Box::new(self.get_known_symmetric_keys()),
             KeyType::EcHybrid => Box::new(self.get_known_ec_hybrid_keys()),
             KeyType::ViewingAddress => Box::new(self.get_known_viewing_address_keys()),
+            _ => unimplemented!(),
         }
     }
 
@@ -1137,6 +1139,7 @@ impl WalletState {
             KeyType::Symmetric => self.next_unused_symmetric_key().await.into(),
             KeyType::EcHybrid => self.next_unused_ec_hybrid_key().await.into(),
             KeyType::ViewingAddress => self.next_unused_viewing_address_key().await.into(),
+            _ => unimplemented!(),
         }
     }
 
@@ -1193,6 +1196,7 @@ impl WalletState {
                         self.known_viewing_address_keys.push(key);
                     }
                 }
+                _ => unimplemented!(),
             }
         }
     }
@@ -1204,6 +1208,7 @@ impl WalletState {
             KeyType::Symmetric => self.wallet_db.get_symmetric_key_counter(),
             KeyType::EcHybrid => self.wallet_db.get_ec_hybrid_key_counter(),
             KeyType::ViewingAddress => self.wallet_db.get_viewing_address_key_counter(),
+            _ => unimplemented!(),
         }
     }
 
