@@ -1,7 +1,6 @@
 use std::ops::RangeInclusive;
 
 use neptune_consensus::block::block_height::BlockHeight;
-use neptune_consensus::block::Block;
 
 /// Configuration settings for Scan Mode.
 ///
@@ -79,19 +78,9 @@ impl ScanModeConfiguration {
     }
 
     /// Determine whether to scan a block given its height.
-    ///
-    /// Exposed (but hidden) for testing only. Not part of the stable API; use
-    /// [`Self::block_is_in_range`] instead.
-    #[doc(hidden)]
     pub fn block_height_is_in_range(&self, block_height: BlockHeight) -> bool {
         self.first_block_height <= block_height
             && self.last_block_height.is_none_or(|lbh| lbh >= block_height)
-    }
-
-    /// Determine whether to scan the given block.
-    pub fn block_is_in_range(&self, block: &Block) -> bool {
-        let block_height = block.header().height;
-        self.block_height_is_in_range(block_height)
     }
 
     /// How many future keys to scan for.

@@ -1372,7 +1372,7 @@ impl WalletState {
         let Some(scan_mode_configuration) = &self.configuration.scan_mode else {
             return Vec::new();
         };
-        if !scan_mode_configuration.block_is_in_range(new_block) {
+        if !scan_mode_configuration.block_height_is_in_range(new_block.header().height) {
             return Vec::new();
         }
 
