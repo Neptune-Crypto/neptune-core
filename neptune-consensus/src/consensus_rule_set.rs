@@ -150,7 +150,7 @@ impl ConsensusRuleSet {
         }
     }
 
-    pub(crate) fn memory_hard_pow(&self) -> bool {
+    pub fn memory_hard_pow(&self) -> bool {
         match self {
             ConsensusRuleSet::Reboot => true,
             ConsensusRuleSet::HardforkAlpha => true,

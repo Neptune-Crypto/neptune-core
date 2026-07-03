@@ -16,7 +16,6 @@ use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::block_transaction::BlockOrRegularTransaction;
 use neptune_consensus::block::block_transaction::BlockTransaction;
 use neptune_consensus::block::difficulty_control::difficulty_control;
-use neptune_consensus::block::pow::GuesserBuffer;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::block::pow::Pow;
 use neptune_consensus::block::pow::PowMastPaths;
@@ -291,15 +290,10 @@ fn guess_worker(
 
     block.set_header_guesser_data(guesser_address.into());
 
-    info!("Start: guess preprocessing, consensus ruleset: {consensus_rule_set}.");
-
-    let guesser_buffer =
-        block.guess_preprocess(Some(&sender), Some(threads_to_use), consensus_rule_set);
-    if sender.is_canceled() {
-        info!("Guess preprocessing canceled. Stopping guessing task.");
-        return;
-    }
-    info!("Completed: guess preprocessing.");
+    assert!(
+        !consensus_rule_set.memory_hard_pow(),
+        "solving pre-hardfork-beta (memory-hard) proof-of-work is not supported"
+    );
 
     let mast_auth_paths = block.pow_mast_paths();
     let pool = ThreadPoolBuilder::new()
@@ -307,7 +301,6 @@ fn guess_worker(
         .build()
         .unwrap();
 
-    let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
     let lustration_status = if consensus_rule_set.requires_lustration_status_in_block_header() {
         Some(
             block
@@ -328,9 +321,7 @@ fn guess_worker(
                 || rng.clone().unwrap_or(std_rng_from_thread_rng()),
                 |rng, _i| {
                     guess_nonce_iteration(
-                        &guesser_buffer,
                         &mast_auth_paths,
-                        index_picker_preimage,
                         threshold,
                         lustration_status,
                         rng,
@@ -397,17 +388,9 @@ impl GuessNonceResult {
 }
 
 /// Run a single iteration of the mining loop.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "After hard fork beta is activated we can factor out the arguments \
-    that are no longer necessary; until then we support both before and after \
-    hard fork beta, which means many arguments."
-)]
 #[inline]
 fn guess_nonce_iteration(
-    guesser_buffer: &GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }>,
     mast_auth_paths: &PowMastPaths,
-    index_picker_preimage: Digest,
     threshold: Digest,
     lustration_status: Option<LustrationStatus>,
     rng: &mut rand::rngs::StdRng,
@@ -423,9 +406,7 @@ fn guess_nonce_iteration(
     }
 
     let result = Pow::guess(
-        guesser_buffer,
         mast_auth_paths,
-        index_picker_preimage,
         nonce,
         threshold,
         lustration_status,
@@ -1233,18 +1214,13 @@ pub(crate) mod tests {
         let tick = std::time::SystemTime::now();
 
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
-        let guesser_buffer =
-            block.guess_preprocess(Some(&worker_task_tx), None, ConsensusRuleSet::default());
-        let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
         let lustration_status = block.header().pow.lustration_status().ok();
         let version = block.header().version;
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(std_rng_from_thread_rng, |prng, _i| {
                     guess_nonce_iteration(
-                        &guesser_buffer,
                         &mast_auth_paths,
-                        index_picker_preimage,
                         threshold,
                         lustration_status,
                         prng,
@@ -1708,7 +1684,7 @@ pub(crate) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn mined_block_has_proof_of_work() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
             network,
@@ -2350,7 +2326,7 @@ pub(crate) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn msg_from_main_does_not_crash_composer() -> anyhow::Result<()> {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let cli_args = cli_args::Args {
             compose: true,
             network,

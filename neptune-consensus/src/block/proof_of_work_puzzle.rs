@@ -85,24 +85,17 @@ impl ProofOfWorkPuzzle {
     /// Takes a very long time and cannot be cancelled while running. Slow
     /// implementation, as it only uses one thread.
     pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> BlockPow {
-        info!("Starting PoW preprocessing");
-        let guesser_buffer = BlockPow::preprocess(
-            self.pow_mast_paths,
-            None,
-            consensus_rule_set,
-            self.prev_block,
+        assert!(
+            !consensus_rule_set.memory_hard_pow(),
+            "solving pre-hardfork-beta (memory-hard) proof-of-work is not supported"
         );
-        info!("Done with PoW preprocessing");
 
         info!("Now attempting to find valid nonce");
-        let index_picker_preimage = guesser_buffer.index_picker_preimage(&self.pow_mast_paths);
         let solution = (0u64..u64::MAX)
             .map(|i| {
                 let nonce = Digest(bfe_array![0, 0, 0, 0, i]);
                 BlockPow::guess(
-                    &guesser_buffer,
                     &self.pow_mast_paths,
-                    index_picker_preimage,
                     nonce,
                     self.threshold,
                     self.lustration_status,

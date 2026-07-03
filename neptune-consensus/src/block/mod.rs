@@ -41,7 +41,6 @@ use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rayon::ThreadPoolBuilder;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
@@ -67,9 +66,8 @@ use crate::block::block_transaction::BlockTransaction;
 use crate::block::difficulty_control::difficulty_control;
 use crate::block::difficulty_control::ProofOfWork;
 use crate::block::guesser_receiver_data::GuesserReceiverData;
-use crate::block::pow::Cancelable;
-use crate::block::pow::GuesserBuffer;
 use crate::block::pow::LustrationStatus;
+#[cfg(test)]
 use crate::block::pow::Pow;
 use crate::block::pow::PowMastPaths;
 use crate::consensus_rule_set::ConsensusRuleSet;
@@ -930,33 +928,6 @@ impl Block {
         }
     }
 
-    /// Preprocess block for PoW guessing
-    pub fn guess_preprocess(
-        &self,
-        maybe_cancel_channel: Option<&dyn Cancelable>,
-        num_guesser_threads: Option<usize>,
-        consensus_rule_set: ConsensusRuleSet,
-    ) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
-        // build a rayon thread pool that respects the limitation on the number
-        // of threads
-        let num_threads = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
-        let thread_pool = ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .build()
-            .unwrap();
-
-        let auth_paths = self.pow_mast_paths();
-        let prev_block_digest = self.header().prev_block_digest;
-        thread_pool.install(|| {
-            Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(
-                auth_paths,
-                maybe_cancel_channel,
-                consensus_rule_set,
-                prev_block_digest,
-            )
-        })
-    }
-
     /// Mock verification of Pow. Use only on networks that allow for PoW
     /// mocking. Only checks that block hash is less than target. Does not
     /// verify other aspects of PoW.
@@ -1503,27 +1474,19 @@ pub(crate) mod tests {
         ] {
             let mut invalid_block = invalid_empty_block(&genesis, network);
             let mast_auth_paths = invalid_block.pow_mast_paths();
-            let guesser_buffer = invalid_block.guess_preprocess(None, None, consensus_rule_set);
             let target = if consensus_rule_set.use_parent_difficulty() {
                 parent_target
             } else {
                 invalid_block.header().difficulty.target()
             };
             let mut rng = rng();
-            let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
 
             let version = invalid_block.header().version;
 
             let valid_pow = loop {
-                if let Some(valid_pow) = Pow::guess(
-                    &guesser_buffer,
-                    &mast_auth_paths,
-                    index_picker_preimage,
-                    rng.random(),
-                    target,
-                    None,
-                    Some(version),
-                ) {
+                if let Some(valid_pow) =
+                    Pow::guess(&mast_auth_paths, rng.random(), target, None, Some(version))
+                {
                     break valid_pow;
                 }
             };
