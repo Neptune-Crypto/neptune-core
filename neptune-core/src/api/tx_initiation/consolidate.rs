@@ -1,16 +1,17 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use num_traits::CheckedSub;
 use tracing::debug;
 use tracing::error;
 
-use crate::api::export::ChangePolicy;
 use crate::api::export::InputSelectionPriority;
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::ReceivingAddress;
-use crate::api::export::Timestamp;
-use crate::api::export::TxProvingCapability;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::input_selector::InputSelector;
 use crate::api::tx_initiation::builder::input_selector::SortOrder;
@@ -18,7 +19,6 @@ use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuil
 use crate::api::tx_initiation::error::CreateTxError;
 use crate::api::tx_initiation::error::SendError;
 use crate::api::tx_initiation::initiator::TransactionInitiator;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 
 pub const CONSOLIDATION_FEE_PC: NativeCurrencyAmount =
     NativeCurrencyAmount::from_nau(NativeCurrencyAmount::coin_as_nau() / 10);

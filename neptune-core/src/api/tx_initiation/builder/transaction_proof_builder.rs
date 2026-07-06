@@ -37,6 +37,7 @@ use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue
 use neptune_consensus::proof_abstractions::SecretWitness;
 use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
 use neptune_consensus::transaction::validity::single_proof::produce_single_proof;
 use neptune_consensus::transaction::validity::single_proof::produce_single_proof_mock;
@@ -44,9 +45,8 @@ use neptune_consensus::transaction::validity::single_proof::SingleProof;
 use neptune_consensus::transaction::validity::single_proof::SingleProofWitness;
 use neptune_consensus::transaction::validity::tasm::single_proof::update_branch::UpdateWitness;
 use neptune_consensus::transaction::TransactionProof;
+use neptune_wallet::transaction_details::TransactionDetails;
 
-use crate::api::export::NeptuneProof;
-use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
 

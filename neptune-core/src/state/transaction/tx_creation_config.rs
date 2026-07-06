@@ -10,10 +10,9 @@ use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_primitives::network::Network;
-
-use super::super::wallet::address::SpendingKey;
-use super::super::wallet::change_policy::ChangePolicy;
-use super::super::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone)]

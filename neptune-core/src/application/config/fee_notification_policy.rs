@@ -1,7 +1,6 @@
 use anyhow::bail;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use regex::Regex;
-
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 
 /// How notifications for UTXOs resulting from proving jobs (*i.e.*, composing
 /// or upgrading) are communicated.

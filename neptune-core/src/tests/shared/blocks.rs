@@ -19,6 +19,7 @@ use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
+use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
@@ -35,6 +36,13 @@ use neptune_mutator_set::shared::WINDOW_SIZE;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::difficulty_control::ProofOfWork;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::generation_address;
+use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+use neptune_wallet::address::generation_address::GenerationSpendingKey;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -45,13 +53,8 @@ use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::b_field_element::BFieldElement;
 
-use crate::api::export::Announcement;
-use crate::api::export::GenerationSpendingKey;
 use crate::api::export::GlobalStateLock;
-use crate::api::export::Network;
 use crate::api::export::OutputFormat;
-use crate::api::export::ReceivingAddress;
-use crate::api::export::Timestamp;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::loops::channel::NewBlockFound;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
@@ -60,9 +63,6 @@ use crate::application::loops::mine_loop::composer_parameters::ComposerParameter
 use crate::application::loops::mine_loop::guess_nonce;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
 use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-use crate::state::wallet::address::generation_address;
-use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::mock_tx::send_coins;
 use crate::tests::shared::Randomness;
 
@@ -270,7 +270,7 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
                 txo.utxo(),
                 txo.sender_randomness(),
                 composer_key.receiver_preimage(),
-                crate::state::wallet::expected_utxo::UtxoNotifier::OwnMinerComposeBlock,
+                neptune_wallet::expected_utxo::UtxoNotifier::OwnMinerComposeBlock,
             )
         })
         .collect();

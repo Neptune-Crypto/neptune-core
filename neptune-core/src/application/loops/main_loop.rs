@@ -24,6 +24,7 @@ use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
+use neptune_primitives::timestamp::Timestamp;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
@@ -45,7 +46,6 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
-use crate::api::export::Timestamp;
 use crate::application::config::auto_consolidation::ConsolidationTarget;
 use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::loops::channel::MainToMiner;
@@ -2595,17 +2595,17 @@ mod tests {
 
     use macro_rules_attr::apply;
     use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_primitives::network::Network;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::utxo_notification::UtxoNotificationMedium;
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::KeyType;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::ReceivingAddress;
     use crate::application::config::cli_args;
     use crate::protocol::peer::peer_info::pseudorandom_peer_id;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::blocks::block_with_outputs;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
@@ -2887,8 +2887,9 @@ mod tests {
     }
 
     mod update_mempool_txs {
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
         use super::*;
-        use crate::api::export::NativeCurrencyAmount;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
@@ -3004,13 +3005,13 @@ mod tests {
         use neptune_consensus::transaction::Transaction;
         use neptune_consensus::transaction::TransactionProof;
         use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use neptune_primitives::block_height::BlockHeight;
         use neptune_primitives::timestamp::Timestamp;
+        use neptune_wallet::transaction_output::TxOutput;
 
         use super::*;
-        use crate::api::export::BlockHeight;
         use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
         use crate::state::transaction::tx_creation_config::TxCreationConfig;
-        use crate::state::wallet::transaction_output::TxOutput;
 
         async fn tx_no_outputs(
             global_state_lock: &mut GlobalStateLock,
@@ -3616,8 +3617,9 @@ mod tests {
     }
 
     mod peer_messages {
+        use neptune_primitives::block_height::BlockHeight;
+
         use super::*;
-        use crate::api::export::BlockHeight;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

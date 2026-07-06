@@ -22,7 +22,7 @@ use neptune_primitives::network::Network;
 ///
 /// ```
 /// use neptune_cash::api::export::Args;
-/// use neptune_cash::api::export::TransactionProofType;
+/// use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 ///
 /// let args = Args::default();
@@ -35,10 +35,10 @@ use neptune_primitives::network::Network;
 /// Example: (setting all fields)
 ///
 /// ```
-/// use neptune_cash::api::export::TritonVmJobPriority;
-/// use neptune_cash::api::export::Network;
-/// use neptune_cash::api::export::TxProvingCapability;
-/// use neptune_cash::api::export::TransactionProofType;
+/// use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+/// use neptune_primitives::network::Network;
+/// use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+/// use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 ///
 /// let (_tx, cancel_job_rx) = tokio::sync::watch::channel(());
@@ -80,7 +80,7 @@ impl TritonVmProofJobOptionsBuilder {
     ///
     /// ```
     /// use neptune_cash::api::export::Args;
-    /// use neptune_cash::api::export::TransactionProofType;
+    /// use neptune_consensus::transaction::transaction_proof::TransactionProofType;
     /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
     ///
     /// let args = Args::default();
@@ -126,8 +126,8 @@ impl TritonVmProofJobOptionsBuilder {
     /// Example:
     ///
     /// ```
-    /// use neptune_cash::api::export::TransactionDetails;
-    /// use neptune_cash::api::export::TransactionProof;
+    /// use neptune_wallet::transaction_details::TransactionDetails;
+    /// use neptune_consensus::transaction::transaction_proof::TransactionProof;
     /// use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
     /// use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;

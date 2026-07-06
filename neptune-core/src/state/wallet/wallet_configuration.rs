@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use neptune_primitives::data_directory::DataDirectory;
 use neptune_primitives::network::Network;
+use neptune_wallet::scan_mode_configuration::ScanModeConfiguration;
+use neptune_wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
+use neptune_wallet::wallet_file::WALLET_OUTGOING_SECRETS_FILE_NAME;
 use tracing::info;
 
-use super::scan_mode_configuration::ScanModeConfiguration;
-use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
-use super::wallet_file::WALLET_OUTGOING_SECRETS_FILE_NAME;
 use crate::application::config::cli_args;
 
 /// Configuration options for [`WalletState`](super::wallet_state::WalletState).

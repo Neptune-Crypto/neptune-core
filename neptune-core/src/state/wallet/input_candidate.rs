@@ -3,10 +3,10 @@
 use std::ops::Deref;
 
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::api::export::BlockHeight;
 use crate::state::wallet::wallet_status::SyncedUtxo;
 
 /// Represents a potential transaction input UTXO.

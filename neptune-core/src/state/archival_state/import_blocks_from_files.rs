@@ -118,10 +118,10 @@ impl ArchivalState {
 #[cfg(test)]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_primitives::network::Network;
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::application::config::cli_args;
     use crate::state::archival_state::tests::make_test_archival_state;
     use crate::tests::shared::blocks::invalid_empty_blocks;

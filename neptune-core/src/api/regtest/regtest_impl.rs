@@ -1,13 +1,13 @@
 use neptune_consensus::block::Block;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
 use tasm_lib::prelude::Digest;
 use tracing::info;
 
 use super::error::RegTestError;
-use crate::api::export::Timestamp;
 use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
 use crate::protocol::shared::SIZE_20MB_IN_BYTES;
 use crate::state::mining::block_proposal::BlockProposal;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 

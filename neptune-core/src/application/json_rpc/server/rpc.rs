@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
+use neptune_primitives::timestamp::Timestamp;
 use neptune_rpc_api::api::ops::Namespace;
 use tokio::sync::mpsc;
 use tracing::error;
 use tracing::warn;
 
-use crate::api::export::Timestamp;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::state::GlobalStateLock;
 
@@ -108,19 +108,19 @@ mod tests {
     use std::sync::Arc;
 
     use macro_rules_attr::apply;
+    use neptune_primitives::network::Network;
     use neptune_rpc_api::api::ops::Namespace;
     use neptune_rpc_api::api::ops::RpcMethods;
     use neptune_rpc_api::api::server::router::RpcRouter;
     use neptune_rpc_api::model::json::JsonError;
     use neptune_rpc_api::model::json::JsonResponse;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use serde_json::json;
 
-    use crate::api::export::Network;
     use crate::application::config::cli_args;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::application::json_rpc::server::service::tests::test_rpc_server;
     use crate::application::json_rpc::server::service::tests::test_rpc_server_with_cli_args;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
 

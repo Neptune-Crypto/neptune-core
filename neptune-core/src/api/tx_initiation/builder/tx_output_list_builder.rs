@@ -7,14 +7,14 @@
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::transaction_output::TxOutputList;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::api::export::Timestamp;
-use crate::state::wallet::address::ReceivingAddress;
-use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::transaction_output::TxOutputList;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::StateLock;
 use crate::WalletState;
 

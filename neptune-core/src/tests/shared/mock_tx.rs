@@ -3,38 +3,38 @@ use neptune_consensus::block::block_transaction::BlockOrRegularTransaction;
 use neptune_consensus::block::block_transaction::BlockTransaction;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
 use neptune_consensus::transaction::test_helpers::make_mock_transaction;
 use neptune_consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::validity::single_proof::single_proof_claim;
 use neptune_consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
+use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_wallet::wallet_entropy::WalletEntropy;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::bfe;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::ChangePolicy;
 use crate::api::export::InputSelectionPriority;
-use crate::api::export::KeyType;
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::Network;
 use crate::api::export::OutputFormat;
-use crate::api::export::Timestamp;
-use crate::api::export::Transaction;
-use crate::api::export::TxProvingCapability;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::application::config::cli_args;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
-use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::GlobalStateLock;
 use crate::state::StateLock;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -99,7 +99,7 @@ pub(crate) fn make_mock_block_transaction_with_mutator_set_hash(
 /// scenes, this method updates the true claims cache, such that the call to
 /// `triton_vm::verify` will be by-passed.
 pub(super) async fn fake_create_transaction_from_details_for_tests(
-    transaction_details: crate::api::export::TransactionDetails,
+    transaction_details: neptune_wallet::transaction_details::TransactionDetails,
     consensus_rule_set: ConsensusRuleSet,
 ) -> Transaction {
     let kernel = transaction_details.primitive_witness().kernel;

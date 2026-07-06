@@ -10,6 +10,7 @@ use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::Block;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::transaction::utxo_triple::UtxoTriple;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_schema::DbtVec;
 use neptune_database::storage::storage_schema::RustyKey;
@@ -24,6 +25,20 @@ use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::data_directory::DataDirectory;
 use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::elliptic_curve_hybrid;
+use neptune_wallet::address::generation_address;
+use neptune_wallet::address::symmetric_key;
+use neptune_wallet::address::viewing_address;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::incoming_utxo::IncomingUtxo;
+use neptune_wallet::incoming_utxo::IncomingUtxoRecoveryData;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::transaction_output::UtxoUnlocker;
+use neptune_wallet::wallet_entropy::WalletEntropy;
+use neptune_wallet::wallet_file::WalletFileContext;
 use strum::IntoEnumIterator;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Tip5;
@@ -39,21 +54,10 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
-use super::address::generation_address;
-use super::address::symmetric_key;
-use super::address::KeyType;
-use super::address::SpendingKey;
-use super::expected_utxo::ExpectedUtxo;
-use super::expected_utxo::UtxoNotifier;
-use super::incoming_utxo::IncomingUtxo;
-use super::incoming_utxo::IncomingUtxoRecoveryData;
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::sent_transaction::SentTransaction;
 use super::wallet_configuration::WalletConfiguration;
-use super::wallet_entropy::WalletEntropy;
-use super::wallet_file::WalletFileContext;
 use super::wallet_status::WalletStatus;
-use crate::api::export::UtxoTriple;
 use crate::application::config::cli_args::Args;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::loops::channel::ClaimUtxoData;
@@ -63,14 +67,10 @@ use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::utxo_validitor::UtxoValidator;
-use crate::state::wallet::address::elliptic_curve_hybrid;
-use crate::state::wallet::address::viewing_address;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::rusty_wallet_database::WalletDbConnectError;
-use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::transaction_output::UtxoUnlocker;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::wallet_status::IncomingMempoolUtxo;
 use crate::state::wallet::wallet_status::OutgoingMempoolUtxo;
@@ -2226,7 +2226,12 @@ pub(crate) mod tests {
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use neptune_consensus::transaction::utxo::Coin;
     use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+    use neptune_consensus::transaction::Transaction;
     use neptune_primitives::network::Network;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::expected_utxo::ExpectedUtxo;
+    use neptune_wallet::transaction_output::TxOutput;
+    use neptune_wallet::utxo_notification::UtxoNotificationMedium;
     use num_traits::Zero;
     use rand::prelude::*;
     use rand::random;
@@ -2235,14 +2240,9 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::Transaction;
     use crate::api::tx_initiation::initiator::TransactionInitiator;
     use crate::application::config::cli_args;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::expected_utxo::ExpectedUtxo;
-    use crate::state::wallet::transaction_output::TxOutput;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::GlobalStateLock;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
@@ -3517,6 +3517,8 @@ pub(crate) mod tests {
         use generation_address::GenerationReceivingAddress;
         use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
         use neptune_primitives::block_height::BlockHeight;
+        use neptune_wallet::address::ReceivingAddress;
+        use neptune_wallet::utxo_notification::UtxoNotificationMedium;
         use num_traits::CheckedSub;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
@@ -3524,8 +3526,6 @@ pub(crate) mod tests {
         use super::*;
         use crate::application::config::cli_args;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
-        use crate::state::wallet::address::ReceivingAddress;
-        use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         /// basic test for confirmed and unconfirmed balance.
@@ -4457,6 +4457,7 @@ pub(crate) mod tests {
 
         use neptune_consensus::transaction::test_helpers::txkernel;
         use neptune_primitives::block_height::BlockHeight;
+        use neptune_wallet::utxo_notification::UtxoNotificationPayload;
         use proptest::collection;
         use proptest::prelude::any;
         use proptest_arbitrary_interop::arb;
@@ -4464,7 +4465,6 @@ pub(crate) mod tests {
         use super::*;
         use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-        use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::files::unit_test_data_directory;
 
         const NUM_FUTURE_KEYS: usize = 20;

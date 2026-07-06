@@ -2,10 +2,10 @@ use futures::pin_mut;
 use itertools::Itertools;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;
 use neptune_database::storage::storage_vec::traits::*;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::transaction_output::TxOutputList;
 
 use crate::state::wallet::sent_transaction::SentTransaction;
-use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::wallet::wallet_db_tables::WalletDbTables;
 
 // migrates wallet db with schema-version v0 to v1.
@@ -71,12 +71,12 @@ mod migration {
 
     pub mod schema_v0 {
         use neptune_consensus::transaction::utxo::Utxo;
+        use neptune_wallet::utxo_notification::UtxoNotificationMethod;
         use serde::Deserialize;
         use serde::Serialize;
         use tasm_lib::prelude::Digest;
 
         use crate::state::wallet::sent_transaction::AoclLeafIndex;
-        use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
         use crate::state::NativeCurrencyAmount;
         use crate::state::Timestamp;
 
@@ -141,6 +141,7 @@ mod migration {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_database::storage::storage_schema::traits::StorageWriter;
     use neptune_database::storage::storage_schema::DbtSingleton;
     use neptune_database::storage::storage_schema::DbtVec;
@@ -148,14 +149,13 @@ mod tests {
     use neptune_database::storage::storage_schema::RustyValue;
     use neptune_database::NeptuneLevelDb;
     use neptune_primitives::network::Network;
+    use neptune_wallet::utxo_notification::UtxoNotificationMethod;
     use num_traits::Zero;
     use tasm_lib::prelude::Digest;
 
     use super::*;
-    use crate::api::export::NativeCurrencyAmount;
     use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
     use crate::state::Timestamp;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;

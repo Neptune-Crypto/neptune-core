@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use neptune_consensus::block::Block;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
 use rand::rng;
 use rand::RngCore;
 use tokio::fs;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::Network;
 use crate::application::loops::sync_loop::SynchronizationBitMask;
 
 /// The state of a rapid block download process.

@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use neptune_cash::api::export::KeyType;
-use neptune_cash::api::export::Network;
-use neptune_cash::api::export::ReceivingAddress;
+use neptune_primitives::network::Network;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
 
 use crate::parser::abbreviated_address::AbbreviatedAddress;
 

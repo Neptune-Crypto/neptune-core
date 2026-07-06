@@ -14,13 +14,13 @@ use itertools::Itertools;
 use libp2p::swarm::SwarmEvent;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_primitives::network::Network;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-use crate::api::export::Network;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;

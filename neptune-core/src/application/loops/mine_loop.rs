@@ -32,6 +32,9 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::difficulty_control;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutputList;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use rand::rngs::StdRng;
@@ -58,9 +61,6 @@ use crate::application::loops::mine_loop::guesser_configuration::GuessingConfigu
 use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
 use crate::protocol::shared::SIZE_20MB_IN_BYTES;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
-use crate::state::transaction::transaction_details::TransactionDetails;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::GlobalStateLock;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
@@ -1094,6 +1094,12 @@ pub(crate) mod tests {
     use neptune_primitives::mast_hash::MastHash;
     use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::address::generation_address::GenerationSpendingKey;
+    use neptune_wallet::address::symmetric_key::SymmetricKey;
+    use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::transaction_output::TxOutput;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_bigint::BigUint;
     use num_traits::One;
     use num_traits::Pow;
@@ -1101,8 +1107,6 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::GenerationSpendingKey;
-    use crate::api::export::ReceivingAddress;
     use crate::application::config::cli_args;
     use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
     use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
@@ -1112,10 +1116,6 @@ pub(crate) mod tests {
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::mining::mining_status::MiningStatus;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::address::symmetric_key::SymmetricKey;
-    use crate::state::wallet::transaction_output::TxOutput;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::state::GlobalState;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::dummy_expected_utxo;

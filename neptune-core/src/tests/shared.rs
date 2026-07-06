@@ -22,6 +22,10 @@ use neptune_database::storage::storage_vec::traits::StorageVecBase;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutputList;
 use num_traits::Zero;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
@@ -31,13 +35,9 @@ use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use tracing::warn;
 
-use crate::api::export::TransactionDetails;
-use crate::api::export::TxOutputList;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::protocol::peer::PeerMessage;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::wallet_state::WalletState;
 
 pub mod blocks;
@@ -173,7 +173,7 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
 }
 
 pub(crate) async fn mock_genesis_wallet_state(
-    wallet_entropy: crate::state::wallet::wallet_entropy::WalletEntropy,
+    wallet_entropy: neptune_wallet::wallet_entropy::WalletEntropy,
     cli_args: &crate::application::config::cli_args::Args,
 ) -> WalletState {
     let data_dir = unit_test_data_directory(cli_args.network).unwrap();

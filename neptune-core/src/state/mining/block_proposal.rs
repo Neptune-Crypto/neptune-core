@@ -2,10 +2,9 @@ use std::fmt;
 
 use neptune_consensus::block::Block;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
 use tasm_lib::prelude::Digest;
-
-use crate::api::export::BlockHeight;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
 
 /// A proposed block to extend the block chain with.
 ///

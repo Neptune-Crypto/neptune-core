@@ -1,23 +1,11 @@
-pub use neptune_wallet::address;
-pub use neptune_wallet::change_policy;
-pub use neptune_wallet::coin_with_possible_timelock;
-pub use neptune_wallet::expected_utxo;
-pub use neptune_wallet::incoming_utxo;
 pub mod input_candidate;
 pub(crate) mod migrate_db;
 pub(crate) mod monitored_utxo;
 pub(crate) mod monitored_utxo_state;
 pub(crate) mod rusty_wallet_database;
-pub(crate) use neptune_wallet::scan_mode_configuration;
-pub use neptune_wallet::secret_key_material;
 pub mod sent_transaction;
-pub use neptune_wallet::transaction_output;
-pub use neptune_wallet::unlocked_utxo;
-pub use neptune_wallet::utxo_notification;
 pub(crate) mod wallet_configuration;
 pub(crate) mod wallet_db_tables;
-pub use neptune_wallet::wallet_entropy;
-pub use neptune_wallet::wallet_file;
 pub mod wallet_state;
 pub mod wallet_status;
 
@@ -30,7 +18,6 @@ pub const MAX_DERIVATION_INDEX_BUMP: u64 = 100_u64;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use expected_utxo::ExpectedUtxo;
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use neptune_consensus::block::block_transaction::BlockTransaction;
@@ -42,11 +29,19 @@ mod tests {
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::transaction::lock_script::LockScript;
     use neptune_consensus::transaction::utxo::Utxo;
+    use neptune_consensus::transaction::Transaction;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_database::storage::storage_vec::traits::*;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
+    use neptune_wallet::address::SpendingKey;
+    use neptune_wallet::expected_utxo::ExpectedUtxo;
+    use neptune_wallet::expected_utxo::UtxoNotifier;
+    use neptune_wallet::secret_key_material::SecretKeyMaterial;
+    use neptune_wallet::transaction_output::TxOutput;
+    use neptune_wallet::transaction_output::TxOutputList;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::random;
@@ -60,18 +55,10 @@ mod tests {
     use tasm_lib::twenty_first::math::x_field_element::EXTENSION_DEGREE;
     use tracing_test::traced_test;
 
-    use super::*;
-    use crate::api::export::SpendingKey;
-    use crate::api::export::Transaction;
     use crate::application::config::cli_args;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::expected_utxo::UtxoNotifier;
-    use crate::state::wallet::secret_key_material::SecretKeyMaterial;
-    use crate::state::wallet::transaction_output::TxOutput;
-    use crate::state::wallet::transaction_output::TxOutputList;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::state::GlobalStateLock;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -83,25 +70,25 @@ mod tests {
     mod can_spend {
         use neptune_consensus::block::Block;
         use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
+        use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
         use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use neptune_primitives::network::Network;
         use neptune_primitives::timestamp::Timestamp;
+        use neptune_wallet::address::elliptic_curve_hybrid::EcHybridAddress;
+        use neptune_wallet::address::KeyType;
+        use neptune_wallet::change_policy::ChangePolicy;
+        use neptune_wallet::wallet_entropy::WalletEntropy;
         use num_traits::CheckedSub;
         use strum::IntoEnumIterator;
         use tasm_lib::prelude::Digest;
         use tracing_test::traced_test;
 
-        use crate::api::export::ChangePolicy;
         use crate::api::export::InputSelectionPriority;
         use crate::api::export::OutputFormat;
-        use crate::api::export::TxProvingCapability;
-        use crate::api::export::WalletEntropy;
         use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
         use crate::api::tx_initiation::builder::input_selector::SortOrder;
         use crate::application::config::cli_args;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
-        use crate::state::wallet::address::elliptic_curve_hybrid::EcHybridAddress;
-        use crate::state::wallet::address::KeyType;
         use crate::tests::consensus_integration::consensus_rule_set::tx_with_n_outputs;
         use crate::tests::shared::blocks::next_block;
         use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -217,9 +204,9 @@ mod tests {
     mod wallet_file {
         use neptune_primitives::data_directory::DataDirectory;
         use neptune_primitives::network::Network;
+        use neptune_wallet::wallet_entropy::WalletEntropy;
+        use neptune_wallet::wallet_file::WalletFileContext;
 
-        use crate::state::wallet::wallet_entropy::WalletEntropy;
-        use crate::state::wallet::wallet_file::WalletFileContext;
         use crate::tests::shared::files::unit_test_data_directory;
 
         #[should_panic(expected = "This function may not overwrite existing seed found in")]
@@ -248,16 +235,16 @@ mod tests {
         use neptune_consensus::transaction::utxo::Utxo;
         use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use neptune_primitives::network::Network;
+        use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+        use neptune_wallet::address::KeyType;
+        use neptune_wallet::transaction_output::TxOutput;
+        use neptune_wallet::utxo_notification::UtxoNotificationMedium;
+        use neptune_wallet::utxo_notification::UtxoNotificationMethod;
+        use neptune_wallet::wallet_entropy::WalletEntropy;
         use rand::Rng;
         use tasm_lib::prelude::Digest;
 
         use crate::application::config::cli_args;
-        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-        use crate::state::wallet::address::KeyType;
-        use crate::state::wallet::transaction_output::TxOutput;
-        use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
-        use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
-        use crate::state::wallet::wallet_entropy::WalletEntropy;
         use crate::tests::shared::globalstate::mock_genesis_global_state;
         use crate::tests::shared_tokio_runtime;
 
@@ -1270,9 +1257,10 @@ mod tests {
     mod wallet_balance {
         use std::collections::HashMap;
 
+        use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+
         use super::*;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
-        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -1574,7 +1562,7 @@ mod tests {
         }
 
         mod worker {
-            use crate::state::wallet::address::generation_address;
+            use neptune_wallet::address::generation_address;
 
             // provides the set of indexes to derive keys at
             pub fn known_key_indexes() -> [u64; 13] {

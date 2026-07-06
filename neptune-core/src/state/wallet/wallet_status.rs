@@ -3,7 +3,10 @@ use std::collections::HashSet;
 use itertools::Itertools;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -13,9 +16,6 @@ use strum::EnumIter;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 
-use crate::api::export::AbsoluteIndexSet;
-use crate::api::export::AdditionRecord;
-use crate::api::export::BlockHeight;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

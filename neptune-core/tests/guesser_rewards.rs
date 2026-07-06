@@ -2,9 +2,9 @@ mod common;
 
 use common::genesis_node::GenesisNode;
 use common::logging;
-use neptune_cash::api::export::Network;
-use neptune_cash::api::export::ReceivingAddress;
-use neptune_cash::api::export::Timestamp;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::ReceivingAddress;
 use num_traits::Zero;
 
 #[tokio::test(flavor = "multi_thread")]

@@ -165,6 +165,7 @@ impl HandshakeData {
 pub(crate) mod test {
     use std::time::Duration;
 
+    use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::difficulty_control::Difficulty;
     use proptest::collection::vec;
     use proptest::prelude::BoxedStrategy;
@@ -174,7 +175,6 @@ pub(crate) mod test {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::api::export::BlockHeight;
 
     impl VersionString {
         /// Generate a version string that is guaranteed to parse correctly.

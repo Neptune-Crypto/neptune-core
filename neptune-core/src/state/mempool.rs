@@ -29,10 +29,14 @@ use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_primitives::timestamp::Timestamp;
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
@@ -62,10 +66,6 @@ use tracing::debug;
 use tracing::error;
 use tracing::warn;
 
-use crate::api::export::AdditionRecord;
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::NeptuneProof;
-use crate::api::export::TransactionProofType;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
 use crate::protocol::peer::transfer_transaction::TransactionProofQualityExt;
@@ -1474,6 +1474,10 @@ mod tests {
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::network::Network;
+    use neptune_wallet::expected_utxo::UtxoNotifier;
+    use neptune_wallet::transaction_output::TxOutput;
+    use neptune_wallet::transaction_output::TxOutputList;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_bigint::BigInt;
     use num_traits::One;
     use num_traits::Zero;
@@ -1494,10 +1498,6 @@ mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::protocol::shared::SIZE_20MB_IN_BYTES;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::expected_utxo::UtxoNotifier;
-    use crate::state::wallet::transaction_output::TxOutput;
-    use crate::state::wallet::transaction_output::TxOutputList;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::state::GlobalStateLock;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;

@@ -2,9 +2,9 @@ use macro_rules_attr::apply;
 use neptune_consensus::block::Block;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::transaction_details::TransactionDetails;
 use tracing_test::traced_test;
 
-use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::tests::shared_tokio_runtime;
 
 #[traced_test]

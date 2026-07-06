@@ -11,13 +11,13 @@ use neptune_consensus::type_scripts::native_currency::NativeCurrency;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutputList;
+use neptune_wallet::unlocked_utxo::TxInputs;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::isa::error::AssertionError;
 use tracing_test::traced_test;
 
-use crate::api::export::TxInputs;
-use crate::api::export::TxOutputList;
-use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::tests::shared_tokio_runtime;
 
 #[traced_test]

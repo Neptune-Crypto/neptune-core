@@ -90,17 +90,17 @@ pub(super) mod migration {
         use neptune_database::storage::storage_schema::DbtVec;
         use neptune_database::storage::storage_schema::SimpleRustyStorage;
         use neptune_database::storage::storage_vec::Index;
+        use neptune_mutator_set::addition_record::AdditionRecord;
         use neptune_mutator_set::commit;
         use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
         use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+        use neptune_primitives::block_height::BlockHeight;
+        use neptune_wallet::expected_utxo::ExpectedUtxo;
         use serde::Deserialize;
         use serde::Serialize;
         use tasm_lib::prelude::Digest;
         use tasm_lib::prelude::Tip5;
 
-        use crate::api::export::AdditionRecord;
-        use crate::api::export::BlockHeight;
-        use crate::state::wallet::expected_utxo::ExpectedUtxo;
         use crate::state::wallet::sent_transaction::SentTransaction;
         use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
         use crate::state::Timestamp;
@@ -223,9 +223,9 @@ pub(super) mod migration {
 mod tests {
     use macro_rules_attr::apply;
     use neptune_database::NeptuneLevelDb;
+    use neptune_primitives::network::Network;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::tests::shared::files::unit_test_data_directory;

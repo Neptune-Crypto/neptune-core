@@ -3,18 +3,18 @@ mod common;
 use common::genesis_node::GenesisNode;
 use common::logging;
 use itertools::Itertools;
-use neptune_cash::api::export::BlockHeight;
-use neptune_cash::api::export::KeyType;
-use neptune_cash::api::export::NativeCurrencyAmount;
-use neptune_cash::api::export::Network;
-use neptune_cash::api::export::ReceivingAddress;
-use neptune_cash::api::export::Timestamp;
-use neptune_cash::api::export::TransactionProofType;
 use neptune_cash::api::tx_initiation::consolidate::CONSOLIDATION_FEE_SP;
 use neptune_cash::api::tx_initiation::consolidate::NUM_CONFIRMATIONS_REQUIRED_FOR_CONSOLIDATION;
-use neptune_cash::state::wallet::address::viewing_address::ViewingAddressKey;
 use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::viewing_address::ViewingAddressKey;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
 use num_traits::ops::checked::CheckedSub;
 use num_traits::Zero;
 use tasm_lib::twenty_first::tip5::Digest;
@@ -28,7 +28,7 @@ async fn wallet_with_mining_rewards(num_blocks: u32, test_id: u8) -> (GenesisNod
 
     let mut base_args = GenesisNode::default_args().await;
     base_args.tx_proving_capability =
-        Some(neptune_cash::api::export::TxProvingCapability::SingleProof);
+        Some(neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability::SingleProof);
 
     let [mut alice, bob] = GenesisNode::start_connected_cluster(
         &GenesisNode::cluster_id(Some(test_id)),

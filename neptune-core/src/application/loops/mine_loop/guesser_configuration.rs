@@ -1,7 +1,6 @@
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::ReceivingAddress;
 use rand::rngs::StdRng;
-
-use crate::api::export::ReceivingAddress;
-use crate::api::export::Timestamp;
 
 /// Information related to guessing.
 #[derive(Debug, Clone)]

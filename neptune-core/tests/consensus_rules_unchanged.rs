@@ -6,14 +6,14 @@ use std::path::PathBuf;
 
 use common::logging;
 use itertools::Itertools;
-use neptune_cash::api::export::BlockHeight;
-use neptune_cash::api::export::NativeCurrencyAmount;
-use neptune_cash::api::export::Network;
-use neptune_cash::api::export::Timestamp;
 use neptune_cash::state::archival_state::ArchivalState;
 use neptune_consensus::block::validity::block_program::BlockProgram;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tracing::info;

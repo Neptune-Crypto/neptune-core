@@ -1,10 +1,10 @@
 pub mod multiaddr;
 
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use num_traits::Zero;
 use sysinfo::System;
 
 use super::cli_args::Args;
-use crate::api::export::TxProvingCapability;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub(crate) enum CliArgsParseError {

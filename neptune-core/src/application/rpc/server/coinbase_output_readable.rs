@@ -1,10 +1,10 @@
 use anyhow::Ok;
 use anyhow::Result;
+use neptune_primitives::network::Network;
+use neptune_wallet::address::ReceivingAddress;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::api::export::Network;
-use crate::api::export::ReceivingAddress;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
 
 /// Data structure to avoid the default JSON encoding of addresses and instead
@@ -30,9 +30,10 @@ impl CoinbaseOutputReadable {
 
 #[cfg(test)]
 mod tests {
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
+
     use super::*;
-    use crate::api::export::KeyType;
-    use crate::api::export::WalletEntropy;
 
     impl CoinbaseOutputReadable {
         pub(crate) fn new(fraction_in_promille: u32, recipient: String, timelocked: bool) -> Self {

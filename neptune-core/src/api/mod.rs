@@ -20,7 +20,7 @@
 //! use neptune_cash::api::export;
 //! use export::GlobalStateLock;
 //! use export::Args;
-//! use export::Timestamp;
+//! use neptune_primitives::timestamp::Timestamp;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {

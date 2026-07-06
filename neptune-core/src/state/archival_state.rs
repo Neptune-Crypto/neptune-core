@@ -39,6 +39,8 @@ use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_MAIN;
 use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_TESTNET_0;
 use neptune_consensus::transaction::lock_script::LockScript;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::create_db_if_missing;
 use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::NeptuneLevelDb;
@@ -53,13 +55,11 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
 use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::network::Network;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
 use crate::api::export::Args;
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::Network;
-use crate::api::export::Utxo;
 use crate::state::archival_state::rusty_utxo_index::RustyUtxoIndex;
 use crate::state::database::BlockFileLocation;
 use crate::state::database::BlockIndexKey;
@@ -2423,6 +2423,11 @@ pub(super) mod tests {
     use neptune_primitives::data_directory::DataDirectory;
     use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::expected_utxo::UtxoNotifier;
+    use neptune_wallet::transaction_output::TxOutput;
+    use neptune_wallet::transaction_output::TxOutputList;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use proptest::collection;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -2440,11 +2445,6 @@ pub(super) mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::archival_state::ArchivalState;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::address::KeyType;
-    use crate::state::wallet::expected_utxo::UtxoNotifier;
-    use crate::state::wallet::transaction_output::TxOutput;
-    use crate::state::wallet::transaction_output::TxOutputList;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::block_with_puts;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
@@ -5313,7 +5313,7 @@ pub(super) mod tests {
         #[traced_test]
         #[test_strategy::proptest(async = "tokio", cases = 3)]
         async fn find_canonical_block_with_input_genesis_block_test(
-            #[strategy(crate::tests::shared::strategies::absindset())]
+            #[strategy(neptune_mutator_set::strategies::absindset())]
             random_index_set: AbsoluteIndexSet,
         ) {
             let network = Network::Main;

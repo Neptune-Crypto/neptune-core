@@ -1,12 +1,11 @@
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutputList;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
-
-use crate::state::transaction::transaction_details::TransactionDetails;
-use crate::state::wallet::transaction_output::TxOutputList;
 
 pub(crate) type AoclLeafIndex = u64;
 

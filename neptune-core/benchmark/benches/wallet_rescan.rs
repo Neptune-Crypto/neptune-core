@@ -1,16 +1,16 @@
 use divan::Bencher;
 use itertools::Itertools;
-use neptune_cash::api::export::BlockHeight;
-use neptune_cash::api::export::KeyType;
-use neptune_cash::api::export::Network;
-use neptune_cash::api::export::Timestamp;
 use neptune_cash::application::config::cli_args;
 use neptune_cash::bench_helpers::devops_global_state_genesis;
 use neptune_cash::bench_helpers::extract_expected_utxos;
 use neptune_cash::bench_helpers::next_block_empty;
 use neptune_cash::bench_helpers::next_block_incoming_utxos;
-use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_consensus::block::Block;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 
 fn main() {
     divan::main();

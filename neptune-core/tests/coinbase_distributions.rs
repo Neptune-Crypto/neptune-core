@@ -2,11 +2,11 @@ mod common;
 
 use common::genesis_node::GenesisNode;
 use common::logging;
-use neptune_cash::api::export::NativeCurrencyAmount;
-use neptune_cash::api::export::ReceivingAddress;
-use neptune_cash::api::export::Timestamp;
 use neptune_cash::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use neptune_cash::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::ReceivingAddress;
 use rand::Rng;
 
 // #[traced_test]

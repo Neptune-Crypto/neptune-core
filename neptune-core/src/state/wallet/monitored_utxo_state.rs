@@ -1,4 +1,4 @@
-use crate::api::export::BlockHeight;
+use neptune_primitives::block_height::BlockHeight;
 
 pub(crate) enum MonitoredUtxoState {
     SyncedAndUnspent,

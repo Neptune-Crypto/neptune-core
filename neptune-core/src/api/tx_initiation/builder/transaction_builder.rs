@@ -5,9 +5,9 @@
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
+use neptune_wallet::transaction_details::TransactionDetails;
 
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::state::transaction::transaction_details::TransactionDetails;
 
 /// a builder for [Transaction]
 ///

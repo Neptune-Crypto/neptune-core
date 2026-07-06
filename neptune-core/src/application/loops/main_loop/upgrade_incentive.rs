@@ -1,4 +1,4 @@
-use crate::api::export::NativeCurrencyAmount;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// The magnitude of the incentive to perform a transaction upgrade.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

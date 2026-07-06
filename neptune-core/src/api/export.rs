@@ -2,47 +2,15 @@
 //!
 //! They are exported here in one location for convenience.
 
-pub use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
-pub use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
-pub use neptune_consensus::transaction::announcement::Announcement;
-pub use neptune_consensus::transaction::primitive_witness::WitnessValidationError;
-pub use neptune_consensus::transaction::transaction_proof::TransactionProof;
-pub use neptune_consensus::transaction::transaction_proof::TransactionProofType;
-pub use neptune_consensus::transaction::transparent_input::TransparentInput;
-pub use neptune_consensus::transaction::transparent_transaction_info::TransparentTransactionInfo;
-pub use neptune_consensus::transaction::utxo::Utxo;
-pub use neptune_consensus::transaction::utxo_triple::UtxoTriple;
-pub use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
-pub use neptune_consensus::transaction::Transaction;
-pub use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-pub use neptune_mutator_set::addition_record::AdditionRecord;
-pub use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-pub use neptune_primitives::block_height::BlockHeight;
-pub use neptune_primitives::network::Network;
-pub use neptune_primitives::timestamp::Timestamp;
-
 pub use crate::api::tx_initiation::builder::input_selector::InputSelectionPriority;
 pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 pub use crate::api::tx_initiation::consolidate::ConsolidationError;
 pub use crate::api::wallet::WalletBalances;
 pub use crate::application::config::cli_args::Args;
-pub use crate::state::transaction::transaction_details::TransactionDetails;
 pub use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 pub use crate::state::transaction::transaction_kernel_id::Txid;
 pub use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
-pub use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
-pub use crate::state::wallet::address::generation_address::GenerationSpendingKey;
-pub use crate::state::wallet::address::symmetric_key::SymmetricKey;
-pub use crate::state::wallet::address::KeyType;
-pub use crate::state::wallet::address::ReceivingAddress;
-pub use crate::state::wallet::address::SpendingKey;
-pub use crate::state::wallet::change_policy::ChangePolicy;
 pub use crate::state::wallet::input_candidate::InputCandidate;
-pub use crate::state::wallet::transaction_output::TxOutputList;
-pub use crate::state::wallet::unlocked_utxo::TxInputs;
-pub use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
-pub use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
-pub use crate::state::wallet::wallet_entropy::WalletEntropy;
 pub use crate::state::GlobalStateLock;
 pub use crate::state::RecordTransactionError;
 pub use crate::state::StateLock;

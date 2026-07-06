@@ -9,7 +9,11 @@ use itertools::Itertools;
 use neptune_consensus::block::Block;
 use neptune_consensus::block::FUTUREDATING_LIMIT;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::transaction_proof::TransactionProof;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_vec::traits::StorageVecStream;
+use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_primitives::block_selector::BlockSelector;
 use neptune_rpc_api::api::rpc::*;
@@ -29,20 +33,18 @@ use neptune_rpc_api::model::wallet::personal_history::InitiatedTransactionOutput
 use neptune_rpc_api::model::wallet::personal_history::ReceivedTransactionOutput;
 use neptune_rpc_api::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
 use neptune_rpc_api::model::wallet::transaction::RpcPrivateNotificationData;
+use neptune_wallet::address::announcement_flag::AnnouncementFlag;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use tasm_lib::prelude::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
 
-use crate::api::export::AdditionRecord;
-use crate::api::export::AnnouncementFlag;
-use crate::api::export::ChangePolicy;
 use crate::api::export::InputSelectionPriority;
-use crate::api::export::KeyType;
-use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::OutputFormat;
-use crate::api::export::ReceivingAddress;
-use crate::api::export::Transaction;
-use crate::api::export::TransactionProof;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
@@ -51,8 +53,6 @@ use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
-use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 
@@ -519,7 +519,7 @@ impl RpcApi for RpcServer {
         &self,
         request: ValidateAddressRequest,
     ) -> RpcResult<ValidateAddressResponse> {
-        use crate::state::wallet::address::ReceivingAddress;
+        use neptune_wallet::address::ReceivingAddress;
 
         let network = self.state.cli().network;
         let Some(addr) = ReceivingAddress::from_bech32m(&request.address_string, network).ok()
@@ -1819,13 +1819,19 @@ pub mod tests {
     use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
     use neptune_consensus::block::PREMINE_MAX_SIZE;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+    use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::transaction::announcement::Announcement;
     use neptune_consensus::transaction::test_helpers::txkernel;
+    use neptune_consensus::transaction::utxo::Utxo;
     use neptune_consensus::transaction::Transaction;
     use neptune_consensus::transaction::TransactionProof;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::shared::NUM_TRIALS;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+    use neptune_primitives::network::Network;
+    use neptune_primitives::timestamp::Timestamp;
     use neptune_rpc_api::api::ops::Namespace;
     use neptune_rpc_api::api::rpc::RpcApi;
     use neptune_rpc_api::api::rpc::RpcError;
@@ -1833,6 +1839,9 @@ pub mod tests {
     use neptune_rpc_api::model::common::RpcBlockSelector;
     use neptune_rpc_api::model::message::BlockHeightsByFlagsRequest;
     use neptune_rpc_api::model::mining::template::RpcBlockTemplate;
+    use neptune_wallet::address::announcement_flag::AnnouncementFlag;
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::Zero;
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
@@ -1841,15 +1850,7 @@ pub mod tests {
     use tasm_lib::twenty_first::bfe_vec;
     use tracing_test::traced_test;
 
-    use crate::api::export::Announcement;
-    use crate::api::export::AnnouncementFlag;
-    use crate::api::export::KeyType;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::Network;
     use crate::api::export::OutputFormat;
-    use crate::api::export::Timestamp;
-    use crate::api::export::TxProvingCapability;
-    use crate::api::export::Utxo;
     use crate::application::config::cli_args;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::application::network::arbitrary::arb_multiaddr;
@@ -1857,7 +1858,6 @@ pub mod tests {
     use crate::state::mining::block_proposal::BlockProposal;
     use crate::state::transaction::transaction_kernel_id::Txid;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::state::wallet::wallet_status::SyncedUtxo;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
@@ -2812,9 +2812,10 @@ pub mod tests {
     }
 
     mod send {
+        use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+        use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+
         use super::*;
-        use crate::api::export::UtxoTriple;
-        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -2869,9 +2870,9 @@ pub mod tests {
 
     mod history {
         use neptune_database::storage::storage_vec::traits::StorageVecBase;
+        use neptune_wallet::address::ReceivingAddress;
 
         use super::*;
-        use crate::api::export::ReceivingAddress;
 
         #[apply(shared_tokio_runtime)]
         async fn incoming_history_no_filter() {

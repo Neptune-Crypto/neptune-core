@@ -1,11 +1,11 @@
 //! provides error types related to initiating transactions.
 
 use neptune_consensus::proof_abstractions::error::CreateProofError;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::MutatorSetError;
+use neptune_primitives::block_height::BlockHeight;
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::RecordTransactionError;
 
 /// enumerates possible transaction send errors

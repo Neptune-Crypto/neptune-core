@@ -5,12 +5,11 @@ use neptune_consensus::transaction::primitive_witness::WitnessValidationError;
 use neptune_consensus::transaction::Transaction;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::utxo_notification::PrivateNotificationData;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
-
-use crate::state::transaction::transaction_details::TransactionDetails;
-use crate::state::wallet::utxo_notification::PrivateNotificationData;
 
 /// represents a [Transaction] and its corresponding [TransactionDetails]
 ///

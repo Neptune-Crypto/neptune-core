@@ -6,6 +6,8 @@ use std::time::SystemTime;
 
 use itertools::Itertools;
 use neptune_consensus::block::Block;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
 use rand::rng;
 use rand::Rng;
 use tokio::sync::mpsc;
@@ -15,8 +17,6 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::Network;
 use crate::application::loops::sync_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::MainToSync;
@@ -885,13 +885,13 @@ mod tests {
 
     use macro_rules_attr::apply;
     use neptune_consensus::block::Block;
+    use neptune_primitives::network::Network;
     use rand::rngs::StdRng;
     use rand::RngCore;
     use rand::SeedableRng;
     use tokio::sync::Mutex;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::application::loops::sync_loop::handle::SyncLoopHandle;
     use crate::tests::shared_tokio_runtime;
 

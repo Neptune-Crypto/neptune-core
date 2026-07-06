@@ -2376,6 +2376,7 @@ mod tests {
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_primitives::network::Network;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -2391,7 +2392,6 @@ mod tests {
     use crate::protocol::peer::Sanction;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_block_for_tests;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::globalstate::get_dummy_handshake_data_for_genesis;
@@ -4927,12 +4927,12 @@ mod tests {
     mod proof_qualities {
         use itertools::Itertools;
         use neptune_consensus::transaction::Transaction;
+        use neptune_wallet::transaction_output::TxOutput;
         use strum::IntoEnumIterator;
 
         use super::*;
         use crate::application::config::cli_args;
         use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
-        use crate::state::wallet::transaction_output::TxOutput;
         use crate::tests::shared::globalstate::mock_genesis_global_state;
 
         async fn tx_of_proof_quality(

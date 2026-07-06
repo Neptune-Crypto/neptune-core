@@ -1,8 +1,8 @@
 use std::ops::Add;
 
 use get_size2::GetSize;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-use crate::api::export::NativeCurrencyAmount;
 use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 
 /// Used by memory pool subscribers to indicate how interested they are in

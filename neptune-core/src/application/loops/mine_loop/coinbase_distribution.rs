@@ -2,8 +2,7 @@ use std::ops::Deref;
 
 use anyhow::ensure;
 use anyhow::Result;
-
-use crate::api::export::ReceivingAddress;
+use neptune_wallet::address::ReceivingAddress;
 
 #[derive(Debug, Clone)]
 pub struct CoinbaseOutput {
@@ -104,10 +103,10 @@ impl CoinbaseDistribution {
 
 #[cfg(test)]
 mod tests {
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
     use tasm_lib::prelude::Digest;
 
     use super::*;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 
     #[test]
     fn solo_doesnt_crash() {

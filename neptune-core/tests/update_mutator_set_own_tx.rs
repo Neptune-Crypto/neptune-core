@@ -2,12 +2,12 @@ mod common;
 
 use common::genesis_node::GenesisNode;
 use common::logging;
-use neptune_cash::api::export::BlockHeight;
-use neptune_cash::api::export::KeyType;
-use neptune_cash::api::export::NativeCurrencyAmount;
-use neptune_cash::api::export::Timestamp;
-use neptune_cash::api::export::TxProvingCapability;
 use neptune_cash::api::export::Txid;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::KeyType;
 use rand::Rng;
 use tracing_test::traced_test;
 

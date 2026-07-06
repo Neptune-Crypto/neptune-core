@@ -3,16 +3,16 @@ use neptune_database::storage::storage_schema::DbtSingleton;
 use neptune_database::storage::storage_schema::DbtVec;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;
 use neptune_database::storage::storage_vec::Index;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::unlocked_utxo::UnlockedUtxo;
 use serde::Deserialize;
 use serde::Serialize;
 use twenty_first::prelude::Digest;
 
-use super::expected_utxo::ExpectedUtxo;
 use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
-use crate::api::export::AdditionRecord;
 use crate::prelude::twenty_first;
-use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 
 /// An ID for UTXOs that defines uniqueness of a UTXO even in the case of
 /// reorganizations. In the case of reorganizations both the AOCL leaf index and

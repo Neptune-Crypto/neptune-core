@@ -4,10 +4,11 @@
 
 use std::sync::Arc;
 
-use crate::api::export::Transaction;
+use neptune_consensus::transaction::Transaction;
+use neptune_wallet::transaction_details::TransactionDetails;
+
 use crate::api::export::TxCreationArtifacts;
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::state::transaction::transaction_details::TransactionDetails;
 
 /// a builder for [TxCreationArtifacts]
 ///

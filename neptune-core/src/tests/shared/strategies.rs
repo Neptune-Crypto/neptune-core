@@ -1,20 +1,9 @@
-pub use neptune_consensus::block::arbitrary_kernel as block_with_arbkernel;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::RemovalRecord;
-// The mutator-set proptest strategies now live in the neptune-mutator-set crate;
-// re-exported here so existing `tests::shared::strategies::*` paths keep working.
-pub use neptune_mutator_set::strategies::absindset;
-pub use neptune_mutator_set::strategies::absindset_with_limit;
-pub use neptune_mutator_set::strategies::chunkdict;
-pub use neptune_mutator_set::strategies::chunkdict_with_leafs_limit;
-pub use neptune_mutator_set::strategies::mmrmembershipproof_and_index;
-pub use neptune_mutator_set::strategies::msmembershipproof;
-pub use neptune_mutator_set::strategies::removalrecord;
+use neptune_primitives::timestamp::Timestamp;
 use proptest::prelude::*;
-
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::Timestamp;
-use crate::api::export::Transaction;
 
 // TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
@@ -35,7 +24,7 @@ pub fn make_mock_transaction_with_wallet(
     )
     .prop_map(|kernel| Transaction {
         kernel,
-        proof: crate::api::export::TransactionProof::invalid(),
+        proof: neptune_consensus::transaction::transaction_proof::TransactionProof::invalid(),
     })
     .boxed()
 }

@@ -1,10 +1,10 @@
 use neptune_consensus::block::Block;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::Network;
 use crate::application::loops::sync_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::MainToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;

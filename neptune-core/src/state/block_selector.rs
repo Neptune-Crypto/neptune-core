@@ -47,11 +47,11 @@ pub mod tests {
     use neptune_consensus::transaction::Transaction;
     use neptune_consensus::transaction::TransactionProof;
     use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::network::Network;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::application::config::cli_args;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::Block;
 

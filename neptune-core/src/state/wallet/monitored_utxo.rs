@@ -44,8 +44,8 @@ pub enum MonitoredUtxoSpentStatus {
 /// The UTXO must, at one point, have  been mined, although the block in which
 /// it was mined might have been abandoned.
 ///
-/// See also: [`IncomingUtxo`](super::incoming_utxo::IncomingUtxo),
-/// [`ExpectedUtxo`](super::expected_utxo::ExpectedUtxo),
+/// See also: [`IncomingUtxo`](neptune_wallet::incoming_utxo::IncomingUtxo),
+/// [`ExpectedUtxo`](neptune_wallet::expected_utxo::ExpectedUtxo),
 /// [`MonitoredUtxo`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MonitoredUtxo {

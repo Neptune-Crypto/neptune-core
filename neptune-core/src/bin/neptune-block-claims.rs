@@ -7,13 +7,13 @@
 
 use clap::Parser;
 use itertools::Itertools;
-use neptune_cash::api::export::Network;
 use neptune_cash::application::config::cli_args;
 use neptune_cash::state::archival_state::ArchivalState;
 use neptune_consensus::block::validity::block_program::BlockProgram;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::network::Network;
 
 #[derive(Parser, Debug, Clone)]
 #[clap()]

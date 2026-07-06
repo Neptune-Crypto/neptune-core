@@ -44,6 +44,7 @@ use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -59,6 +60,20 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::data_directory::DataDirectory;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::announcement_flag::AnnouncementFlag;
+use neptune_wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+#[cfg(test)]
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::incoming_utxo::IncomingUtxo;
+use neptune_wallet::incoming_utxo::IncomingUtxoRecoveryData;
+use neptune_wallet::unlocked_utxo::TxInputs;
+use neptune_wallet::unlocked_utxo::UnlockedUtxo;
+use neptune_wallet::wallet_entropy::WalletEntropy;
+use neptune_wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -77,10 +92,6 @@ use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
 use crate::api;
-use crate::api::export::NeptuneProof;
-use crate::api::export::ReceivingAddress;
-use crate::api::export::SpendingKey;
-use crate::api::export::TxInputs;
 use crate::application::config::cli_args;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::loops::channel::ClaimUtxoData;
@@ -102,24 +113,13 @@ use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::utxo_validitor::UtxoValidator;
-use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
-use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-#[cfg(test)]
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
-use crate::state::wallet::incoming_utxo::IncomingUtxo;
-use crate::state::wallet::incoming_utxo::IncomingUtxoRecoveryData;
 use crate::state::wallet::input_candidate::InputCandidate;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
-use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
-use crate::state::wallet::wallet_entropy::WalletEntropy;
-use crate::state::wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::time_fn_call_async;
 use crate::ArchivalState;
 use crate::RPCServerToMain;
@@ -3480,6 +3480,15 @@ mod tests {
     use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
     use neptune_mutator_set::removal_record::RemovalRecord;
     use neptune_primitives::network::Network;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::address::generation_address::GenerationSpendingKey;
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::expected_utxo::UtxoNotifier;
+    use neptune_wallet::transaction_output::TxOutput;
+    use neptune_wallet::transaction_output::TxOutputList;
+    use neptune_wallet::utxo_notification::UtxoNotificationMedium;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::random;
@@ -3488,19 +3497,10 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tracing_test::traced_test;
-    use wallet::address::generation_address::GenerationSpendingKey;
-    use wallet::address::KeyType;
-    use wallet::expected_utxo::UtxoNotifier;
-    use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
-    use crate::api::export::ReceivingAddress;
-    use crate::api::export::TxOutputList;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::transaction_output::TxOutput;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_status::WalletStatusExportFormat;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::make_mock_block;
@@ -3656,9 +3656,9 @@ mod tests {
 
         use futures::future;
         use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+        use neptune_mutator_set::addition_record::AdditionRecord;
 
         use super::*;
-        use crate::api::export::AdditionRecord;
 
         /// Create 3 branches and return them in an array.
         ///

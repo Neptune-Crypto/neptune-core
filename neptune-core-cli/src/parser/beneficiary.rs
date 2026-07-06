@@ -1,13 +1,13 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use neptune_cash::api::export::NativeCurrencyAmount;
-use neptune_cash::api::export::Network;
 use neptune_cash::api::export::OutputFormat;
-use neptune_cash::api::export::ReceivingAddress;
-use neptune_cash::api::export::Timestamp;
 use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
 use neptune_cash::prelude::twenty_first::error::ParseBFieldElementError;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::ReceivingAddress;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -120,14 +120,14 @@ impl FromStr for Beneficiary {
 #[cfg(test)]
 mod tests {
     use neptune_cash::api::export::Digest;
-    use neptune_cash::api::export::GenerationSpendingKey;
-    use neptune_cash::api::export::KeyType;
-    use neptune_cash::api::export::Network;
-    use neptune_cash::api::export::SpendingKey;
-    use neptune_cash::api::export::SymmetricKey;
     use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
-    use neptune_cash::state::wallet::address::elliptic_curve_hybrid::EcHybridKey;
-    use neptune_cash::state::wallet::address::viewing_address::ViewingAddressKey;
+    use neptune_primitives::network::Network;
+    use neptune_wallet::address::elliptic_curve_hybrid::EcHybridKey;
+    use neptune_wallet::address::generation_address::GenerationSpendingKey;
+    use neptune_wallet::address::symmetric_key::SymmetricKey;
+    use neptune_wallet::address::viewing_address::ViewingAddressKey;
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::address::SpendingKey;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use strum::IntoEnumIterator;

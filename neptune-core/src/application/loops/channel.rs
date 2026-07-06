@@ -6,17 +6,17 @@ use neptune_consensus::transaction::Transaction;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 
-use crate::api::export::KeyType;
-use crate::api::export::ReceivingAddress;
-use crate::api::export::SpendingKey;
 use crate::api::export::TxCreationArtifacts;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::network::overview::NetworkOverview;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 
 #[derive(Clone, Debug, strum::Display)]

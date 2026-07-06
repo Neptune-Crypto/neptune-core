@@ -19,10 +19,14 @@ use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutputList;
+use neptune_wallet::unlocked_utxo::TxInputs;
 use tracing::trace;
 
 use super::error;
-use crate::api::export::Timestamp;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::input_selector::InputSelector;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
@@ -32,13 +36,9 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
-use crate::state::wallet::change_policy::ChangePolicy;
 use crate::state::wallet::input_candidate::InputCandidate;
-use crate::state::wallet::transaction_output::TxOutputList;
-use crate::state::wallet::unlocked_utxo::TxInputs;
 use crate::state::StateLock;
 use crate::GlobalStateLock;
 

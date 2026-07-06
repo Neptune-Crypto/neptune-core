@@ -16,7 +16,7 @@ use tokio::time::timeout;
 ///
 /// For now we use databases on disk. In-memory databases would be nicer.
 pub(crate) fn unit_test_data_directory(
-    network: crate::api::export::Network,
+    network: neptune_primitives::network::Network,
 ) -> Result<DataDirectory> {
     let mut rng = rand::rng();
     let user = env::var("USER").unwrap_or_else(|_| "default".to_string());

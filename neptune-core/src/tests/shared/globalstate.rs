@@ -5,10 +5,11 @@ use std::time::SystemTime;
 
 use libp2p::PeerId;
 use neptune_consensus::block::Block;
+use neptune_primitives::network::Network;
+use neptune_wallet::wallet_entropy::WalletEntropy;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
-use crate::api::export::Network;
 use crate::application::config::cli_args;
 use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
@@ -24,7 +25,6 @@ use crate::state::light_state::LightState;
 use crate::state::mempool::Mempool;
 use crate::state::networking_state::NetworkingState;
 use crate::state::wallet::wallet_configuration::WalletConfiguration;
-use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::HandshakeData;

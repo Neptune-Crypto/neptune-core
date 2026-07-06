@@ -8,7 +8,6 @@ use std::time::SystemTime;
 use bytesize::ByteSize;
 use itertools::Itertools;
 use libp2p::autonat::NatStatus;
-use neptune_cash::api::export::Timestamp;
 use neptune_cash::application::network::overview::NetworkOverview;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::state::mining::mining_status::MiningStatus;
@@ -18,6 +17,7 @@ use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapab
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
 use ratatui::layout::Layout;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;

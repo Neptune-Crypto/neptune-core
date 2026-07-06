@@ -1,4 +1,3 @@
-pub(crate) use neptune_wallet::transaction_details;
 pub(crate) mod transaction_kernel_id;
 pub(crate) mod tx_creation_artifacts;
 

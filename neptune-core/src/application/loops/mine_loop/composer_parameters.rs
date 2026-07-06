@@ -1,17 +1,17 @@
 use neptune_consensus::block::MINING_REWARD_TIME_LOCK_PERIOD;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::transaction_output::TxOutputList;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::Timestamp;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
-use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::transaction_output::TxOutputList;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ComposerParameters {
@@ -141,7 +141,7 @@ impl ComposerParameters {
     ///
     /// Note that the receiver preimage is not known in a *cold composing*
     /// scenario, where the composer fee UTXOs are sent to a foreign
-    /// [`crate::state::wallet::address::ReceivingAddress`].
+    /// [`neptune_wallet::address::ReceivingAddress`].
     pub(crate) fn maybe_receiver_preimage(&self) -> Option<Digest> {
         self.maybe_receiver_preimage
     }
@@ -177,12 +177,12 @@ impl ComposerParameters {
 #[cfg(test)]
 mod tests {
     use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
+    use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::network::Network;
+    use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
-    use crate::api::export::BlockHeight;
-    use crate::api::export::Network;
-    use crate::api::export::ReceivingAddress;
-    use crate::api::export::WalletEntropy;
     use crate::application::config::cli_args;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;

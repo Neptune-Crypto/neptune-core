@@ -1,7 +1,6 @@
 use neptune_consensus::block::Block;
-
-use crate::api::export::Network;
-use crate::api::export::Timestamp;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
 
 /// An abstract function to decide if one block is valid given its predecessor.
 ///

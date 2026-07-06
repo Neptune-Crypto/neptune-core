@@ -7,17 +7,16 @@ use neptune_database::create_db_if_missing;
 use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::NeptuneLevelDb;
 use neptune_database::WriteBatchAsync;
+use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::data_directory::DataDirectory;
+use neptune_wallet::address::announcement_flag::AnnouncementFlag;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tracing::warn;
-
-use crate::api::export::AdditionRecord;
-use crate::api::export::BlockHeight;
-use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
 
 /// The maximum number of blocks stored for each [`AnnouncementFlag`]. Wallets
 /// with incoming UTXOs in more than this number of blocks cannot rely on the
@@ -457,13 +456,13 @@ mod tests {
     use std::collections::HashMap;
 
     use macro_rules_attr::apply;
+    use neptune_consensus::transaction::announcement::Announcement;
+    use neptune_primitives::network::Network;
+    use neptune_wallet::address::generation_address::GenerationSpendingKey;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::bfe_vec;
 
     use super::*;
-    use crate::api::export::Announcement;
-    use crate::api::export::GenerationSpendingKey;
-    use crate::api::export::Network;
     use crate::tests::shared::blocks::block_with_num_puts;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
