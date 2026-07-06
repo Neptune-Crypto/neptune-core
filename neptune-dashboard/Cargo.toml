@@ -24,6 +24,7 @@ mock = ["rand", "neptune-cash/mock-rpc"]
 anyhow = { version = "1.0" }
 neptune-cash = { version = "0.12.0", path = "../neptune-core" }
 neptune-consensus = { version = "0.12.0", path = "../neptune-consensus" }
+neptune-primitives = { version = "0.12.0", path = "../neptune-primitives" }
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.27"
 libp2p = { version = "0.56.0", features = ["autonat"] }

@@ -141,6 +141,7 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
 mod tests {
     use std::collections::HashMap;
 
+    use neptune_primitives::network::Network;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
@@ -157,7 +158,6 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadowError;
 
     use super::*;
-    use crate::network::Network;
     use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::transaction::primitive_witness::PrimitiveWitness;

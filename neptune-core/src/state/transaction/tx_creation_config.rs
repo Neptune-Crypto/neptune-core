@@ -5,11 +5,11 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use neptune_consensus::network::Network;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_primitives::network::Network;
 
 use super::super::wallet::address::SpendingKey;
 use super::super::wallet::change_policy::ChangePolicy;

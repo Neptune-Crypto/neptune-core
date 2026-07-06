@@ -2,10 +2,10 @@ use std::net::SocketAddr;
 
 use libp2p::Multiaddr;
 use libp2p::PeerId;
-use neptune_consensus::block::block_height::BlockHeight;
-use neptune_consensus::block::difficulty_control::ProofOfWork;
 use neptune_consensus::block::Block;
 use neptune_consensus::transaction::Transaction;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::difficulty_control::ProofOfWork;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 

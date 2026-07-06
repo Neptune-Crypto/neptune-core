@@ -173,6 +173,7 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
@@ -193,7 +194,6 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::network::Network;
     use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::transaction::primitive_witness::PrimitiveWitness;

@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use neptune_consensus::network::Network;
+use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::network::Network;
 use tracing::info;
 
 use super::scan_mode_configuration::ScanModeConfiguration;
 use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use super::wallet_file::WALLET_OUTGOING_SECRETS_FILE_NAME;
 use crate::application::config::cli_args;
-use crate::application::config::data_directory::DataDirectory;
 
 /// Configuration options for [`WalletState`](super::wallet_state::WalletState).
 ///
@@ -116,7 +116,7 @@ impl WalletConfiguration {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
-    use neptune_consensus::block::block_height::BlockHeight;
+    use neptune_primitives::block_height::BlockHeight;
 
     use super::*;
     use crate::application::config::cli_args::Args;

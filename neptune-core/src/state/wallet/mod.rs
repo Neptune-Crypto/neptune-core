@@ -33,12 +33,10 @@ mod tests {
     use expected_utxo::ExpectedUtxo;
     use itertools::Itertools;
     use macro_rules_attr::apply;
-    use neptune_consensus::block::block_height::BlockHeight;
     use neptune_consensus::block::block_transaction::BlockTransaction;
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
     use neptune_consensus::block::Block;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-    use neptune_consensus::network::Network;
     use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -46,6 +44,8 @@ mod tests {
     use neptune_consensus::transaction::utxo::Utxo;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_database::storage::storage_vec::traits::*;
+    use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedSub;
     use num_traits::Zero;
@@ -83,8 +83,8 @@ mod tests {
     mod can_spend {
         use neptune_consensus::block::Block;
         use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
-        use neptune_consensus::network::Network;
         use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use neptune_primitives::network::Network;
         use neptune_primitives::timestamp::Timestamp;
         use num_traits::CheckedSub;
         use strum::IntoEnumIterator;
@@ -215,9 +215,9 @@ mod tests {
     // Relocated from neptune-wallet's wallet_file module: depends on neptune-core's
     // DataDirectory and test-data helpers.
     mod wallet_file {
-        use neptune_consensus::network::Network;
+        use neptune_primitives::data_directory::DataDirectory;
+        use neptune_primitives::network::Network;
 
-        use crate::application::config::data_directory::DataDirectory;
         use crate::state::wallet::wallet_entropy::WalletEntropy;
         use crate::state::wallet::wallet_file::WalletFileContext;
         use crate::tests::shared::files::unit_test_data_directory;
@@ -245,9 +245,9 @@ mod tests {
     // TxOutput::auto against a real WalletState (owned vs unowned outputs).
     mod transaction_output {
         use macro_rules_attr::apply;
-        use neptune_consensus::network::Network;
         use neptune_consensus::transaction::utxo::Utxo;
         use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use neptune_primitives::network::Network;
         use rand::Rng;
         use tasm_lib::prelude::Digest;
 

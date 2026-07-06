@@ -15,7 +15,6 @@ use zeroize::ZeroizeOnDrop;
 use super::secret_key_material::SecretKeyMaterial;
 use super::wallet_entropy::WalletEntropy;
 
-pub const WALLET_DIRECTORY: &str = "wallet";
 pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";
 
 /// A file that stores UTXO data in the form of `UtxoTriple`s for all
@@ -24,8 +23,6 @@ pub const WALLET_OUTGOING_SECRETS_FILE_NAME: &str = "outgoing_randomness.dat";
 pub const WALLET_INCOMING_SECRETS_FILE_NAME: &str = "incoming_randomness.dat";
 const STANDARD_WALLET_NAME: &str = "standard_wallet";
 const STANDARD_WALLET_VERSION: u8 = 0;
-pub const WALLET_DB_NAME: &str = "wallet";
-pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 
 /// Wrapper around [`WalletFile`] with extra context.
 #[derive(Debug, Clone)]

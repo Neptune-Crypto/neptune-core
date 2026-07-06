@@ -1066,6 +1066,7 @@ impl BasicSnippet for MergeBranch {
 pub(crate) mod tests {
     use itertools::Itertools;
     use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_primitives::network::Network;
     use num_traits::CheckedAdd;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -1075,7 +1076,6 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::consensus_rule_set::ConsensusRuleSet;
-    use crate::network::Network;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::transaction::validity::single_proof::produce_single_proof;

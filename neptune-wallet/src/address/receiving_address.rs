@@ -5,8 +5,8 @@ use anyhow::Result;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
-use neptune_consensus::network::Network;
 use neptune_consensus::transaction::announcement::Announcement;
+use neptune_primitives::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;

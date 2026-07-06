@@ -29,9 +29,6 @@ pub mod rusty_utxo_index;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
-use neptune_consensus::block::block_height::BlockHeight;
-use neptune_consensus::block::block_height::BLOCKS_PER_GENERATION;
-use neptune_consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use neptune_consensus::block::block_kernel::BlockKernel;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::Block;
@@ -52,6 +49,10 @@ use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
+use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+use neptune_primitives::data_directory::DataDirectory;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
@@ -59,7 +60,6 @@ use crate::api::export::Args;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
 use crate::api::export::Utxo;
-use crate::application::config::data_directory::DataDirectory;
 use crate::state::archival_state::rusty_utxo_index::RustyUtxoIndex;
 use crate::state::database::BlockFileLocation;
 use crate::state::database::BlockIndexKey;
@@ -70,11 +70,6 @@ use crate::state::database::LastFileRecord;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::util_types::rusty_archival_block_mmr::RustyArchivalBlockMmr;
 use crate::BFieldElement;
-
-pub(crate) const BLOCK_INDEX_DB_NAME: &str = "block_index";
-pub(crate) const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
-pub(crate) const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
-pub(crate) const UTXO_INDEX_DIRECTORY_NAME: &str = "utxo_index";
 
 /// Provides interface to historic blockchain data which consists of
 ///  * block-data stored in individual files (append-only)
@@ -2418,7 +2413,6 @@ pub(super) mod tests {
     use neptune_consensus::block::test_helpers::invalid_empty_block;
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-    use neptune_consensus::network::Network;
     use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -2426,6 +2420,8 @@ pub(super) mod tests {
     use neptune_consensus::transaction::utxo::Utxo;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_database::storage::storage_vec::traits::*;
+    use neptune_primitives::data_directory::DataDirectory;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use proptest::collection;
     use proptest::prop_assert;
@@ -2441,7 +2437,6 @@ pub(super) mod tests {
 
     use super::*;
     use crate::application::config::cli_args::Args;
-    use crate::application::config::data_directory::DataDirectory;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::archival_state::ArchivalState;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;

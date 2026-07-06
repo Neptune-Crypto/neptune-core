@@ -1,7 +1,7 @@
-use neptune_consensus::block::difficulty_control::Difficulty;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::block::pow::PowMastPaths;
 use neptune_consensus::block::Block;
+use neptune_primitives::difficulty_control::Difficulty;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;

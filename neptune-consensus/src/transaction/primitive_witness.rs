@@ -1313,6 +1313,7 @@ pub mod neptune_arbitrary {
 mod test_support {
     use itertools::izip;
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedAdd;
     use num_traits::CheckedSub;
@@ -1324,7 +1325,6 @@ mod test_support {
 
     use super::*;
     use crate::block::MINING_REWARD_TIME_LOCK_PERIOD;
-    use crate::network::Network;
     use crate::proof_abstractions::tasm::program::TritonProgram;
     use crate::transaction::announcement::Announcement;
     use crate::transaction::lock_script::LockScript;

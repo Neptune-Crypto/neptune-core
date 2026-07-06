@@ -11,8 +11,7 @@ pub(super) mod worker {
     use neptune_database::storage::storage_schema::RustyKey;
     use neptune_database::storage::storage_schema::RustyValue;
     use neptune_database::NeptuneLevelDb;
-
-    use crate::application::config::data_directory::DataDirectory;
+    use neptune_primitives::data_directory::DataDirectory;
 
     pub(super) fn crate_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

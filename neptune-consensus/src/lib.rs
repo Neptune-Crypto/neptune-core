@@ -101,7 +101,6 @@ impl Drop for ScopeDurationLogger<'_> {
 
 pub mod block;
 pub mod consensus_rule_set;
-pub mod network;
 pub mod proof_abstractions;
 pub mod transaction;
 pub mod type_scripts;

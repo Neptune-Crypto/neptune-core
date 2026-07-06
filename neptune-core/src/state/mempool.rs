@@ -1413,7 +1413,7 @@ impl Mempool {
     ///
     /// ```
     /// use bytesize::ByteSize;
-    /// use neptune_consensus::network::Network;
+    /// use neptune_primitives::network::Network;
     /// use neptune_consensus::block::Block;
     /// use neptune_cash::state::mempool::Mempool;
     /// use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -1458,11 +1458,9 @@ impl Mempool {
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
-    use neptune_consensus::block::block_height::BlockHeight;
     use neptune_consensus::block::block_transaction::BlockTransaction;
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-    use neptune_consensus::network::Network;
     use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -1474,6 +1472,8 @@ mod tests {
     use neptune_consensus::transaction::Transaction;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::network::Network;
     use num_bigint::BigInt;
     use num_traits::One;
     use num_traits::Zero;

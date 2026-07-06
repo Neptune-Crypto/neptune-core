@@ -2,7 +2,6 @@ use std::fmt::Display;
 
 use anyhow::Result;
 use itertools::Itertools;
-use neptune_consensus::network::Network;
 use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::primitive_witness::WitnessValidationError;
@@ -10,6 +9,7 @@ use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use num_traits::Zero;

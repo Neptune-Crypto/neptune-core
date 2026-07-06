@@ -1049,6 +1049,7 @@ mod tests {
     use neptune_mutator_set::commit;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::shared::NUM_TRIALS;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
@@ -1058,7 +1059,6 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::network::Network;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;

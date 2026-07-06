@@ -4,26 +4,24 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use libp2p::PeerId;
-use neptune_consensus::block::block_height::BlockHeight;
-use neptune_consensus::block::difficulty_control::ProofOfWork;
 use neptune_database::create_db_if_missing;
 use neptune_database::NeptuneLevelDb;
 use neptune_database::WriteBatchAsync;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::difficulty_control::ProofOfWork;
 use rand::rng;
 use rand::Rng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::application::config::data_directory::DataDirectory;
 use crate::application::loops::sync_loop::sync_progress::SyncProgress;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
 use crate::state::database::PeerDatabases;
 use crate::state::sync_status::SyncStatus;
-
-pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 
 type PeerMap = HashMap<PeerId, PeerInfo>;
 

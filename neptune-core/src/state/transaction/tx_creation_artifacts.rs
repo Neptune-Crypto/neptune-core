@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_consensus::network::Network;
 use neptune_consensus::transaction::primitive_witness::WitnessValidationError;
 use neptune_consensus::transaction::Transaction;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;

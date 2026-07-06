@@ -225,7 +225,6 @@ mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
-    use neptune_consensus::network::Network;
     use neptune_consensus::transaction::lock_script::LockScript;
     use neptune_database::storage::storage_schema::traits::StorageWriter;
     use neptune_database::storage::storage_schema::DbtSingleton;
@@ -236,6 +235,7 @@ mod tests {
     use neptune_mutator_set::commit;
     use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
     use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+    use neptune_primitives::network::Network;
     use tasm_lib::prelude::Digest;
     use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 

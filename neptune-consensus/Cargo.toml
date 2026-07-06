@@ -27,7 +27,7 @@ spec = []
 # exposes the consensus/proof-abstraction test-support constructors and proptest
 # strategies (the `test_helpers` modules) needed by downstream crates' tests.
 # off by default.
-test-helpers = ["arbitrary-impls", "dep:clienter", "neptune-mutator-set/test-helpers"]
+test-helpers = ["arbitrary-impls", "dep:clienter", "neptune-mutator-set/test-helpers", "neptune-primitives/test-helpers"]
 
 [dependencies]
 
@@ -84,6 +84,10 @@ neptune-consensus = { path = ".", features = ["test-helpers", "spec"] }
 
 # enables neptune-mutator-set's `strategies` + `msa_and_records` test modules.
 neptune-mutator-set = { version = "0.12.0", path = "../neptune-mutator-set", features = ["test-helpers"] }
+
+# enables `Network::arbitrary`/`all_networks` and the `Arbitrary` derives on the
+# primitives-level types (Difficulty, ProofOfWork, BlockHeight) used by tests.
+neptune-primitives = { version = "0.12.0", path = "../neptune-primitives", features = ["test-helpers"] }
 
 # note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in
 # [dev-dependencies] because they are optional deps but required for unit tests.

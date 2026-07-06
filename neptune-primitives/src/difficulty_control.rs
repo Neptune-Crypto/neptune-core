@@ -9,7 +9,6 @@ use anyhow::ensure;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
-use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
 use num_traits::FromPrimitive;
 use num_traits::ToPrimitive;
@@ -24,7 +23,8 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Digest;
 
-use super::block_height::BlockHeight;
+use crate::block_height::BlockHeight;
+use crate::timestamp::Timestamp;
 
 const DIFFICULTY_NUM_LIMBS: usize = 5;
 
@@ -542,7 +542,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::block::Network;
+    use crate::network::Network;
 
     impl Difficulty {
         /// Convert a u64 into a difficulty.

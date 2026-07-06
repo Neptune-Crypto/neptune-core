@@ -97,7 +97,7 @@ pub(crate) mod tests {
     use neptune_consensus::block::block_header::BlockHeader;
     use neptune_consensus::block::Block;
     use neptune_consensus::block::BlockProof;
-    use neptune_consensus::network::Network;
+    use neptune_primitives::network::Network;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;

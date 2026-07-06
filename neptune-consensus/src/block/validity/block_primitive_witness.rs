@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use tasm_lib::twenty_first::prelude::Mmr;
@@ -14,7 +15,6 @@ use crate::block::pow::LustrationStatus;
 use crate::block::Block;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::consensus_rule_set::LustrationRule;
-use crate::network::Network;
 use crate::transaction::transaction_kernel::TransactionKernel;
 
 /// Wraps all information necessary to produce a block.
@@ -173,6 +173,8 @@ mod test_support {
     use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::difficulty_control::Difficulty;
     use proptest::collection::vec;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::BoxedStrategy;
@@ -187,9 +189,7 @@ mod test_support {
 
     use super::*;
     use crate::block::block_appendix::BlockAppendix;
-    use crate::block::block_height::BlockHeight;
     use crate::block::block_kernel::BlockKernel;
-    use crate::block::difficulty_control::Difficulty;
     use crate::block::BlockProof;
     use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;

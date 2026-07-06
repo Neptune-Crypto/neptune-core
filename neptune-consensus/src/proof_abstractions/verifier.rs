@@ -1,9 +1,9 @@
+use neptune_primitives::network::Network;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tokio::task;
 
-use crate::network::Network;
 use crate::transaction::validity::neptune_proof::Proof;
 
 /// Historical block claims that define the main-net checkpoint: one hex-encoded,

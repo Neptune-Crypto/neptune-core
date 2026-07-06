@@ -891,6 +891,7 @@ pub(crate) mod tests {
 pub mod test_helpers {
     use itertools::Itertools;
     use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
@@ -903,7 +904,6 @@ pub mod test_helpers {
     use super::UpdateWitness;
     use crate::block::mutator_set_update::MutatorSetUpdate;
     use crate::consensus_rule_set::ConsensusRuleSet;
-    use crate::network::Network;
     use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::transaction::validity::single_proof::produce_single_proof;

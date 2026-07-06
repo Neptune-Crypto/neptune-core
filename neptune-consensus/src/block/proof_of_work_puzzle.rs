@@ -1,3 +1,4 @@
+use neptune_primitives::difficulty_control::Difficulty;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -7,7 +8,6 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tracing::info;
 
 use crate::block::block_header::BlockPow;
-use crate::block::difficulty_control::Difficulty;
 use crate::block::pow::LustrationStatus;
 use crate::block::pow::PowMastPaths;
 use crate::block::Block;

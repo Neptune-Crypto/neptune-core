@@ -291,7 +291,7 @@ pub mod spec {
 
 #[cfg(any(test, feature = "test-helpers"))]
 impl TritonVmProofJobOptions {
-    pub fn default_with_network(network: crate::network::Network) -> Self {
+    pub fn default_with_network(network: neptune_primitives::network::Network) -> Self {
         let job_settings = ProverJobSettings {
             network,
             ..Default::default()

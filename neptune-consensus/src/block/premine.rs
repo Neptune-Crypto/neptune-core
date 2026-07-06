@@ -1,3 +1,4 @@
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
@@ -5,7 +6,6 @@ use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use crate::block::Block;
-use crate::network::Network;
 use crate::transaction::utxo::Coin;
 use crate::transaction::utxo::Utxo;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -288,8 +288,9 @@ impl Block {
 
 #[cfg(test)]
 mod tests {
+    use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+
     use super::*;
-    use crate::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
     use crate::block::INITIAL_BLOCK_SUBSIDY;
     use crate::block::PREMINE_MAX_SIZE;
 

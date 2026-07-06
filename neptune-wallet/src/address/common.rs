@@ -1,8 +1,8 @@
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
-use neptune_consensus::network::Network;
 use neptune_consensus::transaction::announcement::Announcement;
+use neptune_primitives::network::Network;
 use sha3::digest::ExtendableOutput;
 use sha3::digest::Update;
 use sha3::Shake256;

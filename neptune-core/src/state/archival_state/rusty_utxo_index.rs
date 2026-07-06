@@ -8,6 +8,7 @@ use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::NeptuneLevelDb;
 use neptune_database::WriteBatchAsync;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::data_directory::DataDirectory;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -16,7 +17,6 @@ use tracing::warn;
 
 use crate::api::export::AdditionRecord;
 use crate::api::export::BlockHeight;
-use crate::application::config::data_directory::DataDirectory;
 use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
 
 /// The maximum number of blocks stored for each [`AnnouncementFlag`]. Wallets

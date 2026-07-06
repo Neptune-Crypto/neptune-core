@@ -1,6 +1,8 @@
 //! Test-support constructors for blocks with invalid proofs.
 
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -10,14 +12,12 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_body::BlockBody;
 use crate::block::block_header::BlockHeader;
-use crate::block::block_height::BlockHeight;
 use crate::block::block_transaction::BlockTransaction;
 use crate::block::guesser_receiver_data::GuesserReceiverData;
 use crate::block::mutator_set_update::MutatorSetUpdate;
 use crate::block::pow::Pow;
 use crate::block::Block;
 use crate::block::BlockProof;
-use crate::network::Network;
 use crate::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::validity::neptune_proof::Proof;

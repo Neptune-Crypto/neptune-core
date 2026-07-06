@@ -54,6 +54,7 @@ use itertools::Itertools;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_locks::tokio as sync_tokio;
+use neptune_primitives::data_directory::DataDirectory;
 use prelude::tasm_lib;
 use prelude::triton_vm;
 use prelude::twenty_first;
@@ -74,7 +75,6 @@ use tracing::info;
 use tracing::warn;
 use triton_vm::prelude::BFieldElement;
 
-use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::identity::resolve_identity;
 use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::json_rpc::server::rpc::RpcServer;

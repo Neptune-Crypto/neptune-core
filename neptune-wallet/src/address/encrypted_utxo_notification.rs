@@ -4,8 +4,8 @@ use anyhow::Result;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use get_size2::GetSize;
-use neptune_consensus::network::Network;
 use neptune_consensus::transaction::announcement::Announcement;
+use neptune_primitives::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -128,7 +128,7 @@ mod tests {
     use arbitrary::Unstructured;
     use bech32::FromBase32;
     use bech32::ToBase32;
-    use neptune_consensus::network::Network;
+    use neptune_primitives::network::Network;
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;

@@ -4,22 +4,27 @@ use std::path::PathBuf;
 use anyhow::Context;
 use anyhow::Result;
 use directories::ProjectDirs;
-use neptune_consensus::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
-use crate::state::archival_state::BLOCK_INDEX_DB_NAME;
-use crate::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;
-use crate::state::archival_state::UTXO_INDEX_DIRECTORY_NAME;
-use crate::state::database::DATABASE_DIRECTORY_ROOT_NAME;
-use crate::state::networking_state::BANNED_IPS_DB_NAME;
-use crate::state::shared::BLOCK_FILENAME_EXTENSION;
-use crate::state::shared::BLOCK_FILENAME_PREFIX;
-use crate::state::shared::DIR_NAME_FOR_BLOCKS;
-use crate::state::wallet::wallet_file::WALLET_DB_NAME;
-use crate::state::wallet::wallet_file::WALLET_DIRECTORY;
-use crate::state::wallet::wallet_file::WALLET_OUTPUT_COUNT_DB_NAME;
+use crate::network::Network;
+
+// On-disk layout names. These are the single source of truth for the
+// directory- and file-names used by the node's databases and block store;
+// higher crates re-export them so that the code that opens a database and the
+// code that computes its path (here) cannot drift apart.
+pub const BLOCK_FILENAME_PREFIX: &str = "blk";
+pub const BLOCK_FILENAME_EXTENSION: &str = "dat";
+pub const DIR_NAME_FOR_BLOCKS: &str = "blocks";
+pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
+pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
+pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
+pub const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
+pub const UTXO_INDEX_DIRECTORY_NAME: &str = "utxo_index";
+pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
+pub const WALLET_DIRECTORY: &str = "wallet";
+pub const WALLET_DB_NAME: &str = "wallet";
+pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 
 const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.
@@ -155,7 +160,7 @@ impl DataDirectory {
     /// Returns None if:
     /// 1. wallet DB path is the filesystem root
     /// 2. 1000 backup directories already exist
-    pub(crate) fn wallet_db_next_unused_migration_backup_path(
+    pub fn wallet_db_next_unused_migration_backup_path(
         &self,
         schema_version: u16,
     ) -> Option<PathBuf> {
@@ -210,7 +215,7 @@ impl DataDirectory {
     /// The UTXO index database directory path
     ///
     /// This directory lives within `DataDirectory::database_dir_path()`.
-    pub(crate) fn utxo_index_dir_path(&self) -> PathBuf {
+    pub fn utxo_index_dir_path(&self) -> PathBuf {
         self.database_dir_path()
             .join(Path::new(UTXO_INDEX_DIRECTORY_NAME))
     }

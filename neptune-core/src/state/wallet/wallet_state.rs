@@ -6,7 +6,6 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use itertools::Itertools;
-use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::Block;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
@@ -23,6 +22,8 @@ use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::data_directory::DataDirectory;
 use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
@@ -57,7 +58,6 @@ use super::wallet_file::WalletFileContext;
 use super::wallet_status::WalletStatus;
 use crate::api::export::UtxoTriple;
 use crate::application::config::cli_args::Args;
-use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
@@ -2241,12 +2241,12 @@ pub(crate) mod tests {
     use macro_rules_attr::apply;
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-    use neptune_consensus::network::Network;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use neptune_consensus::transaction::utxo::Coin;
     use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+    use neptune_primitives::network::Network;
     use num_traits::Zero;
     use rand::prelude::*;
     use rand::random;
@@ -3535,8 +3535,8 @@ pub(crate) mod tests {
 
     mod wallet_balance {
         use generation_address::GenerationReceivingAddress;
-        use neptune_consensus::block::block_height::BlockHeight;
         use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+        use neptune_primitives::block_height::BlockHeight;
         use num_traits::CheckedSub;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
@@ -4475,8 +4475,8 @@ pub(crate) mod tests {
     pub(crate) mod scan_mode {
         use std::hint::black_box;
 
-        use neptune_consensus::block::block_height::BlockHeight;
         use neptune_consensus::transaction::test_helpers::txkernel;
+        use neptune_primitives::block_height::BlockHeight;
         use proptest::collection;
         use proptest::prelude::any;
         use proptest_arbitrary_interop::arb;
@@ -4986,9 +4986,9 @@ pub(crate) mod tests {
 
     pub(crate) mod fee_notifications {
 
-        use neptune_consensus::block::block_height::BlockHeight;
         use neptune_consensus::block::block_transaction::BlockTransaction;
         use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+        use neptune_primitives::block_height::BlockHeight;
 
         use super::*;
         use crate::application::config::fee_notification_policy::FeeNotificationPolicy;

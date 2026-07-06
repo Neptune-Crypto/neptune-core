@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use itertools::Itertools;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
 use tasm_lib::field;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::hash_from_stack::HashFromStack;
@@ -26,7 +27,6 @@ use crate::block::block_body::BlockBody;
 use crate::block::block_body::BlockBodyField;
 use crate::block::BlockAppendix;
 use crate::consensus_rule_set::ConsensusRuleSet;
-use crate::network::Network;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::verifier::verify;
 use crate::transaction::transaction_kernel::TransactionKernel;

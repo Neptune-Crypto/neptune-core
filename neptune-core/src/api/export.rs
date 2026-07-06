@@ -2,8 +2,6 @@
 //!
 //! They are exported here in one location for convenience.
 
-pub use neptune_consensus::block::block_height::BlockHeight;
-pub use neptune_consensus::network::Network;
 pub use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 pub use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 pub use neptune_consensus::transaction::announcement::Announcement;
@@ -19,6 +17,8 @@ pub use neptune_consensus::transaction::Transaction;
 pub use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 pub use neptune_mutator_set::addition_record::AdditionRecord;
 pub use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+pub use neptune_primitives::block_height::BlockHeight;
+pub use neptune_primitives::network::Network;
 pub use neptune_primitives::timestamp::Timestamp;
 
 pub use crate::api::tx_initiation::builder::input_selector::InputSelectionPriority;

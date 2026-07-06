@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use neptune_consensus::block::block_appendix::BlockAppendix;
-use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::block_validation_error::BlockValidationError;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::block::test_helpers::invalid_block_with_tx_kernel;
@@ -11,13 +10,14 @@ use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveW
 use neptune_consensus::block::Block;
 use neptune_consensus::block::BlockProof;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_consensus::network::Network;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use rand::rngs::StdRng;

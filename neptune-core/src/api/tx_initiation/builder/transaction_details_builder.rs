@@ -8,13 +8,13 @@
 //! except for a [TransactionProof](neptune_consensus::transaction::TransactionProof).
 //!
 //! see [builder](super) for examples of using the builders together.
-use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::lock_script::LockScript;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;

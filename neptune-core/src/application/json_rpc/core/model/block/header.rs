@@ -1,10 +1,10 @@
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockPow;
-use neptune_consensus::block::difficulty_control::Difficulty;
-use neptune_consensus::block::difficulty_control::ProofOfWork;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::pow::POW_MEMORY_TREE_HEIGHT;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_primitives::difficulty_control::Difficulty;
+use neptune_primitives::difficulty_control::ProofOfWork;
 use num_bigint::BigUint;
 use serde::Deserialize;
 use serde::Deserializer;

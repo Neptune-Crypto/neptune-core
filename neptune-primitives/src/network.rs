@@ -2,12 +2,12 @@ use std::fmt;
 use std::str::FromStr;
 
 use get_size2::GetSize;
-use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
-use crate::block::difficulty_control::Difficulty;
+use crate::difficulty_control::Difficulty;
+use crate::timestamp::Timestamp;
 
 #[derive(
     Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, strum::EnumIs, GetSize,
@@ -63,7 +63,7 @@ impl Network {
     }
 
     /// Indicates if network allows for mocked PoW
-    pub(crate) fn allows_mock_pow(self) -> bool {
+    pub fn allows_mock_pow(self) -> bool {
         matches!(self, Network::RegTest)
     }
 

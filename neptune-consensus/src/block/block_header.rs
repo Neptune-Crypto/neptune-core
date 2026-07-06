@@ -3,8 +3,13 @@ use std::fmt::Display;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::difficulty_control::difficulty_control;
+use neptune_primitives::difficulty_control::Difficulty;
+use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;
@@ -18,15 +23,10 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use super::block_height::BlockHeight;
-use super::difficulty_control::difficulty_control;
-use super::difficulty_control::Difficulty;
-use super::difficulty_control::ProofOfWork;
 use super::Block;
 use crate::block::guesser_receiver_data::GuesserReceiverData;
 use crate::block::pow::Pow;
 use crate::consensus_rule_set::ConsensusRuleSet;
-use crate::network::Network;
 
 pub const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
 

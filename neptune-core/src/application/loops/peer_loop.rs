@@ -17,7 +17,6 @@ use futures::FutureExt;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
-use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::Block;
 use neptune_consensus::block::FUTUREDATING_LIMIT;
@@ -26,6 +25,7 @@ use neptune_consensus::transaction::transaction_kernel::TransactionConfirmabilit
 use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
 use neptune_consensus::transaction::Transaction;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
 use rand::rngs::StdRng;
@@ -2373,9 +2373,9 @@ impl PeerLoopHandler {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
-    use neptune_consensus::network::Network;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_primitives::network::Network;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;

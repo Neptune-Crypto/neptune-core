@@ -63,13 +63,10 @@ use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockPow;
-use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::block_kernel::BlockKernel;
-use neptune_consensus::block::difficulty_control::Difficulty;
 use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_consensus::network::Network;
 use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
@@ -80,6 +77,9 @@ use neptune_database::storage::storage_vec::traits::StorageVecBase;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::difficulty_control::Difficulty;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;
@@ -571,7 +571,7 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::state::block_selector::BlockSelector;
-    /// use neptune_consensus::block::block_height::BlockHeight;
+    /// use neptune_primitives::block_height::BlockHeight;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1171,7 +1171,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_consensus::network::Network;
+    /// use neptune_primitives::network::Network;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1774,7 +1774,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_consensus::network::Network;
+    /// # use neptune_primitives::network::Network;
     /// # use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     /// # use neptune_cash::state::wallet::address::ReceivingAddress;
     /// # use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -4751,10 +4751,10 @@ mod tests {
     use anyhow::Result;
     use macro_rules_attr::apply;
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
-    use neptune_consensus::network::Network;
     use neptune_consensus::transaction::test_helpers::txkernel;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_primitives::mast_hash::MastHash;
+    use neptune_primitives::network::Network;
     use num_traits::One;
     use num_traits::Zero;
     use proptest::prop_assume;

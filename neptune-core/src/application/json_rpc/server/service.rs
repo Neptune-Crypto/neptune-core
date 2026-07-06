@@ -1813,8 +1813,6 @@ pub mod tests {
 
     use libp2p::Multiaddr;
     use macro_rules_attr::apply;
-    use neptune_consensus::block::block_height::BlockHeight;
-    use neptune_consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
     use neptune_consensus::block::test_helpers::invalid_empty_block;
     use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
@@ -1825,6 +1823,8 @@ pub mod tests {
     use neptune_consensus::transaction::TransactionProof;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::shared::NUM_TRIALS;
+    use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
     use num_traits::Zero;
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;

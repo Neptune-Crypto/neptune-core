@@ -18,7 +18,7 @@ use itertools::Itertools;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use libp2p::StreamProtocol;
-use neptune_consensus::network::Network;
+use neptune_primitives::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 

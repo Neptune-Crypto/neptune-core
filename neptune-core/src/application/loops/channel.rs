@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use libp2p::Multiaddr;
-use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::Block;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;

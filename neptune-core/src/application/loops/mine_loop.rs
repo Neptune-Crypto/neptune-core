@@ -12,16 +12,13 @@ use block_header::BlockHeader;
 use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
 use neptune_consensus::block::block_header::BlockPow;
-use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::block_transaction::BlockOrRegularTransaction;
 use neptune_consensus::block::block_transaction::BlockTransaction;
-use neptune_consensus::block::difficulty_control::difficulty_control;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::block::pow::Pow;
 use neptune_consensus::block::pow::PowMastPaths;
 use neptune_consensus::block::*;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_consensus::network::Network;
 use neptune_consensus::proof_abstractions::error::CreateProofError;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
@@ -31,6 +28,9 @@ use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::*;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_job_queue::errors::JobHandleError;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::difficulty_control::difficulty_control;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -1080,10 +1080,8 @@ pub(crate) async fn mine(
 pub(crate) mod tests {
     use std::hint::black_box;
 
-    use difficulty_control::Difficulty;
     use itertools::Itertools;
     use macro_rules_attr::apply;
-    use neptune_consensus::network::Network;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::proof_abstractions::verifier::verify;
@@ -1092,7 +1090,9 @@ pub(crate) mod tests {
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_job_queue::errors::JobHandleError;
     use neptune_mutator_set::test_shared::pseudorandom_addition_record;
+    use neptune_primitives::difficulty_control::Difficulty;
     use neptune_primitives::mast_hash::MastHash;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use num_bigint::BigUint;
     use num_traits::One;

@@ -2,12 +2,12 @@
 //! consumption/reporting in block explorers, cli, dashboard, etc.
 
 use itertools::Itertools;
-use neptune_consensus::block::block_height::BlockHeight;
-use neptune_consensus::block::difficulty_control::Difficulty;
-use neptune_consensus::block::difficulty_control::ProofOfWork;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::block::Block;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::difficulty_control::Difficulty;
+use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::timestamp::Timestamp;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;

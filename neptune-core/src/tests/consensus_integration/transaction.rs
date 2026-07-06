@@ -1,7 +1,6 @@
 use macro_rules_attr::apply;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_consensus::network::Network;
 use neptune_consensus::proof_abstractions::error::CreateProofError;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJobError;
@@ -10,6 +9,7 @@ use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::transaction::validity::single_proof::produce_single_proof;
 use neptune_consensus::type_scripts::native_currency::NativeCurrency;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::isa::error::AssertionError;

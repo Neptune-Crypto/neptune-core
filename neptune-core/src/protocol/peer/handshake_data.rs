@@ -6,7 +6,7 @@ use arraystring::typenum::U255;
 use arraystring::typenum::U30;
 use arraystring::ArrayString;
 use neptune_consensus::block::block_header::BlockHeader;
-use neptune_consensus::network::Network;
+use neptune_primitives::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -165,7 +165,7 @@ impl HandshakeData {
 pub(crate) mod test {
     use std::time::Duration;
 
-    use neptune_consensus::block::difficulty_control::Difficulty;
+    use neptune_primitives::difficulty_control::Difficulty;
     use proptest::collection::vec;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;

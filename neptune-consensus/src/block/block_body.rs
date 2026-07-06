@@ -4,6 +4,7 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
@@ -18,7 +19,6 @@ use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::block::block_height::BlockHeight;
 use crate::block::block_validation_error::BlockValidationError;
 use crate::block::mutator_set_update::MutatorSetUpdate;
 use crate::prelude::twenty_first;
@@ -339,6 +339,7 @@ mod test_support {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
+    use neptune_primitives::network::Network;
     use num_traits::Zero;
     use proptest::prop_assert_eq;
     use test_strategy::proptest;
@@ -346,7 +347,6 @@ mod tests {
     use super::*;
     use crate::block::test_helpers::invalid_empty_block;
     use crate::block::Block;
-    use crate::network::Network;
 
     #[test]
     fn max_aocl_leaf_index_genesis() {

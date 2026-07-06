@@ -1,11 +1,11 @@
 use get_size2::GetSize;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
 use crate::consensus_rule_set::ConsensusRuleSet;
-use crate::network::Network;
 use crate::proof_abstractions::verifier::verify;
 use crate::transaction::validity::neptune_proof::NeptuneProof;
 use crate::transaction::validity::single_proof::single_proof_claim;

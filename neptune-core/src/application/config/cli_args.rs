@@ -15,13 +15,13 @@ use clap::Parser;
 use itertools::Itertools;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
-use neptune_consensus::network::Network;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use neptune_consensus::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::network::Network;
 use num_traits::Zero;
 use tracing::error;
 

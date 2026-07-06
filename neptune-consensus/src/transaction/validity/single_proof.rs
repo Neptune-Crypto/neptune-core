@@ -785,6 +785,7 @@ pub(crate) mod tests {
 
     use assert2::let_assert;
     use macro_rules_attr::apply;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
@@ -793,7 +794,6 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::network::Network;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;

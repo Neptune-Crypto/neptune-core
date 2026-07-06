@@ -6,11 +6,11 @@ use anyhow::Result;
 use itertools::Itertools;
 use memmap2::MmapOptions;
 use neptune_consensus::block::Block;
+use neptune_primitives::data_directory::BLOCK_FILENAME_EXTENSION;
+use neptune_primitives::data_directory::BLOCK_FILENAME_PREFIX;
 use regex::Regex;
 
 use super::ArchivalState;
-use crate::state::shared::BLOCK_FILENAME_EXTENSION;
-use crate::state::shared::BLOCK_FILENAME_PREFIX;
 
 impl ArchivalState {
     /// Return a list of file names found in a directory, unsorted.

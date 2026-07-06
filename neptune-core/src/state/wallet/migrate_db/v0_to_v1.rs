@@ -141,13 +141,13 @@ mod migration {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
-    use neptune_consensus::network::Network;
     use neptune_database::storage::storage_schema::traits::StorageWriter;
     use neptune_database::storage::storage_schema::DbtSingleton;
     use neptune_database::storage::storage_schema::DbtVec;
     use neptune_database::storage::storage_schema::RustyKey;
     use neptune_database::storage::storage_schema::RustyValue;
     use neptune_database::NeptuneLevelDb;
+    use neptune_primitives::network::Network;
     use num_traits::Zero;
     use tasm_lib::prelude::Digest;
 

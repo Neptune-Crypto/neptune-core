@@ -2,13 +2,13 @@ use std::collections::VecDeque;
 use std::fmt::Display;
 
 use itertools::Itertools;
-use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::Block;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;

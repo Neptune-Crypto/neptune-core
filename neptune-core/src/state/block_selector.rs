@@ -15,7 +15,7 @@
 
 use std::str::FromStr;
 
-use neptune_consensus::block::block_height::BlockHeight;
+use neptune_primitives::block_height::BlockHeight;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::prelude::Digest;

@@ -387,6 +387,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
 #[cfg(test)]
 pub(crate) mod tests {
 
+    use neptune_primitives::difficulty_control::Difficulty;
+    use neptune_primitives::network::Network;
     use num_traits::Zero;
     use proptest::prelude::TestCaseError;
     use proptest::prop_assert;
@@ -400,10 +402,8 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::block::difficulty_control::Difficulty;
     use crate::block::test_helpers::invalid_empty_block;
     use crate::block::DIFFICULTY_LIMIT_FOR_TESTS;
-    use crate::network::Network;
     use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     #[test]

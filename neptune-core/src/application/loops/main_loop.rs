@@ -2595,7 +2595,7 @@ mod tests {
 
     use macro_rules_attr::apply;
     use neptune_consensus::block::test_helpers::invalid_empty_block;
-    use neptune_consensus::network::Network;
+    use neptune_primitives::network::Network;
     use tracing_test::traced_test;
 
     use super::*;

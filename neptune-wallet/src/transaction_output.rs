@@ -3,12 +3,12 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use neptune_consensus::network::Network;
 use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::transaction::utxo_triple::UtxoTriple;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;

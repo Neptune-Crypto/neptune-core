@@ -1,11 +1,11 @@
 pub mod block_appendix;
 pub mod block_body;
 pub mod block_header;
-pub mod block_height;
+#[cfg(test)]
+mod block_height_tests;
 pub mod block_kernel;
 pub mod block_transaction;
 pub mod block_validation_error;
-pub mod difficulty_control;
 pub mod guesser_receiver_data;
 pub mod mutator_set_update;
 pub mod pow;
@@ -22,10 +22,8 @@ use block_appendix::BlockAppendix;
 use block_appendix::MAX_NUM_CLAIMS;
 use block_body::BlockBody;
 use block_header::BlockHeader;
-use block_height::BlockHeight;
 use block_kernel::BlockKernel;
 use block_validation_error::BlockValidationError;
-use difficulty_control::Difficulty;
 use get_size2::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
@@ -33,8 +31,15 @@ use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
+use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+use neptune_primitives::difficulty_control::difficulty_control;
+use neptune_primitives::difficulty_control::Difficulty;
+use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -59,12 +64,8 @@ use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::block::block_header::BlockHeaderField;
 use crate::block::block_header::BlockPow;
-use crate::block::block_height::BLOCKS_PER_GENERATION;
-use crate::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use crate::block::block_kernel::BlockKernelField;
 use crate::block::block_transaction::BlockTransaction;
-use crate::block::difficulty_control::difficulty_control;
-use crate::block::difficulty_control::ProofOfWork;
 use crate::block::guesser_receiver_data::GuesserReceiverData;
 use crate::block::pow::LustrationStatus;
 #[cfg(test)]
@@ -72,7 +73,6 @@ use crate::block::pow::Pow;
 use crate::block::pow::PowMastPaths;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::consensus_rule_set::LustrationRule;
-use crate::network::Network;
 use crate::proof_abstractions::proof_builder::ProofBuilder;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -128,7 +128,7 @@ pub enum BlockProof {
 ///
 /// ```compile_fail,E0594
 /// use neptune_consensus::block::Block;
-/// use neptune_consensus::network::Network;
+/// use neptune_primitives::network::Network;
 /// use neptune_consensus::prelude::twenty_first::math::b_field_element::BFieldElement;
 /// use tasm_lib::prelude::Digest;
 ///
@@ -1409,13 +1409,13 @@ proptest::prop_compose! {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
 
+    use neptune_primitives::network::Network;
     use proptest_arbitrary_interop::arb;
     use rand::rng;
     use rand::Rng;
 
     use super::*;
     use crate::block::test_helpers::invalid_empty_block;
-    use crate::network::Network;
     use crate::type_scripts::native_currency::NativeCurrency;
     use crate::type_scripts::TypeScript;
 

@@ -1,14 +1,14 @@
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
-use crate::block::block_height::BlockHeight;
-use crate::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use crate::block::pow::LustrationStatus;
 use crate::block::INITIAL_BLOCK_SUBSIDY;
 use crate::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::block::PREMINE_MAX_SIZE;
-use crate::network::Network;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// Height of 1st block that follows the alpha consensus ruleset, for main net.
@@ -353,17 +353,18 @@ impl ConsensusRuleSet {
             Network::Testnet(_) => one,
             Network::TestnetMock => one,
             Network::RegTest => one,
+            _ => one,
         }
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use neptune_primitives::difficulty_control::Difficulty;
     use tasm_lib::twenty_first::bfe;
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::block::difficulty_control::Difficulty;
     use crate::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::block::Block;
     use crate::proof_abstractions::test_runtime::tokio_runtime;

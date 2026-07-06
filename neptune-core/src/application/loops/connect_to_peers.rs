@@ -709,7 +709,7 @@ mod tests {
     use anyhow::bail;
     use anyhow::Result;
     use macro_rules_attr::apply;
-    use neptune_consensus::network::Network;
+    use neptune_primitives::network::Network;
     use tasm_lib::twenty_first::tip5::digest::Digest;
     use test_strategy::proptest;
     use tokio_test::io::Builder;

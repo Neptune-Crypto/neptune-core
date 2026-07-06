@@ -9,5 +9,9 @@ pub use tasm_lib;
 pub use tasm_lib::prelude::triton_vm;
 pub use tasm_lib::prelude::twenty_first;
 
+pub mod block_height;
+pub mod data_directory;
+pub mod difficulty_control;
 pub mod mast_hash;
+pub mod network;
 pub mod timestamp;

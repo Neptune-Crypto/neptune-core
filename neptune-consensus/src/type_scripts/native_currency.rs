@@ -746,6 +746,7 @@ pub mod tests {
     use std::panic;
 
     use macro_rules_attr::apply;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use num_traits::CheckedAdd;
     use num_traits::Zero;
@@ -758,7 +759,6 @@ pub mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::network::Network;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;

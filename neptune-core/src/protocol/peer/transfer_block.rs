@@ -4,10 +4,10 @@ use anyhow::Result;
 use neptune_consensus::block::block_appendix::BlockAppendix;
 use neptune_consensus::block::block_body::BlockBody;
 use neptune_consensus::block::block_header::BlockHeader;
-use neptune_consensus::block::block_height::BlockHeight;
 use neptune_consensus::block::Block;
 use neptune_consensus::block::BlockProof;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
+use neptune_primitives::block_height::BlockHeight;
 use serde::Deserialize;
 use serde::Serialize;
 

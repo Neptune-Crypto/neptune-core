@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 
 use crate::block::mutator_set_update::MutatorSetUpdate;
-use crate::network::Network;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
@@ -250,6 +250,7 @@ impl Transaction {
 pub(crate) mod tests {
     use lock_script::LockScript;
     use macro_rules_attr::apply;
+    use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
@@ -260,7 +261,6 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::network::Network;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::transaction::test_helpers::make_mock_transaction;
     use crate::transaction::utxo_triple::UtxoTriple;

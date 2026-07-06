@@ -1,11 +1,11 @@
 use anyhow::bail;
 use anyhow::Result;
-use neptune_consensus::network::Network;
 use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::lock_script::LockScript;
 use neptune_consensus::transaction::lock_script::LockScriptAndWitness;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::utxo::Utxo;
+use neptune_primitives::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;

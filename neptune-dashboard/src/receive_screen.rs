@@ -8,7 +8,7 @@ use crossterm::event::KeyEventKind;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::state::wallet::address::KeyType;
 use neptune_cash::state::wallet::address::ReceivingAddress;
-use neptune_consensus::network::Network;
+use neptune_primitives::network::Network;
 use ratatui::layout::Alignment;
 use ratatui::layout::Margin;
 use ratatui::style::Color;

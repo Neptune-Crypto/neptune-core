@@ -21,10 +21,10 @@ pub use receiving_address::ReceivingAddress;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neptune_consensus::network::Network;
     use neptune_consensus::transaction::test_helpers::make_mock_transaction;
     use neptune_consensus::transaction::utxo::Utxo;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_primitives::network::Network;
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::Rng;

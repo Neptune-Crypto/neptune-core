@@ -1,9 +1,6 @@
 use tokio::fs;
 
 pub const MAX_BLOCK_FILE_SIZE: u64 = 1024 * 1024 * 128; // 128 Mebibyte
-pub const BLOCK_FILENAME_PREFIX: &str = "blk";
-pub const BLOCK_FILENAME_EXTENSION: &str = "dat";
-pub const DIR_NAME_FOR_BLOCKS: &str = "blocks";
 
 /// Return a boolean indicating if a new file is needed or, in the negative sense, we can continue
 /// writing to the current file.

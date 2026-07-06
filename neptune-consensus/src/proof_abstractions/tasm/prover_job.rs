@@ -14,6 +14,7 @@ use neptune_job_queue::channels::JobCancelReceiver;
 use neptune_job_queue::traits::Job;
 use neptune_job_queue::JobCompletion;
 use neptune_job_queue::JobResultWrapper;
+use neptune_primitives::network::Network;
 use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::vm::VMState;
@@ -21,7 +22,6 @@ use tokio::io::AsyncWriteExt;
 
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
-use crate::network::Network;
 use crate::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
 use crate::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
 use crate::proof_abstractions::tx_proving_capability::TxProvingCapability;

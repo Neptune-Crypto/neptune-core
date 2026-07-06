@@ -1,6 +1,6 @@
-use neptune_consensus::block::block_height::BlockHeight;
-use neptune_consensus::block::difficulty_control::ProofOfWork;
 use neptune_consensus::block::Block;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::difficulty_control::ProofOfWork;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -28,7 +28,7 @@ impl From<&Block> for PeerBlockNotification {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neptune_consensus::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
-    use neptune_consensus::network::Network;
+    use neptune_primitives::network::Network;
 
     use super::PeerBlockNotification;
 

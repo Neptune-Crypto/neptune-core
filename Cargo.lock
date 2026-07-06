@@ -3602,6 +3602,7 @@ dependencies = [
  "libp2p",
  "neptune-cash",
  "neptune-consensus",
+ "neptune-primitives",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.4",
@@ -3629,6 +3630,7 @@ dependencies = [
  "multiaddr",
  "neptune-cash",
  "neptune-consensus",
+ "neptune-primitives",
  "num-traits",
  "rand 0.9.4",
  "ratatui",
@@ -3718,18 +3720,24 @@ dependencies = [
 name = "neptune-primitives"
 version = "0.12.0"
 dependencies = [
+ "anyhow",
  "arbitrary",
  "chrono",
+ "directories",
  "get-size2",
  "itertools",
+ "num-bigint",
+ "num-rational",
  "num-traits",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.4",
+ "rand_distr 0.5.1",
  "serde",
  "strum",
  "tasm-lib",
  "test-strategy 0.3.1",
+ "tokio",
 ]
 
 [[package]]

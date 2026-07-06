@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use neptune_consensus::block::block_height::BlockHeight;
+use neptune_primitives::block_height::BlockHeight;
 
 /// Configuration settings for Scan Mode.
 ///

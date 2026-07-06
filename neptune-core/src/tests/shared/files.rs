@@ -4,12 +4,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use neptune_primitives::data_directory::DataDirectory;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use tokio::time::sleep;
 use tokio::time::timeout;
-
-use crate::application::config::data_directory::DataDirectory;
 
 /// Create a randomly named `DataDirectory` so filesystem-bound tests can run
 /// in parallel. If this is not done, parallel execution of unit tests will

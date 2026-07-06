@@ -10,7 +10,7 @@ use itertools::Itertools;
 use neptune_cash::api::export::KeyType;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::state::wallet::address::SpendingKey;
-use neptune_consensus::network::Network;
+use neptune_primitives::network::Network;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
