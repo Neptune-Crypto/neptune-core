@@ -22,6 +22,7 @@ use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPrior
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::network::Network;
+use neptune_rpc_api::api::ops::Namespace;
 use num_traits::Zero;
 use tracing::error;
 
@@ -31,7 +32,6 @@ use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::parser::CliArgsParseError;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::application::json_rpc::core::api::ops::Namespace;
 use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;

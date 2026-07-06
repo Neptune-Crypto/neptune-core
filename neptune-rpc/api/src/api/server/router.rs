@@ -3,9 +3,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::application::json_rpc::core::api::rpc::RpcApi;
-use crate::application::json_rpc::core::model::json::JsonError;
-use crate::application::json_rpc::core::model::json::JsonResult;
+use crate::api::rpc::RpcApi;
+use crate::model::json::JsonError;
+use crate::model::json::JsonResult;
 
 type HandlerFn = Box<
     dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = JsonResult<serde_json::Value>> + Send>>
@@ -65,9 +65,9 @@ mod tests {
     use macro_rules_attr::apply;
     use serde_json::json;
 
-    use crate::application::json_rpc::core::api::server::router::Router;
-    use crate::application::json_rpc::core::model::json::JsonError;
-    use crate::tests::shared_tokio_runtime;
+    use crate::api::server::router::Router;
+    use crate::model::json::JsonError;
+    use crate::test_utils::shared_tokio_runtime;
 
     struct DummyApi;
 

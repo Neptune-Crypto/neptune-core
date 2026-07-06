@@ -15,7 +15,7 @@ use serde::Serializer;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
+use crate::model::block::transaction_kernel::RpcTransactionKernel;
 
 // TODO: Mirror consensus impl (RpcBlockPow = RpcPow<POW_MEMORY_TREE_HEIGHT>)
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -213,7 +213,7 @@ pub struct TransactionKernelWithPriority {
 }
 
 impl TransactionKernelWithPriority {
-    pub(crate) fn new(kernel: &TransactionKernel, priority: Option<u32>) -> Self {
+    pub fn new(kernel: &TransactionKernel, priority: Option<u32>) -> Self {
         Self {
             kernel: kernel.into(),
             priority,

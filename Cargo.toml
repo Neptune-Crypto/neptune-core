@@ -12,6 +12,7 @@ members = [
     "neptune-locks",
     "neptune-mutator-set",
     "neptune-primitives",
+    "neptune-rpc/api",
     "neptune-rpc/client",
     "neptune-rpc/macros",
     "neptune-wallet",

@@ -3,11 +3,11 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use async_trait::async_trait;
-use neptune_cash::application::json_rpc::core::api::client::transport::Transport;
-use neptune_cash::application::json_rpc::core::model::json::JsonError;
-use neptune_cash::application::json_rpc::core::model::json::JsonRequest;
-use neptune_cash::application::json_rpc::core::model::json::JsonResponse;
-use neptune_cash::application::json_rpc::core::model::json::JsonResult;
+use neptune_rpc_api::api::client::transport::Transport;
+use neptune_rpc_api::model::json::JsonError;
+use neptune_rpc_api::model::json::JsonRequest;
+use neptune_rpc_api::model::json::JsonResponse;
+use neptune_rpc_api::model::json::JsonResult;
 use reqwest::Client;
 
 #[derive(Clone, Debug)]
@@ -84,11 +84,6 @@ mod tests {
     use neptune_cash::api::export::ReceivingAddress;
     use neptune_cash::api::export::TransactionKernelId;
     use neptune_cash::api::export::TxProvingCapability;
-    use neptune_cash::application::json_rpc::core::api::ops::Namespace;
-    use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
-    use neptune_cash::application::json_rpc::core::api::rpc::RpcError;
-    use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
-    use neptune_cash::application::json_rpc::core::model::json::JsonError;
     use neptune_cash::state::GlobalState;
     use neptune_cash::state::GlobalStateLock;
     use neptune_cash::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -96,6 +91,11 @@ mod tests {
     use neptune_consensus::block::Block;
     use neptune_primitives::block_selector::BlockSelector;
     use neptune_primitives::block_selector::BlockSelectorLiteral;
+    use neptune_rpc_api::api::ops::Namespace;
+    use neptune_rpc_api::api::rpc::RpcApi;
+    use neptune_rpc_api::api::rpc::RpcError;
+    use neptune_rpc_api::model::block::transaction_kernel::RpcAdditionRecord;
+    use neptune_rpc_api::model::json::JsonError;
     use num_traits::Zero;
     use rand::distr::Alphanumeric;
     use rand::distr::SampleString;

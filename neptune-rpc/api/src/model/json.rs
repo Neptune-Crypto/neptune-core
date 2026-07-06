@@ -1,12 +1,12 @@
-use serde::ser::SerializeStruct;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::Serializer;
+use serde::ser::SerializeStruct;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::application::json_rpc::core::api::rpc::RpcError;
+use crate::api::rpc::RpcError;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonRequest {

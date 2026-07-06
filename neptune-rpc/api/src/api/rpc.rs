@@ -1,27 +1,27 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use libp2p::Multiaddr;
+use multiaddr::Multiaddr;
 use neptune_primitives::timestamp::Timestamp;
-use neptune_wallet::address::announcement_flag::AnnouncementFlag;
 use neptune_wallet::address::KeyType;
+use neptune_wallet::address::announcement_flag::AnnouncementFlag;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
-use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
-use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernelId;
-use crate::application::json_rpc::core::model::block::RpcBlock;
-use crate::application::json_rpc::core::model::common::RpcBlockSelector;
-use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
-use crate::application::json_rpc::core::model::json::JsonError;
-use crate::application::json_rpc::core::model::message::*;
-use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
+use crate::model::block::RpcBlock;
+use crate::model::block::header::RpcBlockHeight;
+use crate::model::block::header::RpcBlockPow;
+use crate::model::block::transaction_kernel::RpcAbsoluteIndexSet;
+use crate::model::block::transaction_kernel::RpcAdditionRecord;
+use crate::model::block::transaction_kernel::RpcTransactionKernelId;
+use crate::model::common::RpcBlockSelector;
+use crate::model::common::RpcNativeCurrencyAmount;
+use crate::model::json::JsonError;
+use crate::model::message::*;
+use crate::model::wallet::transaction::RpcTransaction;
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RestoreMembershipProofError {

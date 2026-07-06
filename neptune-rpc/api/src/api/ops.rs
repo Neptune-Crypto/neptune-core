@@ -3,12 +3,12 @@ use neptune_rpc_macros::Routes;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::application::json_rpc::core::api::client::transport::Transport;
-use crate::application::json_rpc::core::api::rpc::RpcApi;
-use crate::application::json_rpc::core::api::rpc::RpcResult;
-use crate::application::json_rpc::core::api::server::router::RpcRouter;
-use crate::application::json_rpc::core::model::json::JsonError;
-use crate::application::json_rpc::core::model::message::*;
+use crate::api::client::transport::Transport;
+use crate::api::rpc::RpcApi;
+use crate::api::rpc::RpcResult;
+use crate::api::server::router::RpcRouter;
+use crate::model::json::JsonError;
+use crate::model::message::*;
 
 /// API version.
 ///

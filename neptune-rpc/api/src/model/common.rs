@@ -199,13 +199,17 @@ mod tests {
         // Missing 0x prefix
         assert!("0000000000000001".parse::<RpcBFieldElements>().is_err());
         // Wrong length (not multiple of 16)
-        assert!("0x0000000000000100000000000002"
-            .parse::<RpcBFieldElements>()
-            .is_err());
+        assert!(
+            "0x0000000000000100000000000002"
+                .parse::<RpcBFieldElements>()
+                .is_err()
+        );
         // Invalid hex characters
-        assert!("0x0000000000000x0000000000000002"
-            .parse::<RpcBFieldElements>()
-            .is_err());
+        assert!(
+            "0x0000000000000x0000000000000002"
+                .parse::<RpcBFieldElements>()
+                .is_err()
+        );
         // Too big hex string (over 4 MB)
         let oversized_hex = "0x".to_string() + &"00".repeat(4 * 1024 * 1024 + 1);
         assert!(oversized_hex.parse::<RpcBFieldElements>().is_err());

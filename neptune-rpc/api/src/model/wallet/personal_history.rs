@@ -4,15 +4,15 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
-use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
-use crate::application::json_rpc::core::model::wallet::transaction::RpcUtxo;
+use crate::model::block::header::RpcBlockHeight;
+use crate::model::block::transaction_kernel::RpcAbsoluteIndexSet;
+use crate::model::block::transaction_kernel::RpcAdditionRecord;
+use crate::model::common::RpcNativeCurrencyAmount;
+use crate::model::wallet::transaction::RpcUtxo;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(test, derive(PartialEq, Eq))]
+#[cfg_attr(any(test, feature = "test-helpers"), derive(PartialEq, Eq))]
 pub struct ReceivedTransactionOutput {
     pub aocl_leaf_index: u64,
     pub addition_record: RpcAdditionRecord,

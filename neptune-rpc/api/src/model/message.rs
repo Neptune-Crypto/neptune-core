@@ -1,4 +1,4 @@
-use libp2p::Multiaddr;
+use multiaddr::Multiaddr;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::KeyType;
 use serde::Deserialize;
@@ -8,21 +8,21 @@ use serde_tuple::Serialize_tuple;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::application::json_rpc::core::model::block::body::*;
-use crate::application::json_rpc::core::model::block::header::*;
-use crate::application::json_rpc::core::model::block::transaction_kernel::*;
-use crate::application::json_rpc::core::model::block::*;
-use crate::application::json_rpc::core::model::common::*;
-use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
-use crate::application::json_rpc::core::model::wallet::block::*;
-use crate::application::json_rpc::core::model::wallet::mutator_set::*;
-use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
-use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
-use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
-use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNotificationData;
-use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
-use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
-use crate::application::json_rpc::core::model::wallet::RpcAnnouncementFlag;
+use crate::model::block::body::*;
+use crate::model::block::header::*;
+use crate::model::block::transaction_kernel::*;
+use crate::model::block::*;
+use crate::model::common::*;
+use crate::model::mining::template::RpcBlockTemplate;
+use crate::model::wallet::RpcAnnouncementFlag;
+use crate::model::wallet::block::*;
+use crate::model::wallet::mutator_set::*;
+use crate::model::wallet::personal_history::InitiatedTransaction;
+use crate::model::wallet::personal_history::ReceivedTransactionOutput;
+use crate::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
+use crate::model::wallet::transaction::RpcPrivateNotificationData;
+use crate::model::wallet::transaction::RpcTransaction;
+use crate::model::wallet::transaction::RpcTransactionProof;
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]

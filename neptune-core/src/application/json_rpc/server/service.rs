@@ -12,6 +12,23 @@ use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_database::storage::storage_vec::traits::StorageVecStream;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_primitives::block_selector::BlockSelector;
+use neptune_rpc_api::api::rpc::*;
+use neptune_rpc_api::model::block::header::RpcBlockHeader;
+use neptune_rpc_api::model::block::header::TransactionKernelWithPriority;
+use neptune_rpc_api::model::block::RpcBlock;
+use neptune_rpc_api::model::common::RpcNativeCurrencyAmount;
+use neptune_rpc_api::model::json::JsonError;
+use neptune_rpc_api::model::message::*;
+use neptune_rpc_api::model::mining::template::RpcBlockTemplate;
+use neptune_rpc_api::model::mining::template::RpcBlockTemplateMetadata;
+use neptune_rpc_api::model::wallet::block::RpcWalletBlock;
+use neptune_rpc_api::model::wallet::mutator_set::RpcMsMembershipSnapshot;
+use neptune_rpc_api::model::wallet::personal_history::InitiatedTransaction;
+use neptune_rpc_api::model::wallet::personal_history::InitiatedTransactionInput;
+use neptune_rpc_api::model::wallet::personal_history::InitiatedTransactionOutput;
+use neptune_rpc_api::model::wallet::personal_history::ReceivedTransactionOutput;
+use neptune_rpc_api::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
+use neptune_rpc_api::model::wallet::transaction::RpcPrivateNotificationData;
 use tasm_lib::prelude::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -27,23 +44,6 @@ use crate::api::export::ReceivingAddress;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
-use crate::application::json_rpc::core::api::rpc::*;
-use crate::application::json_rpc::core::model::block::header::RpcBlockHeader;
-use crate::application::json_rpc::core::model::block::header::TransactionKernelWithPriority;
-use crate::application::json_rpc::core::model::block::RpcBlock;
-use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
-use crate::application::json_rpc::core::model::json::JsonError;
-use crate::application::json_rpc::core::model::message::*;
-use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
-use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplateMetadata;
-use crate::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
-use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
-use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
-use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionInput;
-use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionOutput;
-use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
-use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
-use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNotificationData;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::state::block_selector::BlockSelectorExt;
@@ -95,7 +95,7 @@ impl RpcApi for RpcServer {
         let proof = &state.chain.tip().proof;
 
         Ok(TipProofResponse {
-            proof: crate::application::json_rpc::core::model::block::rpc_block_proof_from(proof),
+            proof: neptune_rpc_api::model::block::rpc_block_proof_from(proof),
         })
     }
 
@@ -213,9 +213,7 @@ impl RpcApi for RpcServer {
                 .await
                 .unwrap()
                 .as_ref()
-                .map(|b| {
-                    crate::application::json_rpc::core::model::block::rpc_block_proof_from(&b.proof)
-                }),
+                .map(|b| neptune_rpc_api::model::block::rpc_block_proof_from(&b.proof)),
             None => None,
         };
 
@@ -1828,6 +1826,13 @@ pub mod tests {
     use neptune_mutator_set::shared::NUM_TRIALS;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+    use neptune_rpc_api::api::ops::Namespace;
+    use neptune_rpc_api::api::rpc::RpcApi;
+    use neptune_rpc_api::api::rpc::RpcError;
+    use neptune_rpc_api::api::rpc::MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS;
+    use neptune_rpc_api::model::common::RpcBlockSelector;
+    use neptune_rpc_api::model::message::BlockHeightsByFlagsRequest;
+    use neptune_rpc_api::model::mining::template::RpcBlockTemplate;
     use num_traits::Zero;
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
@@ -1846,13 +1851,6 @@ pub mod tests {
     use crate::api::export::TxProvingCapability;
     use crate::api::export::Utxo;
     use crate::application::config::cli_args;
-    use crate::application::json_rpc::core::api::ops::Namespace;
-    use crate::application::json_rpc::core::api::rpc::RpcApi;
-    use crate::application::json_rpc::core::api::rpc::RpcError;
-    use crate::application::json_rpc::core::api::rpc::MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS;
-    use crate::application::json_rpc::core::model::common::RpcBlockSelector;
-    use crate::application::json_rpc::core::model::message::BlockHeightsByFlagsRequest;
-    use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::application::network::arbitrary::arb_multiaddr;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
@@ -2405,7 +2403,7 @@ pub mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn mining_scenarios_validated_properly() {
-        use crate::application::json_rpc::core::api::rpc::SubmitBlockError;
+        use neptune_rpc_api::api::rpc::SubmitBlockError;
 
         let network = Network::Testnet(42);
         let rpc_cli = cli_args::Args::default_with_network(network);

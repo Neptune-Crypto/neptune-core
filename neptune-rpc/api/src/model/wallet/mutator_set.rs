@@ -9,8 +9,8 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
-use crate::application::json_rpc::core::model::block::body::RpcMutatorSetAccumulator;
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcChunkDictionary;
+use crate::model::block::body::RpcMutatorSetAccumulator;
+use crate::model::block::transaction_kernel::RpcChunkDictionary;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RpcMmrMembershipProof(Vec<Digest>);

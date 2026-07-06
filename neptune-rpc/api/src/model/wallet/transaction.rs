@@ -1,9 +1,9 @@
+use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::transaction_proof::TransactionProof;
 use neptune_consensus::transaction::utxo::Coin;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
-use neptune_consensus::transaction::Transaction;
 use neptune_primitives::network::Network;
 use neptune_wallet::utxo_notification::PrivateNotificationData;
 use neptune_wallet::utxo_notification::UtxoNotificationPayload;
@@ -11,8 +11,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
-use crate::application::json_rpc::core::model::common::RpcBFieldElements;
+use crate::model::block::transaction_kernel::RpcTransactionKernel;
+use crate::model::common::RpcBFieldElements;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RpcNeptuneProof(RpcBFieldElements);
@@ -25,7 +25,7 @@ impl From<NeptuneProof> for RpcNeptuneProof {
 
 impl From<RpcNeptuneProof> for NeptuneProof {
     fn from(proof: RpcNeptuneProof) -> NeptuneProof {
-        proof.0 .0.into()
+        proof.0.0.into()
     }
 }
 
@@ -229,7 +229,7 @@ pub struct RpcPrivateNotificationData {
 }
 
 impl RpcPrivateNotificationData {
-    pub(crate) fn from_private_notification_data(
+    pub fn from_private_notification_data(
         value: PrivateNotificationData,
         network: Network,
     ) -> Self {

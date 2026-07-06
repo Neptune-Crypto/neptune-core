@@ -6,15 +6,15 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::Json;
 use axum::Router;
+use neptune_rpc_api::api::ops::Namespace;
+use neptune_rpc_api::api::ops::RpcMethods;
+use neptune_rpc_api::api::rpc::RpcApi;
+use neptune_rpc_api::api::server::router::RpcRouter;
+use neptune_rpc_api::model::json::JsonError;
+use neptune_rpc_api::model::json::JsonRequest;
+use neptune_rpc_api::model::json::JsonResponse;
 use tokio::net::TcpListener;
 
-use crate::application::json_rpc::core::api::ops::Namespace;
-use crate::application::json_rpc::core::api::ops::RpcMethods;
-use crate::application::json_rpc::core::api::rpc::RpcApi;
-use crate::application::json_rpc::core::api::server::router::RpcRouter;
-use crate::application::json_rpc::core::model::json::JsonError;
-use crate::application::json_rpc::core::model::json::JsonRequest;
-use crate::application::json_rpc::core::model::json::JsonResponse;
 use crate::application::json_rpc::server::rpc::RpcServer;
 
 /// Max request size for any HTTP requests. Enforced by server. This size must
@@ -159,14 +159,14 @@ mod tests {
     use axum::extract::State;
     use axum::Json;
     use macro_rules_attr::apply;
+    use neptune_rpc_api::api::ops::Namespace;
+    use neptune_rpc_api::api::ops::RpcMethods;
+    use neptune_rpc_api::api::server::router::RpcRouter;
+    use neptune_rpc_api::model::json::JsonError;
+    use neptune_rpc_api::model::json::JsonRequest;
+    use neptune_rpc_api::model::json::JsonResponse;
     use serde_json::json;
 
-    use crate::application::json_rpc::core::api::ops::Namespace;
-    use crate::application::json_rpc::core::api::ops::RpcMethods;
-    use crate::application::json_rpc::core::api::server::router::RpcRouter;
-    use crate::application::json_rpc::core::model::json::JsonError;
-    use crate::application::json_rpc::core::model::json::JsonRequest;
-    use crate::application::json_rpc::core::model::json::JsonResponse;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::application::json_rpc::server::service::tests::test_rpc_server;
     use crate::tests::shared_tokio_runtime;

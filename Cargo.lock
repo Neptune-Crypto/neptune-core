@@ -3502,6 +3502,7 @@ dependencies = [
  "neptune-locks",
  "neptune-mutator-set",
  "neptune-primitives",
+ "neptune-rpc-api",
  "neptune-rpc-macros",
  "neptune-wallet",
  "num-bigint",
@@ -3743,6 +3744,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "neptune-rpc-api"
+version = "0.12.0"
+dependencies = [
+ "async-trait",
+ "hex",
+ "macro_rules_attr",
+ "multiaddr",
+ "neptune-consensus",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "neptune-rpc-macros",
+ "neptune-wallet",
+ "num-bigint",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "serde",
+ "serde_arrays",
+ "serde_json",
+ "serde_tuple",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "neptune-rpc-client"
 version = "0.12.0"
 dependencies = [
@@ -3751,6 +3778,7 @@ dependencies = [
  "neptune-cash",
  "neptune-consensus",
  "neptune-primitives",
+ "neptune-rpc-api",
  "num-traits",
  "rand 0.9.4",
  "reqwest",

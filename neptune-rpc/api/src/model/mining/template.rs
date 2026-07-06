@@ -1,14 +1,14 @@
+use neptune_consensus::block::Block;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::block::pow::PowMastPaths;
-use neptune_consensus::block::Block;
 use neptune_primitives::difficulty_control::Difficulty;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::application::json_rpc::core::model::block::RpcBlock;
-use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
+use crate::model::block::RpcBlock;
+use crate::model::common::RpcNativeCurrencyAmount;
 
 /// Data required to attempt to solve the proof-of-work puzzle that allows the
 /// minting of the next block.
@@ -78,39 +78,35 @@ pub struct RpcBlockTemplate {
     pub metadata: RpcBlockTemplateMetadata,
 }
 
-#[cfg(test)]
-mod tests {
-    use neptune_consensus::block::block_header::BlockPow;
-    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-    use tasm_lib::twenty_first::bfe_array;
-    use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+#[cfg(any(test, feature = "test-helpers"))]
+impl RpcBlockTemplateMetadata {
+    pub fn solve(
+        &self,
+        consensus_rule_set: neptune_consensus::consensus_rule_set::ConsensusRuleSet,
+    ) -> crate::model::block::header::RpcBlockPow {
+        use neptune_consensus::block::block_header::BlockPow;
+        use tasm_lib::twenty_first::bfe_array;
 
-    use super::*;
-    use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
+        assert!(
+            !consensus_rule_set.memory_hard_pow(),
+            "solving pre-hardfork-beta (memory-hard) proof-of-work is not supported"
+        );
 
-    impl RpcBlockTemplateMetadata {
-        pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> RpcBlockPow {
-            assert!(
-                !consensus_rule_set.memory_hard_pow(),
-                "solving pre-hardfork-beta (memory-hard) proof-of-work is not supported"
-            );
+        let solution = (0u64..u64::MAX)
+            .map(|i| {
+                let nonce = Digest(bfe_array![0, 0, 0, 0, i]);
 
-            let solution = (0u64..u64::MAX)
-                .map(|i| {
-                    let nonce = Digest(bfe_array![0, 0, 0, 0, i]);
+                BlockPow::guess(
+                    &self.pow_mast_paths,
+                    nonce,
+                    self.threshold,
+                    self.lustration_status,
+                    Some(self.version),
+                )
+            })
+            .find_map(|x| x)
+            .expect("Should find solution within 2^{64} attempts");
 
-                    BlockPow::guess(
-                        &self.pow_mast_paths,
-                        nonce,
-                        self.threshold,
-                        self.lustration_status,
-                        Some(self.version),
-                    )
-                })
-                .find_map(|x| x)
-                .expect("Should find solution within 2^{64} attempts");
-
-            solution.into()
-        }
+        solution.into()
     }
 }

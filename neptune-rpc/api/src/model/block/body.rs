@@ -7,7 +7,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
+use crate::model::block::transaction_kernel::RpcTransactionKernel;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

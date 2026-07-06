@@ -1,18 +1,18 @@
+use neptune_consensus::block::Block;
+use neptune_consensus::block::BlockProof;
 use neptune_consensus::block::block_appendix::BlockAppendix;
 use neptune_consensus::block::block_body::BlockBody;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_kernel::BlockKernel;
-use neptune_consensus::block::Block;
-use neptune_consensus::block::BlockProof;
 use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::application::json_rpc::core::model::block::appendix::RpcBlockAppendix;
-use crate::application::json_rpc::core::model::block::body::RpcBlockBody;
-use crate::application::json_rpc::core::model::block::header::RpcBlockHeader;
-use crate::application::json_rpc::core::model::common::RpcBFieldElements;
+use crate::model::block::appendix::RpcBlockAppendix;
+use crate::model::block::body::RpcBlockBody;
+use crate::model::block::header::RpcBlockHeader;
+use crate::model::common::RpcBFieldElements;
 
 pub mod appendix;
 pub mod body;

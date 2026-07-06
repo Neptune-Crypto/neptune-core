@@ -3,10 +3,10 @@ use std::fmt::Display;
 use libp2p::autonat::NatStatus;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_rpc_api::model::message::RpcNetworkOverview;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::application::json_rpc::core::model::message::RpcNetworkOverview;
 use crate::application::network::reachability::ReachabilityState;
 
 /// Shadow enum to avoid Serialize / Deserialize problems for [`NatStatus`].

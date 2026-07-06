@@ -5,13 +5,12 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::Transaction;
+use neptune_rpc_api::model::block::transaction_kernel::RpcTransactionKernelId;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::prelude::MerkleTree;
-
-use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernelId;
 
 /// A unique identifier of a transaction whose value is unaffected by a
 /// transaction update.
