@@ -23,7 +23,6 @@ use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNo
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransaction;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcTransactionProof;
 use crate::application::json_rpc::core::model::wallet::RpcAnnouncementFlag;
-use crate::application::network::overview::NetworkOverview;
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -844,8 +843,28 @@ pub struct ResetRelayReservationsResponse {}
 #[serde(rename_all = "camelCase")]
 pub struct NetworkOverviewRequest {}
 
+/// RPC representation of the node's libp2p network overview.
+///
+/// A node-independent DTO: the libp2p types (`NatStatus`, `Multiaddr`,
+/// `PeerId`) and the node's `ReachabilityState` are rendered to their string
+/// forms so the RPC contract carries no node/libp2p dependency. The node
+/// converts from its internal `NetworkOverview` at the RPC boundary.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcNetworkOverview {
+    pub nat_status: String,
+    pub reachability_state: String,
+    pub external_addresses: Vec<String>,
+    pub connection_count: usize,
+    pub connection_limit: usize,
+    pub num_active_relays: usize,
+    pub peer_id: String,
+    pub address_book_size: usize,
+    pub num_banned_peers: usize,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkOverviewResponse {
-    pub network_overview: NetworkOverview,
+    pub network_overview: RpcNetworkOverview,
 }

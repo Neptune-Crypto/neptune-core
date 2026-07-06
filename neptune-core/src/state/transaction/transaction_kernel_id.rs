@@ -11,6 +11,8 @@ use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::prelude::MerkleTree;
 
+use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernelId;
+
 /// A unique identifier of a transaction whose value is unaffected by a
 /// transaction update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, GetSize, Hash, Serialize, Deserialize)]
@@ -34,6 +36,18 @@ impl FromStr for TransactionKernelId {
 impl From<TransactionKernelId> for Digest {
     fn from(value: TransactionKernelId) -> Self {
         value.0
+    }
+}
+
+impl From<TransactionKernelId> for RpcTransactionKernelId {
+    fn from(value: TransactionKernelId) -> Self {
+        RpcTransactionKernelId(value.0)
+    }
+}
+
+impl From<RpcTransactionKernelId> for TransactionKernelId {
+    fn from(value: RpcTransactionKernelId) -> Self {
+        TransactionKernelId(value.0)
     }
 }
 

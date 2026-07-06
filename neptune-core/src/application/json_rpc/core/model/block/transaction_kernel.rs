@@ -11,7 +11,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::TransactionKernelId;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMmrMembershipProof;
@@ -202,7 +201,13 @@ impl From<RpcTransactionKernel> for TransactionKernel {
     }
 }
 
-pub type RpcTransactionKernelId = TransactionKernelId;
+/// RPC representation of a transaction identifier.
+///
+/// Wire-compatible newtype over [`Digest`] (serde treats it transparently). The
+/// node converts to and from its internal `TransactionKernelId` at the RPC
+/// boundary, keeping that node/mempool abstraction out of the public API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RpcTransactionKernelId(pub Digest);
 
 #[cfg(test)]
 mod tests {

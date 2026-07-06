@@ -1353,7 +1353,7 @@ impl RpcApi for RpcServer {
             .expect("Main loop must still be running");
 
         let resp = SendResponse {
-            transaction_kernel_id,
+            transaction_kernel_id: transaction_kernel_id.into(),
             inputs: tx_inputs,
             outputs: tx_outputs,
             unowned_offchain_notifications: unowned_offchain_notifications
@@ -1578,7 +1578,7 @@ impl RpcApi for RpcServer {
             .await
             .mempool
             .fee_density_iter()
-            .map(|(txkid, _)| txkid)
+            .map(|(txkid, _)| txkid.into())
             .collect();
 
         Ok(TransactionsResponse { transactions })
@@ -1593,7 +1593,7 @@ impl RpcApi for RpcServer {
             .lock_guard()
             .await
             .mempool
-            .get(request.id)
+            .get(request.id.into())
             .cloned();
 
         Ok(GetTransactionKernelResponse {
@@ -1610,7 +1610,7 @@ impl RpcApi for RpcServer {
             .lock_guard()
             .await
             .mempool
-            .get(request.id)
+            .get(request.id.into())
             .cloned();
 
         Ok(GetTransactionProofResponse {
@@ -1800,7 +1800,9 @@ impl RpcApi for RpcServer {
         // Await receipt.
         let timeout_period = Duration::from_secs(1);
         match tokio::time::timeout(timeout_period, rx).await {
-            Ok(Ok(network_overview)) => Ok(NetworkOverviewResponse { network_overview }),
+            Ok(Ok(network_overview)) => Ok(NetworkOverviewResponse {
+                network_overview: network_overview.into(),
+            }),
             Ok(Err(_e)) => Err(RpcError::RxChannel),
             Err(_e) => Err(RpcError::Timeout(timeout_period)),
         }
@@ -2498,12 +2500,20 @@ pub mod tests {
             let id = tx.txid();
 
             // Test transaction kernel can be extracted and contents match.
-            let kernel = rpc_server.get_transaction_kernel(id).await.unwrap().kernel;
+            let kernel = rpc_server
+                .get_transaction_kernel(id.into())
+                .await
+                .unwrap()
+                .kernel;
             assert!(kernel.is_some());
             assert_eq!(tx.kernel, kernel.unwrap().into());
 
             // Test transaction proofs can be extracted and contents match.
-            let proof = rpc_server.get_transaction_proof(id).await.unwrap().proof;
+            let proof = rpc_server
+                .get_transaction_proof(id.into())
+                .await
+                .unwrap()
+                .proof;
             match tx.proof {
                 // Witness-backed transactions proofs cannot be exposed as it exposes private data.
                 TransactionProof::Witness(_) => assert!(proof.is_none()),

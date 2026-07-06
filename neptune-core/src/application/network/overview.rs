@@ -6,6 +6,7 @@ use libp2p::PeerId;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::application::json_rpc::core::model::message::RpcNetworkOverview;
 use crate::application::network::reachability::ReachabilityState;
 
 /// Shadow enum to avoid Serialize / Deserialize problems for [`NatStatus`].
@@ -40,6 +41,31 @@ pub struct NetworkOverview {
     pub peer_id: PeerId,
     pub address_book_size: usize,
     pub num_banned_peers: usize,
+}
+
+impl From<NetworkOverview> for RpcNetworkOverview {
+    fn from(o: NetworkOverview) -> Self {
+        let nat_status = match &o.nat_status {
+            NatStatus::Public(addr) => format!("public({addr})"),
+            NatStatus::Private => "private".to_string(),
+            NatStatus::Unknown => "unknown".to_string(),
+        };
+        RpcNetworkOverview {
+            nat_status,
+            reachability_state: o.reachability_state.to_string(),
+            external_addresses: o
+                .external_addresses
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            connection_count: o.connection_count,
+            connection_limit: o.connection_limit,
+            num_active_relays: o.num_active_relays,
+            peer_id: o.peer_id.to_string(),
+            address_book_size: o.address_book_size,
+            num_banned_peers: o.num_banned_peers,
+        }
+    }
 }
 
 impl Display for NetworkOverview {

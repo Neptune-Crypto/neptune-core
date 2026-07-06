@@ -521,7 +521,7 @@ mod tests {
             let alice = alice_gsl.lock_guard().await;
             wait_until_tx_in_mempool_has_single_proof(
                 &alice,
-                send_resp.transaction_kernel_id,
+                send_resp.transaction_kernel_id.into(),
                 Duration::from_secs(20),
             )
             .await;
