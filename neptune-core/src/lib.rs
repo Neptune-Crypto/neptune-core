@@ -57,7 +57,6 @@ use neptune_locks::tokio as sync_tokio;
 use neptune_primitives::data_directory::DataDirectory;
 use prelude::tasm_lib;
 use prelude::triton_vm;
-use prelude::twenty_first;
 use protocol::peer::handshake_data::HandshakeData;
 use state::wallet::wallet_file::WalletFileContext;
 use state::GlobalState;

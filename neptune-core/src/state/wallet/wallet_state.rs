@@ -17,7 +17,6 @@ use neptune_database::storage::storage_schema::RustyValue;
 use neptune_database::storage::storage_vec::traits::*;
 use neptune_database::NeptuneLevelDb;
 use neptune_mutator_set::addition_record::AdditionRecord;
-use neptune_mutator_set::commit;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -25,12 +24,9 @@ use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::data_directory::DataDirectory;
 use neptune_primitives::timestamp::Timestamp;
-use serde::Deserialize;
-use serde::Serialize;
 use strum::IntoEnumIterator;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Tip5;
-use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::fs::OpenOptions;
@@ -50,6 +46,7 @@ use super::address::SpendingKey;
 use super::expected_utxo::ExpectedUtxo;
 use super::expected_utxo::UtxoNotifier;
 use super::incoming_utxo::IncomingUtxo;
+use super::incoming_utxo::IncomingUtxoRecoveryData;
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::sent_transaction::SentTransaction;
 use super::wallet_configuration::WalletConfiguration;
@@ -111,23 +108,6 @@ pub struct WalletState {
 
     /// Tunable options for configuring how the wallet state operates.
     pub(crate) configuration: WalletConfiguration,
-}
-
-/// Contains the cryptographic (non-public) data that is needed to recover the mutator set
-/// membership proof of a UTXO.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
-pub struct IncomingUtxoRecoveryData {
-    pub utxo: Utxo,
-    pub sender_randomness: Digest,
-    pub receiver_preimage: Digest,
-    pub aocl_index: u64,
-}
-
-impl IncomingUtxoRecoveryData {
-    pub(crate) fn addition_record(&self) -> AdditionRecord {
-        let item = Tip5::hash(&self.utxo);
-        commit(item, self.sender_randomness, self.receiver_preimage.hash())
-    }
 }
 
 impl From<&MonitoredUtxo> for IncomingUtxoRecoveryData {

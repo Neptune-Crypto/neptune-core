@@ -5,7 +5,12 @@ use arbitrary::Arbitrary;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::transaction::utxo_triple::UtxoTriple;
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use super::expected_utxo::UtxoNotifier;
 use super::utxo_notification::UtxoNotificationPayload;
@@ -101,6 +106,23 @@ impl IncomingUtxo {
             self.receiver_preimage,
             received_from,
         )
+    }
+}
+
+/// Contains the cryptographic (non-public) data that is needed to recover the mutator set
+/// membership proof of a UTXO.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+pub struct IncomingUtxoRecoveryData {
+    pub utxo: Utxo,
+    pub sender_randomness: Digest,
+    pub receiver_preimage: Digest,
+    pub aocl_index: u64,
+}
+
+impl IncomingUtxoRecoveryData {
+    pub fn addition_record(&self) -> AdditionRecord {
+        let item = Tip5::hash(&self.utxo);
+        commit(item, self.sender_randomness, self.receiver_preimage.hash())
     }
 }
 
