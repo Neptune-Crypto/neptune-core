@@ -14,6 +14,7 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
 
 use crate::block::block_header::BlockHeader;
 use crate::block::block_kernel::BlockKernel;
@@ -53,37 +54,6 @@ pub const POW_MEMORY_TREE_HEIGHT: usize = POW_MEMORY_PARAMETER.ilog2() as usize;
 const NUM_INDEX_REPETITIONS: u32 = 63;
 const NUM_BUD_LAYERS: usize = 5; // 5 => 63 Tip5 permutations per leaf
 const BUDS_PER_LEAF: usize = 1 << NUM_BUD_LAYERS;
-
-/// Merkle-tree authentication-path verification, tailored to the `pow` module.
-///
-/// Only path verification is needed here: memory-hard proof-of-work solving —
-/// the only thing that required building a full tree — is no longer supported.
-/// Historical blocks are verified by checking authentication paths, which is
-/// cheap. To build a Merkle tree, use `twenty-first`'s Merkle tree module.
-#[derive(Debug, Clone, Copy)]
-pub struct MTree;
-
-impl MTree {
-    pub fn verify(root: Digest, index: usize, path: &[Digest], element: Digest) -> bool {
-        // if index out of bounds, reject early
-        if index > 1 << path.len() {
-            return false;
-        }
-
-        let mut running_index = index;
-        let mut running_digest = element;
-        for sibling in path {
-            if running_index & 1 == 1 {
-                running_digest = Tip5::hash_pair(*sibling, running_digest);
-            } else {
-                running_digest = Tip5::hash_pair(running_digest, *sibling);
-            }
-            running_index >>= 1;
-        }
-
-        running_digest == root
-    }
-}
 
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
@@ -341,10 +311,22 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             )
         };
 
-        if !MTree::verify(self.root, index_a as usize, &self.path_a, leaf_a) {
+        if !(MerkleTreeInclusionProof {
+            tree_height: MERKLE_TREE_HEIGHT.try_into().unwrap(),
+            indexed_leafs: vec![(index_a as usize, leaf_a)],
+            authentication_structure: self.path_a.to_vec(),
+        })
+        .verify(self.root)
+        {
             return Err(PowValidationError::PathAInvalid);
         }
-        if !MTree::verify(self.root, index_b as usize, &self.path_b, leaf_b) {
+        if !(MerkleTreeInclusionProof {
+            tree_height: MERKLE_TREE_HEIGHT.try_into().unwrap(),
+            indexed_leafs: vec![(index_b as usize, leaf_b)],
+            authentication_structure: self.path_b.to_vec(),
+        })
+        .verify(self.root)
+        {
             return Err(PowValidationError::PathBInvalid);
         }
 
@@ -629,129 +611,6 @@ pub(crate) mod tests {
             {
                 break solution;
             }
-        }
-    }
-
-    mod merkle_tree_tests {
-        use rand::rngs::StdRng;
-        use rand::SeedableRng;
-        use tasm_lib::twenty_first::prelude::MerkleTree;
-
-        use super::*;
-
-        fn valid_root_index_path_element_tuple(
-            tree_height: usize,
-            seed: [u8; 32],
-        ) -> (Digest, usize, Vec<Digest>, Digest) {
-            let mut rng = StdRng::from_seed(seed);
-            let num_leafs = 1 << tree_height;
-
-            let leafs = (0..num_leafs).map(|_| rng.random::<Digest>()).collect_vec();
-            let index = rng.random_range(0..num_leafs);
-            let element = leafs[index];
-            let merkle_tree =
-                MerkleTree::sequential_new(&leafs).expect("must not forget to unwrap");
-            let root = merkle_tree.root();
-            let path = merkle_tree
-                .authentication_structure(&[index])
-                .expect("must not forget to unwrap");
-
-            (root, index, path, element)
-        }
-
-        #[test]
-        fn can_verify() {
-            let mut rng = rng();
-            for height in [1, 5, 10] {
-                let (root, index, path, element) =
-                    valid_root_index_path_element_tuple(height, rng.random());
-                assert!(MTree::verify(root, index, &path, element));
-            }
-        }
-
-        #[test]
-        fn verify_fails_on_wrong_root() {
-            let mut rng = rng();
-            let height = 10;
-            let (_root, index, path, element) =
-                valid_root_index_path_element_tuple(height, rng.random());
-
-            let root = rng.random();
-
-            assert!(!MTree::verify(root, index, &path, element));
-        }
-
-        #[test]
-        fn verify_fails_on_wrong_index() {
-            let mut rng = rng();
-            let height = 10;
-            let (root, index, path, element) =
-                valid_root_index_path_element_tuple(height, rng.random());
-
-            let translation = rng.random_range(1..((1 << height) - 1));
-            let index = (index + translation) % (1 << height);
-
-            assert!(!MTree::verify(root, index, &path, element));
-        }
-
-        #[test]
-        fn verify_fails_on_index_out_of_bounds() {
-            let mut rng = rng();
-            let height = 10;
-            let (root, index, path, element) =
-                valid_root_index_path_element_tuple(height, rng.random());
-
-            let index = index + (1 << height);
-
-            assert!(!MTree::verify(root, index, &path, element));
-        }
-
-        #[test]
-        fn verify_fails_on_wrong_path() {
-            let mut rng = rng();
-            let height = 10;
-            let (root, index, mut path, element) =
-                valid_root_index_path_element_tuple(height, rng.random());
-
-            path[rng.random_range(0..height)] = rng.random();
-
-            assert!(!MTree::verify(root, index, &path, element));
-        }
-
-        #[test]
-        fn verify_fails_on_path_too_long() {
-            let mut rng = rng();
-            let height = 10;
-            let (root, index, mut path, element) =
-                valid_root_index_path_element_tuple(height, rng.random());
-
-            path.push(rng.random());
-
-            assert!(!MTree::verify(root, index, &path, element));
-        }
-
-        #[test]
-        fn verify_fails_on_path_too_short() {
-            let mut rng = rng();
-            let height = 10;
-            let (root, index, mut path, element) =
-                valid_root_index_path_element_tuple(height, rng.random());
-
-            path.pop();
-
-            assert!(!MTree::verify(root, index, &path, element));
-        }
-
-        #[test]
-        fn verify_fails_on_wrong_element() {
-            let mut rng = rng();
-            let height = 10;
-            let (root, index, path, _element) =
-                valid_root_index_path_element_tuple(height, rng.random());
-
-            let element = rng.random();
-
-            assert!(!MTree::verify(root, index, &path, element));
         }
     }
 }
