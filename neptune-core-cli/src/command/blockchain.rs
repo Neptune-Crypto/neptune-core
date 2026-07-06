@@ -1,5 +1,5 @@
 use clap::Parser;
-use neptune_cash::state::block_selector::BlockSelector;
+use neptune_primitives::block_selector::BlockSelector;
 
 /// Blockchain Command -- a command related to the state of the blockchain.
 #[derive(Debug, Clone, Parser)]

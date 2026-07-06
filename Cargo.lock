@@ -3734,9 +3734,11 @@ dependencies = [
  "rand 0.9.4",
  "rand_distr 0.5.1",
  "serde",
+ "serde_json",
  "strum",
  "tasm-lib",
  "test-strategy 0.3.1",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -3748,6 +3750,7 @@ dependencies = [
  "itertools",
  "neptune-cash",
  "neptune-consensus",
+ "neptune-primitives",
  "num-traits",
  "rand 0.9.4",
  "reqwest",

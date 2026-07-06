@@ -11,6 +11,7 @@ use neptune_consensus::block::FUTUREDATING_LIMIT;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_database::storage::storage_vec::traits::StorageVecStream;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::block_selector::BlockSelector;
 use tasm_lib::prelude::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -45,7 +46,7 @@ use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoin
 use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNotificationData;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
-use crate::state::block_selector::BlockSelector;
+use crate::state::block_selector::BlockSelectorExt;
 use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
