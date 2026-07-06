@@ -1,18 +1,18 @@
+use neptune_consensus::transaction::transaction_proof::TransactionProof;
 use neptune_consensus::transaction::utxo::Coin;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::Transaction;
+use neptune_primitives::network::Network;
+use neptune_wallet::utxo_notification::PrivateNotificationData;
+use neptune_wallet::utxo_notification::UtxoNotificationPayload;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::NeptuneProof;
-use crate::api::export::Network;
-use crate::api::export::Transaction;
-use crate::api::export::TransactionProof;
-use crate::api::export::Utxo;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
 use crate::application::json_rpc::core::model::common::RpcBFieldElements;
-use crate::state::wallet::utxo_notification::PrivateNotificationData;
-use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RpcNeptuneProof(RpcBFieldElements);

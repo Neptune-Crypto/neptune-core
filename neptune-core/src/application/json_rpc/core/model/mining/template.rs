@@ -83,10 +83,10 @@ mod tests {
     use neptune_consensus::block::block_header::BlockPow;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
     use tasm_lib::twenty_first::bfe_array;
+    use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
     use super::*;
     use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
-    use crate::BFieldElement;
 
     impl RpcBlockTemplateMetadata {
         pub fn solve(&self, consensus_rule_set: ConsensusRuleSet) -> RpcBlockPow {

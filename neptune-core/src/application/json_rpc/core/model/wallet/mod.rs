@@ -1,4 +1,4 @@
-use crate::api::export::AnnouncementFlag;
+use neptune_wallet::address::announcement_flag::AnnouncementFlag;
 
 pub mod block;
 pub mod mutator_set;

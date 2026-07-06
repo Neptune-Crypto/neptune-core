@@ -1,14 +1,14 @@
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
 use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
 use crate::application::json_rpc::core::model::wallet::transaction::RpcUtxo;
-use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

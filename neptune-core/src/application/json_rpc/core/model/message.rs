@@ -1,4 +1,6 @@
 use libp2p::Multiaddr;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::KeyType;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_tuple::Deserialize_tuple;
@@ -6,8 +8,6 @@ use serde_tuple::Serialize_tuple;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::api::export::KeyType;
-use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::body::*;
 use crate::application::json_rpc::core::model::block::header::*;
 use crate::application::json_rpc::core::model::block::transaction_kernel::*;

@@ -2,15 +2,15 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use libp2p::Multiaddr;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::announcement_flag::AnnouncementFlag;
+use neptune_wallet::address::KeyType;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use thiserror::Error;
 
-use crate::api::export::AnnouncementFlag;
-use crate::api::export::KeyType;
-use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::header::RpcBlockHeight;
 use crate::application::json_rpc::core::model::block::header::RpcBlockPow;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcAbsoluteIndexSet;

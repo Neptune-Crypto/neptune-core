@@ -3,8 +3,10 @@ use neptune_consensus::block::block_header::BlockPow;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::pow::POW_MEMORY_TREE_HEIGHT;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::difficulty_control::ProofOfWork;
+use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -13,8 +15,6 @@ use serde::Serializer;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::Timestamp;
 use crate::application::json_rpc::core::model::block::transaction_kernel::RpcTransactionKernel;
 
 // TODO: Mirror consensus impl (RpcBlockPow = RpcPow<POW_MEMORY_TREE_HEIGHT>)

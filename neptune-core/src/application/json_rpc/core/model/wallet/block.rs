@@ -41,19 +41,19 @@ mod tests {
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
     use neptune_consensus::block::BlockProof;
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::removal_record::chunk::Chunk;
     use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
     use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_primitives::network::Network;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::Zero;
     use tasm_lib::twenty_first::prelude::MmrMembershipProof;
     use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
     use super::*;
-    use crate::api::export::AbsoluteIndexSet;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::Network;
-    use crate::api::export::Timestamp;
     use crate::tests::shared::blocks::block_with_num_puts;
     use crate::tests::shared_tokio_runtime;
 
