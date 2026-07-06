@@ -1,6 +1,6 @@
 [package]
 name = "neptune-archival-mmr"
-description = "Append-only archival Merkle Mountain Range backed by neptune-database storage"
+description = "Archival Merkle Mountain Range backed by neptune-database storage. Uses the TIP5 hash function."
 authors = ["Triton Software"]
 
 version = "0.12.0"
