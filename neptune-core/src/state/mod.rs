@@ -64,6 +64,13 @@ use neptune_mempool::upgrade_incentive::UpgradeIncentive;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::handshake_data::VersionString;
+use neptune_p2p::peer::peer_info::PeerInfo;
+use neptune_p2p::peer::transfer_block::TransferBlock;
+use neptune_p2p::peer::SyncChallenge;
+use neptune_p2p::peer::SyncChallengeResponse;
+use neptune_p2p::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::data_directory::DataDirectory;
 use neptune_primitives::difficulty_control::ProofOfWork;
@@ -106,13 +113,6 @@ use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJo
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::protocol::peer::handshake_data::HandshakeData;
-use crate::protocol::peer::handshake_data::VersionString;
-use crate::protocol::peer::peer_info::PeerInfo;
-use crate::protocol::peer::transfer_block::TransferBlock;
-use crate::protocol::peer::SyncChallenge;
-use crate::protocol::peer::SyncChallengeResponse;
-use crate::protocol::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::state::claim_error::ClaimError;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::utxo_validitor::UtxoValidator;
@@ -230,7 +230,7 @@ impl GlobalStateLock {
     /// immediately.
     ///
     /// This function is for obtaining the node's
-    /// [`HandshakeData`](crate::protocol::peer::handshake_data) without
+    /// [`HandshakeData`](neptune_p2p::peer::handshake_data) without
     /// immediately (*i.e.*, without blocking) in a synchronous environment.
     /// In other cases, call [`GlobalState::get_own_handshakedata`] instead.
     pub(crate) fn get_own_handshakedata_sync(&self) -> HandshakeData {

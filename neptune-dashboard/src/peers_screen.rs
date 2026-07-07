@@ -11,7 +11,7 @@ use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use multiaddr::Protocol;
 use neptune_cash::application::rpc::auth;
-use neptune_cash::protocol::peer::peer_info::PeerInfo;
+use neptune_p2p::peer::peer_info::PeerInfo;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::layout::Offset;

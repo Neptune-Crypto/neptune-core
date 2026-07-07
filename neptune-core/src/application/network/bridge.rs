@@ -6,11 +6,11 @@ use futures::SinkExt;
 use futures::Stream;
 use futures::TryStreamExt;
 use libp2p::Stream as Libp2pStream;
+use neptune_p2p::peer::PeerMessage;
 use tokio_util::codec::Framed;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 
 use crate::application::loops::connect_to_peers::get_codec_rules;
-use crate::protocol::peer::PeerMessage;
 
 /// A transport-agnostic wrapper for peer communication.
 ///

@@ -16,6 +16,15 @@ use futures::SinkExt;
 use futures::TryStreamExt;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
+use neptune_p2p::peer::handshake_data::VersionString;
+use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+use neptune_p2p::peer::ConnectionRefusedReason;
+use neptune_p2p::peer::InternalConnectionStatus;
+use neptune_p2p::peer::NegativePeerSanction;
+use neptune_p2p::peer::PeerMessage;
+use neptune_p2p::peer::PeerSanction;
+use neptune_p2p::peer::PeerStanding;
+use neptune_p2p::peer::TransferConnectionStatus;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
@@ -37,15 +46,6 @@ use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
-use crate::protocol::peer::handshake_data::VersionString;
-use crate::protocol::peer::peer_info::pseudorandom_peer_id;
-use crate::protocol::peer::ConnectionRefusedReason;
-use crate::protocol::peer::InternalConnectionStatus;
-use crate::protocol::peer::NegativePeerSanction;
-use crate::protocol::peer::PeerMessage;
-use crate::protocol::peer::PeerSanction;
-use crate::protocol::peer::PeerStanding;
-use crate::protocol::peer::TransferConnectionStatus;
 use crate::state::GlobalStateLock;
 use crate::HandshakeData;
 use crate::MAGIC_STRING_REQUEST;
@@ -58,8 +58,6 @@ pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 500 * 1024 * 1024;
 /// Only accept connections where peer's reported timestamp deviates from our
 /// by less than this value.
 const PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS: u128 = 90;
-pub(crate) const PEER_TIME_DIFFERENCE_THRESHOLD: Duration =
-    Duration::from_secs(PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS as u64);
 
 /// Use this function to ensure that the same rules apply for both
 /// ingoing and outgoing connections. This limits the size of messages
@@ -709,6 +707,12 @@ mod tests {
     use anyhow::bail;
     use anyhow::Result;
     use macro_rules_attr::apply;
+    use neptune_p2p::peer::handshake_data::VersionString;
+    use neptune_p2p::peer::peer_info::PeerInfo;
+    use neptune_p2p::peer::InternalConnectionStatus;
+    use neptune_p2p::peer::NegativePeerSanction;
+    use neptune_p2p::peer::PeerMessage;
+    use neptune_p2p::peer::PeerStanding;
     use neptune_primitives::network::Network;
     use tasm_lib::twenty_first::tip5::digest::Digest;
     use test_strategy::proptest;
@@ -718,12 +722,6 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
-    use crate::protocol::peer::handshake_data::VersionString;
-    use crate::protocol::peer::peer_info::PeerInfo;
-    use crate::protocol::peer::InternalConnectionStatus;
-    use crate::protocol::peer::NegativePeerSanction;
-    use crate::protocol::peer::PeerMessage;
-    use crate::protocol::peer::PeerStanding;
     use crate::tests::shared::globalstate::get_dummy_handshake_data_for_genesis;
     use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;

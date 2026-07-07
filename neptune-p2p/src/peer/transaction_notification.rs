@@ -1,5 +1,5 @@
-use anyhow::bail;
 use anyhow::Result;
+use anyhow::bail;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -8,8 +8,7 @@ use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
 use serde::Deserialize;
 use serde::Serialize;
-
-use crate::tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Digest;
 
 /// Data structure for communicating knowledge of transactions.
 ///
@@ -18,30 +17,30 @@ use crate::tasm_lib::prelude::Digest;
 /// that interested peers can request the full transaction object from this
 /// sender.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct TransactionNotification {
+pub struct TransactionNotification {
     /// A unique identifier of the transaction. Matches keys in the [mempool]
     /// data structure.
     ///
     /// [mempool]: neptune_mempool::mempool::Mempool
-    pub(crate) txid: TransactionKernelId,
+    pub txid: TransactionKernelId,
 
     /// The hash of the mutator set under which this transaction is valid.
     /// The receiver can use this to check if it matches their tip. If not, they
     /// can choose to ignore the transaction.
-    pub(crate) mutator_set_hash: Digest,
+    pub mutator_set_hash: Digest,
 
     /// The quality of the proof. Denotes how much effort it takes to get the
     /// transaction included in a block. Higher quality means less effort.
-    pub(crate) proof_quality: TransactionProofQuality,
+    pub proof_quality: TransactionProofQuality,
 
     /// How much fee is the transaction paying?
-    pub(crate) fee: NativeCurrencyAmount,
+    pub fee: NativeCurrencyAmount,
 
     /// How many inputs does the transaction have?
-    pub(crate) num_inputs: u64,
+    pub num_inputs: u64,
 
     /// How many outputs does the transaction have?
-    pub(crate) num_outputs: u64,
+    pub num_outputs: u64,
 }
 
 impl TryFrom<&Transaction> for TransactionNotification {

@@ -13,6 +13,7 @@ target/
 /neptune-core/test_data/*/blk*.dat
 /neptune-core/test_data/*/*/blk*.dat
 /neptune-consensus/test_data/*.proof
+/neptune-p2p/test_data/*.proof
 /neptune-rpc/client/test_data/*.proof
 
 # Remove Cargo.lock from gitignore if creating an executable, leave it for libraries

@@ -6,6 +6,7 @@ use std::time::SystemTime;
 
 use itertools::Itertools;
 use neptune_consensus::block::Block;
+use neptune_p2p::synchronization_bit_mask::SynchronizationBitMask;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
 use rand::rng;
@@ -25,14 +26,12 @@ use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownload;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownloadError;
 use crate::application::loops::sync_loop::sync_progress::SyncProgress;
-use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 
 mod block_validator;
 pub(crate) mod channel;
 pub(crate) mod handle;
 pub(crate) mod rapid_block_download;
 pub mod sync_progress;
-pub(crate) mod synchronization_bit_mask;
 
 pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 100;
 

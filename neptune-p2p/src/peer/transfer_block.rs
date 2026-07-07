@@ -1,11 +1,11 @@
+use anyhow::Result;
 use anyhow::bail;
 use anyhow::ensure;
-use anyhow::Result;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::BlockProof;
 use neptune_consensus::block::block_appendix::BlockAppendix;
 use neptune_consensus::block::block_body::BlockBody;
 use neptune_consensus::block::block_header::BlockHeader;
-use neptune_consensus::block::Block;
-use neptune_consensus::block::BlockProof;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_primitives::block_height::BlockHeight;
 use serde::Deserialize;
@@ -17,7 +17,7 @@ use serde::Serialize;
 pub struct TransferBlock {
     pub header: BlockHeader,
     pub body: BlockBody,
-    pub(crate) appendix: BlockAppendix,
+    pub appendix: BlockAppendix,
     pub proof: Proof,
 }
 
@@ -73,18 +73,10 @@ impl TryFrom<&Block> for TransferBlock {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use macro_rules_attr::apply;
     use neptune_consensus::block::test_helpers::invalid_empty_block;
-    use neptune_primitives::timestamp::Timestamp;
-    use rand::rngs::StdRng;
-    use rand::Rng;
-    use rand::SeedableRng;
-    use tracing_test::traced_test;
+    use neptune_primitives::network::Network;
 
     use super::*;
-    use crate::protocol::peer::Network;
-    use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
-    use crate::tests::shared_tokio_runtime;
 
     #[test]
     fn cannot_transfer_blocks_that_are_not_single_proof_supported() {
@@ -101,28 +93,5 @@ mod tests {
             tblock_1.is_err(),
             "Transferring invalid block is disallowed"
         );
-    }
-
-    // test: verify digest is the same after conversion from
-    //       TransferBlock and back.
-    #[apply(shared_tokio_runtime)]
-    #[traced_test]
-    async fn from_transfer_block() {
-        let network = Network::Testnet(42);
-        // note: we have to generate a block because
-        // TransferBlock::into() will panic if it
-        // encounters the genesis block.
-        let genesis = Block::genesis(network);
-        let [block1] = fake_valid_sequence_of_blocks_for_tests(
-            &genesis,
-            Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).random(),
-            network,
-        )
-        .await;
-
-        let transfer_block = TransferBlock::try_from(block1.clone()).unwrap();
-        let new_block = Block::try_from(transfer_block).unwrap();
-        assert_eq!(block1.hash(), new_block.hash());
     }
 }

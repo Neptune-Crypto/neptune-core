@@ -28,6 +28,20 @@ use neptune_mempool::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::transaction_proof_quality::TransactionProofQualityExt;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
+use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::peer_info::PeerConnectionInfo;
+use neptune_p2p::peer::peer_info::PeerInfo;
+use neptune_p2p::peer::transfer_block::TransferBlock;
+use neptune_p2p::peer::BlockProposalRequest;
+use neptune_p2p::peer::BlockRequestBatch;
+use neptune_p2p::peer::IssuedSyncChallenge;
+use neptune_p2p::peer::MutablePeerState;
+use neptune_p2p::peer::NegativePeerSanction;
+use neptune_p2p::peer::PeerMessage;
+use neptune_p2p::peer::PeerSanction;
+use neptune_p2p::peer::PeerStanding;
+use neptune_p2p::peer::PositivePeerSanction;
+use neptune_p2p::peer::SyncChallenge;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
@@ -54,20 +68,6 @@ use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::channel::PeerTaskToMainTransaction;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::peer::handshake_data::HandshakeData;
-use crate::protocol::peer::peer_info::PeerConnectionInfo;
-use crate::protocol::peer::peer_info::PeerInfo;
-use crate::protocol::peer::transfer_block::TransferBlock;
-use crate::protocol::peer::BlockProposalRequest;
-use crate::protocol::peer::BlockRequestBatch;
-use crate::protocol::peer::IssuedSyncChallenge;
-use crate::protocol::peer::MutablePeerState;
-use crate::protocol::peer::NegativePeerSanction;
-use crate::protocol::peer::PeerMessage;
-use crate::protocol::peer::PeerSanction;
-use crate::protocol::peer::PeerStanding;
-use crate::protocol::peer::PositivePeerSanction;
-use crate::protocol::peer::SyncChallenge;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::sync_status::SyncStatus;
 use crate::state::GlobalState;
@@ -1929,6 +1929,19 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+
+            // `PeerMessage` is `#[non_exhaustive]`, so a wildcard arm is
+            // required. In practice this is a safety net for a variant that was
+            // added to the protocol but not wired up here: log loudly and keep
+            // the connection alive rather than dropping the peer.
+            unhandled => {
+                error!(
+                    "Received unhandled peer message '{}' from peer {}",
+                    unhandled.get_type(),
+                    self.peer_id
+                );
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
         }
     }
 
@@ -2376,6 +2389,10 @@ mod tests {
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+    use neptune_p2p::peer::peer_block_notifications::PeerBlockNotification;
+    use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+    use neptune_p2p::peer::transaction_notification::TransactionNotification;
+    use neptune_p2p::peer::Sanction;
     use neptune_primitives::network::Network;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use rand::rngs::StdRng;
@@ -2387,10 +2404,6 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
-    use crate::protocol::peer::peer_block_notifications::PeerBlockNotification;
-    use crate::protocol::peer::peer_info::pseudorandom_peer_id;
-    use crate::protocol::peer::transaction_notification::TransactionNotification;
-    use crate::protocol::peer::Sanction;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::tests::shared::blocks::fake_valid_block_for_tests;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
@@ -2541,9 +2554,10 @@ mod tests {
     mod peer_discovery {
         use std::str::FromStr;
 
+        use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+
         use super::*;
         use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
-        use crate::protocol::peer::peer_info::pseudorandom_peer_id;
         use crate::tests::shared::globalstate::get_dummy_peer_outgoing;
 
         #[traced_test]
@@ -4702,9 +4716,10 @@ mod tests {
     mod block_proposals {
         use std::net::IpAddr;
 
+        use neptune_p2p::block_proposal_notification::BlockProposalNotification;
+        use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+
         use super::*;
-        use crate::application::loops::channel::BlockProposalNotification;
-        use crate::protocol::peer::peer_info::pseudorandom_peer_id;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
 
         struct TestSetup {
@@ -5083,9 +5098,9 @@ mod tests {
 
     mod sync_challenges {
         use itertools::Itertools;
+        use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
 
         use super::*;
-        use crate::protocol::peer::peer_info::pseudorandom_peer_id;
         use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests_dyn;
 
         #[traced_test]

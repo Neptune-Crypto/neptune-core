@@ -4,14 +4,13 @@ use libp2p::Multiaddr;
 use libp2p::PeerId;
 use neptune_consensus::block::Block;
 use neptune_consensus::transaction::Transaction;
+use neptune_p2p::block_proposal_notification::BlockProposalNotification;
+use neptune_p2p::peer::transaction_notification::TransactionNotification;
+use neptune_p2p::synchronization_bit_mask::SynchronizationBitMask;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-
-use crate::application::loops::channel::BlockProposalNotification;
-use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
-use crate::protocol::peer::transaction_notification::TransactionNotification;
 
 #[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MainToPeerTask {

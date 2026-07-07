@@ -1,4 +1,4 @@
-pub(crate) mod handshake_data;
+pub mod handshake_data;
 pub mod peer_block_notifications;
 pub mod peer_info;
 pub mod transaction_notification;
@@ -11,24 +11,24 @@ use std::time::SystemTime;
 
 use handshake_data::HandshakeData;
 use itertools::Itertools;
+use neptune_consensus::block::Block;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
-use neptune_consensus::block::Block;
 use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 use neptune_primitives::block_height::BlockHeight;
-use neptune_primitives::difficulty_control::max_cumulative_pow_after;
 use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::difficulty_control::ProofOfWork;
+use neptune_primitives::difficulty_control::max_cumulative_pow_after;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use num_traits::Zero;
 use peer_block_notifications::PeerBlockNotification;
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::prelude::Mmr;
@@ -41,16 +41,16 @@ use tracing::warn;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
 
-use crate::application::loops::channel::BlockProposalNotification;
-use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
-use crate::protocol::peer::transfer_block::TransferBlock;
+use crate::block_proposal_notification::BlockProposalNotification;
+use crate::peer::transfer_block::TransferBlock;
+use crate::synchronization_bit_mask::SynchronizationBitMask;
 
-pub(crate) type InstanceId = u128;
+pub type InstanceId = u128;
 
-pub(crate) const SYNC_CHALLENGE_POW_WITNESS_LENGTH: usize = 10;
-pub(crate) const SYNC_CHALLENGE_NUM_BLOCK_PAIRS: usize = 10;
+pub const SYNC_CHALLENGE_POW_WITNESS_LENGTH: usize = 10;
+pub const SYNC_CHALLENGE_NUM_BLOCK_PAIRS: usize = 10;
 
-pub(crate) trait Sanction {
+pub trait Sanction {
     fn severity(self) -> i32;
 }
 
@@ -188,7 +188,7 @@ impl Sanction for NegativePeerSanction {
 ///
 /// Sanctions can be positive (rewards) or negative (punishments).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub(crate) enum PeerSanction {
+pub enum PeerSanction {
     Positive(PositivePeerSanction),
     Negative(NegativePeerSanction),
 }
@@ -225,10 +225,10 @@ pub struct PeerStanding {
     pub standing: i32,
     pub latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
     pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
-    pub(crate) peer_tolerance: i32,
+    pub peer_tolerance: i32,
 }
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct StandingExceedsBanThreshold;
+pub struct StandingExceedsBanThreshold;
 
 impl Display for StandingExceedsBanThreshold {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -239,7 +239,7 @@ impl Display for StandingExceedsBanThreshold {
 impl std::error::Error for StandingExceedsBanThreshold {}
 
 impl PeerStanding {
-    pub(crate) fn new(peer_tolerance: u16) -> Self {
+    pub fn new(peer_tolerance: u16) -> Self {
         assert!(peer_tolerance > 0, "peer tolerance must be positive");
         Self {
             peer_tolerance: i32::from(peer_tolerance),
@@ -251,18 +251,14 @@ impl PeerStanding {
 
     /// Sanction peer. If (and only if) the peer is now in
     /// [bad standing](Self::is_bad), returns an error.
-    pub(crate) fn sanction(
-        &mut self,
-        sanction: PeerSanction,
-    ) -> Result<(), StandingExceedsBanThreshold> {
+    pub fn sanction(&mut self, sanction: PeerSanction) -> Result<(), StandingExceedsBanThreshold> {
         self.standing = self
             .standing
             .saturating_add(sanction.severity())
             .clamp(-self.peer_tolerance, self.peer_tolerance);
         trace!(
             "new standing: {}, peer tolerance: {}",
-            self.standing,
-            self.peer_tolerance
+            self.standing, self.peer_tolerance
         );
         let now = SystemTime::now();
         match sanction {
@@ -276,7 +272,7 @@ impl PeerStanding {
     }
 
     /// Clear peer standing record
-    pub(crate) fn clear_standing(&mut self) {
+    pub fn clear_standing(&mut self) {
         self.standing = 0;
         self.latest_punishment = None;
         self.latest_reward = None;
@@ -286,11 +282,11 @@ impl PeerStanding {
         self.standing.is_negative()
     }
 
-    pub(crate) fn is_bad(&self) -> bool {
+    pub fn is_bad(&self) -> bool {
         self.standing <= -self.peer_tolerance
     }
 
-    pub(crate) fn is_good(&self) -> bool {
+    pub fn is_good(&self) -> bool {
         !self.is_bad()
     }
 }
@@ -331,7 +327,7 @@ pub enum ConnectionRefusedReason {
 }
 
 impl ConnectionRefusedReason {
-    pub(crate) fn bad_timestamp() -> Self {
+    pub fn bad_timestamp() -> Self {
         Self::Other(0)
     }
 }
@@ -354,10 +350,10 @@ pub struct BlockRequestBatch {
     /// Sorted list of most preferred blocks. The first digest is the block
     /// that the peer would prefer to build on top off, if it belongs to the
     /// canonical chain.
-    pub(crate) known_blocks: Vec<Digest>,
+    pub known_blocks: Vec<Digest>,
 
     /// Indicates the maximum allowed number of blocks in the response.
-    pub(crate) max_response_len: usize,
+    pub max_response_len: usize,
 
     /// The block MMR accumulator of the tip of the chain which the node is
     /// syncing towards. Its number of leafs is the block height the node is
@@ -367,23 +363,23 @@ pub struct BlockRequestBatch {
     /// attach to the blocks in the response. These paths allow the receiver of
     /// a batch of blocks to verify that the received blocks are indeed
     /// ancestors to a given tip.
-    pub(crate) anchor: MmrAccumulator,
+    pub anchor: MmrAccumulator,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct BlockProposalRequest {
-    pub(crate) body_mast_hash: Digest,
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockProposalRequest {
+    pub body_mast_hash: Digest,
 }
 
 impl BlockProposalRequest {
-    pub(crate) fn new(body_mast_hash: Digest) -> Self {
+    pub fn new(body_mast_hash: Digest) -> Self {
         Self { body_mast_hash }
     }
 }
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) enum PeerMessage {
+pub enum PeerMessage {
     Handshake {
         magic_value: [u8; 15],
         data: Box<HandshakeData>,
@@ -546,12 +542,12 @@ impl PeerMessage {
 pub struct MutablePeerState {
     pub highest_shared_block_height: BlockHeight,
     pub fork_reconciliation_blocks: Vec<Block>,
-    pub(crate) sync_challenge: Option<IssuedSyncChallenge>,
+    pub sync_challenge: Option<IssuedSyncChallenge>,
 
     /// Timestamp for the last successful sync challenge response.
     ///
     /// Used to prevent issuing multiple sync challenges in short succession.
-    pub(crate) successful_sync_challenge_response_time: Option<Timestamp>,
+    pub successful_sync_challenge_response_time: Option<Timestamp>,
 }
 
 impl MutablePeerState {
@@ -566,17 +562,13 @@ impl MutablePeerState {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct IssuedSyncChallenge {
-    pub(crate) challenge: SyncChallenge,
-    pub(crate) issued_at: Timestamp,
-    pub(crate) accumulated_pow: ProofOfWork,
+pub struct IssuedSyncChallenge {
+    pub challenge: SyncChallenge,
+    pub issued_at: Timestamp,
+    pub accumulated_pow: ProofOfWork,
 }
 impl IssuedSyncChallenge {
-    pub(crate) fn new(
-        challenge: SyncChallenge,
-        claimed_pow: ProofOfWork,
-        timestamp: Timestamp,
-    ) -> Self {
+    pub fn new(challenge: SyncChallenge, claimed_pow: ProofOfWork, timestamp: Timestamp) -> Self {
         Self {
             challenge,
             issued_at: timestamp,
@@ -586,12 +578,12 @@ impl IssuedSyncChallenge {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct SyncChallenge {
-    pub(crate) tip_digest: Digest,
+pub struct SyncChallenge {
+    pub tip_digest: Digest,
 
     /// Block heights of the child blocks, for which the peer must respond with
     /// (parent, child) blocks. Assumed to be ordered from small to big.
-    pub(crate) challenges: [BlockHeight; SYNC_CHALLENGE_NUM_BLOCK_PAIRS],
+    pub challenges: [BlockHeight; SYNC_CHALLENGE_NUM_BLOCK_PAIRS],
 }
 
 impl SyncChallenge {
@@ -607,7 +599,7 @@ impl SyncChallenge {
     ///
     ///  - Panics if the difference in height between own tip and peer's tip is
     ///    less than 10.
-    pub(crate) fn generate(
+    pub fn generate(
         block_notification: &PeerBlockNotification,
         own_tip_height: BlockHeight,
         randomness: [u8; 32],
@@ -665,26 +657,26 @@ impl SyncChallenge {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct SyncChallengeResponse {
+pub struct SyncChallengeResponse {
     /// (parent, child) blocks. blocks are assumed to be ordered from small to
     /// big block height.
-    pub(crate) blocks: [(TransferBlock, TransferBlock); SYNC_CHALLENGE_NUM_BLOCK_PAIRS],
+    pub blocks: [(TransferBlock, TransferBlock); SYNC_CHALLENGE_NUM_BLOCK_PAIRS],
 
     /// Membership proof of the child blocks, relative to the tip-MMR (after
     /// appending digest of tip). Must match ordering of blocks.
-    pub(crate) membership_proofs: [MmrMembershipProof; SYNC_CHALLENGE_NUM_BLOCK_PAIRS],
+    pub membership_proofs: [MmrMembershipProof; SYNC_CHALLENGE_NUM_BLOCK_PAIRS],
 
-    pub(crate) tip_parent: TransferBlock,
-    pub(crate) tip: TransferBlock,
+    pub tip_parent: TransferBlock,
+    pub tip: TransferBlock,
 
     /// Pow-witnesses from tip and X blocks back, in reverse-chronological
     /// order. So a witness to the `tip` hash should be the 1st element in this
     /// array.
-    pub(crate) pow_witnesses: [BlockHeaderWithBlockHashWitness; SYNC_CHALLENGE_POW_WITNESS_LENGTH],
+    pub pow_witnesses: [BlockHeaderWithBlockHashWitness; SYNC_CHALLENGE_POW_WITNESS_LENGTH],
 }
 
 impl SyncChallengeResponse {
-    fn pow_witnesses_form_chain_from_tip(
+    pub fn pow_witnesses_form_chain_from_tip(
         tip_digest: Digest,
         pow_witnesses: &[BlockHeaderWithBlockHashWitness; SYNC_CHALLENGE_POW_WITNESS_LENGTH],
     ) -> bool {
@@ -699,7 +691,7 @@ impl SyncChallengeResponse {
 
     /// Determine whether the `SyncChallengeResponse` answers the given
     /// `IssuedSyncChallenge`, and not some other one.
-    pub(crate) fn matches(&self, network: Network, issued_challenge: IssuedSyncChallenge) -> bool {
+    pub fn matches(&self, network: Network, issued_challenge: IssuedSyncChallenge) -> bool {
         let Ok(tip_parent) = Block::try_from(self.tip_parent.clone()) else {
             return false;
         };
@@ -722,7 +714,7 @@ impl SyncChallengeResponse {
 
     /// Determine whether the proofs in `SyncChallengeResponse` are valid. Also
     /// checks proof-of-work.
-    pub(crate) async fn is_valid(&self, now: Timestamp, network: Network) -> bool {
+    pub async fn is_valid(&self, now: Timestamp, network: Network) -> bool {
         let Ok(tip_predecessor) = Block::try_from(self.tip_parent.clone()) else {
             return false;
         };
@@ -768,7 +760,7 @@ impl SyncChallengeResponse {
 
     /// Determine whether the claimed evolution of the cumulative proof-of-work
     /// is a) possible, and b) likely, given the difficulties.
-    pub(crate) fn check_pow(&self, network: Network, own_tip_height: BlockHeight) -> bool {
+    pub fn check_pow(&self, network: Network, own_tip_height: BlockHeight) -> bool {
         let genesis_header = BlockHeader::genesis(network);
         let parent_triples = [(
             genesis_header.height,
@@ -884,7 +876,7 @@ impl SyncChallengeResponse {
     /// our own tip difficulty. This inequality guarantees that the successful
     /// attacker must have spent at least one block's worth of guessing power to
     /// produce the malicious chain, and probably much more.
-    pub(crate) fn check_difficulty(&self, own_tip_difficulty: Difficulty) -> bool {
+    pub fn check_difficulty(&self, own_tip_difficulty: Difficulty) -> bool {
         let own_tip_difficulty = ProofOfWork::zero() + own_tip_difficulty;
         let mut fork_relative_cumpow = ProofOfWork::zero();
         for (_parent, child) in &self.blocks {
@@ -999,91 +991,31 @@ impl rand::distr::Distribution<PeerStanding> for rand::distr::StandardUniform {
     }
 }
 
+/// Test-support constructor for [`PeerStanding`] with explicit fields.
+#[cfg(any(test, feature = "test-helpers"))]
+impl PeerStanding {
+    pub fn init(
+        standing: i32,
+        latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
+        latest_reward: Option<(PositivePeerSanction, SystemTime)>,
+        peer_tolerance: i32,
+    ) -> PeerStanding {
+        Self {
+            standing,
+            latest_punishment,
+            latest_reward,
+            peer_tolerance,
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use macro_rules_attr::apply;
-    use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
-    use neptune_consensus::block::Block;
-    use rand::random;
+    use rand::Rng;
     use rand::rng;
 
     use super::*;
-    use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
-    use crate::tests::shared_tokio_runtime;
-
-    impl PeerStanding {
-        pub fn init(
-            standing: i32,
-            latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
-            latest_reward: Option<(PositivePeerSanction, SystemTime)>,
-            peer_tolerance: i32,
-        ) -> PeerStanding {
-            Self {
-                standing,
-                latest_punishment,
-                latest_reward,
-                peer_tolerance,
-            }
-        }
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn sync_challenge_response_pow_witnesses_must_be_a_chain() {
-        let network = Network::Testnet(42);
-        let genesis = Block::genesis(network);
-        let mut rng = rand::rng();
-        let ten_blocks: [Block; SYNC_CHALLENGE_POW_WITNESS_LENGTH] =
-            fake_valid_sequence_of_blocks_for_tests(
-                &genesis,
-                Timestamp::minutes(20),
-                rng.random(),
-                network,
-            )
-            .await;
-
-        let to_pow_witness = |block: &Block| {
-            BlockHeaderWithBlockHashWitness::new(
-                *block.header(),
-                HeaderToBlockHashWitness::from(block),
-            )
-        };
-
-        let mut i = SYNC_CHALLENGE_POW_WITNESS_LENGTH;
-        let mut block;
-        let mut valid_pow_chain = vec![];
-        while valid_pow_chain.len() < SYNC_CHALLENGE_POW_WITNESS_LENGTH {
-            i -= 1;
-            block = &ten_blocks[i];
-            valid_pow_chain.push(to_pow_witness(block));
-        }
-
-        let tip = &ten_blocks[SYNC_CHALLENGE_POW_WITNESS_LENGTH - 1];
-        let valid_pow_chain: [BlockHeaderWithBlockHashWitness; SYNC_CHALLENGE_POW_WITNESS_LENGTH] =
-            valid_pow_chain.try_into().unwrap();
-        assert!(SyncChallengeResponse::pow_witnesses_form_chain_from_tip(
-            tip.hash(),
-            &valid_pow_chain
-        ));
-
-        for j in 0..SYNC_CHALLENGE_POW_WITNESS_LENGTH {
-            let mut invalid_pow_chain = valid_pow_chain.clone();
-            invalid_pow_chain[j].header_mut().prev_block_digest = random();
-            assert!(!SyncChallengeResponse::pow_witnesses_form_chain_from_tip(
-                tip.hash(),
-                &invalid_pow_chain
-            ));
-        }
-
-        for j in 0..SYNC_CHALLENGE_POW_WITNESS_LENGTH {
-            let mut invalid_pow_chain = valid_pow_chain.clone();
-            invalid_pow_chain[j].header_mut().set_nonce(random());
-            assert!(!SyncChallengeResponse::pow_witnesses_form_chain_from_tip(
-                tip.hash(),
-                &invalid_pow_chain
-            ));
-        }
-    }
 
     #[test]
     fn random_negative_peer_sanction_does_not_crash() {

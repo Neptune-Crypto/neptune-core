@@ -3,9 +3,9 @@ use std::ops::BitOr;
 use std::ops::Not;
 
 use itertools::Itertools;
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -37,12 +37,12 @@ use serde::Serialize;
 // `lower_bound` must always be 0. Whenever this bit is set to 1, the
 // `lower_bound` increases.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SynchronizationBitMask {
+pub struct SynchronizationBitMask {
     // inclusive
-    pub(crate) lower_bound: u64,
+    pub lower_bound: u64,
 
     // exclusive
-    pub(crate) upper_bound: u64,
+    pub upper_bound: u64,
 
     limbs: VecDeque<u32>,
 }
@@ -192,7 +192,7 @@ impl SynchronizationBitMask {
     ///
     ///  - If `upper_bound` <= `lower_bound`.
     ///  - If the would-be number of limbs is greater than usize::MAX.
-    pub(crate) fn new(lower_bound: u64, upper_bound: u64) -> Self {
+    pub fn new(lower_bound: u64, upper_bound: u64) -> Self {
         assert!(upper_bound > lower_bound);
         let offset = lower_bound / 32;
         let onset = upper_bound.saturating_sub(1) / 32;
@@ -220,7 +220,7 @@ impl SynchronizationBitMask {
 
     /// Compute a bitmask whose zeros indicate items that the other does have
     /// and we don't.
-    pub(crate) fn reconcile(&self, other: &Self) -> Self {
+    pub fn reconcile(&self, other: &Self) -> Self {
         let offset = self.lower_bound / 32;
         let onset = self.upper_bound.saturating_sub(1) / 32;
 
@@ -244,7 +244,7 @@ impl SynchronizationBitMask {
     /// # Panics
     ///
     ///  - If the new upper bound is less than the old.
-    pub(crate) fn expand(self, new_upper_bound: u64) -> Self {
+    pub fn expand(self, new_upper_bound: u64) -> Self {
         assert!(new_upper_bound >= self.upper_bound);
 
         let offset = self.lower_bound / 32;
@@ -273,7 +273,7 @@ impl SynchronizationBitMask {
     /// # Panics
     ///  - If the limb index corresponding to the given bit index is smaller
     ///    than usize::MAX.
-    pub(crate) fn contains(&self, index: u64) -> bool {
+    pub fn contains(&self, index: u64) -> bool {
         if index < self.lower_bound {
             return true;
         } else if index >= self.upper_bound {
@@ -295,7 +295,7 @@ impl SynchronizationBitMask {
     /// # Panics
     ///
     ///  - If the given index is greater than or equal to the upper bound.
-    pub(crate) fn set(&mut self, index: u64) {
+    pub fn set(&mut self, index: u64) {
         if index < self.lower_bound {
             return;
         }
@@ -320,7 +320,7 @@ impl SynchronizationBitMask {
 
     /// Return the vector of indices of unset bits in between lower bound and
     /// upper bound.
-    pub(crate) fn to_vec_complement(&self) -> Vec<u64> {
+    pub fn to_vec_complement(&self) -> Vec<u64> {
         (self.lower_bound..self.upper_bound)
             .filter(|i| !self.contains(*i))
             .collect_vec()
@@ -332,7 +332,7 @@ impl SynchronizationBitMask {
     /// # Panics
     ///
     ///  - If lower bound >= upper bound.
-    pub(crate) fn sample(&self, seed: [u8; 32]) -> u64 {
+    pub fn sample(&self, seed: [u8; 32]) -> u64 {
         let [single_element] = self.sample_many(seed);
         single_element
     }
@@ -345,7 +345,7 @@ impl SynchronizationBitMask {
     /// # Panics
     ///
     ///  - If lower bound >= upper bound.
-    pub(crate) fn sample_many<const N: usize>(&self, seed: [u8; 32]) -> [u64; N] {
+    pub fn sample_many<const N: usize>(&self, seed: [u8; 32]) -> [u64; N] {
         assert_ne!(self.lower_bound, self.upper_bound);
         let mut rng = StdRng::from_seed(seed);
         let mut elements = vec![];
@@ -383,7 +383,7 @@ impl SynchronizationBitMask {
     }
 
     /// Determine whether all bits up to the upper bound are set.
-    pub(crate) fn is_complete(&self) -> bool {
+    pub fn is_complete(&self) -> bool {
         // Canonicity requires that the lower bound be set as high as possible,
         // i.e. it is the index of the first zero. If the bit mask is complete,
         // then the first zero is exactly the point where the infinte string of
@@ -392,7 +392,7 @@ impl SynchronizationBitMask {
     }
 
     /// Count the number of ones between the lower and upper bounds.
-    pub(crate) fn pop_count(&self) -> u64 {
+    pub fn pop_count(&self) -> u64 {
         let mut pop_count = 0u64;
         for (i, limb) in self.limbs.iter().copied().enumerate() {
             if limb == 0 {
@@ -418,7 +418,7 @@ impl SynchronizationBitMask {
     ///
     ///  - If either of the given indices is greater than the upper bound.
     ///  - If max < min.
-    pub(crate) fn set_range(&mut self, min: u64, max: u64) {
+    pub fn set_range(&mut self, min: u64, max: u64) {
         assert!(max < self.upper_bound);
         assert!(min < self.upper_bound);
         assert!(max >= min);
@@ -440,6 +440,49 @@ impl SynchronizationBitMask {
     }
 }
 
+/// Test-support constructor for a random bit mask over the given range.
+#[cfg(any(test, feature = "test-helpers"))]
+impl SynchronizationBitMask {
+    pub fn random(lower_bound: u64, upper_bound: u64) -> Self {
+        use rand::RngCore;
+
+        assert!(upper_bound >= lower_bound);
+
+        if lower_bound == upper_bound {
+            return SynchronizationBitMask {
+                lower_bound,
+                upper_bound,
+                limbs: VecDeque::new(),
+            };
+        }
+
+        let offset = lower_bound / 32;
+        let onset = (upper_bound.saturating_sub(1)) / 32;
+        let num_limbs = onset - offset + 1;
+        let mut rng = rand::rng();
+        let mut limbs = (0..num_limbs)
+            .map(|_| rng.next_u32())
+            .collect::<VecDeque<u32>>();
+        if let Some(first) = limbs.front_mut()
+            && !lower_bound.is_multiple_of(32)
+        {
+            *first |= (1 << (lower_bound % 32)) - 1;
+        }
+        if let Some(last) = limbs.back_mut()
+            && !upper_bound.is_multiple_of(32)
+        {
+            *last &= u32::MAX >> (32 - (upper_bound % 32));
+        }
+
+        SynchronizationBitMask {
+            lower_bound,
+            upper_bound,
+            limbs,
+        }
+        .canonize()
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use std::hint::black_box;
@@ -450,55 +493,17 @@ pub mod test {
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use rand::rng;
-    use rand::RngCore;
     use test_strategy::proptest;
 
     use super::*;
 
     impl SynchronizationBitMask {
-        pub(crate) fn random(lower_bound: u64, upper_bound: u64) -> Self {
-            assert!(upper_bound >= lower_bound);
-
-            if lower_bound == upper_bound {
-                return SynchronizationBitMask {
-                    lower_bound,
-                    upper_bound,
-                    limbs: VecDeque::new(),
-                };
-            }
-
-            let offset = lower_bound / 32;
-            let onset = (upper_bound.saturating_sub(1)) / 32;
-            let num_limbs = onset - offset + 1;
-            let mut rng = rng();
-            let mut limbs = (0..num_limbs)
-                .map(|_| rng.next_u32())
-                .collect::<VecDeque<u32>>();
-            if let Some(first) = limbs.front_mut() {
-                if !lower_bound.is_multiple_of(32) {
-                    *first |= (1 << (lower_bound % 32)) - 1;
-                }
-            }
-            if let Some(last) = limbs.back_mut() {
-                if !upper_bound.is_multiple_of(32) {
-                    *last &= u32::MAX >> (32 - (upper_bound % 32));
-                }
-            }
-
-            SynchronizationBitMask {
-                lower_bound,
-                upper_bound,
-                limbs,
-            }
-            .canonize()
-        }
-
         /// Decrease the upper bound.
         ///
         /// # Panics
         ///
         ///  - If the new upper bound is greater than the old.
-        pub(crate) fn shrink(mut self, new_upper_bound: u64) -> Self {
+        pub fn shrink(mut self, new_upper_bound: u64) -> Self {
             assert!(new_upper_bound <= self.upper_bound);
 
             let new_lower_bound = u64::min(self.lower_bound, new_upper_bound);
@@ -514,11 +519,11 @@ pub mod test {
             while self.limbs.len() > num_limbs {
                 self.limbs.pop_back();
             }
-            if let Some(last) = self.limbs.back_mut() {
-                if !new_upper_bound.is_multiple_of(32) {
-                    let shamt = 32 - (new_upper_bound % 32);
-                    *last &= u32::MAX >> shamt;
-                }
+            if let Some(last) = self.limbs.back_mut()
+                && !new_upper_bound.is_multiple_of(32)
+            {
+                let shamt = 32 - (new_upper_bound % 32);
+                *last &= u32::MAX >> shamt;
             }
 
             self.upper_bound = new_upper_bound;

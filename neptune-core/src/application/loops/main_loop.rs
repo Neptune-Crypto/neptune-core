@@ -28,6 +28,9 @@ use neptune_mempool::mempool::mempool_update_job_result::MempoolUpdateJobResult;
 use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
 use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::upgrade_incentive::UpgradeIncentive;
+use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::peer_info::PeerInfo;
+use neptune_p2p::peer::transaction_notification::TransactionNotification;
 use neptune_primitives::timestamp::Timestamp;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
@@ -70,9 +73,6 @@ use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::peer::handshake_data::HandshakeData;
-use crate::protocol::peer::peer_info::PeerInfo;
-use crate::protocol::peer::transaction_notification::TransactionNotification;
 use crate::state::mining::block_proposal::BlockProposal;
 use crate::state::networking_state::SyncAnchor;
 use crate::state::sync_status::SyncStatus;
@@ -2595,6 +2595,7 @@ mod tests {
     use macro_rules_attr::apply;
     use neptune_consensus::block::test_helpers::invalid_empty_block;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
     use neptune_primitives::network::Network;
     use neptune_wallet::address::generation_address::GenerationReceivingAddress;
     use neptune_wallet::address::KeyType;
@@ -2604,7 +2605,6 @@ mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::protocol::peer::peer_info::pseudorandom_peer_id;
     use crate::tests::shared::blocks::block_with_outputs;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
@@ -3438,11 +3438,11 @@ mod tests {
 
     mod bootstrapper_mode {
 
+        use neptune_p2p::peer::PeerMessage;
+        use neptune_p2p::peer::TransferConnectionStatus;
         use rand::Rng;
 
         use super::*;
-        use crate::protocol::peer::PeerMessage;
-        use crate::protocol::peer::TransferConnectionStatus;
         use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;
         use crate::tests::shared::to_bytes;
 

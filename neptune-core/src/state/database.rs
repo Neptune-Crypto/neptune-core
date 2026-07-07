@@ -4,13 +4,12 @@ use std::net::IpAddr;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
 use neptune_database::NeptuneLevelDb;
+use neptune_p2p::peer::PeerStanding;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
-
-use crate::protocol::peer::PeerStanding;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct BlockFileLocation {

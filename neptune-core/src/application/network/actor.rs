@@ -14,6 +14,7 @@ use itertools::Itertools;
 use libp2p::swarm::SwarmEvent;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_p2p::peer::handshake_data::HandshakeData;
 use neptune_primitives::network::Network;
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -41,7 +42,6 @@ use crate::application::network::stack::NetworkStackEvent;
 use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::state::GlobalStateLock;
 
 /// Tracks the status of a relay reservation.
@@ -2111,7 +2111,7 @@ impl NetworkActor {
     /// 2. Subscribes to the global `MainToPeerTask` broadcast channel.
     /// 3. Upgrades the raw [`libp2p::Stream`] into a
     ///    `tokio_util::codec::framed::Framed`
-    ///    [`PeerMessage`](crate::protocol::peer::PeerMessage) stream using the
+    ///    [`PeerMessage`](neptune_p2p::peer::PeerMessage) stream using the
     ///    same codec bridge already in use for the legacy TCP stack.
     /// 4. Calls the legacy [`PeerLoopHandler::run_wrapper`] method, handing
     ///    over control of the connection to the established protocol logic.

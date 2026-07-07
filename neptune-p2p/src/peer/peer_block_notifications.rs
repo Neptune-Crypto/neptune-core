@@ -11,7 +11,7 @@ use tasm_lib::prelude::Digest;
 pub struct PeerBlockNotification {
     pub hash: Digest,
     pub height: BlockHeight,
-    pub(crate) cumulative_proof_of_work: ProofOfWork,
+    pub cumulative_proof_of_work: ProofOfWork,
 }
 
 impl From<&Block> for PeerBlockNotification {

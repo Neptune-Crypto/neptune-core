@@ -2,10 +2,10 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
-use libp2p::multiaddr::Protocol;
-use libp2p::multihash::Multihash;
-use libp2p::Multiaddr;
-use libp2p::PeerId;
+use libp2p_identity::PeerId;
+use multiaddr::Multiaddr;
+use multiaddr::Protocol;
+use multihash::Multihash;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
@@ -13,7 +13,7 @@ use sha2::Sha256;
 
 use super::InstanceId;
 use super::PeerStanding;
-use crate::HandshakeData;
+use crate::peer::handshake_data::HandshakeData;
 
 /// Derive a pseudorandom [`PeerId`] from a [`SocketAddr`].
 ///
@@ -50,7 +50,7 @@ use crate::HandshakeData;
 /// work and weaker peer set entropy. Therefore, this map should only be used in
 /// the context of the legacy peer-to-peer stack and, if the legacy peer-to-peer
 /// stack is deprecated, this function should be deprecated along with it.
-pub(crate) fn pseudorandom_peer_id(addr: &SocketAddr) -> PeerId {
+pub fn pseudorandom_peer_id(addr: &SocketAddr) -> PeerId {
     let mut hasher = Sha256::new();
     hasher.update(b"legacy-mapping");
     hasher.update(addr.to_string().as_bytes());
@@ -84,15 +84,15 @@ impl PeerConnectionInfo {
 pub struct PeerInfo {
     peer_connection_info: PeerConnectionInfo,
     instance_id: InstanceId,
-    pub(crate) own_timestamp_connection_established: SystemTime,
-    pub(crate) peer_timestamp_connection_established: SystemTime,
-    pub(crate) standing: PeerStanding,
+    pub own_timestamp_connection_established: SystemTime,
+    pub peer_timestamp_connection_established: SystemTime,
+    pub standing: PeerStanding,
     version: String,
     is_archival_node: bool,
 }
 
 impl PeerInfo {
-    pub(crate) fn new(
+    pub fn new(
         peer_connection_info: PeerConnectionInfo,
         peer_handshake: &HandshakeData,
         connection_established: SystemTime,
@@ -202,8 +202,8 @@ impl PeerInfo {
         Some(new_multiaddr)
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_connection_established(&mut self, new_timestamp: SystemTime) {
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn set_connection_established(&mut self, new_timestamp: SystemTime) {
         self.own_timestamp_connection_established = new_timestamp;
     }
 }

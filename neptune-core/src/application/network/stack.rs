@@ -49,7 +49,7 @@ pub(crate) const NEPTUNE_PROTOCOL_STR: &str = "/neptune/";
 /// ### Note on Messaging:
 ///
 /// This stack does not contain a messaging behavior. Actual data exchange (the
-/// [`PeerMessage`](crate::protocol::peer::PeerMessage) stream) is handled via
+/// [`PeerMessage`](neptune_p2p::peer::PeerMessage) stream) is handled via
 /// the [`libp2p stream`](libp2p::Stream) control mechanism, which operates
 /// independently of this behavior struct in libp2p version 0.56.0.
 #[derive(NetworkBehaviour)]

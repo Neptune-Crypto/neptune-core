@@ -1,9 +1,9 @@
 use anyhow::bail;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
-use neptune_consensus::transaction::Transaction;
-use neptune_consensus::transaction::TransactionProof;
 use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
 use serde::Deserialize;
 use serde::Serialize;
@@ -14,7 +14,7 @@ use serde::Serialize;
 /// Specifically disallows `[TransactionProof::PrimitiveWitness]` to be sent to
 /// peers, as this would leak secret key material.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) enum TransferTransactionProof {
+pub enum TransferTransactionProof {
     //OnlyLockScripts(OnlyLockScriptWitness) TODO: Add when Transaction supports
     ProofCollection(Box<ProofCollection>),
     SingleProof(Proof),
@@ -27,8 +27,8 @@ pub(crate) enum TransferTransactionProof {
 /// leak secret keys and lead to loss of funds.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransferTransaction {
-    pub(crate) kernel: TransactionKernel,
-    pub(crate) proof: TransferTransactionProof,
+    pub kernel: TransactionKernel,
+    pub proof: TransferTransactionProof,
 }
 
 impl TryFrom<&Transaction> for TransferTransaction {
@@ -37,7 +37,9 @@ impl TryFrom<&Transaction> for TransferTransaction {
     fn try_from(value: &Transaction) -> Result<Self, Self::Error> {
         let transfer_proof = match &value.proof {
             TransactionProof::Witness(_) => {
-                bail!("Cannot share primitive witness-supported transaction, as this would leak secret data")
+                bail!(
+                    "Cannot share primitive witness-supported transaction, as this would leak secret data"
+                )
             }
             TransactionProof::SingleProof(proof) => {
                 TransferTransactionProof::SingleProof(proof.to_owned())
@@ -55,7 +57,7 @@ impl TryFrom<&Transaction> for TransferTransaction {
 }
 
 impl TransferTransactionProof {
-    pub(crate) fn proof_quality(&self) -> TransactionProofQuality {
+    pub fn proof_quality(&self) -> TransactionProofQuality {
         match self {
             TransferTransactionProof::ProofCollection(_) => {
                 TransactionProofQuality::ProofCollection

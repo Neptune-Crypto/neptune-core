@@ -101,7 +101,7 @@ pub struct Args {
     /// from peers in bad standing are refused.
     ///
     /// For a list of reasons that cause bad standing, see
-    /// [NegativePeerSanction](crate::protocol::peer::NegativePeerSanction).
+    /// [NegativePeerSanction](neptune_p2p::peer::NegativePeerSanction).
     #[clap(
         long,
         default_value = "1000",

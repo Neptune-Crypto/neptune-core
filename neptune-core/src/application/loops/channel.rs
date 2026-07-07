@@ -3,9 +3,7 @@ use std::sync::Arc;
 use libp2p::Multiaddr;
 use neptune_consensus::block::Block;
 use neptune_consensus::transaction::Transaction;
-use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::block_height::BlockHeight;
-use neptune_primitives::mast_hash::MastHash;
 use neptune_wallet::address::KeyType;
 use neptune_wallet::address::ReceivingAddress;
 use neptune_wallet::address::SpendingKey;
@@ -78,22 +76,6 @@ pub(crate) enum MinerToMain {
     Shutdown(i32),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct BlockProposalNotification {
-    pub(crate) body_mast_hash: Digest,
-    pub(crate) guesser_fee: NativeCurrencyAmount,
-    pub(crate) height: BlockHeight,
-}
-
-impl From<&Block> for BlockProposalNotification {
-    fn from(value: &Block) -> Self {
-        Self {
-            body_mast_hash: value.body().mast_hash(),
-            guesser_fee: value.body().transaction_kernel.fee,
-            height: value.header().height,
-        }
-    }
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ClaimUtxoData {
     /// Some(mutxo) if UTXO has already been mined. Otherwise, None.

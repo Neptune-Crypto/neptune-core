@@ -1,16 +1,18 @@
 use std::fmt::Display;
 use std::ops::Deref;
+use std::time::Duration;
 use std::time::SystemTime;
 
-use arraystring::typenum::U255;
-use arraystring::typenum::U30;
 use arraystring::ArrayString;
+use arraystring::typenum::U30;
+use arraystring::typenum::U255;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_primitives::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::application::loops::connect_to_peers::PEER_TIME_DIFFERENCE_THRESHOLD;
+/// Maximum tolerated clock difference between two peers during the handshake.
+const PEER_TIME_DIFFERENCE_THRESHOLD: Duration = Duration::from_secs(90);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VersionString(ArrayString<U30>);
@@ -30,12 +32,12 @@ impl Display for VersionString {
 }
 
 impl VersionString {
-    pub(crate) fn new_from_str(s: &str) -> Self {
+    pub fn new_from_str(s: &str) -> Self {
         let array_string = ArrayString::<U30>::from_chars(s.chars());
         Self(array_string)
     }
 
-    pub(crate) fn versions_are_compatible(own: Self, other: Self) -> bool {
+    pub fn versions_are_compatible(own: Self, other: Self) -> bool {
         let own = semver::Version::parse(&own)
             .unwrap_or_else(|_| panic!("Must be able to parse own version string. Got: {own}"));
         let Ok(other) = semver::Version::parse(&other) else {
@@ -88,8 +90,8 @@ pub struct HandshakeData {
     pub extra_data: ExtraDataString,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
-pub(crate) enum HandshakeValidationError {
+#[derive(Debug, Clone, Copy, Eq, PartialEq, thiserror::Error)]
+pub enum HandshakeValidationError {
     #[error("connect to self")]
     SelfConnect,
 
@@ -111,7 +113,7 @@ pub(crate) enum HandshakeValidationError {
 
 impl HandshakeData {
     /// Determine whether two handshakes are compatible.
-    pub(crate) fn validate(
+    pub fn validate(
         local_handshake: &HandshakeData,
         remote_handshake: &HandshakeData,
     ) -> Result<(), HandshakeValidationError> {
@@ -160,9 +162,9 @@ impl HandshakeData {
     }
 }
 
-// #[cfg(any(test, feature = "arbitrary-impls"))]
-#[cfg(test)]
-pub(crate) mod test {
+/// Proptest strategies for the handshake types.
+#[cfg(any(test, feature = "arbitrary-impls"))]
+pub mod arbitrary_impls {
     use std::time::Duration;
 
     use neptune_primitives::block_height::BlockHeight;
@@ -170,15 +172,13 @@ pub(crate) mod test {
     use proptest::collection::vec;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
-    use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
-    use test_strategy::proptest;
 
     use super::*;
 
     impl VersionString {
         /// Generate a version string that is guaranteed to parse correctly.
-        pub(crate) fn arbitrary_semver() -> BoxedStrategy<Self> {
+        pub fn arbitrary_semver() -> BoxedStrategy<Self> {
             (0..5, 0..50, 0..200)
                 .prop_map(|(major, minor, point)| {
                     Self::new_from_str(&format!("{major}.{minor}.{point}"))
@@ -187,14 +187,14 @@ pub(crate) mod test {
         }
     }
 
-    pub(crate) fn arbitrary_extra_data_string() -> BoxedStrategy<ExtraDataString> {
+    pub fn arbitrary_extra_data_string() -> BoxedStrategy<ExtraDataString> {
         vec(0u8..=u8::MAX, 256)
             .prop_map(|bytes| ExtraDataString::from_chars(bytes.into_iter().map(|b| b as char)))
             .boxed()
     }
 
     impl HandshakeData {
-        pub(crate) fn arbitrary() -> BoxedStrategy<Self> {
+        pub fn arbitrary() -> BoxedStrategy<Self> {
             let height_strategy = arb::<BlockHeight>();
             let difficulty_strategy = arb::<Difficulty>();
 
@@ -261,6 +261,14 @@ pub(crate) mod test {
                 .boxed()
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prop_assert_eq;
+    use test_strategy::proptest;
+
+    use super::*;
 
     #[test]
     fn malformed_version_from_peer_doesnt_crash() {
