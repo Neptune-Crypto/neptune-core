@@ -4762,6 +4762,7 @@ mod tests {
     use neptune_primitives::network::Network;
     use neptune_wallet::address::generation_address::GenerationReceivingAddress;
     use neptune_wallet::address::generation_address::GenerationSpendingKey;
+    use neptune_wallet::mock_block::make_mock_block;
     use neptune_wallet::utxo_notification::UtxoNotificationMedium;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::One;
@@ -4779,7 +4780,6 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::rpc::server::NeptuneRPCServer;
-    use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
@@ -6646,8 +6646,7 @@ mod tests {
 
                     let cb_key = wallet_entropy.nth_generation_spending_key(0);
                     let (block1, composer_expected_utxos) =
-                        make_mock_block(&genesis_block, None, cb_key, Default::default(), network)
-                            .await;
+                        make_mock_block(&genesis_block, None, cb_key, Default::default(), network);
                     blocks.push(block1.clone());
 
                     rpc_server
@@ -6795,8 +6794,7 @@ mod tests {
                 let bob_key = bob_wallet.nth_generation_spending_key(0);
                 let genesis_block = Block::genesis(network);
                 let (block1, composer_expected_utxos) =
-                    make_mock_block(&genesis_block, None, bob_key, Default::default(), network)
-                        .await;
+                    make_mock_block(&genesis_block, None, bob_key, Default::default(), network);
 
                 bob.state
                     .set_new_self_composed_tip(block1.clone(), composer_expected_utxos)
@@ -7106,8 +7104,7 @@ mod tests {
                 // wallet ---
                 let timestamp = network.launch_date() + Timestamp::days(1);
                 let (block_1, composer_utxos) =
-                    make_mock_block(&genesis_block, Some(timestamp), key, rng.random(), network)
-                        .await;
+                    make_mock_block(&genesis_block, Some(timestamp), key, rng.random(), network);
 
                 {
                     let state_lock = rpc_server.state.lock_guard().await;

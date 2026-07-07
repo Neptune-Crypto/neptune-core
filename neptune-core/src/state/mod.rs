@@ -3538,6 +3538,8 @@ mod tests {
     use neptune_wallet::address::KeyType;
     use neptune_wallet::address::ReceivingAddress;
     use neptune_wallet::expected_utxo::UtxoNotifier;
+    use neptune_wallet::mock_block::make_mock_block;
+    use neptune_wallet::mock_block::make_mock_block_with_inputs_and_outputs;
     use neptune_wallet::transaction_output::TxOutput;
     use neptune_wallet::transaction_output::TxOutputList;
     use neptune_wallet::utxo_notification::UtxoNotificationMedium;
@@ -3556,8 +3558,6 @@ mod tests {
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_status::WalletStatusExportFormat;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
-    use crate::tests::shared::blocks::make_mock_block;
-    use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::mock_tx::send_coins;
@@ -3734,7 +3734,7 @@ mod tests {
             .await
         }
 
-        pub(crate) async fn make_one_branch(
+        pub(crate) fn make_one_branch(
             network: Network,
             first_block: &Block,
             branch_length: usize,
@@ -3797,8 +3797,7 @@ mod tests {
                     coinbase_recipient.to_owned(),
                     rng.random(),
                     network,
-                )
-                .await;
+                );
                 branch.push(next_block.clone());
                 let mut test_msa = block.mutator_set_accumulator_after().unwrap();
                 block = next_block;
@@ -3910,8 +3909,7 @@ mod tests {
                         branch_length,
                         &coinbase_recipient,
                         seed,
-                    )
-                    .await;
+                    );
 
                     all_branches.lock().await[i] = Some(branch);
                 }));
@@ -4120,7 +4118,7 @@ mod tests {
         let mut current_block = genesis.clone();
         for _ in 0..3 {
             let (block, alice_composer_expected_utxos) =
-                make_mock_block(&current_block, None, alice_key, rng.random(), network).await;
+                make_mock_block(&current_block, None, alice_key, rng.random(), network);
             alice_gsl
                 .wallet_state
                 .add_expected_utxos(alice_composer_expected_utxos)
@@ -4197,8 +4195,7 @@ mod tests {
             2 * branch_length / 3,
             &bob_key,
             rng.random(),
-        )
-        .await;
+        );
         for block in more_a_blocks {
             alice_gsl.set_new_tip(block.clone()).await.unwrap();
             a_blocks.push(block);
@@ -5153,7 +5150,7 @@ mod tests {
                 // 1. Create new block 1 and store it, but do not update wallet
                 // with the new block.
                 let (mock_block_1a, _) =
-                    make_mock_block(&genesis_block, None, bob_key, rng.random(), network).await;
+                    make_mock_block(&genesis_block, None, bob_key, rng.random(), network);
 
                 {
                     alice
@@ -5231,7 +5228,7 @@ mod tests {
                 // 1. Create new block 1a where we receive a coinbase UTXO, store it
                 let genesis_block = alice.chain.archival_state().get_tip().await;
                 let (mock_block_1a, composer_expected_utxos_1a) =
-                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
+                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network);
                 alice
                     .wallet_state
                     .add_expected_utxos(composer_expected_utxos_1a)
@@ -5257,7 +5254,7 @@ mod tests {
                 let mut parent_block = genesis_block;
                 for _ in 0..5 {
                     let (next_block, _) =
-                        make_mock_block(&parent_block, None, bob_key, rng.random(), network).await;
+                        make_mock_block(&parent_block, None, bob_key, rng.random(), network);
                     alice.set_new_tip(next_block.clone()).await.unwrap();
                     parent_block = next_block;
                 }
@@ -5332,7 +5329,7 @@ mod tests {
                 // 1. Create new block 1 where Alice receives two composer UTXOs, store it.
                 let genesis_block = alice.chain.archival_state().get_tip().await;
                 let (block_1, alice_composer_expected_utxos_1) =
-                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
+                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network);
                 {
                     alice
                         .wallet_state
@@ -6241,8 +6238,7 @@ mod tests {
             let mut previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(&previous_block, None, spending_key, rng.random(), network)
-                        .await;
+                    make_mock_block(&previous_block, None, spending_key, rng.random(), network);
                 global_state_lock
                     .set_new_self_composed_tip(next_block.clone(), expected)
                     .await
@@ -6263,8 +6259,7 @@ mod tests {
             previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(&previous_block, None, spending_key, rng.random(), network)
-                        .await;
+                    make_mock_block(&previous_block, None, spending_key, rng.random(), network);
                 global_state_lock
                     .set_new_self_composed_tip(next_block.clone(), expected)
                     .await
@@ -6320,8 +6315,7 @@ mod tests {
             assert_eq!(genesis_block.hash(), alice.chain.tip().hash());
 
             let cb_key = WalletEntropy::new_random().nth_generation_spending_key(0);
-            let (block_1, _) =
-                make_mock_block(&genesis_block, None, cb_key, rng.random(), network).await;
+            let (block_1, _) = make_mock_block(&genesis_block, None, cb_key, rng.random(), network);
 
             alice.store_block_not_tip(block_1.clone()).await.unwrap();
             assert_eq!(
@@ -6340,17 +6334,13 @@ mod tests {
         }
 
         /// Return a list of (Block, parent) pairs, of length N.
-        async fn chain_of_blocks_and_parents(
-            network: Network,
-            length: usize,
-        ) -> Vec<(Block, Block)> {
+        fn chain_of_blocks_and_parents(network: Network, length: usize) -> Vec<(Block, Block)> {
             let mut rng = rand::rng();
             let cb_key = WalletEntropy::new_random().nth_generation_spending_key(0);
             let mut parent = Block::genesis(network);
             let mut chain = vec![];
             for _ in 0..length {
-                let (block, _) =
-                    make_mock_block(&parent, None, cb_key, rng.random(), network).await;
+                let (block, _) = make_mock_block(&parent, None, cb_key, rng.random(), network);
                 chain.push((block.clone(), parent.clone()));
                 parent = block;
             }
@@ -6372,7 +6362,7 @@ mod tests {
             let mut alice = alice.global_state_lock.lock_guard_mut().await;
 
             let a_length = 12;
-            let chain_a = chain_of_blocks_and_parents(network, a_length).await;
+            let chain_a = chain_of_blocks_and_parents(network, a_length);
             for (block, _) in &chain_a {
                 alice.set_new_tip(block.to_owned()).await.unwrap();
             }
@@ -6391,7 +6381,7 @@ mod tests {
             // Store all blocks from a new chain, except the last, without
             // marking any of them as tips.  Verify no change in tip.
             let b_length = 15;
-            let chain_b = chain_of_blocks_and_parents(network, b_length).await;
+            let chain_b = chain_of_blocks_and_parents(network, b_length);
             for (block, _) in chain_b.iter().take(b_length - 1) {
                 alice.store_block_not_tip(block.clone()).await.unwrap();
             }
@@ -6439,8 +6429,8 @@ mod tests {
                 .await;
                 let mut alice = alice.global_state_lock.lock_guard_mut().await;
                 assert_eq!(genesis_block.hash(), alice.chain.tip().hash());
-                let chain_a = chain_of_blocks_and_parents(network, depth).await;
-                let chain_b = chain_of_blocks_and_parents(network, depth).await;
+                let chain_a = chain_of_blocks_and_parents(network, depth);
+                let chain_b = chain_of_blocks_and_parents(network, depth);
                 let blocks_and_parents = [chain_a, chain_b].concat();
                 for (block, _) in &blocks_and_parents {
                     alice.store_block_not_tip(block.clone()).await.unwrap();
@@ -6484,11 +6474,11 @@ mod tests {
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1a, composer_expected_utxos_1a) =
-                make_mock_block(&genesis_block, None, spending_key, rng.random(), network).await;
+                make_mock_block(&genesis_block, None, spending_key, rng.random(), network);
             let (block_2a, composer_expected_utxos_2a) =
-                make_mock_block(&block_1a, None, spending_key, rng.random(), network).await;
+                make_mock_block(&block_1a, None, spending_key, rng.random(), network);
             let (block_3a, composer_expected_utxos_3a) =
-                make_mock_block(&block_2a, None, spending_key, rng.random(), network).await;
+                make_mock_block(&block_2a, None, spending_key, rng.random(), network);
 
             let cli_args = cli_args::Args {
                 number_of_mps_per_utxo: 30,
@@ -6543,7 +6533,7 @@ mod tests {
                 // Verify that we can also reorganize with last shared ancestor being
                 // the genesis block.
                 let (block_1b, _) =
-                    make_mock_block(&genesis_block, None, spending_key, random(), network).await;
+                    make_mock_block(&genesis_block, None, spending_key, random(), network);
                 global_state.set_new_tip(block_1b.clone()).await.unwrap();
                 assert_correct_global_state(
                     &global_state,
@@ -6558,8 +6548,7 @@ mod tests {
                 let mut previous_block = block_1b;
                 for block_height in 2..60 {
                     let (next_block, composer_expected_utxos) =
-                        make_mock_block(&previous_block, None, spending_key, rng.random(), network)
-                            .await;
+                        make_mock_block(&previous_block, None, spending_key, rng.random(), network);
                     global_state
                         .wallet_state
                         .add_expected_utxos(composer_expected_utxos.clone())
@@ -6600,7 +6589,7 @@ mod tests {
             let spend_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1, composer_expected_utxos_1) =
-                make_mock_block(&genesis_block, None, spend_key, rng.random(), network).await;
+                make_mock_block(&genesis_block, None, spend_key, rng.random(), network);
 
             for claim_coinbase in [false, true] {
                 let mut global_state_lock = mock_genesis_global_state(

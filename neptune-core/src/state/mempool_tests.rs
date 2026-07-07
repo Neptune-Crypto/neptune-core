@@ -34,6 +34,7 @@ mod tests {
     use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use neptune_wallet::expected_utxo::UtxoNotifier;
+    use neptune_wallet::mock_block::make_mock_block;
     use neptune_wallet::transaction_output::TxOutput;
     use neptune_wallet::transaction_output::TxOutputList;
     use neptune_wallet::wallet_entropy::WalletEntropy;
@@ -55,7 +56,6 @@ mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::GlobalStateLock;
-    use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
 
@@ -433,7 +433,7 @@ mod tests {
         // mine a block.
         let genesis_block = Block::genesis(network);
         let (block_1, expected_1) =
-            make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
+            make_mock_block(&genesis_block, None, alice_key, rng.random(), network);
 
         // Update both states with block 1
         alice
@@ -598,7 +598,7 @@ mod tests {
         let mut previous_block = block_2;
         for _ in 0..2 {
             let (next_block, _) =
-                make_mock_block(&previous_block, None, alice_key, rng.random(), network).await;
+                make_mock_block(&previous_block, None, alice_key, rng.random(), network);
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
             let _ = mempool.update_with_block(&next_block);
@@ -951,8 +951,7 @@ mod tests {
                 bob_key,
                 rng.random(),
                 network,
-            )
-            .await;
+            );
             let update_jobs = alice.set_new_tip(next_block.clone()).await.unwrap();
             assert!(
                 update_jobs.is_empty(),
@@ -1004,8 +1003,7 @@ mod tests {
             bob_key,
             rng.random(),
             network,
-        )
-        .await;
+        );
         assert!(
             block_1b.header().height.previous().unwrap().is_genesis(),
             "Sanity check that new tip has height 1"

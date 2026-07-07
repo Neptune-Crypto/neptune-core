@@ -20,12 +20,12 @@ use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_rpc_api::model::wallet::block::RpcWalletBlock;
+use neptune_wallet::mock_block::block_with_num_puts;
 use num_traits::Zero;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::tests::shared::blocks::block_with_num_puts;
 use crate::tests::shared_tokio_runtime;
 
 fn assert_rpc_block_hash_and_block_hash_agree(block: &Block) {
@@ -45,7 +45,7 @@ async fn rpc_wallet_block_hash_agrees_with_block_hash() {
     let block2 = invalid_empty_block_with_proof_size(&block1, network, proof_size2);
     assert_rpc_block_hash_and_block_hash_agree(&block2);
 
-    let block3 = block_with_num_puts(network, &block2, 2, 2).await;
+    let block3 = block_with_num_puts(network, &block2, 2, 2);
     assert_rpc_block_hash_and_block_hash_agree(&block3);
 }
 

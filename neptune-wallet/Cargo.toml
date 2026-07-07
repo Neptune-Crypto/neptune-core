@@ -19,9 +19,10 @@ arbitrary-impls = [
     "neptune-primitives/arbitrary-impls",
 ]
 
-# exposes test-support constructors (e.g. WalletEntropy::new_random and the
-# nth_*_for_tests key derivations) needed by downstream crates' tests.
-test-helpers = ["arbitrary-impls"]
+# exposes test-support constructors (e.g. WalletEntropy::new_random, the
+# nth_*_for_tests key derivations, and the mock_block builders) needed by
+# downstream crates' tests.
+test-helpers = ["arbitrary-impls", "neptune-consensus/test-helpers"]
 
 [dependencies]
 

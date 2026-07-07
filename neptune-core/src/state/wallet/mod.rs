@@ -38,6 +38,7 @@ mod tests {
     use neptune_wallet::address::SpendingKey;
     use neptune_wallet::expected_utxo::ExpectedUtxo;
     use neptune_wallet::expected_utxo::UtxoNotifier;
+    use neptune_wallet::mock_block::make_mock_block;
     use neptune_wallet::secret_key_material::SecretKeyMaterial;
     use neptune_wallet::transaction_output::TxOutput;
     use neptune_wallet::transaction_output::TxOutputList;
@@ -60,7 +61,6 @@ mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::GlobalStateLock;
-    use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared_tokio_runtime;
@@ -425,8 +425,7 @@ mod tests {
             for _ in 0..12 {
                 let previous_block = next_block;
                 let (nb, _) =
-                    make_mock_block(&previous_block, None, charlie_key, rng.random(), network)
-                        .await;
+                    make_mock_block(&previous_block, None, charlie_key, rng.random(), network);
                 next_block = nb;
                 let maintain_mps = true;
                 alice
@@ -488,7 +487,7 @@ mod tests {
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let (block_1, block1_composer_expected) =
-            make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
+            make_mock_block(&genesis_block, None, alice_key, rng.random(), network);
 
         alice_wallet
             .add_expected_utxos(block1_composer_expected.clone())
@@ -546,8 +545,8 @@ mod tests {
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
-        let (block_2, _) = make_mock_block(&block_1, None, bob_key, rng.random(), network).await;
-        let (block_3, _) = make_mock_block(&block_2, None, bob_key, rng.random(), network).await;
+        let (block_2, _) = make_mock_block(&block_1, None, bob_key, rng.random(), network);
+        let (block_3, _) = make_mock_block(&block_2, None, bob_key, rng.random(), network);
 
         // TODO: Is this assertion correct? Do we need to check if an auth path
         // is empty?
@@ -616,7 +615,7 @@ mod tests {
 
         let mut rng = rand::rng();
         let (block_1, expected_utxos) =
-            make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
+            make_mock_block(&genesis_block, None, alice_key, rng.random(), network);
         let liquid_expected_utxo = &expected_utxos[0];
         assert!(
             liquid_expected_utxo.utxo.release_date().is_none(),
@@ -663,7 +662,7 @@ mod tests {
             for _ in 0..21 {
                 let previous_block = next_block;
                 let (next_block_prime, expected) =
-                    make_mock_block(&previous_block, None, alice_key, rng.random(), network).await;
+                    make_mock_block(&previous_block, None, alice_key, rng.random(), network);
                 alice.wallet_state.add_expected_utxos(expected).await;
                 alice.set_new_tip(next_block_prime.clone()).await.unwrap();
                 next_block = next_block_prime;
@@ -841,8 +840,7 @@ mod tests {
                 alice_key,
                 rng.random(),
                 network,
-            )
-            .await;
+            );
             next_block = block;
             alice.wallet_state.add_expected_utxos(expected).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
@@ -916,7 +914,7 @@ mod tests {
             .wallet_state
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
-        let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.random(), network).await;
+        let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.random(), network);
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
         bob_global_lock
             .set_new_tip(block_2_b.clone())
@@ -944,7 +942,7 @@ mod tests {
         // Fork back again to the long chain and verify that the membership proofs
         // all work again. No one gets the coinbase/guesser fee of this block.
         let (first_block_after_spree, _) =
-            make_mock_block(&last_block_in_spree, None, bob_key, rng.random(), network).await;
+            make_mock_block(&last_block_in_spree, None, bob_key, rng.random(), network);
         alice
             .set_new_tip(first_block_after_spree.clone())
             .await
@@ -1087,8 +1085,7 @@ mod tests {
             bob_key,
             rng.random(),
             network,
-        )
-        .await;
+        );
         alice
             .set_new_tip(second_block_after_spree.clone())
             .await

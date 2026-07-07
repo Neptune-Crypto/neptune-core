@@ -27,6 +27,7 @@ use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
 use neptune_wallet::composer_parameters::prepare_coinbase_transaction_stateless;
 use neptune_wallet::composer_parameters::ComposerParameters;
 use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
+use neptune_wallet::mock_block::make_mock_block;
 use neptune_wallet::transaction_output::TxOutput;
 use neptune_wallet::wallet_entropy::WalletEntropy;
 use proptest::collection;
@@ -46,7 +47,6 @@ use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::tests::shared::blocks::fake_valid_successor_for_tests;
 use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
-use crate::tests::shared::blocks::make_mock_block;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::tests::shared_tokio_runtime;
 
@@ -136,8 +136,7 @@ async fn test_difficulty_control_matches() {
             let duration = i as u64 * multiplier;
             now += Timestamp::millis(duration);
 
-            let (block, _) =
-                make_mock_block(&block_prev, Some(now), a_key, rng.random(), network).await;
+            let (block, _) = make_mock_block(&block_prev, Some(now), a_key, rng.random(), network);
 
             let control = difficulty_control(
                 block.kernel.header.timestamp,
@@ -221,8 +220,7 @@ async fn can_prove_block_ancestry(
             key,
             sender_randomness_vec.pop().unwrap(),
             network,
-        )
-        .await;
+        );
         if i != 26 {
             ammr.append(new_block.hash()).await;
             mmra.append(new_block.hash());
@@ -631,6 +629,7 @@ mod guesser_fee_utxos {
     use neptune_primitives::timestamp::Timestamp;
     use neptune_wallet::address::generation_address::GenerationReceivingAddress;
     use neptune_wallet::address::generation_address::GenerationSpendingKey;
+    use neptune_wallet::mock_block::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
     use neptune_wallet::transaction_output::TxOutput;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use rand::Rng;
@@ -638,7 +637,6 @@ mod guesser_fee_utxos {
 
     use crate::application::config::cli_args;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
 
@@ -661,8 +659,7 @@ mod guesser_fee_utxos {
             rng.random(),
             (0.4, guesser_address.into()),
             network,
-        )
-        .await;
+        );
         let ars = block1.guesser_fee_addition_records().unwrap();
         let ars_from_wallet = block1
             .kernel

@@ -20,6 +20,8 @@ pub mod composer_parameters;
 pub mod expected_utxo;
 pub mod fee_notification_policy;
 pub mod incoming_utxo;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod mock_block;
 pub mod scan_mode_configuration;
 pub mod secret_key_material;
 pub mod transaction_details;

@@ -138,7 +138,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
         .mining_rewards_address();
     for coinbase_sender_randomness in coinbase_sender_randomness_coll {
         let (next_block, composer_utxos) =
-            super::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+            neptune_wallet::mock_block::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                 &previous_block,
                 vec![],
                 vec![],
@@ -147,8 +147,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
                 coinbase_sender_randomness,
                 (0.5, guesser_address.clone()),
                 network,
-            )
-            .await;
+            );
 
         global_state_lock
             .set_new_self_composed_tip(next_block.clone(), composer_utxos)

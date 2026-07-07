@@ -2230,6 +2230,8 @@ pub(crate) mod tests {
     use neptune_primitives::network::Network;
     use neptune_wallet::address::generation_address::GenerationReceivingAddress;
     use neptune_wallet::expected_utxo::ExpectedUtxo;
+    use neptune_wallet::mock_block::make_mock_block;
+    use neptune_wallet::mock_block::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
     use neptune_wallet::transaction_output::TxOutput;
     use neptune_wallet::utxo_notification::UtxoNotificationMedium;
     use num_traits::Zero;
@@ -2244,8 +2246,6 @@ pub(crate) mod tests {
     use crate::application::config::cli_args;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::GlobalStateLock;
-    use crate::tests::shared::blocks::make_mock_block;
-    use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
@@ -2419,8 +2419,7 @@ pub(crate) mod tests {
             alice_key,
             Default::default(),
             network,
-        )
-        .await;
+        );
 
         {
             let mut alice = alice.lock_guard_mut().await;
@@ -2466,8 +2465,7 @@ pub(crate) mod tests {
             bob_key,
             rng.random(),
             network,
-        )
-        .await;
+        );
 
         bob_global_lock
             .set_new_self_composed_tip(block1.clone(), composer_fee_eutxos)
@@ -2831,8 +2829,7 @@ pub(crate) mod tests {
                 mock_block_seed,
                 (guesser_fraction, bob_key.to_address().into()),
                 network,
-            )
-            .await;
+            );
 
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let mutxos_1a = bob.wallet_state.wallet_db.monitored_utxos().get_all().await;
@@ -2866,8 +2863,7 @@ pub(crate) mod tests {
                 mock_block_seed,
                 (guesser_fraction, random_address.into()),
                 network,
-            )
-            .await;
+            );
         assert_ne!(
             block_1a.header().guesser_receiver_data,
             block_1b.header().guesser_receiver_data,
@@ -2940,7 +2936,7 @@ pub(crate) mod tests {
 
         let genesis_block = Block::genesis(network);
         let (block1, composer_utxos) =
-            make_mock_block(&genesis_block, None, bob_key, rng.random(), network).await;
+            make_mock_block(&genesis_block, None, bob_key, rng.random(), network);
 
         bob.wallet_state.add_expected_utxos(composer_utxos).await;
         assert!(
@@ -3047,7 +3043,7 @@ pub(crate) mod tests {
         let maintain_mps = true;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo) =
-                make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
+                make_mock_block(&latest_block, None, alice_key, rng.random(), network);
             bob.wallet_state
                 .update_wallet_state_with_new_block(
                     &latest_block.mutator_set_accumulator_after().unwrap(),
@@ -3080,8 +3076,7 @@ pub(crate) mod tests {
             bob_spending_key,
             rng.random(),
             network,
-        )
-        .await;
+        );
         bob.wallet_state
             .add_expected_utxos(composer_expected_utxos_3a)
             .await;
@@ -3110,7 +3105,7 @@ pub(crate) mod tests {
 
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_exp) =
-            make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
+            make_mock_block(&latest_block, None, alice_key, rng.random(), network);
         bob.set_new_tip(block_3b.clone()).await.unwrap();
 
         assert!(
@@ -3134,7 +3129,7 @@ pub(crate) mod tests {
         latest_block = block_3b;
         for _ in 4..=11 {
             let (new_block, _new_block_exp) =
-                make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
+                make_mock_block(&latest_block, None, alice_key, rng.random(), network);
             bob.set_new_tip(new_block.clone()).await.unwrap();
 
             latest_block = new_block;
@@ -3158,8 +3153,7 @@ pub(crate) mod tests {
         );
 
         // Mine *one* more block. Verify that MUTXO is pruned
-        let (block_12, _) =
-            make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
+        let (block_12, _) = make_mock_block(&latest_block, None, alice_key, rng.random(), network);
         bob.set_new_tip(block_12.clone()).await.unwrap();
 
         assert!(
@@ -3489,7 +3483,7 @@ pub(crate) mod tests {
             let composer_key = wallet_state.wallet_entropy.nth_generation_spending_key(0);
             let genesis_block = Block::genesis(network);
             let (mut incoming_block, _) =
-                make_mock_block(&genesis_block, None, composer_key, rng.random(), network).await;
+                make_mock_block(&genesis_block, None, composer_key, rng.random(), network);
 
             // other guesser -> no detection
             let rando = GenerationReceivingAddress::derive_from_seed(rng.random());
@@ -3695,8 +3689,7 @@ pub(crate) mod tests {
                     rng.random(),
                     (guesser_fraction, guesser_address.into()),
                     network,
-                )
-                .await;
+                );
 
             // Alice gets all mining rewards
             alice
@@ -4411,8 +4404,7 @@ pub(crate) mod tests {
                     rng.random(),
                     (guesser_fraction, guesser_address.into()),
                     network,
-                )
-                .await;
+                );
 
             alice_global_lock
                 .set_new_self_composed_tip(block_1a.clone(), composer_expected_utxos_1a)
