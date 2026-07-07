@@ -50,12 +50,12 @@ track-lock-location = ["neptune-locks/track-lock-location"]
 track-lock-time = ["neptune-locks/track-lock-time"]
 
 # implements arbitrary::Arbitrary for various types
-arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest", "neptune-consensus/arbitrary-impls", "neptune-mutator-set/arbitrary-impls", "neptune-primitives/arbitrary-impls", "neptune-wallet/arbitrary-impls"]
+arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest", "neptune-consensus/arbitrary-impls", "neptune-mempool/arbitrary-impls", "neptune-mutator-set/arbitrary-impls", "neptune-primitives/arbitrary-impls", "neptune-wallet/arbitrary-impls"]
 
 # exposes the consensus/proof-abstraction test-support constructors and proptest
 # strategies (the `test_helpers` modules) needed by downstream crates' tests.
 # off by default.
-test-helpers = ["arbitrary-impls", "dep:clienter", "neptune-consensus/test-helpers", "neptune-mutator-set/test-helpers", "neptune-wallet/test-helpers"]
+test-helpers = ["arbitrary-impls", "dep:clienter", "neptune-consensus/test-helpers", "neptune-mempool/test-helpers", "neptune-mutator-set/test-helpers", "neptune-wallet/test-helpers"]
 
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]
@@ -63,7 +63,7 @@ tokio-console = ["dep:console-subscriber"]
 # Implements `StandardUniform: Distribution<T>` for various types `T` that are
 # served through the RPC interface. Enables the RPC interface to be mocked on
 # the client side.
-mock-rpc = ["neptune-consensus/mock-rpc"]
+mock-rpc = ["neptune-consensus/mock-rpc", "neptune-mempool/mock-rpc"]
 
 # defines and implements TritonProgramSpecification for various programs
 spec = ["neptune-consensus/spec"]
@@ -143,6 +143,7 @@ neptune-consensus = { version = "0.12.0", path = "../neptune-consensus" }
 neptune-database = { version = "0.12.0", path = "../neptune-database" }
 neptune-job-queue = { version = "0.12.0", path = "../neptune-job-queue" }
 neptune-locks = { version = "0.12.0", path = "../neptune-locks" }
+neptune-mempool = { version = "0.12.0", path = "../neptune-mempool" }
 neptune-mutator-set = { version = "0.12.0", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.12.0", path = "../neptune-primitives" }
 neptune-wallet = { version = "0.12.0", path = "../neptune-wallet" }
@@ -194,6 +195,9 @@ neptune-cash = { path = "../neptune-core", features = ["arbitrary-impls", "spec"
 # enables neptune-consensus's test-support constructors and proptest strategies
 # (the `test_helpers` modules) used by neptune-core's own test code.
 neptune-consensus = { version = "0.12.0", path = "../neptune-consensus", features = ["test-helpers"] }
+# enables neptune-mempool's test-support accessors used by the relocated,
+# GlobalState-coupled mempool tests in neptune-core.
+neptune-mempool = { version = "0.12.0", path = "../neptune-mempool", features = ["test-helpers"] }
 
 # enables neptune-rpc-api test helpers (e.g. RpcBlockTemplateMetadata::solve and
 # test-only PartialEq on the model types) used by neptune-core's own test code.

@@ -15,6 +15,10 @@ use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mempool::upgrade_incentive::UpgradeIncentive;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
@@ -37,11 +41,7 @@ use tracing::warn;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
-use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
-use crate::state::mempool::upgrade_priority::UpgradePriority;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
-use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 
@@ -541,11 +541,15 @@ impl UpgradeJob {
                     // the transaction can be merged with anything favorable to
                     // us.
                     if upgrade_job.performs_raise() {
-                        let merge_tx = global_state_lock.lock_guard().await.mempool.merge_partner(
-                            &upgraded.kernel,
-                            consensus_rule_set,
-                            MINIMUM_FEE_FOR_FREE_MERGE,
-                        );
+                        let merge_tx = global_state_lock
+                            .lock_guard()
+                            .await
+                            .mempool()
+                            .merge_partner(
+                                &upgraded.kernel,
+                                consensus_rule_set,
+                                MINIMUM_FEE_FOR_FREE_MERGE,
+                            );
                         if let Some((right_kernel, single_proof_right, right_priority)) = merge_tx {
                             info!("Found merge candidate for newly upgraded transaction.");
 
@@ -865,7 +869,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
 
     // Do we have any `ProofCollection`s?
     let proof_collection_job = if let Some((kernel, proof, upgrade_priority)) = global_state
-        .mempool
+        .mempool()
         .preferred_proof_collection(num_proofs_threshold, upgrade_filter)
     {
         if kernel.mutator_set_hash != tip_mutator_set.hash() {
@@ -913,7 +917,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
         [(left_kernel, left_single_proof), (right_kernel, right_single_proof)],
         upgrade_priority,
     )) = global_state
-        .mempool
+        .mempool()
         .preferred_single_proof_pair(upgrade_filter)
     {
         // Sanity check
@@ -969,6 +973,7 @@ mod tests {
     use macro_rules_attr::apply;
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
     use neptune_consensus::block::Block;
+    use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
     use neptune_primitives::network::Network;
     use neptune_wallet::address::generation_address::GenerationReceivingAddress;
     use neptune_wallet::transaction_output::TxOutput;
@@ -978,7 +983,6 @@ mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::tests::shared::blocks::fake_block_successor_with_merged_tx;
     use crate::tests::shared::globalstate::get_test_genesis_setup;
@@ -1146,7 +1150,7 @@ mod tests {
             let mempool_tx = alice
                 .lock_guard()
                 .await
-                .mempool
+                .mempool()
                 .get(pwtx.kernel.txid())
                 .unwrap()
                 .to_owned();
@@ -1247,7 +1251,7 @@ mod tests {
             let mempool_tx = alice
                 .lock_guard()
                 .await
-                .mempool
+                .mempool()
                 .get(pwtx.kernel.txid())
                 .unwrap()
                 .to_owned();
@@ -1330,7 +1334,7 @@ mod tests {
             .await;
         assert_eq!(
             1,
-            bob.lock_guard().await.mempool.len(),
+            bob.lock_guard().await.mempool().len(),
             "Upgraded tx must be merged"
         );
 
@@ -1343,7 +1347,7 @@ mod tests {
         let mempool_tx = bob
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get_transactions_for_block_composition(usize::MAX, None);
         assert_eq!(1, mempool_tx.len());
         let mempool_tx = &mempool_tx[0];
@@ -1521,11 +1525,11 @@ mod tests {
         // Since one transacion got mined, and the other didn't, we should still
         // have the unmined transaction in the mempool. Since this transcation
         // is owned by this client, we want to keep it in the mempool.
-        assert_eq!(1, alice.lock_guard().await.mempool.len());
+        assert_eq!(1, alice.lock_guard().await.mempool().len());
         assert!(alice
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .contains(unmined_tx.kernel.txid()));
     }
 }

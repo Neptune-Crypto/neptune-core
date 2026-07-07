@@ -1,4 +1,3 @@
-pub(crate) mod transaction_kernel_id;
 pub(crate) mod tx_creation_artifacts;
 
 #[cfg(test)]

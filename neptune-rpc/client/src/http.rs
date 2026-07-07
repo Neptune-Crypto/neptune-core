@@ -77,12 +77,12 @@ mod tests {
 
     use neptune_cash::api::export::Args;
     use neptune_cash::api::export::Digest;
-    use neptune_cash::api::export::TransactionKernelId;
     use neptune_cash::state::GlobalState;
     use neptune_cash::state::GlobalStateLock;
     use neptune_consensus::block::Block;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_mempool::transaction_kernel_id::TransactionKernelId;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::block_selector::BlockSelector;
     use neptune_primitives::block_selector::BlockSelectorLiteral;
@@ -668,7 +668,7 @@ mod tests {
     ) {
         let start = std::time::Instant::now();
         loop {
-            if let Some(tx) = gs.mempool.get(txid)
+            if let Some(tx) = gs.mempool().get(txid)
                 && tx.proof.is_single_proof()
             {
                 break;

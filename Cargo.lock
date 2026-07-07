@@ -3500,6 +3500,7 @@ dependencies = [
  "neptune-database",
  "neptune-job-queue",
  "neptune-locks",
+ "neptune-mempool",
  "neptune-mutator-set",
  "neptune-primitives",
  "neptune-rpc-api",
@@ -3603,6 +3604,7 @@ dependencies = [
  "libp2p",
  "neptune-cash",
  "neptune-consensus",
+ "neptune-mempool",
  "neptune-primitives",
  "neptune-wallet",
  "proptest",
@@ -3694,6 +3696,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "neptune-mempool"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "arbitrary",
+ "bincode",
+ "bytesize",
+ "get-size2",
+ "itertools",
+ "macro_rules_attr",
+ "neptune-consensus",
+ "neptune-mempool",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "neptune-rpc-api",
+ "num-rational",
+ "num-traits",
+ "priority-queue",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "serde",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "tracing",
+]
+
+[[package]]
 name = "neptune-mutator-set"
 version = "0.12.0"
 dependencies = [
@@ -3779,6 +3810,7 @@ dependencies = [
  "itertools",
  "neptune-cash",
  "neptune-consensus",
+ "neptune-mempool",
  "neptune-primitives",
  "neptune-rpc-api",
  "neptune-wallet",

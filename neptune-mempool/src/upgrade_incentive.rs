@@ -19,7 +19,7 @@ pub enum UpgradeIncentive {
 }
 
 impl UpgradeIncentive {
-    pub(crate) fn upgrade_is_worth_it(&self, min_gobbling_fee: NativeCurrencyAmount) -> bool {
+    pub fn upgrade_is_worth_it(&self, min_gobbling_fee: NativeCurrencyAmount) -> bool {
         match self {
             UpgradeIncentive::Gobble(gobble_amt) => *gobble_amt >= min_gobbling_fee,
             _ => true,
@@ -29,7 +29,7 @@ impl UpgradeIncentive {
     /// On successful proof-upgrading, the new transaction will affect our
     /// balance in the case fees were gobbled. Return the upgrade incentive as
     /// it looks after a successful proof-upgrading.
-    pub(crate) fn after_upgrade(self) -> Self {
+    pub fn after_upgrade(self) -> Self {
         match self {
             UpgradeIncentive::Critical => UpgradeIncentive::Critical,
             UpgradeIncentive::Gobble(native_currency_amount) => {

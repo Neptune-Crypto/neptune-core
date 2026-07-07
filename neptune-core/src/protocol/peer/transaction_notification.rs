@@ -3,12 +3,12 @@ use anyhow::Result;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::transfer_transaction::TransactionProofQuality;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
-use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::tasm_lib::prelude::Digest;
 
 /// Data structure for communicating knowledge of transactions.
@@ -22,7 +22,7 @@ pub(crate) struct TransactionNotification {
     /// A unique identifier of the transaction. Matches keys in the [mempool]
     /// data structure.
     ///
-    /// [mempool]: crate::state::mempool::Mempool
+    /// [mempool]: neptune_mempool::mempool::Mempool
     pub(crate) txid: TransactionKernelId,
 
     /// The hash of the mutator set under which this transaction is valid.

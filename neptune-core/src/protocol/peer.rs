@@ -14,6 +14,7 @@ use itertools::Itertools;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::Block;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::max_cumulative_pow_after;
 use neptune_primitives::difficulty_control::Difficulty;
@@ -43,7 +44,6 @@ use transfer_transaction::TransferTransaction;
 use crate::application::loops::channel::BlockProposalNotification;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::protocol::peer::transfer_block::TransferBlock;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 
 pub(crate) type InstanceId = u128;
 

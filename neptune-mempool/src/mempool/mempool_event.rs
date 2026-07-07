@@ -65,25 +65,23 @@ impl MempoolEvent {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Test-support tallies over mempool events. Gated behind `test-helpers` so
+/// downstream crates' tests (e.g. `neptune-core`) can use them.
+#[cfg(any(test, feature = "test-helpers"))]
+impl MempoolEvent {
+    pub fn is_add(&self) -> bool {
+        matches!(self, Self::AddTx(_))
+    }
 
-    impl MempoolEvent {
-        pub(crate) fn is_add(&self) -> bool {
-            matches!(self, Self::AddTx(_))
-        }
+    pub fn is_remove(&self) -> bool {
+        matches!(self, Self::RemoveTx(_))
+    }
 
-        pub(crate) fn is_remove(&self) -> bool {
-            matches!(self, Self::RemoveTx(_))
-        }
+    pub fn num_removes(events: &[Self]) -> usize {
+        events.iter().filter(|x| x.is_remove()).count()
+    }
 
-        pub(crate) fn num_removes(events: &[Self]) -> usize {
-            events.iter().filter(|x| x.is_remove()).count()
-        }
-
-        pub(crate) fn num_adds(events: &[Self]) -> usize {
-            events.iter().filter(|x| x.is_add()).count()
-        }
+    pub fn num_adds(events: &[Self]) -> usize {
+        events.iter().filter(|x| x.is_add()).count()
     }
 }

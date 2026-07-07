@@ -5,7 +5,7 @@ use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 #[derive(Debug, Clone)]
 pub struct PrimitiveWitnessUpdate {
     /// The deprecated primitive witness, before applying a mutator set update.
-    pub(crate) old_primitive_witness: PrimitiveWitness,
+    pub old_primitive_witness: PrimitiveWitness,
 }
 
 impl PrimitiveWitnessUpdate {

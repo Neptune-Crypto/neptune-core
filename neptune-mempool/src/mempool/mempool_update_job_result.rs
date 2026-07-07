@@ -1,9 +1,10 @@
-use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 
-use crate::api::export::TransactionKernelId;
+use crate::transaction_kernel_id::TransactionKernelId;
 
-pub(crate) enum MempoolUpdateJobResult {
+#[derive(Debug)]
+pub enum MempoolUpdateJobResult {
     Failure(TransactionKernelId),
     Success {
         /// The primitive witness, with updated mutator set data

@@ -3,12 +3,12 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use get_size2::GetSize;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 
-use crate::api::export::TransactionKernelId;
-use crate::state::transaction::transaction_kernel_id::Txid;
-use crate::state::NeptuneProof;
-use crate::state::TransactionKernel;
-use crate::state::UpgradePriority;
+use crate::mempool::upgrade_priority::UpgradePriority;
+use crate::transaction_kernel_id::TransactionKernelId;
+use crate::transaction_kernel_id::Txid;
 
 /// A transaction that was input to a merge of two transactions. In other words:
 /// either a or b in the operation merge(a, b) -> c, where a, b, and c are all
@@ -40,7 +40,7 @@ pub(super) struct MergeInputCacheElement {
 // should ever be needed by the aplication. Also: This cache can have a size in
 // the gigabytes so any application logic cloning it would have terrible
 // performance.
-#[cfg_attr(test, derive(Clone))]
+#[cfg_attr(any(test, feature = "test-helpers"), derive(Clone))]
 pub(super) struct MergeInputCache {
     tx_dictionary: HashMap<TransactionKernelId, MergeInputCacheElement>,
 
@@ -61,7 +61,7 @@ impl MergeInputCache {
         self.insertion_order.clear();
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-helpers"))]
     pub(super) fn len(&self) -> usize {
         self.tx_dictionary.len()
     }

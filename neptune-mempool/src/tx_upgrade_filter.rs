@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::TransactionKernelId;
+use crate::transaction_kernel_id::TransactionKernelId;
 
 /// Filter rule for TXIDs: Only upgrade transaction if
 /// `txid % divisor == remainder`.
@@ -50,7 +50,7 @@ impl FromStr for TxUpgradeFilter {
 
 impl TxUpgradeFilter {
     /// Return the transaction upgrade filter that matches all transactions.
-    pub(crate) fn match_all() -> Self {
+    pub fn match_all() -> Self {
         Self {
             divisor: 1u8,
             remainder: 0u8,

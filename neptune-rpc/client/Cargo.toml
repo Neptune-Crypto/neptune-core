@@ -22,6 +22,7 @@ neptune-primitives = { version = "0.12.0", path = "../../neptune-primitives" }
 async-trait = "0.1.83"
 
 [dev-dependencies]
+neptune-mempool = { version = "0.12.0", path = "../../neptune-mempool" }
 neptune-wallet = { version = "0.12.0", path = "../../neptune-wallet" }
 itertools = "0.14"
 num-traits = "0.2"

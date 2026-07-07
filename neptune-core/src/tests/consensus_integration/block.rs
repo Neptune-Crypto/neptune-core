@@ -18,6 +18,7 @@ use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;
 use neptune_database::NeptuneLevelDb;
+use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
 use neptune_primitives::difficulty_control::difficulty_control;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
@@ -42,7 +43,6 @@ use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistrib
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
-use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::tests::shared::blocks::fake_valid_successor_for_tests;
 use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;

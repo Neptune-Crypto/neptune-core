@@ -247,7 +247,7 @@ pub async fn consolidation_tx_with_lustration() {
         .gsl
         .lock_guard()
         .await
-        .mempool
+        .mempool()
         .fee_density_iter()
         .map(|(txid, _)| txid)
         .collect_vec();
@@ -255,7 +255,7 @@ pub async fn consolidation_tx_with_lustration() {
         .gsl
         .lock_guard()
         .await
-        .mempool
+        .mempool()
         .get(mempool_tx[0])
         .unwrap()
         .to_owned();

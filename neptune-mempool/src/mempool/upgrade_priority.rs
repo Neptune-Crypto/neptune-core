@@ -3,12 +3,12 @@ use std::ops::Add;
 use get_size2::GetSize;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::upgrade_incentive::UpgradeIncentive;
 
 /// Used by memory pool subscribers to indicate how interested they are in
 /// a specific transaction.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, GetSize)]
-#[cfg_attr(test, derive(serde::Serialize))]
+#[cfg_attr(any(test, feature = "test-helpers"), derive(serde::Serialize))]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub enum UpgradePriority {
     #[default]
@@ -65,13 +65,13 @@ impl Ord for UpgradePriority {
 
 impl UpgradePriority {
     /// Returns true if the priority is irrelevant.
-    pub(crate) fn is_irrelevant(&self) -> bool {
+    pub fn is_irrelevant(&self) -> bool {
         *self == UpgradePriority::Irrelevant
     }
 
     /// Given the gobbling potential of the transaction, return the incentive to
     /// perform an upgrade.
-    pub(crate) fn incentive_given_gobble_potential(
+    pub fn incentive_given_gobble_potential(
         &self,
         gobbling_potential: NativeCurrencyAmount,
     ) -> UpgradeIncentive {

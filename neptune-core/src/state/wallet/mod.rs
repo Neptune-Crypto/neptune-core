@@ -72,6 +72,7 @@ mod tests {
         use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
         use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
         use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
         use neptune_primitives::network::Network;
         use neptune_primitives::timestamp::Timestamp;
         use neptune_wallet::address::elliptic_curve_hybrid::EcHybridAddress;
@@ -88,7 +89,6 @@ mod tests {
         use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
         use crate::api::tx_initiation::builder::input_selector::SortOrder;
         use crate::application::config::cli_args;
-        use crate::state::mempool::upgrade_priority::UpgradePriority;
         use crate::tests::consensus_integration::consensus_rule_set::tx_with_n_outputs;
         use crate::tests::shared::blocks::next_block;
         use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -1257,10 +1257,10 @@ mod tests {
     mod wallet_balance {
         use std::collections::HashMap;
 
+        use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
         use neptune_wallet::address::generation_address::GenerationReceivingAddress;
 
         use super::*;
-        use crate::state::mempool::upgrade_priority::UpgradePriority;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

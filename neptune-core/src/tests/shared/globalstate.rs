@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use libp2p::PeerId;
 use neptune_consensus::block::Block;
+use neptune_mempool::mempool::Mempool;
 use neptune_primitives::network::Network;
 use neptune_wallet::wallet_entropy::WalletEntropy;
 use tokio::sync::broadcast;
@@ -22,7 +23,6 @@ use crate::protocol::peer::peer_info::PeerConnectionInfo;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::state::blockchain_state::BlockchainState;
 use crate::state::light_state::LightState;
-use crate::state::mempool::Mempool;
 use crate::state::networking_state::NetworkingState;
 use crate::state::wallet::wallet_configuration::WalletConfiguration;
 use crate::state::GlobalState;

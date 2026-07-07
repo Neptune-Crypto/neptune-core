@@ -24,6 +24,9 @@ use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
 use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
 use neptune_consensus::transaction::Transaction;
+use neptune_mempool::mempool::MEMPOOL_TX_THRESHOLD_AGE;
+use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mempool::transaction_proof_quality::TransactionProofQualityExt;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
@@ -55,7 +58,6 @@ use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::protocol::peer::peer_info::PeerConnectionInfo;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::transfer_block::TransferBlock;
-use crate::protocol::peer::transfer_transaction::TransactionProofQualityExt;
 use crate::protocol::peer::BlockProposalRequest;
 use crate::protocol::peer::BlockRequestBatch;
 use crate::protocol::peer::IssuedSyncChallenge;
@@ -66,10 +68,8 @@ use crate::protocol::peer::PeerSanction;
 use crate::protocol::peer::PeerStanding;
 use crate::protocol::peer::PositivePeerSanction;
 use crate::protocol::peer::SyncChallenge;
-use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::sync_status::SyncStatus;
-use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 
@@ -1555,7 +1555,7 @@ impl PeerLoopHandler {
                     .global_state_lock
                     .lock_guard()
                     .await
-                    .mempool
+                    .mempool()
                     .accept_transaction(
                         transaction.kernel.txid(),
                         transaction.proof.proof_quality()?,
@@ -1732,7 +1732,7 @@ impl PeerLoopHandler {
                     // 1. Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
                     let state = self.global_state_lock.lock_guard().await;
-                    let accept_tx = state.mempool.accept_transaction(
+                    let accept_tx = state.mempool().accept_transaction(
                         tx_notification.txid,
                         tx_notification.proof_quality,
                         tx_notification.mutator_set_hash,
@@ -1761,7 +1761,7 @@ impl PeerLoopHandler {
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
                 let state = self.global_state_lock.lock_guard().await;
-                let Some(transaction) = state.mempool.get(transaction_identifier) else {
+                let Some(transaction) = state.mempool().get(transaction_identifier) else {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
 
@@ -2375,6 +2375,7 @@ mod tests {
     use macro_rules_attr::apply;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
     use neptune_primitives::network::Network;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use rand::rngs::StdRng;
@@ -2390,7 +2391,6 @@ mod tests {
     use crate::protocol::peer::peer_info::pseudorandom_peer_id;
     use crate::protocol::peer::transaction_notification::TransactionNotification;
     use crate::protocol::peer::Sanction;
-    use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::tests::shared::blocks::fake_valid_block_for_tests;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
@@ -4210,12 +4210,12 @@ mod tests {
         use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
         use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+        use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
         use strum::IntoEnumIterator;
 
         use super::*;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
         use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
-        use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
@@ -4350,7 +4350,7 @@ mod tests {
             let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
             assert!(
-                state_lock.lock_guard().await.mempool.is_empty(),
+                state_lock.lock_guard().await.mempool().is_empty(),
                 "Mempool must be empty at init"
             );
             peer_loop_handler
@@ -4425,7 +4425,7 @@ mod tests {
             let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
             assert!(
-                state_lock.lock_guard().await.mempool.is_empty(),
+                state_lock.lock_guard().await.mempool().is_empty(),
                 "Mempool must be empty at init"
             );
             state_lock
@@ -4434,7 +4434,7 @@ mod tests {
                 .mempool_insert(transaction_1.clone(), UpgradePriority::Irrelevant)
                 .await;
             assert!(
-                !state_lock.lock_guard().await.mempool.is_empty(),
+                !state_lock.lock_guard().await.mempool().is_empty(),
                 "Mempool must be non-empty after insertion"
             );
 
@@ -4927,12 +4927,12 @@ mod tests {
     mod proof_qualities {
         use itertools::Itertools;
         use neptune_consensus::transaction::Transaction;
+        use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
         use neptune_wallet::transaction_output::TxOutput;
         use strum::IntoEnumIterator;
 
         use super::*;
         use crate::application::config::cli_args;
-        use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
         use crate::tests::shared::globalstate::mock_genesis_global_state;
 
         async fn tx_of_proof_quality(

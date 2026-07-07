@@ -4,7 +4,6 @@ pub mod blockchain_state;
 pub mod claim_error;
 pub mod database;
 pub mod light_state;
-pub mod mempool;
 pub mod mining;
 pub mod networking_state;
 pub mod shared;
@@ -12,6 +11,10 @@ pub mod sync_status;
 pub mod transaction;
 pub mod utxo_validitor;
 pub mod wallet;
+
+// GlobalState-coupled mempool tests
+#[cfg(test)]
+mod mempool_tests;
 
 use std::cmp::max;
 use std::collections::HashMap;
@@ -29,7 +32,6 @@ use blockchain_state::BlockchainArchivalState;
 use blockchain_state::BlockchainState;
 use itertools::Itertools;
 use light_state::LightState;
-use mempool::Mempool;
 use mining::block_proposal::BlockProposal;
 use mining::mining_state::MiningState;
 use mining::mining_status::ComposingWorkInfo;
@@ -53,6 +55,12 @@ use neptune_database::storage::storage_vec::traits::*;
 use neptune_locks::tokio as sync_tokio;
 use neptune_locks::tokio::AtomicRwReadGuard;
 use neptune_locks::tokio::AtomicRwWriteGuard;
+use neptune_mempool::mempool::mempool_update_job::MempoolUpdateJob;
+use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+use neptune_mempool::mempool::Mempool;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
+use neptune_mempool::upgrade_incentive::UpgradeIncentive;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::RemovalRecord;
@@ -85,7 +93,6 @@ use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
-use transaction::transaction_kernel_id::TransactionKernelId;
 use transaction::tx_creation_artifacts::TxCreationArtifacts;
 use transaction::tx_creation_artifacts::TxCreationArtifactsError;
 use wallet::wallet_state::WalletState;
@@ -93,12 +100,10 @@ use wallet::wallet_status::WalletStatus;
 
 use crate::api;
 use crate::application::config::cli_args;
-use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
 use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
-use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::protocol::peer::handshake_data::HandshakeData;
@@ -109,8 +114,6 @@ use crate::protocol::peer::SyncChallenge;
 use crate::protocol::peer::SyncChallengeResponse;
 use crate::protocol::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::state::claim_error::ClaimError;
-use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
-use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::utxo_validitor::UtxoValidator;
 use crate::state::wallet::input_candidate::InputCandidate;
@@ -770,8 +773,16 @@ pub struct GlobalState {
     /// The `cli_args::Args` are read-only and accessible by all tasks.
     cli: cli_args::Args,
 
-    /// The `Mempool` may only be updated by the main task.
-    pub mempool: Mempool,
+    /// The transaction mempool.
+    ///
+    /// This field is deliberately **private**. Read access is granted through
+    /// the [`GlobalState::mempool`] accessor, which hands out only a shared
+    /// `&Mempool`. Mutation must go through the `mempool_*` methods on
+    /// [`GlobalState`] (e.g. [`GlobalState::mempool_insert`]), which wrap every
+    /// change so the resulting `MempoolEvent`s are broadcast to the wallet and
+    /// other consumers. See `mempool_field_is_private` for a test that trips if
+    /// this visibility is ever widened.
+    mempool: Mempool,
 
     /// The `mining_state` can be updated by main task, mining task, or RPC server.
     pub mining_state: MiningState,
@@ -3237,6 +3248,16 @@ impl GlobalState {
         .ok()
     }
 
+    /// Shared, read-only access to the mempool.
+    ///
+    /// This is the only way to reach the mempool from outside the `state`
+    /// module: it hands out a `&Mempool`, never `&mut`, so mutation stays
+    /// funneled through the event-emitting `mempool_*` gateway methods. See the
+    /// `mempool` field's documentation for the rationale.
+    pub fn mempool(&self) -> &Mempool {
+        &self.mempool
+    }
+
     /// Remove one transaction from the mempool and notify wallet of changes.
     pub(crate) async fn mempool_remove(&mut self, transaction_id: TransactionKernelId) {
         let events = self.mempool.remove(transaction_id);
@@ -3460,6 +3481,35 @@ impl GlobalState {
 
         Ok(num_stored_blocks)
     }
+}
+
+/// Trip-wire guarding [`GlobalState`]'s `mempool` field visibility.
+///
+/// The field is private on purpose (see its docs): that is what forces all
+/// mutation through the event-emitting `mempool_*` gateway. This test reads
+/// this very source file and fails if a visibility modifier ever appears before
+/// the declaration. The search needle is built at runtime so this test's own
+/// text cannot match itself.
+#[cfg(test)]
+#[test]
+fn mempool_field_is_private() {
+    let src = include_str!("mod.rs");
+    let needle = format!("mempool{} Mempool", ':');
+    let mut found = 0;
+    for (idx, _) in src.match_indices(&needle) {
+        found += 1;
+        let prefix = src[..idx].trim_end_matches(' ');
+        assert!(
+            prefix.ends_with('\n'),
+            "GlobalState.mempool must remain private: a visibility modifier was \
+             found before a `{needle}` declaration. Keep the field private and \
+             route access through GlobalState::mempool() or a mempool_* method."
+        );
+    }
+    assert!(
+        found >= 1,
+        "expected to find the mempool field declaration in state/mod.rs"
+    );
 }
 
 #[cfg(test)]

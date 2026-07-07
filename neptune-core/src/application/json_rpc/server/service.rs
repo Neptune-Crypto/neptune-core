@@ -13,6 +13,8 @@ use neptune_consensus::transaction::transaction_proof::TransactionProof;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_vec::traits::StorageVecStream;
+use neptune_mempool::mempool::MEMPOOL_TX_THRESHOLD_AGE;
+use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_primitives::block_selector::BlockSelector;
@@ -49,8 +51,6 @@ use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::state::block_selector::BlockSelectorExt;
-use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
-use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
@@ -1574,7 +1574,7 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .fee_density_iter()
             .map(|(txkid, _)| txkid.into())
             .collect();
@@ -1590,7 +1590,7 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get(request.id.into())
             .cloned();
 
@@ -1607,7 +1607,7 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get(request.id.into())
             .cloned();
 
@@ -1636,7 +1636,7 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .with_matching_addition_records(&addition_records);
 
         let transactions = transactions
@@ -1665,7 +1665,7 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .with_matching_absolute_index_sets(&absolute_index_sets);
 
         let transactions = transactions
@@ -1693,7 +1693,7 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get_transactions_for_block_composition(usize::MAX, Some(1));
         let tx = tx.first();
         let tx = BestTransactionForNextBlockResponse {
@@ -1826,6 +1826,8 @@ pub mod tests {
     use neptune_consensus::transaction::Transaction;
     use neptune_consensus::transaction::TransactionProof;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+    use neptune_mempool::transaction_kernel_id::Txid;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::shared::NUM_TRIALS;
     use neptune_primitives::block_height::BlockHeight;
@@ -1854,9 +1856,7 @@ pub mod tests {
     use crate::application::config::cli_args;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::application::network::arbitrary::arb_multiaddr;
-    use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::mining::block_proposal::BlockProposal;
-    use crate::state::transaction::transaction_kernel_id::Txid;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_status::SyncedUtxo;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;

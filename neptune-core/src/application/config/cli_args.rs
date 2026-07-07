@@ -21,6 +21,8 @@ use neptune_consensus::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
+use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_primitives::network::Network;
 use neptune_rpc_api::api::ops::Namespace;
 use neptune_wallet::address::ReceivingAddress;
@@ -32,8 +34,6 @@ use super::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::parser::CliArgsParseError;
-use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 
 const MAX_NUM_INPUTS_FOR_PC_BACKED_TXS: u64 = 200;

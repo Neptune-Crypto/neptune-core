@@ -74,6 +74,9 @@ use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_vec::traits::StorageVecBase;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+#[cfg(test)]
+use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -131,9 +134,6 @@ use crate::protocol::peer::PeerStanding;
 use crate::state::block_selector::BlockSelectorExt;
 use crate::state::claim_error::ClaimError;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
-#[cfg(test)]
-use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
 use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::wallet_status::WalletStatus;
@@ -3041,7 +3041,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.lock_guard().await.mempool.len())
+        Ok(self.state.lock_guard().await.mempool().len())
     }
 
     // documented in trait. do not add doc-comment.
@@ -3053,7 +3053,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.lock_guard().await.mempool.get_size())
+        Ok(self.state.lock_guard().await.mempool().get_size())
     }
 
     async fn mempool_tx_ids(
@@ -3067,7 +3067,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .fee_density_iter()
             .map(|(kernel_id, _)| kernel_id)
             .collect();
@@ -3122,15 +3122,15 @@ impl RPC for NeptuneRPCServer {
         let syncing = state.net.sync_status;
         let mempool_size = {
             log_slow_scope!(fn_name!() + "::mempool.get_size()");
-            state.mempool.get_size()
+            state.mempool().get_size()
         };
         let mempool_total_tx_count = {
             log_slow_scope!(fn_name!() + "::mempool.len()");
-            state.mempool.len()
+            state.mempool().len()
         };
         let mempool_own_tx_count = {
             log_slow_scope!(fn_name!() + "::mempool.num_own_txs()");
-            state.mempool.num_own_txs()
+            state.mempool().num_own_txs()
         };
         let cpu_temp = None; // disable for now.  call is too slow.
         let proving_capability = self.state.cli().proving_capability();
@@ -3571,7 +3571,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get_with_priority(tx_kernel_id)
             .map(|(x, y)| (x.to_owned(), y))
         else {
@@ -4576,7 +4576,7 @@ impl RPC for NeptuneRPCServer {
 
         let global_state = self.state.lock_guard().await;
         let mempool_txkids = global_state
-            .mempool
+            .mempool()
             .fee_density_iter()
             .skip(start_index)
             .take(number)
@@ -4593,7 +4593,7 @@ impl RPC for NeptuneRPCServer {
         let mempool_transactions = mempool_txkids
             .iter()
             .filter_map(|id| {
-                global_state.mempool.get(*id).map(|tx| {
+                global_state.mempool().get(*id).map(|tx| {
                     let pos_balance_effect = incoming.get(id).copied().unwrap_or_default();
                     let neg_balance_effect = outgoing.get(id).copied().unwrap_or_default();
                     MempoolTransactionInfo::new(
@@ -4623,7 +4623,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get(tx_kernel_id)
             .map(|tx| &tx.kernel)
             .cloned())
@@ -5280,18 +5280,18 @@ mod tests {
         );
 
         // Broadcast transaction and verify insertion into mempool
-        assert_eq!(0, rpc_server.state.lock_guard().await.mempool.len());
+        assert_eq!(0, rpc_server.state.lock_guard().await.mempool().len());
         rpc_server
             .clone()
             .record_and_broadcast_transaction(ctx, token, tx_artifacts)
             .await
             .unwrap();
-        assert_eq!(1, rpc_server.state.lock_guard().await.mempool.len());
+        assert_eq!(1, rpc_server.state.lock_guard().await.mempool().len());
         assert!(rpc_server
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .contains(tx.txid()));
 
         // Ensure `proof_type` endpoint finds the transaction in the mempool

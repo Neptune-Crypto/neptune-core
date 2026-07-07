@@ -28,6 +28,8 @@ use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::*;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_job_queue::errors::JobHandleError;
+use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::difficulty_control;
 use neptune_primitives::network::Network;
@@ -54,13 +56,11 @@ use tracing::*;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
-use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::loops::channel::*;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
 use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
 use crate::protocol::shared::SIZE_20MB_IN_BYTES;
-use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::GlobalStateLock;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
@@ -151,7 +151,7 @@ pub(crate) async fn mock_compose_block(
         gs.mining_state.overridden_coinbase_distribution(),
     );
     let (guesser_address, _) = gs.mining_rewards_address();
-    let txs = gs.mempool.get_transactions_for_block_composition(
+    let txs = gs.mempool().get_transactions_for_block_composition(
         SIZE_20MB_IN_BYTES,
         Some(gs.cli().max_num_compose_mergers.get()),
     );
@@ -581,7 +581,7 @@ pub(crate) async fn create_block_transaction_from(
         TxMergeOrigin::Mempool => global_state_lock
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get_transactions_for_block_composition(
                 block_capacity_for_transactions,
                 Some(max_num_mergers),
@@ -689,7 +689,7 @@ pub(crate) async fn create_block_transaction_from(
         let txs_from_mempool = global_state_lock
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get_transactions_for_block_composition(
                 block_capacity_for_transactions,
                 Some(max_num_mergers),
@@ -1089,6 +1089,8 @@ pub(crate) mod tests {
     use neptune_consensus::transaction::validity::single_proof::single_proof_claim;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_job_queue::errors::JobHandleError;
+    use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+    use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
     use neptune_mutator_set::test_shared::pseudorandom_addition_record;
     use neptune_primitives::difficulty_control::Difficulty;
     use neptune_primitives::mast_hash::MastHash;
@@ -1109,11 +1111,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-    use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
     use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
-    use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::mining::mining_status::MiningStatus;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::GlobalState;
@@ -1349,7 +1349,7 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool
+                .mempool()
                 .preferred_update(TxUpgradeFilter::match_all())
                 .is_some(),
             "Must have unsynced tx in mempool"
@@ -1358,7 +1358,7 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool
+                .mempool()
                 .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, None)
                 .is_empty(),
             "May not have synced tx in mempool"
@@ -1396,7 +1396,7 @@ pub(crate) mod tests {
             !alice
                 .lock_guard_mut()
                 .await
-                .mempool
+                .mempool()
                 .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, None)
                 .is_empty(),
             "Updated transaction must have been inserted into mempool"
@@ -1434,7 +1434,7 @@ pub(crate) mod tests {
         for guesser_fee_fraction in [0f64, 0.5, 1.0] {
             // Verify constructed coinbase transaction and block template when mempool is empty
             assert!(
-                alice.lock_guard().await.mempool.is_empty(),
+                alice.lock_guard().await.mempool().is_empty(),
                 "Mempool must be empty at start of loop"
             );
 
@@ -1572,7 +1572,7 @@ pub(crate) mod tests {
         let mocked_now = genesis_block.header().timestamp + Timestamp::months(7);
 
         assert!(
-            alice.lock_guard().await.mempool.is_empty(),
+            alice.lock_guard().await.mempool().is_empty(),
             "Mempool must be empty at start of test"
         );
         let (sender_1, receiver_1) = oneshot::channel();
@@ -1591,7 +1591,7 @@ pub(crate) mod tests {
         assert!(validation_result.is_ok(), "{:?}", validation_result);
 
         assert!(
-            !alice.lock_guard().await.mempool.is_empty(),
+            !alice.lock_guard().await.mempool().is_empty(),
             "Mempool must be non-empty after insertion of nop-transaction, and prior to update of tip"
         );
 

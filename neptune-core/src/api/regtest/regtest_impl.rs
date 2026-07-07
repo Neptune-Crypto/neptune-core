@@ -149,7 +149,7 @@ impl RegTestPrivate {
 
         // retrieve selected tx from mempool for block inclusion.
         let txs_from_mempool = if include_mempool_txs {
-            gs.mempool.get_transactions_for_block_composition(
+            gs.mempool().get_transactions_for_block_composition(
                 SIZE_20MB_IN_BYTES,
                 Some(gsl.cli().max_num_compose_mergers.get()),
             )

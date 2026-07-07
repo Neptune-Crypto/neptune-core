@@ -17,6 +17,9 @@ use neptune_database::storage::storage_schema::RustyKey;
 use neptune_database::storage::storage_schema::RustyValue;
 use neptune_database::storage::storage_vec::traits::*;
 use neptune_database::NeptuneLevelDb;
+use neptune_mempool::mempool::mempool_event::MempoolEvent;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -63,9 +66,6 @@ use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::state::mempool::mempool_event::MempoolEvent;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
-use crate::state::transaction::transaction_kernel_id::Txid;
 use crate::state::utxo_validitor::UtxoValidator;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
@@ -3516,6 +3516,7 @@ pub(crate) mod tests {
     mod wallet_balance {
         use generation_address::GenerationReceivingAddress;
         use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+        use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
         use neptune_primitives::block_height::BlockHeight;
         use neptune_wallet::address::ReceivingAddress;
         use neptune_wallet::utxo_notification::UtxoNotificationMedium;
@@ -3525,7 +3526,6 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::application::config::cli_args;
-        use crate::state::mempool::upgrade_priority::UpgradePriority;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         /// basic test for confirmed and unconfirmed balance.
@@ -4968,6 +4968,7 @@ pub(crate) mod tests {
 
         use neptune_consensus::block::block_transaction::BlockTransaction;
         use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+        use neptune_mempool::upgrade_incentive::UpgradeIncentive;
         use neptune_primitives::block_height::BlockHeight;
 
         use super::*;
@@ -4975,7 +4976,6 @@ pub(crate) mod tests {
         use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
         use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
         use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
-        use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
         use crate::application::loops::mine_loop::create_block_transaction;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
         use crate::application::loops::peer_loop::channel::MainToPeerTask;

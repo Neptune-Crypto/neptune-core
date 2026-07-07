@@ -3,8 +3,8 @@ use std::str::FromStr;
 
 use get_size2::GetSize;
 use itertools::Itertools;
-use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_rpc_api::model::block::transaction_kernel::RpcTransactionKernelId;
 use serde::Deserialize;
 use serde::Serialize;
@@ -15,7 +15,8 @@ use tasm_lib::twenty_first::prelude::MerkleTree;
 /// A unique identifier of a transaction whose value is unaffected by a
 /// transaction update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, GetSize, Hash, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Default, arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "test-helpers"), derive(Default))]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct TransactionKernelId(Digest);
 
 impl Display for TransactionKernelId {
@@ -167,8 +168,8 @@ impl rand::distr::Distribution<TransactionKernelId> for rand::distr::StandardUni
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
     use neptune_consensus::transaction::Transaction;
+    use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
     use proptest::prelude::Strategy;
     use proptest::prop_assert_eq;
     use proptest::strategy::ValueTree;
@@ -201,10 +202,12 @@ mod tests {
 
     #[test]
     fn transaction_kernel_id_from_hex() {
-        assert!(TransactionKernelId::from_str(
-            "04e19a9adfefa811f68d8de45da6412d0d73368159a119af97cfd38da6cfc55ae7c6ba403b9c8b52"
-        )
-        .is_ok());
+        assert!(
+            TransactionKernelId::from_str(
+                "04e19a9adfefa811f68d8de45da6412d0d73368159a119af97cfd38da6cfc55ae7c6ba403b9c8b52"
+            )
+            .is_ok()
+        );
     }
 
     #[proptest]

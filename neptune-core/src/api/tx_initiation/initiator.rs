@@ -19,6 +19,7 @@ use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::change_policy::ChangePolicy;
 use neptune_wallet::transaction_details::TransactionDetails;
@@ -36,7 +37,6 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
 use crate::state::wallet::input_candidate::InputCandidate;
 use crate::state::StateLock;
@@ -228,7 +228,7 @@ impl TransactionInitiator {
         self.global_state_lock
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get(txid)
             .map(|tx| (&tx.proof).into())
             .ok_or(error::UpgradeProofError::TxNotInMempool)

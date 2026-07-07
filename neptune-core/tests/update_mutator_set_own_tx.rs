@@ -2,9 +2,9 @@ mod common;
 
 use common::genesis_node::GenesisNode;
 use common::logging;
-use neptune_cash::api::export::Txid;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::KeyType;
@@ -64,7 +64,7 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
         .await
         .unwrap();
 
-    assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
+    assert_eq!(1, alice.gsl.lock_guard().await.mempool().len());
 
     // Wait until tx has right proof quality
     let timeout_secs = 15;
@@ -89,7 +89,7 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
             .unwrap(),
     };
 
-    assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
+    assert_eq!(1, alice.gsl.lock_guard().await.mempool().len());
 
     let expected_new_height = match new_block_source {
         SourceOfNewBlocks::OwnMiner => 3,
@@ -128,7 +128,7 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
         }
     }
 
-    assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
+    assert_eq!(1, alice.gsl.lock_guard().await.mempool().len());
 
     alice
         .wait_until_block_height(expected_new_height, timeout_secs)
@@ -165,7 +165,7 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
         .gsl
         .lock_guard()
         .await
-        .mempool
+        .mempool()
         .get(txid)
         .unwrap()
         .to_owned();
