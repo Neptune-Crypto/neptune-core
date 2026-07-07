@@ -2,10 +2,9 @@ use anyhow::Ok;
 use anyhow::Result;
 use neptune_primitives::network::Network;
 use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::coinbase_distribution::CoinbaseOutput;
 use serde::Deserialize;
 use serde::Serialize;
-
-use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
 
 /// Data structure to avoid the default JSON encoding of addresses and instead
 /// use Bech32.

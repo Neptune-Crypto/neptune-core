@@ -3920,6 +3920,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.4",
+ "regex",
  "serde",
  "serde_json",
  "sha3",

@@ -2,7 +2,8 @@ use std::ops::Deref;
 
 use anyhow::ensure;
 use anyhow::Result;
-use neptune_wallet::address::ReceivingAddress;
+
+use crate::address::ReceivingAddress;
 
 #[derive(Debug, Clone)]
 pub struct CoinbaseOutput {
@@ -30,15 +31,15 @@ impl CoinbaseOutput {
         }
     }
 
-    pub(super) fn fraction_in_promille(&self) -> u32 {
+    pub(crate) fn fraction_in_promille(&self) -> u32 {
         self.fraction_in_promille
     }
 
-    pub(super) fn recipient(&self) -> &ReceivingAddress {
+    pub(crate) fn recipient(&self) -> &ReceivingAddress {
         &self.recipient
     }
 
-    pub(super) fn is_timelocked(&self) -> bool {
+    pub(crate) fn is_timelocked(&self) -> bool {
         self.timelocked
     }
 }
@@ -93,7 +94,7 @@ impl CoinbaseDistribution {
     }
 
     /// The coinbase distribution for solo mining
-    pub(crate) fn solo(reward_address: ReceivingAddress) -> Self {
+    pub fn solo(reward_address: ReceivingAddress) -> Self {
         let liquid = CoinbaseOutput::liquid(reward_address.clone(), 500);
         let timelocked = CoinbaseOutput::timelocked(reward_address.clone(), 500);
 
@@ -103,10 +104,10 @@ impl CoinbaseDistribution {
 
 #[cfg(test)]
 mod tests {
-    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
     use tasm_lib::prelude::Digest;
 
     use super::*;
+    use crate::address::generation_address::GenerationReceivingAddress;
 
     #[test]
     fn solo_doesnt_crash() {

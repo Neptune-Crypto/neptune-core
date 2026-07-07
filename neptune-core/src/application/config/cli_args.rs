@@ -26,11 +26,11 @@ use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_primitives::network::Network;
 use neptune_rpc_api::api::ops::Namespace;
 use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
 use neptune_wallet::scan_mode_configuration::ScanModeConfiguration;
 use num_traits::Zero;
 use tracing::error;
 
-use super::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::parser::CliArgsParseError;

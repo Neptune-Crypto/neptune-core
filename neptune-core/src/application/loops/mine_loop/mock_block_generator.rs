@@ -12,14 +12,13 @@ use neptune_consensus::transaction::TransactionProof;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::composer_parameters::prepare_coinbase_transaction_stateless;
+use neptune_wallet::composer_parameters::ComposerParameters;
 use neptune_wallet::transaction_details::TransactionDetails;
 use neptune_wallet::transaction_output::TxOutputList;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-
-use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MockBlockGenerator;

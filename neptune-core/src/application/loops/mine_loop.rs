@@ -1,5 +1,3 @@
-pub mod coinbase_distribution;
-pub(crate) mod composer_parameters;
 pub(crate) mod guesser_configuration;
 pub mod mock_block_generator;
 use std::cmp::max;
@@ -9,7 +7,6 @@ use std::time::Duration;
 use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
-use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
 use neptune_consensus::block::block_header::BlockPow;
 use neptune_consensus::block::block_transaction::BlockOrRegularTransaction;
@@ -30,14 +27,14 @@ use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmoun
 use neptune_job_queue::errors::JobHandleError;
 use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
 use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
-use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::difficulty_control;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::composer_parameters::prepare_coinbase_transaction_stateless;
+use neptune_wallet::composer_parameters::ComposerParameters;
 use neptune_wallet::expected_utxo::ExpectedUtxo;
 use neptune_wallet::transaction_details::TransactionDetails;
 use neptune_wallet::transaction_output::TxOutputList;
-use num_traits::CheckedSub;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -461,47 +458,6 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         .build()?;
 
     Ok((transaction, composer_outputs))
-}
-
-/// Compute `TransactionDetails` and a list of `TxOutput`s for a coinbase
-/// transaction.
-///
-/// # Panics
-///
-///  - If `latest_block` has a negative transaction fee
-pub(crate) fn prepare_coinbase_transaction_stateless(
-    latest_block: &Block,
-    composer_parameters: ComposerParameters,
-    timestamp: Timestamp,
-    network: Network,
-) -> (TxOutputList, TransactionDetails) {
-    let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().unwrap();
-    let next_block_height: BlockHeight = latest_block.header().height.next();
-    info!("Creating coinbase for block of height {next_block_height}.");
-
-    let coinbase_amount = Block::block_subsidy(next_block_height);
-    let composer_outputs = composer_parameters.tx_outputs(coinbase_amount, timestamp);
-    let total_composer_fee = composer_outputs.total_native_coins();
-
-    let guesser_fee = coinbase_amount
-        .checked_sub(&total_composer_fee)
-        .expect("total_composer_fee cannot exceed coinbase_amount");
-
-    info!(
-        "Coinbase amount is set to {coinbase_amount} and is divided between \
-        composer fee ({total_composer_fee}) and guesser fee ({guesser_fee})."
-    );
-
-    let transaction_details = TransactionDetails::new_with_coinbase(
-        composer_outputs.clone(),
-        coinbase_amount,
-        guesser_fee,
-        timestamp,
-        mutator_set_accumulator,
-        network,
-    );
-
-    (composer_outputs, transaction_details)
 }
 
 /// Enumerates origins of transactions to be merged into a block transaction.
@@ -1092,6 +1048,7 @@ pub(crate) mod tests {
     use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
     use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
     use neptune_mutator_set::test_shared::pseudorandom_addition_record;
+    use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::difficulty_control::Difficulty;
     use neptune_primitives::mast_hash::MastHash;
     use neptune_primitives::network::Network;
@@ -1100,6 +1057,9 @@ pub(crate) mod tests {
     use neptune_wallet::address::generation_address::GenerationSpendingKey;
     use neptune_wallet::address::symmetric_key::SymmetricKey;
     use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
+    use neptune_wallet::coinbase_distribution::CoinbaseOutput;
+    use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
     use neptune_wallet::transaction_output::TxOutput;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_bigint::BigUint;
@@ -1110,9 +1070,6 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-    use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
-    use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
     use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
     use crate::state::mining::mining_status::MiningStatus;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;

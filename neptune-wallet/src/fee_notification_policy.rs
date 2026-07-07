@@ -1,6 +1,7 @@
 use anyhow::bail;
-use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use regex::Regex;
+
+use crate::utxo_notification::UtxoNotificationMedium;
 
 /// How notifications for UTXOs resulting from proving jobs (*i.e.*, composing
 /// or upgrading) are communicated.
@@ -9,7 +10,7 @@ use regex::Regex;
 // address (one that is *not* linked to the client's wallet) for cold composing
 // and/or upgrading.
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
-pub(crate) enum FeeNotificationPolicy {
+pub enum FeeNotificationPolicy {
     OffChain,
     #[default]
     OnChainSymmetric,
@@ -17,7 +18,7 @@ pub(crate) enum FeeNotificationPolicy {
 }
 
 impl FeeNotificationPolicy {
-    pub(crate) fn parse(unparsed_policy: &str) -> Result<Self, anyhow::Error> {
+    pub fn parse(unparsed_policy: &str) -> Result<Self, anyhow::Error> {
         let off_chain = Regex::new(r"(?i)^off-?chain$").unwrap();
         let on_chain_symmetric = Regex::new(r"(?i)^((on-?chain-)|(onchain))?symmetric$").unwrap();
         let on_chain_generation = Regex::new(r"(?i)^((on-?chain-)|(onchain))?generation$").unwrap();

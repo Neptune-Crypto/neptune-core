@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
 use tasm_lib::prelude::Digest;
 use tracing::info;
 
 use super::mining_status::MiningStatus;
-use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::state::BlockProposal;
 use crate::Block;
 

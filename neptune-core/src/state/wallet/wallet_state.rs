@@ -34,8 +34,11 @@ use neptune_wallet::address::symmetric_key;
 use neptune_wallet::address::viewing_address;
 use neptune_wallet::address::KeyType;
 use neptune_wallet::address::SpendingKey;
+use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
+use neptune_wallet::composer_parameters::ComposerParameters;
 use neptune_wallet::expected_utxo::ExpectedUtxo;
 use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
 use neptune_wallet::incoming_utxo::IncomingUtxo;
 use neptune_wallet::incoming_utxo::IncomingUtxoRecoveryData;
 use neptune_wallet::transaction_output::TxOutput;
@@ -62,10 +65,7 @@ use super::sent_transaction::SentTransaction;
 use super::wallet_configuration::WalletConfiguration;
 use super::wallet_status::WalletStatus;
 use crate::application::config::cli_args::Args;
-use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::loops::channel::ClaimUtxoData;
-use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
-use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::state::utxo_validitor::UtxoValidator;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
@@ -3245,12 +3245,12 @@ pub(crate) mod tests {
         use futures::channel::oneshot;
         use guesser_fee_utxos::composer_parameters::ComposerParameters;
         use neptune_consensus::transaction::TransactionProof;
+        use neptune_wallet::composer_parameters;
+        use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
         use rand::rng;
 
         use super::*;
-        use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::channel::NewBlockFound;
-        use crate::application::loops::mine_loop::composer_parameters;
         use crate::application::loops::mine_loop::guess_nonce;
         use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
         use crate::tests::shared::blocks::fake_valid_block_proposal_from_tx;
@@ -3978,9 +3978,9 @@ pub(crate) mod tests {
     mod expected_utxos {
         use neptune_consensus::transaction::lock_script::LockScript;
         use neptune_consensus::transaction::test_helpers::make_mock_transaction;
+        use neptune_wallet::coinbase_distribution::CoinbaseOutput;
 
         use super::*;
-        use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
 
         #[apply(shared_tokio_runtime)]
         async fn no_expected_utxos_on_custom_coinbase_distribution_and_offchain_notifications() {
@@ -4457,13 +4457,13 @@ pub(crate) mod tests {
 
         use neptune_consensus::transaction::test_helpers::txkernel;
         use neptune_primitives::block_height::BlockHeight;
+        use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
         use neptune_wallet::utxo_notification::UtxoNotificationPayload;
         use proptest::collection;
         use proptest::prelude::any;
         use proptest_arbitrary_interop::arb;
 
         use super::*;
-        use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
         use crate::tests::shared::files::unit_test_data_directory;
 
@@ -4970,9 +4970,9 @@ pub(crate) mod tests {
         use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use neptune_mempool::upgrade_incentive::UpgradeIncentive;
         use neptune_primitives::block_height::BlockHeight;
+        use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
 
         use super::*;
-        use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
         use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
         use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;

@@ -23,6 +23,8 @@ use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_p2p::peer::PeerMessage;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::composer_parameters::prepare_coinbase_transaction_stateless;
+use neptune_wallet::composer_parameters::ComposerParameters;
 use neptune_wallet::expected_utxo::ExpectedUtxo;
 use neptune_wallet::expected_utxo::UtxoNotifier;
 use neptune_wallet::transaction_details::TransactionDetails;
@@ -36,8 +38,6 @@ use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use tracing::warn;
 
-use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::state::wallet::wallet_state::WalletState;
 
 pub mod blocks;
