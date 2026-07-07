@@ -79,7 +79,7 @@ use crate::shared::new_block_file_is_needed;
 /// all file operations are async, or async-friendly.
 ///       see <https://github.com/Neptune-Crypto/neptune-core/issues/75>
 pub struct ArchivalState {
-    pub data_dir: DataDirectory,
+    pub(crate) data_dir: DataDirectory,
 
     /// maps block index key to block index value where key/val pairs can be:
     /// ```ignore
@@ -147,7 +147,7 @@ impl ArchivalState {
     }
 
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
-    pub async fn initialize_mutator_set(
+    pub(crate) async fn initialize_mutator_set(
         data_dir: &DataDirectory,
     ) -> Result<RustyArchivalMutatorSet> {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
@@ -534,7 +534,7 @@ impl ArchivalState {
         Ok(block_index_entries)
     }
 
-    pub async fn write_block_internal(
+    pub(crate) async fn write_block_internal(
         &mut self,
         block: &Block,
         is_canonical_tip: bool,
@@ -1343,7 +1343,7 @@ impl ArchivalState {
     }
 
     /// Return the header of tip, without loading a whole block from disk.
-    pub async fn tip_header(&self) -> BlockHeader {
+    pub(crate) async fn tip_header(&self) -> BlockHeader {
         let tip_digest = self
             .block_index_db
             .get(BlockIndexKey::BlockTipDigest)
@@ -2219,7 +2219,7 @@ impl ArchivalState {
     ///
     /// Start from the suggestion of [`Self::known_burns`] and verify them
     /// against the given state.
-    pub async fn authentic_burns(&self) -> Vec<Utxo> {
+    pub(crate) async fn authentic_burns(&self) -> Vec<Utxo> {
         let mut authentic_burns = vec![];
 
         let known_burns = Self::known_burns();
@@ -2341,7 +2341,7 @@ impl ArchivalState {
     ///
     /// Note that this list is not definite since, in theory, a deep
     /// reorganization could undo these burns.
-    pub fn known_burns() -> Vec<(
+    pub(crate) fn known_burns() -> Vec<(
         BlockHeight,
         usize,
         NativeCurrencyAmount,
@@ -2410,7 +2410,7 @@ impl ArchivalState {
 /// Test-support consistency checks for [`ArchivalState`].
 #[cfg(any(test, feature = "test-helpers"))]
 impl ArchivalState {
-    pub async fn is_consistent(&self, expected_tip: &Block) -> bool {
+    pub(crate) async fn is_consistent(&self, expected_tip: &Block) -> bool {
         let expected_tip_digest = expected_tip.hash();
 
         if expected_tip_digest != self.get_tip().await.hash() {

@@ -45,12 +45,12 @@ pub const MAX_NUM_BLOCKS_IN_LOOKUP_LIST: usize = 10_000;
 /// [`ArchivalState`]: crate::archival_state::ArchivalState
 #[derive(Debug)]
 pub struct RustyUtxoIndex {
-    pub db: NeptuneLevelDb<UtxoIndexKey, UtxoIndexValue>,
+    pub(crate) db: NeptuneLevelDb<UtxoIndexKey, UtxoIndexValue>,
 }
 
 /// The key types used by the UTXO index database.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-pub enum UtxoIndexKey {
+pub(crate) enum UtxoIndexKey {
     /// Latest block handled by this database. Any initialized database must
     /// have a sync label set. The default value indicates that no blocks have
     /// been processed by the UTXO index.
@@ -113,7 +113,7 @@ pub enum UtxoIndexKey {
 ///
 /// See documentstion in [`UtxoIndexKey`] for each variant of this enum.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum UtxoIndexValue {
+pub(crate) enum UtxoIndexValue {
     SyncLabel(Digest),
     AnnouncementsByBlock(Vec<AnnouncementFlag>),
     IndexSetDigestsByBlock(Vec<Digest>),
@@ -144,7 +144,7 @@ impl UtxoIndexValue {
         }
     }
 
-    pub fn expect_blocks_by_announcements(self) -> Vec<BlockHeight> {
+    pub(crate) fn expect_blocks_by_announcements(self) -> Vec<BlockHeight> {
         match self {
             UtxoIndexValue::BlocksByAnnouncementFlag(block_heights) => block_heights,
             _ => panic!("Expected BlocksByAnnouncementFlag found {:?}", self),
@@ -168,12 +168,12 @@ impl UtxoIndexValue {
 
 impl RustyUtxoIndex {
     /// Returns true iff no blocks have been indexed.
-    pub async fn is_empty(&self) -> bool {
+    pub(crate) async fn is_empty(&self) -> bool {
         self.sync_label().await == Default::default()
     }
 
     /// Returns true if the block was already indexed.
-    pub async fn block_was_indexed(&self, block_hash: Digest) -> bool {
+    pub(crate) async fn block_was_indexed(&self, block_hash: Digest) -> bool {
         self.db
             .get(UtxoIndexKey::AnnouncementsByBlock(block_hash))
             .await
@@ -238,7 +238,7 @@ impl RustyUtxoIndex {
     /// For each announcement flag, the returned list is capped in length (for
     /// DOS reasons) by [`MAX_NUM_BLOCKS_IN_LOOKUP_LIST`] so extremely active
     /// wallets cannot rely on this method for wallet recovery. They should
-    /// instead use [`UtxoIndexKey::AnnouncementsByBlock`] to scan through
+    /// instead use `UtxoIndexKey::AnnouncementsByBlock` to scan through
     /// each block.
     pub async fn blocks_by_announcement_flags(
         &self,

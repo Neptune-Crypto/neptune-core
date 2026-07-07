@@ -37,7 +37,7 @@ impl ArchivalState {
     /// Returned list is sorted chronologically, assuming  normal operations,
     /// normal storage of blocks. Namely, `blk2.dat` comes before `blk10.dat` in
     /// the returned list.
-    pub fn sorted_blk_file_names(entries: Vec<String>) -> Result<Vec<String>> {
+    pub(crate) fn sorted_blk_file_names(entries: Vec<String>) -> Result<Vec<String>> {
         // Capture all indices from the block files, from the names
         // "blk(d+).dat".
         let blk_file_name_regex = Regex::new(&format!(
