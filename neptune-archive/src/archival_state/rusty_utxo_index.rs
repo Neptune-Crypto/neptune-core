@@ -181,7 +181,7 @@ impl RustyUtxoIndex {
     }
 
     /// Initialize a UTXO index. Does not apply the genesis block to the index.
-    pub async fn initialize(data_dir: &DataDirectory) -> Result<Self> {
+    pub(crate) async fn initialize(data_dir: &DataDirectory) -> Result<Self> {
         let utxo_index_db_dir_path = data_dir.utxo_index_dir_path();
         DataDirectory::create_dir_if_not_exists(&utxo_index_db_dir_path).await?;
 
@@ -221,7 +221,7 @@ impl RustyUtxoIndex {
 
     /// Return the digests of all absolute index sets of the removal records in
     /// this block. Returns `None` if the block is not known to this index.
-    pub async fn index_set_digests(&self, block_hash: Digest) -> Option<Vec<Digest>> {
+    pub(crate) async fn index_set_digests(&self, block_hash: Digest) -> Option<Vec<Digest>> {
         let key = UtxoIndexKey::IndexSetDigestsByBlock(block_hash);
         self.db
             .get(key)
@@ -268,7 +268,7 @@ impl RustyUtxoIndex {
     /// DOS reasons) by [`MAX_NUM_BLOCKS_IN_LOOKUP_LIST`]. But since addition
     /// records are unlikely to be repeated in large numbers, this truncation
     /// is probably never met.
-    pub async fn blocks_by_addition_record(
+    pub(crate) async fn blocks_by_addition_record(
         &self,
         addition_record: AdditionRecord,
     ) -> HashSet<BlockHeight> {
@@ -303,7 +303,7 @@ impl RustyUtxoIndex {
     /// This method is idempotent, meaning that it does not alter the index if
     /// the same block is indexed twice, apart from the [`Self::sync_label`]
     /// which always points to the latest blocks that was indexed.
-    pub async fn index_block(&mut self, block: &Block) {
+    pub(crate) async fn index_block(&mut self, block: &Block) {
         let hash = block.hash();
         let height = block.header().height;
 
@@ -426,7 +426,7 @@ impl RustyUtxoIndex {
 
     /// Return the hash of the latest block indexed. The default value means
     /// that no blocks have been indexed.
-    pub async fn sync_label(&self) -> Digest {
+    pub(crate) async fn sync_label(&self) -> Digest {
         self.db
             .get(UtxoIndexKey::SyncLabel)
             .await

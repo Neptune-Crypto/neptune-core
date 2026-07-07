@@ -624,7 +624,7 @@ impl ArchivalState {
     /// If block was already written to database, then it is only marked as
     /// tip, and no write to disk occurs. Instead, the old block database entry
     /// is assumed to be valid, and so is the block stored on disk.
-    pub async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
+    pub(crate) async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
         self.write_block_internal(new_block, true).await
     }
 
@@ -632,7 +632,7 @@ impl ArchivalState {
     ///
     /// This method handles reorganizations, but all predecessors of this block
     /// must be known and stored in the block index database for it to work.
-    pub async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
+    pub(crate) async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
         #[cfg(test)]
         {
             // In tests you're allowed to set a genesis block with a height
@@ -788,7 +788,10 @@ impl ArchivalState {
         }
     }
 
-    pub async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
+    pub(crate) async fn get_block_from_block_record(
+        &self,
+        block_record: BlockRecord,
+    ) -> Result<Block> {
         let block_file_path: PathBuf = self
             .data_dir
             .block_file_path(block_record.file_location.file_index);
@@ -845,7 +848,7 @@ impl ArchivalState {
 
     /// Return the latest block that was stored to disk. If no block has been stored to disk, i.e.
     /// if tip is genesis, then `None` is returned
-    pub async fn get_tip_from_disk(&self) -> Result<Option<Block>> {
+    pub(crate) async fn get_tip_from_disk(&self) -> Result<Option<Block>> {
         let tip_block_record = self.tip_block_record().await;
         let Some(tip_block_record) = tip_block_record else {
             return Ok(None);
@@ -1056,7 +1059,7 @@ impl ArchivalState {
     /// consider the tip.
     ///
     /// Never loads blocks from disk, so performance should be good.
-    pub async fn find_canonical_block_hash_with_output(
+    pub(crate) async fn find_canonical_block_hash_with_output(
         &self,
         output: AdditionRecord,
         max_search_depth: Option<u64>,
@@ -1413,7 +1416,7 @@ impl ArchivalState {
     ///
     /// Note that the genesis block is not stored, and so does not have a block
     /// record.
-    pub async fn get_block_record(&self, block_digest: Digest) -> Option<BlockRecord> {
+    pub(crate) async fn get_block_record(&self, block_digest: Digest) -> Option<BlockRecord> {
         self.block_index_db
             .get(BlockIndexKey::Block(block_digest))
             .await

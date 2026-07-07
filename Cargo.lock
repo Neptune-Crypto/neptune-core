@@ -3476,6 +3476,7 @@ dependencies = [
  "neptune-locks",
  "neptune-mutator-set",
  "neptune-primitives",
+ "neptune-wallet",
  "num-traits",
  "proptest",
  "proptest-arbitrary-interop",
