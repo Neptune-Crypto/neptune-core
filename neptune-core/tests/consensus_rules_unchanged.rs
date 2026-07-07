@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use common::logging;
 use itertools::Itertools;
-use neptune_cash::state::archival_state::ArchivalState;
+use neptune_archive::archival_state::ArchivalState;
 use neptune_consensus::block::validity::block_program::BlockProgram;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;

@@ -1,8 +1,8 @@
+use neptune_archive::archival_state::ArchivalState;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 
-use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;

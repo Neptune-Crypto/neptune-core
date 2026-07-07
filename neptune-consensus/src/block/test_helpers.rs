@@ -23,8 +23,11 @@ use crate::block::mutator_set_update::MutatorSetUpdate;
 use crate::block::pow::Pow;
 use crate::block::Block;
 use crate::block::BlockProof;
+use crate::transaction::announcement::Announcement;
+use crate::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash;
 use crate::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
 use crate::transaction::transaction_kernel::TransactionKernel;
+use crate::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::Transaction;
 
@@ -164,4 +167,59 @@ pub fn invalid_block_with_kernel_and_mutator_set(
     let appendix = BlockAppendix::default();
 
     Block::new(block_header, body, appendix, BlockProof::Invalid)
+}
+
+/// `n` empty invalid blocks descending from `ancestor`.
+pub fn invalid_empty_blocks(ancestor: &Block, n: usize, network: Network) -> Vec<Block> {
+    let mut blocks = vec![];
+    let mut predecessor = ancestor;
+    for _ in 0..n {
+        blocks.push(invalid_empty_block(predecessor, network));
+        predecessor = blocks.last().unwrap();
+    }
+    blocks
+}
+
+/// `n` empty invalid blocks descending from `parent`, each with the given proof
+/// size.
+pub fn invalid_empty_blocks_with_proof_size(
+    parent: &Block,
+    n: usize,
+    network: Network,
+    proof_size: usize,
+) -> Vec<Block> {
+    let mut blocks = vec![];
+    let mut predecessor = parent;
+    for _ in 0..n {
+        blocks.push(invalid_empty_block_with_proof_size(
+            predecessor,
+            network,
+            proof_size,
+        ));
+        predecessor = blocks.last().unwrap();
+    }
+    blocks
+}
+
+/// An empty invalid block carrying the given announcements.
+pub fn invalid_empty_block_with_announcements(
+    predecessor: &Block,
+    network: Network,
+    announcements: Vec<Announcement>,
+) -> Block {
+    let tx = make_mock_transaction_with_mutator_set_hash(
+        vec![],
+        vec![],
+        predecessor.mutator_set_accumulator_after().unwrap().hash(),
+    );
+    let kernel = TransactionKernelModifier::default()
+        .announcements(announcements)
+        .clone_modify(&tx.kernel);
+    let tx = Transaction {
+        kernel,
+        proof: tx.proof,
+    };
+    let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    let tx = BlockTransaction::upgrade(tx);
+    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }

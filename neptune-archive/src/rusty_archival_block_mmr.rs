@@ -1,10 +1,10 @@
 use neptune_archival_mmr::ArchivalMmr;
-use neptune_database::storage::storage_schema::traits::*;
+use neptune_database::NeptuneLevelDb;
 use neptune_database::storage::storage_schema::DbtVec;
 use neptune_database::storage::storage_schema::RustyKey;
 use neptune_database::storage::storage_schema::RustyValue;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;
-use neptune_database::NeptuneLevelDb;
+use neptune_database::storage::storage_schema::traits::*;
 use tasm_lib::prelude::Digest;
 
 #[derive(Debug)]
@@ -14,12 +14,8 @@ pub struct RustyArchivalBlockMmr {
 }
 
 impl RustyArchivalBlockMmr {
-    pub(crate) async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
-        let mut storage = SimpleRustyStorage::new_with_callback(
-            db,
-            "archival-block-mmr-Schema",
-            crate::LOG_TOKIO_LOCK_EVENT_CB,
-        );
+    pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
+        let mut storage = SimpleRustyStorage::new(db);
 
         // We do not need a sync-label since the last leaf of the MMR will
         // be the sync-label, i.e., the block digest of the latest block added.

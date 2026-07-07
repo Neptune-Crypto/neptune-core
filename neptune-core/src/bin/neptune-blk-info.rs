@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use anyhow::bail;
 use anyhow::Result;
 use clap::Parser;
-use neptune_cash::state::archival_state::ArchivalState;
+use neptune_archive::archival_state::ArchivalState;
 
 #[derive(Parser, Debug, Clone)]
 #[clap()]

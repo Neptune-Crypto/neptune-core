@@ -1816,6 +1816,7 @@ pub mod tests {
     use macro_rules_attr::apply;
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
     use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_announcements;
     use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
     use neptune_consensus::block::PREMINE_MAX_SIZE;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
@@ -1849,6 +1850,7 @@ pub mod tests {
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::bfe_vec;
     use tracing_test::traced_test;
@@ -1861,10 +1863,8 @@ pub mod tests {
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_status::SyncedUtxo;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
-    use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
-    use crate::BFieldElement;
     use crate::Block;
 
     async fn test_rpc_server_with_cli_args_and_wallet(

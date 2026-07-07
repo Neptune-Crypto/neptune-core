@@ -55,7 +55,7 @@ arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:propt
 # exposes the consensus/proof-abstraction test-support constructors and proptest
 # strategies (the `test_helpers` modules) needed by downstream crates' tests.
 # off by default.
-test-helpers = ["arbitrary-impls", "dep:clienter", "neptune-consensus/test-helpers", "neptune-mempool/test-helpers", "neptune-mutator-set/test-helpers", "neptune-p2p/test-helpers", "neptune-wallet/test-helpers"]
+test-helpers = ["arbitrary-impls", "dep:clienter", "neptune-archive/test-helpers", "neptune-consensus/test-helpers", "neptune-mempool/test-helpers", "neptune-mutator-set/test-helpers", "neptune-p2p/test-helpers", "neptune-wallet/test-helpers"]
 
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]
@@ -139,6 +139,7 @@ rs-leveldb = "0.1.5"
 leveldb-sys = "2.0.9"
 async-trait = "0.1.83"
 neptune-archival-mmr = { version = "0.12.0", path = "../neptune-archival-mmr" }
+neptune-archive = { version = "0.12.0", path = "../neptune-archive" }
 neptune-consensus = { version = "0.12.0", path = "../neptune-consensus" }
 neptune-database = { version = "0.12.0", path = "../neptune-database" }
 neptune-job-queue = { version = "0.12.0", path = "../neptune-job-queue" }

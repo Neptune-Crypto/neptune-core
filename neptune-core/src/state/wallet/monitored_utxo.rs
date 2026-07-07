@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::fmt::Display;
 
 use itertools::Itertools;
+use neptune_archive::archival_state::ArchivalState;
 use neptune_consensus::block::Block;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_mutator_set::addition_record::AdditionRecord;
@@ -16,7 +17,6 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 
 /// Enumerates the possible spent spend-statuses of a monitored UTXO.

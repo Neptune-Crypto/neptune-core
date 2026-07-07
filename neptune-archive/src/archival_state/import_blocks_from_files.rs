@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::bail;
 use anyhow::Result;
+use anyhow::bail;
 use itertools::Itertools;
 use memmap2::MmapOptions;
 use neptune_consensus::block::Block;
@@ -37,7 +37,7 @@ impl ArchivalState {
     /// Returned list is sorted chronologically, assuming  normal operations,
     /// normal storage of blocks. Namely, `blk2.dat` comes before `blk10.dat` in
     /// the returned list.
-    fn sorted_blk_file_names(entries: Vec<String>) -> Result<Vec<String>> {
+    pub fn sorted_blk_file_names(entries: Vec<String>) -> Result<Vec<String>> {
         // Capture all indices from the block files, from the names
         // "blk(d+).dat".
         let blk_file_name_regex = Regex::new(&format!(
@@ -112,77 +112,5 @@ impl ArchivalState {
         }
 
         Ok(blocks)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use macro_rules_attr::apply;
-    use neptune_primitives::network::Network;
-    use tracing_test::traced_test;
-
-    use super::*;
-    use crate::application::config::cli_args;
-    use crate::state::archival_state::tests::make_test_archival_state;
-    use crate::tests::shared::blocks::invalid_empty_blocks;
-    use crate::tests::shared_tokio_runtime;
-
-    #[test]
-    fn blk_file_names_sorted_correctly() {
-        let input = [
-            "blk10.dat",
-            "blk2.dat",
-            "blk3.dat",
-            "blk4.dat",
-            "blk5.dat",
-            "blk0.dat",
-            "blk99.dat",
-            "not-parseable",
-            ".",
-            "..",
-            "blk1.dat",
-        ]
-        .map(|x| x.to_owned())
-        .to_vec();
-
-        let expected = [
-            "blk0.dat",
-            "blk1.dat",
-            "blk2.dat",
-            "blk3.dat",
-            "blk4.dat",
-            "blk5.dat",
-            "blk10.dat",
-            "blk99.dat",
-        ]
-        .map(|x| x.to_owned())
-        .to_vec();
-        assert_eq!(
-            expected,
-            ArchivalState::sorted_blk_file_names(input).unwrap()
-        );
-    }
-
-    #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn get_blocks_directly_from_file_without_database() {
-        let network = Network::Main;
-        let mut archival_state =
-            make_test_archival_state(&cli_args::Args::default_with_network(network)).await;
-        let blocks = invalid_empty_blocks(&archival_state.genesis_block, 10, network);
-
-        for i in 0..10 {
-            archival_state
-                .write_block_internal(&blocks[i], true)
-                .await
-                .unwrap();
-
-            let assumed_block_file = archival_state.data_dir.block_file_path(0);
-            let returned = ArchivalState::blocks_from_file_without_record(&assumed_block_file)
-                .await
-                .unwrap();
-
-            assert_eq!(blocks[0..=i], returned[..]);
-        }
     }
 }

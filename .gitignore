@@ -7,14 +7,12 @@ target/
 /makefile-target
 /makefile-target-opt-level3
 
-# git shouldn't see the proof files, or block files. Bc big.
-/neptune-core/test_data/*.proof
-/neptune-core/test_data/blk*.dat
-/neptune-core/test_data/*/blk*.dat
-/neptune-core/test_data/*/*/blk*.dat
-/neptune-consensus/test_data/*.proof
-/neptune-p2p/test_data/*.proof
-/neptune-rpc/client/test_data/*.proof
+# git shouldn't see the proof files or block files under any crate's test_data
+# directory. They're big and machine-generated.
+**/test_data/*.proof
+**/test_data/**/*.proof
+**/test_data/blk*.dat
+**/test_data/**/blk*.dat
 
 # Remove Cargo.lock from gitignore if creating an executable, leave it for libraries
 # More information here https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html

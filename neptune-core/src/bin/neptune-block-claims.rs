@@ -7,8 +7,8 @@
 
 use clap::Parser;
 use itertools::Itertools;
+use neptune_archive::archival_state::ArchivalState;
 use neptune_cash::application::config::cli_args;
-use neptune_cash::state::archival_state::ArchivalState;
 use neptune_consensus::block::validity::block_program::BlockProgram;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
@@ -50,8 +50,13 @@ async fn print_block_claims(min_height: u64, max_height: u64, network: Option<Ne
     let genesis = Block::genesis(cli_args.network);
     let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)
         .expect("data directory exists");
-    let archival_state =
-        ArchivalState::new(data_directory.clone(), genesis.clone(), &cli_args).await;
+    let archival_state = ArchivalState::new(
+        data_directory.clone(),
+        genesis.clone(),
+        cli_args.utxo_index,
+        cli_args.network,
+    )
+    .await;
 
     // For all canonical blocks:
     let tip = archival_state.get_tip().await;

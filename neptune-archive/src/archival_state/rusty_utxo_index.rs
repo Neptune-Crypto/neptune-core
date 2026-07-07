@@ -3,10 +3,10 @@ use std::collections::HashSet;
 use anyhow::Result;
 use itertools::Itertools;
 use neptune_consensus::block::Block;
-use neptune_database::create_db_if_missing;
-use neptune_database::storage::storage_schema::traits::*;
 use neptune_database::NeptuneLevelDb;
 use neptune_database::WriteBatchAsync;
+use neptune_database::create_db_if_missing;
+use neptune_database::storage::storage_schema::traits::*;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_primitives::block_height::BlockHeight;
@@ -42,15 +42,15 @@ pub const MAX_NUM_BLOCKS_IN_LOOKUP_LIST: usize = 10_000;
 /// serialized size (8 bytes vs. 40).
 ///
 /// [`ArchivalMutatorSet`]: neptune_mutator_set::archival_mutator_set::ArchivalMutatorSet
-/// [`ArchivalState`]: crate::state::archival_state::ArchivalState
+/// [`ArchivalState`]: crate::archival_state::ArchivalState
 #[derive(Debug)]
-pub(crate) struct RustyUtxoIndex {
-    db: NeptuneLevelDb<UtxoIndexKey, UtxoIndexValue>,
+pub struct RustyUtxoIndex {
+    pub db: NeptuneLevelDb<UtxoIndexKey, UtxoIndexValue>,
 }
 
 /// The key types used by the UTXO index database.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-enum UtxoIndexKey {
+pub enum UtxoIndexKey {
     /// Latest block handled by this database. Any initialized database must
     /// have a sync label set. The default value indicates that no blocks have
     /// been processed by the UTXO index.
@@ -113,7 +113,7 @@ enum UtxoIndexKey {
 ///
 /// See documentstion in [`UtxoIndexKey`] for each variant of this enum.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum UtxoIndexValue {
+pub enum UtxoIndexValue {
     SyncLabel(Digest),
     AnnouncementsByBlock(Vec<AnnouncementFlag>),
     IndexSetDigestsByBlock(Vec<Digest>),
@@ -144,7 +144,7 @@ impl UtxoIndexValue {
         }
     }
 
-    fn expect_blocks_by_announcements(self) -> Vec<BlockHeight> {
+    pub fn expect_blocks_by_announcements(self) -> Vec<BlockHeight> {
         match self {
             UtxoIndexValue::BlocksByAnnouncementFlag(block_heights) => block_heights,
             _ => panic!("Expected BlocksByAnnouncementFlag found {:?}", self),
@@ -168,12 +168,12 @@ impl UtxoIndexValue {
 
 impl RustyUtxoIndex {
     /// Returns true iff no blocks have been indexed.
-    pub(super) async fn is_empty(&self) -> bool {
+    pub async fn is_empty(&self) -> bool {
         self.sync_label().await == Default::default()
     }
 
     /// Returns true if the block was already indexed.
-    pub(crate) async fn block_was_indexed(&self, block_hash: Digest) -> bool {
+    pub async fn block_was_indexed(&self, block_hash: Digest) -> bool {
         self.db
             .get(UtxoIndexKey::AnnouncementsByBlock(block_hash))
             .await
@@ -181,7 +181,7 @@ impl RustyUtxoIndex {
     }
 
     /// Initialize a UTXO index. Does not apply the genesis block to the index.
-    pub(super) async fn initialize(data_dir: &DataDirectory) -> Result<Self> {
+    pub async fn initialize(data_dir: &DataDirectory) -> Result<Self> {
         let utxo_index_db_dir_path = data_dir.utxo_index_dir_path();
         DataDirectory::create_dir_if_not_exists(&utxo_index_db_dir_path).await?;
 
@@ -211,10 +211,7 @@ impl RustyUtxoIndex {
     /// block. Returns Some(vec![]) list if no compatible announcement (of
     /// minimum lenth 2) were mined in the block. Returns `None` if the block
     /// is not known to this index.
-    pub(crate) async fn announcement_flags(
-        &self,
-        block_hash: Digest,
-    ) -> Option<Vec<AnnouncementFlag>> {
+    pub async fn announcement_flags(&self, block_hash: Digest) -> Option<Vec<AnnouncementFlag>> {
         let key = UtxoIndexKey::AnnouncementsByBlock(block_hash);
         self.db
             .get(key)
@@ -224,7 +221,7 @@ impl RustyUtxoIndex {
 
     /// Return the digests of all absolute index sets of the removal records in
     /// this block. Returns `None` if the block is not known to this index.
-    pub(crate) async fn index_set_digests(&self, block_hash: Digest) -> Option<Vec<Digest>> {
+    pub async fn index_set_digests(&self, block_hash: Digest) -> Option<Vec<Digest>> {
         let key = UtxoIndexKey::IndexSetDigestsByBlock(block_hash);
         self.db
             .get(key)
@@ -243,7 +240,7 @@ impl RustyUtxoIndex {
     /// wallets cannot rely on this method for wallet recovery. They should
     /// instead use [`UtxoIndexKey::AnnouncementsByBlock`] to scan through
     /// each block.
-    pub(crate) async fn blocks_by_announcement_flags(
+    pub async fn blocks_by_announcement_flags(
         &self,
         announcement_flags: &HashSet<AnnouncementFlag>,
     ) -> HashSet<BlockHeight> {
@@ -271,7 +268,7 @@ impl RustyUtxoIndex {
     /// DOS reasons) by [`MAX_NUM_BLOCKS_IN_LOOKUP_LIST`]. But since addition
     /// records are unlikely to be repeated in large numbers, this truncation
     /// is probably never met.
-    pub(crate) async fn blocks_by_addition_record(
+    pub async fn blocks_by_addition_record(
         &self,
         addition_record: AdditionRecord,
     ) -> HashSet<BlockHeight> {
@@ -291,10 +288,7 @@ impl RustyUtxoIndex {
     /// canonical.
     ///
     /// Returns `None` if the UTXO index has never seen this absolute index set.
-    pub(crate) async fn block_by_index_set(
-        &self,
-        index_set: &AbsoluteIndexSet,
-    ) -> Option<BlockHeight> {
+    pub async fn block_by_index_set(&self, index_set: &AbsoluteIndexSet) -> Option<BlockHeight> {
         let index_set_digest = Tip5::hash(index_set);
         let key = UtxoIndexKey::BlockByIndexSetDigest(index_set_digest);
         self.db
@@ -309,7 +303,7 @@ impl RustyUtxoIndex {
     /// This method is idempotent, meaning that it does not alter the index if
     /// the same block is indexed twice, apart from the [`Self::sync_label`]
     /// which always points to the latest blocks that was indexed.
-    pub(crate) async fn index_block(&mut self, block: &Block) {
+    pub async fn index_block(&mut self, block: &Block) {
         let hash = block.hash();
         let height = block.header().height;
 
@@ -432,7 +426,7 @@ impl RustyUtxoIndex {
 
     /// Return the hash of the latest block indexed. The default value means
     /// that no blocks have been indexed.
-    pub(crate) async fn sync_label(&self) -> Digest {
+    pub async fn sync_label(&self) -> Digest {
         self.db
             .get(UtxoIndexKey::SyncLabel)
             .await
@@ -451,397 +445,19 @@ impl StorageWriter for RustyUtxoIndex {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use macro_rules_attr::apply;
-    use neptune_consensus::transaction::announcement::Announcement;
-    use neptune_primitives::network::Network;
-    use neptune_wallet::address::generation_address::GenerationSpendingKey;
-    use tasm_lib::twenty_first::bfe;
-    use tasm_lib::twenty_first::bfe_vec;
-
-    use super::*;
-    use crate::tests::shared::blocks::block_with_num_puts;
-    use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
-    use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
-    use crate::tests::shared_tokio_runtime;
-    use crate::BFieldElement;
-
-    impl RustyUtxoIndex {
-        /// Return a list of block heights for each announcement in the input
-        /// list.
-        async fn block_heights_by_announcements(
-            &self,
-            announcements: &[Announcement],
-        ) -> HashSet<BlockHeight> {
-            let announcement_flags: HashSet<AnnouncementFlag> = announcements
-                .iter()
-                .filter_map(|ann| AnnouncementFlag::try_from(ann).ok())
-                .collect();
-
-            self.blocks_by_announcement_flags(&announcement_flags).await
-        }
-    }
-
-    async fn test_utxo_index(network: Network) -> RustyUtxoIndex {
-        let data_dir = crate::tests::shared::files::unit_test_data_directory(network).unwrap();
-        RustyUtxoIndex::initialize(&data_dir).await.unwrap()
-    }
-
-    fn announcements_length_0_to_3() -> Vec<Announcement> {
-        let length0 = Announcement {
-            message: bfe_vec![],
-        };
-        let length1 = Announcement {
-            message: bfe_vec![22],
-        };
-        let length2 = Announcement {
-            message: bfe_vec![22, 55],
-        };
-        let length3 = Announcement {
-            message: bfe_vec![22, 878, 668],
-        };
-        vec![length0, length1, length2, length3]
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn announcement_flag_to_block_heights_unit_test() {
-        let network = Network::Main;
-        let mut utxo_index = test_utxo_index(network).await;
-
-        let genesis = Block::genesis(network);
-
-        let announcements1 = vec![
-            Announcement {
-                message: bfe_vec![22, 55],
-            },
-            Announcement {
-                message: bfe_vec![1, 444, 500],
-            },
-        ];
-        let announcements2 = vec![
-            Announcement {
-                message: bfe_vec![22, 55],
-            },
-            Announcement {
-                message: bfe_vec![22, 55, 200],
-            },
-            Announcement {
-                message: bfe_vec![22, 55, 500],
-            },
-            Announcement {
-                message: bfe_vec![1, 888, 500],
-            },
-        ];
-        let announcements3 = announcements1.clone();
-        let block1 = invalid_empty_block_with_announcements(&genesis, network, announcements1);
-        let block2 = invalid_empty_block_with_announcements(&block1, network, announcements2);
-        let block3 = invalid_empty_block_with_announcements(&block2, network, announcements3);
-
-        let blocks = [block1, block2, block3];
-        for block in &blocks {
-            utxo_index.index_block(block).await;
-        }
-
-        // All announcements in all blocks must return block's height.
-        for block in &blocks {
-            for announcement in &block.body().transaction_kernel().announcements {
-                let Ok(announcement_flag) = AnnouncementFlag::try_from(announcement) else {
-                    continue;
-                };
-                let announcement_flag: HashSet<_> = [announcement_flag].into_iter().collect();
-                assert!(utxo_index
-                    .blocks_by_announcement_flags(&announcement_flag)
-                    .await
-                    .contains(&block.header().height),);
-            }
-        }
-
-        assert_eq!(
-            vec![
-                BlockHeight::from(1u64),
-                BlockHeight::from(2u64),
-                BlockHeight::from(3u64)
-            ],
-            utxo_index
-                .db
-                .get(UtxoIndexKey::BlocksByAnnouncementFlag(AnnouncementFlag {
-                    flag: bfe!(22),
-                    receiver_id: bfe!(55),
-                }))
-                .await
-                .unwrap()
-                .expect_blocks_by_announcements()
-        );
-        assert_eq!(
-            vec![BlockHeight::from(1u64), BlockHeight::from(3u64)],
-            utxo_index
-                .db
-                .get(UtxoIndexKey::BlocksByAnnouncementFlag(AnnouncementFlag {
-                    flag: bfe!(1),
-                    receiver_id: bfe!(444),
-                }))
-                .await
-                .unwrap()
-                .expect_blocks_by_announcements()
-        );
-        assert_eq!(
-            vec![BlockHeight::from(2u64),],
-            utxo_index
-                .db
-                .get(UtxoIndexKey::BlocksByAnnouncementFlag(AnnouncementFlag {
-                    flag: bfe!(1),
-                    receiver_id: bfe!(888),
-                }))
-                .await
-                .unwrap()
-                .expect_blocks_by_announcements()
-        );
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn index_set_by_block_unit_test() {
-        let network = Network::Main;
-        let genesis = Block::genesis(network);
-        let block1 = block_with_num_puts(network, &genesis, 12, 11).await;
-        let block2 = block_with_num_puts(network, &block1, 4, 55).await;
-
-        let mut utxo_index = test_utxo_index(network).await;
-        utxo_index.index_block(&block1).await;
-        utxo_index.index_block(&block2).await;
-
-        let block1_res = utxo_index.index_set_digests(block1.hash()).await.unwrap();
-        assert_eq!(12, block1_res.len(), "index set list must have 12 entries");
-
-        let block2_res = utxo_index.index_set_digests(block2.hash()).await.unwrap();
-        assert_eq!(4, block2_res.len(), "index set list must have 4 entries");
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn block_by_addition_record_unit_test() {
-        let network = Network::Main;
-        let genesis = Block::genesis(network);
-        let block1 = block_with_num_puts(network, &genesis, 12, 11).await;
-        let block2 = block_with_num_puts(network, &block1, 4, 55).await;
-        let blocks = [block1, block2];
-
-        let mut utxo_index = test_utxo_index(network).await;
-        for block in &blocks {
-            utxo_index.index_block(block).await;
-        }
-
-        for block in blocks {
-            let expected: HashSet<_> = [block.header().height].into_iter().collect();
-            for ar in block.all_addition_records().unwrap() {
-                assert_eq!(expected, utxo_index.blocks_by_addition_record(ar).await);
-            }
-        }
-
-        let unknown_addition_record = AdditionRecord::new(Digest::default());
-        assert!(
-            utxo_index
-                .blocks_by_addition_record(unknown_addition_record)
-                .await
-                .is_empty(),
-            "Unknown addition record must return empty set"
-        );
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn can_handle_repeated_addition_records() {
-        let network = Network::Main;
-        let genesis = Block::genesis(network);
-
-        let an_addition_record = AdditionRecord::new(Digest::default());
-
-        let inputs = vec![];
-        let (block1_one_addition_record, _) = make_mock_block_with_inputs_and_outputs(
-            &genesis,
-            inputs.clone(),
-            vec![an_addition_record],
-            None,
-            GenerationSpendingKey::derive_from_seed(Digest::default()),
-            Digest::default(),
-            network,
-        )
-        .await;
-        let (block2_two_repeated_addition_records, _) = make_mock_block_with_inputs_and_outputs(
-            &block1_one_addition_record,
-            inputs,
-            vec![an_addition_record, an_addition_record],
-            None,
-            GenerationSpendingKey::derive_from_seed(Digest::default()),
-            Digest::default(),
-            network,
-        )
-        .await;
-        let block3_other_addition_records =
-            block_with_num_puts(network, &block2_two_repeated_addition_records, 10, 10).await;
-
-        let blocks = [
-            block1_one_addition_record,
-            block2_two_repeated_addition_records,
-            block3_other_addition_records,
-        ];
-
-        let mut utxo_index = test_utxo_index(network).await;
-        for block in &blocks {
-            utxo_index.index_block(block).await;
-        }
-
-        // Block 1 and 2 contain this addition record, block 3 does not
-        let expected: HashSet<_> = [BlockHeight::from(1u64), BlockHeight::from(2u64)]
-            .into_iter()
-            .collect();
-        assert_eq!(
-            expected,
-            utxo_index
-                .blocks_by_addition_record(an_addition_record)
-                .await
-        );
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn block_by_index_set_unit_test() {
-        let network = Network::Main;
-        let genesis = Block::genesis(network);
-        let block1 = block_with_num_puts(network, &genesis, 20, 2).await;
-        let block2 = block_with_num_puts(network, &block1, 21, 3).await;
-
-        let blocks = [block1, block2];
-
-        let mut utxo_index = test_utxo_index(network).await;
-        for block in &blocks {
-            for input in &block.body().transaction_kernel().inputs {
-                assert!(
-                    utxo_index
-                        .block_by_index_set(&input.absolute_indices)
-                        .await
-                        .is_none(),
-                    "Block by index set lookup must return none prior to indexing"
-                );
-            }
-        }
-
-        for block in &blocks {
-            utxo_index.index_block(block).await;
-        }
-
-        for block in &blocks {
-            for input in &block.body().transaction_kernel().inputs {
-                assert_eq!(
-                    block.header().height,
-                    utxo_index
-                        .block_by_index_set(&input.absolute_indices)
-                        .await
-                        .unwrap()
-                );
-            }
-        }
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn block_index_is_idempotent() {
-        let network = Network::Main;
-        let mut utxo_index = test_utxo_index(network).await;
-
-        let genesis = Block::genesis(network);
-        let block1 = block_with_num_puts(network, &genesis, 1, 0).await;
-        let announcements = announcements_length_0_to_3();
-        let block2 =
-            invalid_empty_block_with_announcements(&block1, network, announcements.clone());
-
-        utxo_index.index_block(&block1).await;
-        utxo_index.index_block(&block2).await;
-
-        let expected_announcement_flags = utxo_index.announcement_flags(block2.hash()).await;
-        let expected_index_set_digests = utxo_index.index_set_digests(block1.hash()).await;
-        let expected_blocks_by_flag = utxo_index
-            .block_heights_by_announcements(&announcements)
-            .await;
-        let block2_ars: HashSet<_> = block2
-            .body()
-            .transaction_kernel()
-            .outputs
+/// Test-support query over announcements.
+#[cfg(any(test, feature = "test-helpers"))]
+impl RustyUtxoIndex {
+    /// Return the set of block heights for each announcement in the input list.
+    pub async fn block_heights_by_announcements(
+        &self,
+        announcements: &[neptune_consensus::transaction::announcement::Announcement],
+    ) -> std::collections::HashSet<neptune_primitives::block_height::BlockHeight> {
+        let announcement_flags: std::collections::HashSet<AnnouncementFlag> = announcements
             .iter()
-            .copied()
+            .filter_map(|ann| AnnouncementFlag::try_from(ann).ok())
             .collect();
 
-        let mut expected_blocks_by_addition_records = HashMap::new();
-        for ar in &block2_ars {
-            expected_blocks_by_addition_records
-                .insert(*ar, utxo_index.blocks_by_addition_record(*ar).await);
-        }
-
-        utxo_index.index_block(&block1).await;
-        utxo_index.index_block(&block2).await;
-
-        assert_eq!(
-            expected_index_set_digests,
-            utxo_index.index_set_digests(block1.hash()).await
-        );
-        assert_eq!(
-            expected_announcement_flags,
-            utxo_index.announcement_flags(block2.hash()).await
-        );
-        assert_eq!(
-            expected_blocks_by_flag,
-            utxo_index
-                .block_heights_by_announcements(&announcements)
-                .await
-        );
-
-        let mut read_blocks_by_addition_records = HashMap::new();
-        for ar in block2_ars {
-            read_blocks_by_addition_records
-                .insert(ar, utxo_index.blocks_by_addition_record(ar).await);
-        }
-        assert_eq!(
-            expected_blocks_by_addition_records,
-            read_blocks_by_addition_records
-        );
-
-        assert_eq!(block2.hash(), utxo_index.sync_label().await);
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn can_handle_short_announcements() {
-        let network = Network::Main;
-        let mut utxo_index = test_utxo_index(network).await;
-
-        let announcements = announcements_length_0_to_3();
-        let genesis = Block::genesis(network);
-        let block1 = invalid_empty_block_with_announcements(&genesis, network, announcements);
-
-        utxo_index.index_block(&block1).await;
-
-        assert_eq!(
-            2,
-            utxo_index
-                .announcement_flags(block1.hash())
-                .await
-                .unwrap()
-                .len(),
-            "Announcements of length 2 and above should be indexed"
-        );
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn initialize_sets_sync_label() {
-        let network = Network::Main;
-        let utxo_index = test_utxo_index(network).await;
-        assert!(
-            utxo_index.db.get(UtxoIndexKey::SyncLabel).await.is_some(),
-            "sync label must be set during initialization"
-        );
-        assert!(
-            utxo_index.is_empty().await,
-            "UTXO index must be marked as empty after new initialization with empty database"
-        );
-
-        // ensure no panic
-        utxo_index.sync_label().await;
+        self.blocks_by_announcement_flags(&announcement_flags).await
     }
 }

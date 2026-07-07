@@ -51,6 +51,7 @@ use futures::future;
 use futures::Future;
 use futures::StreamExt;
 use itertools::Itertools;
+use neptune_archive::archival_state::ArchivalState;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_locks::tokio as sync_tokio;
@@ -73,7 +74,6 @@ use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
-use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::identity::resolve_identity;
 use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
@@ -90,7 +90,6 @@ use crate::application::network::actor::NetworkActorChannels;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::config::NetworkConfig;
 use crate::application::rpc::server::RPC;
-use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalStateLock;
 

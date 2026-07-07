@@ -3461,6 +3461,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "neptune-archive"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "hex",
+ "itertools",
+ "macro_rules_attr",
+ "memmap2",
+ "neptune-archival-mmr",
+ "neptune-consensus",
+ "neptune-database",
+ "neptune-locks",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "neptune-wallet",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "regex",
+ "serde",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "neptune-cash"
 version = "0.12.0"
 dependencies = [
@@ -3495,6 +3524,7 @@ dependencies = [
  "macro_rules_attr",
  "memmap2",
  "neptune-archival-mmr",
+ "neptune-archive",
  "neptune-cash",
  "neptune-consensus",
  "neptune-database",

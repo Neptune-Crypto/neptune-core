@@ -1,4 +1,3 @@
-pub mod archival_state;
 pub mod block_selector;
 pub mod blockchain_state;
 pub mod claim_error;
@@ -6,13 +5,15 @@ pub mod database;
 pub mod light_state;
 pub mod mining;
 pub mod networking_state;
-pub mod shared;
 pub mod sync_status;
 pub mod transaction;
 pub mod utxo_validitor;
 pub mod wallet;
 
 // GlobalState-coupled mempool tests
+#[cfg(test)]
+mod archival_state_tests;
+
 #[cfg(test)]
 mod mempool_tests;
 
@@ -850,7 +851,8 @@ impl GlobalState {
         cli: cli_args::Args,
         wallet_state: WalletState,
     ) -> Result<Self> {
-        let archival_state = ArchivalState::new(data_directory.clone(), genesis, &cli).await;
+        let archival_state =
+            ArchivalState::new(data_directory.clone(), genesis, cli.utxo_index, cli.network).await;
         debug!("Got archival state");
 
         // Get latest block. Use hardcoded genesis block if nothing is in database.
@@ -1134,13 +1136,14 @@ impl GlobalState {
             let guesser_rewards = self
                 .chain
                 .archival_state()
-                .guesser_reward_strong_keys_for_block(block_height)
+                .guesser_reward_addition_records_for_block(block_height)
                 .await
                 .expect("Must know block if block hash could be found");
 
             let mut all_present = true;
-            for guesser_reward in &guesser_rewards {
-                if !self.wallet_state.wallet_db.has_mutxo(guesser_reward).await {
+            for (addition_record, aocl_index) in &guesser_rewards {
+                let guesser_reward = StrongUtxoKey::new(*addition_record, *aocl_index);
+                if !self.wallet_state.wallet_db.has_mutxo(&guesser_reward).await {
                     all_present = false;
                     break;
                 }
@@ -1166,7 +1169,7 @@ impl GlobalState {
                 .expect("Block in archival MMR must be present on disk");
 
             let sender_randomness = block_hash;
-            for (guesser_utxo, guesser_strong_key) in block
+            for (guesser_utxo, (_addition_record, aocl_index)) in block
                 .kernel
                 .guesser_fee_utxos()
                 .expect("Stored block must have guesser UTXOs")
@@ -1176,7 +1179,7 @@ impl GlobalState {
                 let mutxo = MonitoredUtxo::new(
                     guesser_utxo.clone(),
                     num_mps_per_mutxo,
-                    guesser_strong_key.aocl_index,
+                    aocl_index,
                     sender_randomness,
                     receiver_preimage,
                     &block,
@@ -1189,7 +1192,7 @@ impl GlobalState {
                     utxo: guesser_utxo,
                     sender_randomness,
                     receiver_preimage,
-                    aocl_index: guesser_strong_key.aocl_index,
+                    aocl_index,
                 };
                 recovery_list.push(utxo_ms_recovery_data);
             }
@@ -3646,7 +3649,7 @@ mod tests {
         /// the specific kind of rescan that they want, not use a catch-all,
         /// since all these functions can be somewhat slow.
         ///
-        /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: crate::state::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
+        /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: neptune_archive::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
         pub(crate) async fn rescan_announced_incoming_from_flag_index(
             &mut self,
             keys: Vec<SpendingKey>,
@@ -6642,8 +6645,9 @@ mod tests {
 
     mod import_blocks_from_directory {
 
+        use neptune_consensus::block::test_helpers::invalid_empty_blocks_with_proof_size;
+
         use super::*;
-        use crate::tests::shared::blocks::invalid_empty_blocks_with_proof_size;
 
         async fn state_with_three_big_mocked_blocks(network: Network) -> GlobalStateLock {
             // Ensure more than one file is used to store blocks.

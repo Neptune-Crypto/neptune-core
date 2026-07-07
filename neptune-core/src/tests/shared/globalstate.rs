@@ -45,10 +45,11 @@ pub(crate) async fn mock_genesis_global_state_with_block(
 
     cli.second_parse().unwrap();
 
-    let archival_state = crate::state::archival_state::ArchivalState::new(
+    let archival_state = neptune_archive::archival_state::ArchivalState::new(
         data_dir.clone(),
         genesis_block.clone(),
-        &cli,
+        cli.utxo_index,
+        cli.network,
     )
     .await;
 

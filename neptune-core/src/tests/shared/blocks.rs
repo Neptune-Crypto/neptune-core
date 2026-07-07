@@ -2,8 +2,6 @@ use futures::channel::oneshot;
 use itertools::Itertools;
 use neptune_consensus::block::block_transaction::BlockTransaction;
 use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
-use neptune_consensus::block::test_helpers::invalid_empty_block;
-use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
 use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use neptune_consensus::block::validity::block_program::BlockProgram;
 use neptune_consensus::block::validity::block_proof_witness::BlockProofWitness;
@@ -13,7 +11,6 @@ use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
-use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
@@ -377,62 +374,6 @@ pub(crate) async fn invalid_empty_block1_with_guesser_fraction(
     )
     .await
     .0
-}
-
-/// Return a list of `n` invalid, empty blocks.
-pub(crate) fn invalid_empty_blocks_with_proof_size(
-    parent: &Block,
-    n: usize,
-    network: Network,
-    proof_size: usize,
-) -> Vec<Block> {
-    let mut blocks = vec![];
-    let mut predecessor = parent;
-    for _ in 0..n {
-        blocks.push(invalid_empty_block_with_proof_size(
-            predecessor,
-            network,
-            proof_size,
-        ));
-        predecessor = blocks.last().unwrap();
-    }
-
-    blocks
-}
-
-pub(crate) fn invalid_empty_block_with_announcements(
-    predecessor: &Block,
-    network: Network,
-    announcements: Vec<Announcement>,
-) -> Block {
-    let tx =
-        neptune_consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash(
-            vec![],
-            vec![],
-            predecessor.mutator_set_accumulator_after().unwrap().hash(),
-        );
-    let kernel = TransactionKernelModifier::default()
-        .announcements(announcements)
-        .clone_modify(&tx.kernel);
-    let tx = Transaction {
-        kernel,
-        proof: tx.proof,
-    };
-    let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
-    let tx = BlockTransaction::upgrade(tx);
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
-}
-
-/// Return a list of `n` invalid, empty blocks.
-pub(crate) fn invalid_empty_blocks(ancestor: &Block, n: usize, network: Network) -> Vec<Block> {
-    let mut blocks = vec![];
-    let mut predecessor = ancestor;
-    for _ in 0..n {
-        blocks.push(invalid_empty_block(predecessor, network));
-        predecessor = blocks.last().unwrap();
-    }
-
-    blocks
 }
 
 /// Create a fake block proposal; will pass `is_valid` but fail pow-check. Will

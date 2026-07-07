@@ -561,7 +561,7 @@ pub trait RPC {
     /// [`AnnouncementFlag`]s in more than
     /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST] blocks.
     ///
-    /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: crate::state::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
+    /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: neptune_archive::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
     async fn block_heights_by_announcement_flags(
         token: auth::Token,
         announcement_flags: Vec<AnnouncementFlag>,
@@ -4772,6 +4772,7 @@ mod tests {
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Tip5;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::twenty_first::bfe;
     use tracing_test::traced_test;
 
@@ -4782,7 +4783,6 @@ mod tests {
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
-    use crate::BFieldElement;
     use crate::Block;
 
     const NUM_ANNOUNCEMENTS_BLOCK1: usize = 7;
