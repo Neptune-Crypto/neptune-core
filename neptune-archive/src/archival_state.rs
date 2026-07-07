@@ -633,7 +633,7 @@ impl ArchivalState {
     /// This method handles reorganizations, but all predecessors of this block
     /// must be known and stored in the block index database for it to work.
     pub(crate) async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-helpers"))]
         {
             // In tests you're allowed to set a genesis block with a height
             // different than zero. In such cases, this part of the archival state
@@ -1968,7 +1968,7 @@ impl ArchivalState {
     // Public bc used in benchmarks.
     #[doc(hidden)]
     pub async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-helpers"))]
         {
             // In tests you're allowed to set a genesis block with a height
             // different than zero. In such cases, this part of the archival state
