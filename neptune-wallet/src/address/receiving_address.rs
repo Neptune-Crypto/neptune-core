@@ -354,6 +354,15 @@ impl ReceivingAddress {
     }
 }
 
+impl From<&ReceivingAddress> for neptune_primitives::announcement_flag::AnnouncementFlag {
+    fn from(value: &ReceivingAddress) -> Self {
+        Self {
+            flag: value.flag(),
+            receiver_id: value.receiver_identifier(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bech32::ToBase32;

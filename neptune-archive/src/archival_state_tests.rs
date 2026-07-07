@@ -573,7 +573,7 @@ mod tests {
     }
 
     mod rusty_utxo_index_tests {
-        use neptune_wallet::address::announcement_flag::AnnouncementFlag;
+        use neptune_primitives::announcement_flag::AnnouncementFlag;
         use tasm_lib::twenty_first::bfe_vec;
 
         use super::*;

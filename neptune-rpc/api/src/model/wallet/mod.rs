@@ -1,4 +1,4 @@
-use neptune_wallet::address::announcement_flag::AnnouncementFlag;
+use neptune_primitives::announcement_flag::AnnouncementFlag;
 
 pub mod block;
 pub mod mutator_set;

@@ -9,6 +9,7 @@ pub use tasm_lib;
 pub use tasm_lib::prelude::triton_vm;
 pub use tasm_lib::prelude::twenty_first;
 
+pub mod announcement_flag;
 pub mod block_height;
 pub mod block_selector;
 pub mod data_directory;

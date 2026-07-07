@@ -167,6 +167,22 @@ impl rand::distr::Distribution<Announcement> for rand::distr::StandardUniform {
     }
 }
 
+impl TryFrom<&Announcement> for neptune_primitives::announcement_flag::AnnouncementFlag {
+    // Only possible conversion error is that announcement message is too short.
+    type Error = ();
+
+    fn try_from(value: &Announcement) -> Result<Self, Self::Error> {
+        if value.message.len() < 2 {
+            return Err(());
+        }
+
+        Ok(neptune_primitives::announcement_flag::AnnouncementFlag {
+            flag: value.message[0],
+            receiver_id: value.message[1],
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prop_assert_eq;

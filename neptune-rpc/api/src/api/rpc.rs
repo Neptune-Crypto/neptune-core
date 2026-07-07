@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use multiaddr::Multiaddr;
+use neptune_primitives::announcement_flag::AnnouncementFlag;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::KeyType;
-use neptune_wallet::address::announcement_flag::AnnouncementFlag;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;

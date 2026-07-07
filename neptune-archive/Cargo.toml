@@ -25,7 +25,6 @@ neptune-database = { version = "0.12.0", path = "../neptune-database" }
 neptune-locks = { version = "0.12.0", path = "../neptune-locks" }
 neptune-mutator-set = { version = "0.12.0", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.12.0", path = "../neptune-primitives" }
-neptune-wallet = { version = "0.12.0", path = "../neptune-wallet" }
 num-traits = "0.2"
 regex = "1.11.0"
 serde = { version = "1.0", features = ["derive"] }

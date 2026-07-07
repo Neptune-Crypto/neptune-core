@@ -17,6 +17,7 @@ use neptune_mempool::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::announcement_flag::AnnouncementFlag;
 use neptune_primitives::block_selector::BlockSelector;
 use neptune_rpc_api::api::rpc::*;
 use neptune_rpc_api::model::block::header::RpcBlockHeader;
@@ -35,7 +36,6 @@ use neptune_rpc_api::model::wallet::personal_history::InitiatedTransactionOutput
 use neptune_rpc_api::model::wallet::personal_history::ReceivedTransactionOutput;
 use neptune_rpc_api::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
 use neptune_rpc_api::model::wallet::transaction::RpcPrivateNotificationData;
-use neptune_wallet::address::announcement_flag::AnnouncementFlag;
 use neptune_wallet::address::KeyType;
 use neptune_wallet::address::ReceivingAddress;
 use neptune_wallet::change_policy::ChangePolicy;
@@ -1832,6 +1832,7 @@ pub mod tests {
     use neptune_mempool::transaction_kernel_id::Txid;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::shared::NUM_TRIALS;
+    use neptune_primitives::announcement_flag::AnnouncementFlag;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
     use neptune_primitives::network::Network;
@@ -1843,7 +1844,6 @@ pub mod tests {
     use neptune_rpc_api::model::common::RpcBlockSelector;
     use neptune_rpc_api::model::message::BlockHeightsByFlagsRequest;
     use neptune_rpc_api::model::mining::template::RpcBlockTemplate;
-    use neptune_wallet::address::announcement_flag::AnnouncementFlag;
     use neptune_wallet::address::KeyType;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::Zero;
