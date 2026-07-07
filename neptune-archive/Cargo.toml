@@ -42,6 +42,7 @@ proptest = "1.7"
 proptest-arbitrary-interop = "0.1"
 rand = "0.9"
 test-strategy = "0.3"
+tracing-test = "0.2"
 
 [lints]
 workspace = true

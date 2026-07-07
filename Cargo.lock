@@ -3487,6 +3487,7 @@ dependencies = [
  "test-strategy 0.3.1",
  "tokio",
  "tracing",
+ "tracing-test",
 ]
 
 [[package]]
