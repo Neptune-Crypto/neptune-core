@@ -1,12 +1,17 @@
 //! Test-support constructors for blocks with invalid proofs.
 
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::difficulty_control::Difficulty;
+use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
+use num_traits::Zero;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::bfe;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use crate::block::block_appendix::BlockAppendix;
@@ -118,4 +123,45 @@ pub fn invalid_empty_block_with_timestamp(
     );
     let tx = BlockTransaction::upgrade(tx);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
+}
+
+/// A height-1 block with `Invalid` proof carrying the given transaction kernel,
+/// with the mutator set advanced from the given predecessor accumulator.
+pub fn invalid_block_with_kernel_and_mutator_set(
+    transaction_kernel: TransactionKernel,
+    predecessor_mutator_set: MutatorSetAccumulator,
+) -> Block {
+    let new_block_height: BlockHeight = 1u64.into();
+    let block_header = BlockHeader {
+        version: bfe!(0),
+        height: new_block_height,
+        prev_block_digest: Digest::default(),
+        timestamp: transaction_kernel.timestamp,
+        pow: Pow::default(),
+        guesser_receiver_data: GuesserReceiverData::default(),
+        cumulative_proof_of_work: ProofOfWork::zero(),
+        difficulty: Difficulty::MINIMUM,
+    };
+
+    let block_mmr = MmrAccumulator::new_from_leafs(vec![]);
+    let ms_update = MutatorSetUpdate::new(
+        transaction_kernel.inputs.clone(),
+        transaction_kernel.outputs.clone(),
+    );
+
+    let mut mutator_set = predecessor_mutator_set;
+    ms_update.apply_to_accumulator(&mut mutator_set).unwrap();
+
+    let transaction = BlockTransaction::from_tx_kernel(transaction_kernel);
+
+    let lock_free_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
+    let body = BlockBody::new(
+        transaction.kernel().clone(),
+        mutator_set,
+        lock_free_mmr_accumulator,
+        block_mmr,
+    );
+    let appendix = BlockAppendix::default();
+
+    Block::new(block_header, body, appendix, BlockProof::Invalid)
 }

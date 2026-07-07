@@ -3713,6 +3713,7 @@ dependencies = [
  "neptune-mutator-set",
  "neptune-primitives",
  "neptune-rpc-api",
+ "num-bigint",
  "num-rational",
  "num-traits",
  "priority-queue",
@@ -3723,7 +3724,9 @@ dependencies = [
  "strum",
  "tasm-lib",
  "test-strategy 0.3.1",
+ "tokio",
  "tracing",
+ "tracing-test",
 ]
 
 [[package]]

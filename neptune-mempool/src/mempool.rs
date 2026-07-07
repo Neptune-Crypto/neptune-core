@@ -17,6 +17,9 @@ pub mod merge_input_cache;
 pub mod primitive_witness_update;
 pub mod upgrade_priority;
 
+#[cfg(test)]
+mod mempool_tests;
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::RandomState;

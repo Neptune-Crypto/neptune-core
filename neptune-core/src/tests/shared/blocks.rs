@@ -1,12 +1,6 @@
 use futures::channel::oneshot;
 use itertools::Itertools;
-use neptune_consensus::block::block_appendix::BlockAppendix;
-use neptune_consensus::block::block_body::BlockBody;
-use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_transaction::BlockTransaction;
-use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
-use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
-use neptune_consensus::block::pow::Pow;
 use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
 use neptune_consensus::block::test_helpers::invalid_empty_block;
 use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
@@ -20,22 +14,17 @@ use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOption
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
 use neptune_consensus::transaction::announcement::Announcement;
-use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::Transaction;
 use neptune_mutator_set::addition_record::AdditionRecord;
-use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::shared::CHUNK_SIZE;
 use neptune_mutator_set::shared::NUM_TRIALS;
 use neptune_mutator_set::shared::WINDOW_SIZE;
-use neptune_primitives::block_height::BlockHeight;
-use neptune_primitives::difficulty_control::Difficulty;
-use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::generation_address;
@@ -43,15 +32,10 @@ use neptune_wallet::address::generation_address::GenerationReceivingAddress;
 use neptune_wallet::address::generation_address::GenerationSpendingKey;
 use neptune_wallet::address::ReceivingAddress;
 use neptune_wallet::expected_utxo::ExpectedUtxo;
-use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use tasm_lib::prelude::Digest;
-use tasm_lib::twenty_first;
-use tasm_lib::twenty_first::bfe;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::math::b_field_element::BFieldElement;
 
 use crate::api::export::GlobalStateLock;
 use crate::api::export::OutputFormat;
@@ -149,48 +133,6 @@ pub(crate) async fn block_with_puts(
     .await;
 
     block
-}
-
-/// Create an invalid block with the provided transaction kernel, using the
-/// provided mutator set as the predessor block's mutator set. Invalid block in
-/// most ways you can think of but the mutator set evolution is consistent.
-pub(crate) fn invalid_block_with_kernel_and_mutator_set(
-    transaction_kernel: TransactionKernel,
-    predecessor_mutator_set: MutatorSetAccumulator,
-) -> Block {
-    let new_block_height: BlockHeight = 1u64.into();
-    let block_header = BlockHeader {
-        version: bfe!(0),
-        height: new_block_height,
-        prev_block_digest: Digest::default(),
-        timestamp: transaction_kernel.timestamp,
-        pow: Pow::default(),
-        guesser_receiver_data: GuesserReceiverData::default(),
-        cumulative_proof_of_work: ProofOfWork::zero(),
-        difficulty: Difficulty::MINIMUM,
-    };
-
-    let block_mmr = MmrAccumulator::new_from_leafs(vec![]);
-    let ms_update = MutatorSetUpdate::new(
-        transaction_kernel.inputs.clone(),
-        transaction_kernel.outputs.clone(),
-    );
-
-    let mut mutator_set = predecessor_mutator_set;
-    ms_update.apply_to_accumulator(&mut mutator_set).unwrap();
-
-    let transaction = BlockTransaction::from_tx_kernel(transaction_kernel);
-
-    let lock_free_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
-    let body = BlockBody::new(
-        transaction.kernel().clone(),
-        mutator_set,
-        lock_free_mmr_accumulator,
-        block_mmr,
-    );
-    let appendix = BlockAppendix::default();
-
-    Block::new(block_header, body, appendix, BlockProof::Invalid)
 }
 
 /// Build a fake and invalid block where the caller can specify the

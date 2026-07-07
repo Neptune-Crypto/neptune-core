@@ -1,14 +1,24 @@
 //! Test-support constructors and proptest strategies for transactions.
 
+use itertools::Itertools;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::timestamp::Timestamp;
+use proptest::collection::vec;
+use proptest::prelude::Strategy;
+use proptest::strategy::ValueTree;
+use proptest::test_runner::TestRunner;
+use proptest_arbitrary_interop::arb;
 use tasm_lib::prelude::Digest;
+use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::twenty_first::bfe;
 
 use crate::transaction::transaction_kernel::TransactionKernelProxy;
+use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::Transaction;
 use crate::transaction::TransactionProof;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
 
 /// Make a transaction with `Invalid` transaction proof.
 pub fn make_mock_transaction(
@@ -53,6 +63,70 @@ pub fn make_mock_transaction_with_mutator_set_hash(
         mutator_set_hash,
         timestamp,
     )
+}
+
+/// `count` primitive-witness-backed transactions with expired time locks and
+/// the given timestamp.
+pub fn make_mock_txs_with_primitive_witness_with_timestamp(
+    count: usize,
+    timestamp: Timestamp,
+) -> Vec<Transaction> {
+    let mut test_runner = TestRunner::deterministic();
+    let primitive_witnesses = vec(
+        arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, timestamp),
+        count,
+    )
+    .new_tree(&mut test_runner)
+    .unwrap()
+    .current();
+
+    primitive_witnesses
+        .into_iter()
+        .map(|pw| Transaction {
+            kernel: pw.kernel.clone(),
+            proof: TransactionProof::Witness(pw),
+        })
+        .collect_vec()
+}
+
+/// `count` primitive-witness-backed transactions with expired time locks and a
+/// deterministic timestamp.
+pub fn make_plenty_mock_transaction_supported_by_primitive_witness(
+    count: usize,
+) -> Vec<Transaction> {
+    let mut test_runner = TestRunner::deterministic();
+    let deterministic_now = arb::<Timestamp>()
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
+    make_mock_txs_with_primitive_witness_with_timestamp(count, deterministic_now)
+}
+
+/// `count` transactions carrying an `Invalid` single proof.
+pub fn make_plenty_mock_transaction_supported_by_invalid_single_proofs(
+    count: usize,
+) -> Vec<Transaction> {
+    let mut sp_backeds = make_plenty_mock_transaction_supported_by_primitive_witness(count);
+    for pw_backed in &mut sp_backeds {
+        pw_backed.proof = TransactionProof::invalid();
+    }
+
+    sp_backeds
+}
+
+/// `count` transactions carrying a single proof of the given size, in bytes.
+pub fn mock_transactions_with_sized_single_proof(
+    count: usize,
+    proof_size_in_bytes: usize,
+) -> Vec<Transaction> {
+    let mut sp_backeds = make_plenty_mock_transaction_supported_by_primitive_witness(count);
+    let proof_size_in_num_bfes = proof_size_in_bytes / BFieldElement::BYTES;
+    for sp_backed in &mut sp_backeds {
+        sp_backed.proof =
+            TransactionProof::SingleProof(Proof::from(vec![bfe!(0); proof_size_in_num_bfes]));
+    }
+
+    sp_backeds
 }
 
 /// Proptest strategies producing [`TransactionKernel`]s.

@@ -1821,6 +1821,7 @@ pub mod tests {
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::transaction::announcement::Announcement;
+    use neptune_consensus::transaction::test_helpers::make_plenty_mock_transaction_supported_by_primitive_witness;
     use neptune_consensus::transaction::test_helpers::txkernel;
     use neptune_consensus::transaction::utxo::Utxo;
     use neptune_consensus::transaction::Transaction;
@@ -1862,7 +1863,6 @@ pub mod tests {
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared_tokio_runtime;
     use crate::BFieldElement;
     use crate::Block;

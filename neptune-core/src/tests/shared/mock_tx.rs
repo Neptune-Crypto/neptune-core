@@ -1,4 +1,3 @@
-use bytesize::ByteSize;
 use neptune_consensus::block::block_transaction::BlockOrRegularTransaction;
 use neptune_consensus::block::block_transaction::BlockTransaction;
 use neptune_consensus::block::Block;
@@ -26,8 +25,6 @@ use neptune_wallet::transaction_output::TxOutput;
 use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_wallet::wallet_entropy::WalletEntropy;
 use tasm_lib::prelude::Digest;
-use tasm_lib::triton_vm::prelude::BFieldElement;
-use tasm_lib::twenty_first::bfe;
 
 use crate::api::export::InputSelectionPriority;
 use crate::api::export::OutputFormat;
@@ -38,38 +35,6 @@ use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::state::GlobalStateLock;
 use crate::state::StateLock;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
-
-pub mod testrunning;
-
-pub(crate) fn make_plenty_mock_transaction_supported_by_invalid_single_proofs(
-    count: usize,
-) -> Vec<Transaction> {
-    let mut sp_backeds =
-        testrunning::make_plenty_mock_transaction_supported_by_primitive_witness(count);
-    for pw_backed in &mut sp_backeds {
-        pw_backed.proof = TransactionProof::invalid();
-    }
-
-    sp_backeds
-}
-
-/// Return a list of transactions backed by invalid single proofs where each
-/// single proof has a specified size.
-pub(crate) fn mock_transactions_with_sized_single_proof(
-    count: usize,
-    proof_size: ByteSize,
-) -> Vec<Transaction> {
-    let mut sp_backeds =
-        testrunning::make_plenty_mock_transaction_supported_by_primitive_witness(count);
-    let proof_size_in_bytes: usize = proof_size.as_u64().try_into().unwrap();
-    let proof_size_in_num_bfes = proof_size_in_bytes / BFieldElement::BYTES;
-    for sp_backed in &mut sp_backeds {
-        sp_backed.proof =
-            TransactionProof::SingleProof(Proof::from(vec![bfe!(0); proof_size_in_num_bfes]));
-    }
-
-    sp_backeds
-}
 
 /// A SingleProof-backed transaction with no inputs or outputs
 pub(crate) fn invalid_empty_single_proof_transaction() -> Transaction {

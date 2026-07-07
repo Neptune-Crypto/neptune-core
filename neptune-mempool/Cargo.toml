@@ -53,6 +53,7 @@ tasm-lib = "7.0.0"
 tracing = "0.1"
 
 [dev-dependencies]
+num-bigint = { version = "0.4", features = ["serde"] }
 bincode = "1.3"
 macro_rules_attr = "0.1.3"
 neptune-consensus = { version = "0.12.0", path = "../neptune-consensus", features = ["test-helpers"] }
@@ -63,6 +64,8 @@ proptest = "1.7"
 proptest-arbitrary-interop = "0.1"
 rand = "0.9"
 test-strategy = "0.3"
+tokio = { version = "1.47", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+tracing-test = "0.2"
 
 [lints]
 workspace = true
