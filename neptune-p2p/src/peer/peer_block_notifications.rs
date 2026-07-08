@@ -27,7 +27,8 @@ impl From<&Block> for PeerBlockNotification {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neptune_consensus::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
+    use neptune_consensus::block::Block;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
     use neptune_primitives::network::Network;
 
     use super::PeerBlockNotification;
@@ -35,9 +36,9 @@ mod tests {
     #[test]
     fn block_notification_hash_matches_block_hash() {
         let network = Network::Main;
-        let witness = deterministic_block_primitive_witness(network);
-        let a_block = witness.predecessor_block();
-        let as_notification: PeerBlockNotification = a_block.into();
+        let genesis = Block::genesis(network);
+        let a_block = invalid_empty_block_with_proof_size(&genesis, network, 84);
+        let as_notification: PeerBlockNotification = (&a_block).into();
         assert_eq!(
             a_block.hash(),
             as_notification.hash,
