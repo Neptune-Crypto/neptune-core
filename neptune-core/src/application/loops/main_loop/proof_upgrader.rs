@@ -971,6 +971,7 @@ mod tests {
     use std::collections::HashSet;
 
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
     use neptune_consensus::block::Block;
     use neptune_mempool::upgrade_priority::UpgradePriority;
@@ -1030,6 +1031,88 @@ mod tests {
             .unwrap();
 
         tx.transaction
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn updates_after_foreign_raise() {
+        // Verify that Bob has an interest in updating Alice's transaction
+        // after having raised it, as he collected fees when raising the
+        // transaction.
+        let network = Network::RegTest;
+
+        let cli_args = cli_args::Args {
+            min_gobbling_fee: NativeCurrencyAmount::from_nau(5),
+            network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            gobbling_fraction: 1.0,
+            ..Default::default()
+        };
+
+        let mut alice =
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args.clone()).await;
+        let pc_fee = NativeCurrencyAmount::coins(1);
+        let px_tx_for_raise = transaction_from_state(
+            alice.clone(),
+            512777439428,
+            TxProvingCapability::ProofCollection,
+            pc_fee,
+        )
+        .await;
+        alice
+            .lock_guard_mut()
+            .await
+            .mempool_insert(px_tx_for_raise.clone().into(), UpgradePriority::Critical)
+            .await;
+
+        let mut bob =
+            mock_genesis_global_state(2, WalletEntropy::new_random(), cli_args.clone()).await;
+        let job = {
+            let mut bob = bob.lock_guard_mut().await;
+            bob.mempool_insert(px_tx_for_raise.clone().into(), UpgradePriority::Irrelevant)
+                .await;
+
+            get_upgrade_task_from_mempool(&mut bob).await.unwrap()
+        };
+
+        assert!(
+            matches!(job, UpgradeJob::ProofCollectionToSingleProof(_)),
+            "Expected proof-collection to single-proof job"
+        );
+
+        let (main_to_peer_tx, main_to_peer_rx) =
+            broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+        job.handle_upgrade(
+            TritonVmJobQueue::get_instance(),
+            bob.clone(),
+            main_to_peer_tx,
+        )
+        .await;
+
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+        bob.set_new_tip(block1.clone()).await.unwrap();
+
+        let mut bob = bob.lock_guard_mut().await;
+        let new_job = get_upgrade_task_from_mempool(&mut bob).await.unwrap();
+
+        let UpgradeJob::UpdateMutatorSetData(new_job) = new_job else {
+            panic!("Expected ms-update job");
+        };
+
+        assert_eq!(
+            UpgradeIncentive::BalanceAffecting(pc_fee),
+            new_job.upgrade_incentive,
+            "Upgrade incentive must match gobbled fee"
+        );
+        assert!(
+            new_job
+                .upgrade_incentive
+                .upgrade_is_worth_it(bob.min_gobbling_fee()),
+            "Update must be worthy after successful raise"
+        );
+
+        drop(main_to_peer_rx);
     }
 
     #[traced_test]
