@@ -561,7 +561,7 @@ pub trait RPC {
     /// [`AnnouncementFlag`]s in more than
     /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST] blocks.
     ///
-    /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: neptune_archive::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
+    /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: neptune_archive::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
     async fn block_heights_by_announcement_flags(
         token: auth::Token,
         announcement_flags: Vec<AnnouncementFlag>,

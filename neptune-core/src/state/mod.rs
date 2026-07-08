@@ -56,12 +56,12 @@ use neptune_database::storage::storage_vec::traits::*;
 use neptune_locks::tokio as sync_tokio;
 use neptune_locks::tokio::AtomicRwReadGuard;
 use neptune_locks::tokio::AtomicRwWriteGuard;
-use neptune_mempool::mempool::mempool_update_job::MempoolUpdateJob;
-use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
 use neptune_mempool::mempool::Mempool;
+use neptune_mempool::mempool_update_job::MempoolUpdateJob;
 use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_mempool::upgrade_incentive::UpgradeIncentive;
+use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::RemovalRecord;
@@ -3649,7 +3649,7 @@ mod tests {
         /// the specific kind of rescan that they want, not use a catch-all,
         /// since all these functions can be somewhat slow.
         ///
-        /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: neptune_archive::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
+        /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: neptune_archive::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
         pub(crate) async fn rescan_announced_incoming_from_flag_index(
             &mut self,
             keys: Vec<SpendingKey>,

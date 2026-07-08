@@ -1,7 +1,7 @@
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 
-use crate::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
+use crate::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::transaction_kernel_id::TransactionKernelId;
 use crate::transaction_kernel_id::Txid;
 

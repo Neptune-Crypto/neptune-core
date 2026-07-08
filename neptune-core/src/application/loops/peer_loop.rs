@@ -2388,7 +2388,7 @@ mod tests {
     use macro_rules_attr::apply;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+    use neptune_mempool::upgrade_priority::UpgradePriority;
     use neptune_p2p::peer::peer_block_notifications::PeerBlockNotification;
     use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
     use neptune_p2p::peer::transaction_notification::TransactionNotification;

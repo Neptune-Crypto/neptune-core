@@ -23,11 +23,11 @@ use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
-use neptune_mempool::mempool::mempool_update_job::MempoolUpdateJob;
-use neptune_mempool::mempool::mempool_update_job_result::MempoolUpdateJobResult;
-use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+use neptune_mempool::mempool_update_job::MempoolUpdateJob;
+use neptune_mempool::mempool_update_job_result::MempoolUpdateJobResult;
 use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::upgrade_incentive::UpgradeIncentive;
+use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_p2p::peer::handshake_data::HandshakeData;
 use neptune_p2p::peer::peer_info::PeerInfo;
 use neptune_p2p::peer::transaction_notification::TransactionNotification;

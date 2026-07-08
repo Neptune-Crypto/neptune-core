@@ -9,25 +9,6 @@ use anyhow::bail;
 use anyhow::ensure;
 use itertools::Itertools;
 use memmap2::MmapOptions;
-use num_traits::CheckedSub;
-use num_traits::Zero;
-use tasm_lib::prelude::Tip5;
-use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::twenty_first::bfe_array;
-use tasm_lib::twenty_first::prelude::Mmr;
-use tasm_lib::twenty_first::tip5::digest::Digest;
-use tokio::io::AsyncSeekExt;
-use tokio::io::AsyncWriteExt;
-use tokio::io::SeekFrom;
-use tracing::debug;
-#[cfg(any(test, feature = "test-helpers"))]
-use tracing::error;
-use tracing::info;
-use tracing::warn;
-
-pub mod import_blocks_from_files;
-pub mod rusty_utxo_index;
-
 use neptune_consensus::block::Block;
 use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
 use neptune_consensus::block::PREMINE_MAX_SIZE;
@@ -59,9 +40,23 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use neptune_primitives::data_directory::DataDirectory;
 use neptune_primitives::network::Network;
+use num_traits::CheckedSub;
+use num_traits::Zero;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::twenty_first::bfe_array;
+use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::tip5::digest::Digest;
+use tokio::io::AsyncSeekExt;
+use tokio::io::AsyncWriteExt;
+use tokio::io::SeekFrom;
+use tracing::debug;
+#[cfg(any(test, feature = "test-helpers"))]
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 
-use crate::archival_state::rusty_utxo_index::RustyUtxoIndex;
 use crate::block_index::BlockFileLocation;
 use crate::block_index::BlockIndexKey;
 use crate::block_index::BlockIndexValue;
@@ -69,6 +64,7 @@ use crate::block_index::BlockRecord;
 use crate::block_index::FileRecord;
 use crate::block_index::LastFileRecord;
 use crate::rusty_archival_block_mmr::RustyArchivalBlockMmr;
+use crate::rusty_utxo_index::RustyUtxoIndex;
 use crate::shared::new_block_file_is_needed;
 
 /// Provides interface to historic blockchain data which consists of
@@ -4633,7 +4629,7 @@ mod tests {
         use tasm_lib::twenty_first::bfe_vec;
 
         use super::*;
-        use crate::archival_state::rusty_utxo_index::*;
+        use crate::rusty_utxo_index::*;
 
         async fn test_utxo_index(network: Network) -> RustyUtxoIndex {
             let data_dir = super::unit_test_data_directory(network).unwrap();

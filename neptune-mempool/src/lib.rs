@@ -5,7 +5,7 @@
 //!
 //! - [`transaction_kernel_id`] — the `TransactionKernelId`/`Txid` identifiers
 //!   used to key transactions in the mempool.
-//! - [`upgrade_incentive`] and [`mempool::upgrade_priority`] — the priority
+//! - [`upgrade_incentive`] and [`upgrade_priority`] — the priority
 //!   model that decides which transactions are worth proof-upgrading.
 //! - [`transaction_proof_quality`] — the node-level proof-quality policy used
 //!   for mempool replacement and peer gossip.
@@ -17,10 +17,16 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod mempool;
+pub mod mempool_event;
+pub mod mempool_update_job;
+pub mod mempool_update_job_result;
+pub mod merge_input_cache;
+pub mod primitive_witness_update;
 pub mod transaction_kernel_id;
 pub mod transaction_proof_quality;
 pub mod tx_upgrade_filter;
 pub mod upgrade_incentive;
+pub mod upgrade_priority;
 
 /// Test-only helpers. Mirrors the per-crate `shared_tokio_runtime` macro,
 /// delegating to the shared runtime in `neptune-consensus` so async tests can

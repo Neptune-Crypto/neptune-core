@@ -10,13 +10,6 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
-pub mod mempool_event;
-pub mod mempool_update_job;
-pub mod mempool_update_job_result;
-pub mod merge_input_cache;
-pub mod primitive_witness_update;
-pub mod upgrade_priority;
-
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::RandomState;
@@ -66,17 +59,17 @@ use tracing::debug;
 use tracing::error;
 use tracing::warn;
 
-use crate::mempool::mempool_event::MempoolEvent;
-use crate::mempool::mempool_update_job::MempoolUpdateJob;
-use crate::mempool::merge_input_cache::MergeInputCache;
-use crate::mempool::merge_input_cache::MergeInputCacheElement;
-use crate::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
-use crate::mempool::upgrade_priority::UpgradePriority;
+use crate::mempool_event::MempoolEvent;
+use crate::mempool_update_job::MempoolUpdateJob;
+use crate::merge_input_cache::MergeInputCache;
+use crate::merge_input_cache::MergeInputCacheElement;
+use crate::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::transaction_kernel_id::TransactionKernelId;
 use crate::transaction_kernel_id::Txid;
 use crate::transaction_proof_quality::TransactionProofQuality;
 use crate::transaction_proof_quality::TransactionProofQualityExt;
 use crate::tx_upgrade_filter::TxUpgradeFilter;
+use crate::upgrade_priority::UpgradePriority;
 
 /// Transactions with a timestamp older than this are removed from the mempool.
 pub const MEMPOOL_TX_THRESHOLD_AGE: Timestamp = Timestamp::hours(10);
@@ -1537,12 +1530,12 @@ mod tests {
     use tracing_test::traced_test;
 
     use crate::mempool::Mempool;
-    use crate::mempool::mempool_event::MempoolEvent;
-    use crate::mempool::upgrade_priority::UpgradePriority;
+    use crate::mempool_event::MempoolEvent;
     use crate::test_utils::shared_tokio_runtime;
     use crate::transaction_kernel_id::Txid;
     use crate::transaction_proof_quality::TransactionProofQualityExt;
     use crate::tx_upgrade_filter::TxUpgradeFilter;
+    use crate::upgrade_priority::UpgradePriority;
 
     const SIZE_20MB_IN_BYTES: usize = 20_000_000;
 

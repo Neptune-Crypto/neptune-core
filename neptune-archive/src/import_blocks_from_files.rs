@@ -10,7 +10,7 @@ use neptune_primitives::data_directory::BLOCK_FILENAME_EXTENSION;
 use neptune_primitives::data_directory::BLOCK_FILENAME_PREFIX;
 use regex::Regex;
 
-use super::ArchivalState;
+use crate::archival_state::ArchivalState;
 
 impl ArchivalState {
     /// Return a list of file names found in a directory, unsorted.

@@ -6,9 +6,9 @@ use get_size2::GetSize;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 
-use crate::mempool::upgrade_priority::UpgradePriority;
 use crate::transaction_kernel_id::TransactionKernelId;
 use crate::transaction_kernel_id::Txid;
+use crate::upgrade_priority::UpgradePriority;
 
 /// A transaction that was input to a merge of two transactions. In other words:
 /// either a or b in the operation merge(a, b) -> c, where a, b, and c are all

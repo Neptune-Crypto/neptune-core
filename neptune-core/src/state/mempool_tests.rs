@@ -21,14 +21,14 @@ mod tests {
     use neptune_consensus::transaction::Transaction;
     use neptune_consensus::transaction::TransactionProof;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use neptune_mempool::mempool::mempool_event::MempoolEvent;
-    use neptune_mempool::mempool::mempool_update_job::MempoolUpdateJob;
-    use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
     use neptune_mempool::mempool::Mempool;
+    use neptune_mempool::mempool_event::MempoolEvent;
+    use neptune_mempool::mempool_update_job::MempoolUpdateJob;
     use neptune_mempool::transaction_kernel_id::Txid;
     use neptune_mempool::transaction_proof_quality::TransactionProofQualityExt;
     use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
     use neptune_mempool::upgrade_incentive::UpgradeIncentive;
+    use neptune_mempool::upgrade_priority::UpgradePriority;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::network::Network;

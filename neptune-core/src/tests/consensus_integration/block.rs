@@ -18,7 +18,7 @@ use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;
 use neptune_database::NeptuneLevelDb;
-use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_primitives::difficulty_control::difficulty_control;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;

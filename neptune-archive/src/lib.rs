@@ -13,7 +13,9 @@
 
 pub mod archival_state;
 pub mod block_index;
+pub mod import_blocks_from_files;
 pub mod rusty_archival_block_mmr;
+pub mod rusty_utxo_index;
 pub mod shared;
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ use neptune_database::storage::storage_schema::RustyKey;
 use neptune_database::storage::storage_schema::RustyValue;
 use neptune_database::storage::storage_vec::traits::*;
 use neptune_database::NeptuneLevelDb;
-use neptune_mempool::mempool::mempool_event::MempoolEvent;
+use neptune_mempool::mempool_event::MempoolEvent;
 use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mutator_set::addition_record::AdditionRecord;
@@ -3510,7 +3510,7 @@ pub(crate) mod tests {
     mod wallet_balance {
         use generation_address::GenerationReceivingAddress;
         use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
-        use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+        use neptune_mempool::upgrade_priority::UpgradePriority;
         use neptune_primitives::block_height::BlockHeight;
         use neptune_wallet::address::ReceivingAddress;
         use neptune_wallet::utxo_notification::UtxoNotificationMedium;

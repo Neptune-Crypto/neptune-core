@@ -72,7 +72,7 @@ mod tests {
         use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
         use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
         use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-        use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+        use neptune_mempool::upgrade_priority::UpgradePriority;
         use neptune_primitives::network::Network;
         use neptune_primitives::timestamp::Timestamp;
         use neptune_wallet::address::elliptic_curve_hybrid::EcHybridAddress;
@@ -1254,7 +1254,7 @@ mod tests {
     mod wallet_balance {
         use std::collections::HashMap;
 
-        use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
+        use neptune_mempool::upgrade_priority::UpgradePriority;
         use neptune_wallet::address::generation_address::GenerationReceivingAddress;
 
         use super::*;

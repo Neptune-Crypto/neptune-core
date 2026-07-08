@@ -1828,8 +1828,8 @@ pub mod tests {
     use neptune_consensus::transaction::Transaction;
     use neptune_consensus::transaction::TransactionProof;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use neptune_mempool::mempool::upgrade_priority::UpgradePriority;
     use neptune_mempool::transaction_kernel_id::Txid;
+    use neptune_mempool::upgrade_priority::UpgradePriority;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::shared::NUM_TRIALS;
     use neptune_primitives::announcement_flag::AnnouncementFlag;
