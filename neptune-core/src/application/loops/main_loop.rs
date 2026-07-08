@@ -2947,6 +2947,7 @@ mod tests {
 
                 assert_eq!(1, update_jobs.len(), "Must return 1 job for MS-updating");
 
+                let original_outputs = tx.kernel.outputs.clone();
                 let (update_sender, mut update_receiver) =
                     mpsc::channel::<Vec<MempoolUpdateJobResult>>(TX_UPDATER_CHANNEL_CAPACITY);
                 MainLoopHandler::update_mempool_jobs(
@@ -2972,18 +2973,19 @@ mod tests {
                 // b) that peers were informed of the new transaction, if the
                 //    transaction is shareable, i.e. is not only backed by a
                 //    primitive witness.
+                // c) tx-outputs are unchanged by tx-update
                 let txid = tx.txid();
                 let block1_msa = block1.mutator_set_accumulator_after().unwrap();
+                let new_tx = main_loop_handler
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .mempool()
+                    .get(txid)
+                    .unwrap()
+                    .clone();
                 assert!(
-                    main_loop_handler
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .mempool()
-                        .get(txid)
-                        .unwrap()
-                        .clone()
-                        .is_confirmable_relative_to(&block1_msa),
+                    new_tx.is_confirmable_relative_to(&block1_msa),
                     "transaction must be updatable"
                 );
 
@@ -2995,6 +2997,13 @@ mod tests {
                     assert_eq!(txid, tx_notification.txid);
                     assert_eq!(block1_msa.hash(), tx_notification.mutator_set_hash);
                 }
+
+                let new_outputs = new_tx.kernel.outputs.clone();
+                assert_eq!(
+                    original_outputs, new_outputs,
+                    "Ouputs must be unchanged as a result of an update. \
+                    Otherwise output tracking is compromised."
+                );
             }
         }
     }
