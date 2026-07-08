@@ -6,12 +6,48 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use itertools::Itertools;
-use serde::Deserialize;
-use serde::Serialize;
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::Block;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_database::storage::storage_schema::DbtVec;
+use neptune_database::storage::storage_schema::RustyKey;
+use neptune_database::storage::storage_schema::RustyValue;
+use neptune_database::storage::storage_vec::traits::*;
+use neptune_database::NeptuneLevelDb;
+use neptune_mempool::mempool_event::MempoolEvent;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::elliptic_curve_hybrid;
+use neptune_wallet::address::generation_address;
+use neptune_wallet::address::symmetric_key;
+use neptune_wallet::address::viewing_address;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
+use neptune_wallet::composer_parameters::ComposerParameters;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
+use neptune_wallet::incoming_utxo::IncomingUtxo;
+use neptune_wallet::incoming_utxo::IncomingUtxoRecoveryData;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::transaction_output::UtxoUnlocker;
+use neptune_wallet::wallet_entropy::WalletEntropy;
+use neptune_wallet::wallet_file::WalletFileContext;
 use strum::IntoEnumIterator;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Tip5;
-use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::fs::OpenOptions;
@@ -24,59 +60,22 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
-use super::address::generation_address;
-use super::address::symmetric_key;
-use super::address::KeyType;
-use super::address::SpendingKey;
-use super::expected_utxo::ExpectedUtxo;
-use super::expected_utxo::UtxoNotifier;
-use super::incoming_utxo::IncomingUtxo;
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::sent_transaction::SentTransaction;
 use super::wallet_configuration::WalletConfiguration;
-use super::wallet_entropy::WalletEntropy;
-use super::wallet_file::WalletFileContext;
 use super::wallet_status::WalletStatus;
-use crate::api::export::UtxoTriple;
 use crate::application::config::cli_args::Args;
-use crate::application::config::data_directory::DataDirectory;
-use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-use crate::application::database::storage::storage_schema::DbtVec;
-use crate::application::database::storage::storage_schema::RustyKey;
-use crate::application::database::storage::storage_schema::RustyValue;
-use crate::application::database::storage::storage_vec::traits::*;
-use crate::application::database::NeptuneLevelDb;
 use crate::application::loops::channel::ClaimUtxoData;
-use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
-use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::mempool::mempool_event::MempoolEvent;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::utxo_validitor::UtxoValidator;
-use crate::state::wallet::address::elliptic_curve_hybrid;
-use crate::state::wallet::address::viewing_address;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::rusty_wallet_database::WalletDbConnectError;
-use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::wallet_status::IncomingMempoolUtxo;
 use crate::state::wallet::wallet_status::OutgoingMempoolUtxo;
 use crate::state::wallet::wallet_status::SyncedUtxo;
 use crate::state::wallet::wallet_status::UnsyncedUtxo;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 const CHANGE_KEY_TYPE: KeyType = KeyType::ViewingAddress;
 
@@ -109,23 +108,6 @@ pub struct WalletState {
 
     /// Tunable options for configuring how the wallet state operates.
     pub(crate) configuration: WalletConfiguration,
-}
-
-/// Contains the cryptographic (non-public) data that is needed to recover the mutator set
-/// membership proof of a UTXO.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
-pub struct IncomingUtxoRecoveryData {
-    pub utxo: Utxo,
-    pub sender_randomness: Digest,
-    pub receiver_preimage: Digest,
-    pub aocl_index: u64,
-}
-
-impl IncomingUtxoRecoveryData {
-    pub(crate) fn addition_record(&self) -> AdditionRecord {
-        let item = Tip5::hash(&self.utxo);
-        commit(item, self.sender_randomness, self.receiver_preimage.hash())
-    }
 }
 
 impl From<&MonitoredUtxo> for IncomingUtxoRecoveryData {
@@ -435,7 +417,7 @@ impl WalletState {
     }
 
     async fn open_wallet_db(path: &Path) -> anyhow::Result<NeptuneLevelDb<RustyKey, RustyValue>> {
-        NeptuneLevelDb::new(path, &crate::application::database::create_db_if_missing())
+        NeptuneLevelDb::new(path, &neptune_database::create_db_if_missing())
             .await
             .map_err(|e| anyhow::anyhow!("Failed to open wallet db at '{}': {}", path.display(), e))
     }
@@ -1071,6 +1053,7 @@ impl WalletState {
                 self.get_future_viewing_address_keys(num_future_keys)
                     .map(|(i, key)| (i, SpendingKey::from(key))),
             ),
+            _ => unimplemented!(),
         }
     }
 
@@ -1088,6 +1071,7 @@ impl WalletState {
             KeyType::Symmetric => Box::new(self.get_known_symmetric_keys()),
             KeyType::EcHybrid => Box::new(self.get_known_ec_hybrid_keys()),
             KeyType::ViewingAddress => Box::new(self.get_known_viewing_address_keys()),
+            _ => unimplemented!(),
         }
     }
 
@@ -1136,6 +1120,7 @@ impl WalletState {
             KeyType::Symmetric => self.next_unused_symmetric_key().await.into(),
             KeyType::EcHybrid => self.next_unused_ec_hybrid_key().await.into(),
             KeyType::ViewingAddress => self.next_unused_viewing_address_key().await.into(),
+            _ => unimplemented!(),
         }
     }
 
@@ -1192,6 +1177,7 @@ impl WalletState {
                         self.known_viewing_address_keys.push(key);
                     }
                 }
+                _ => unimplemented!(),
             }
         }
     }
@@ -1203,6 +1189,7 @@ impl WalletState {
             KeyType::Symmetric => self.wallet_db.get_symmetric_key_counter(),
             KeyType::EcHybrid => self.wallet_db.get_ec_hybrid_key_counter(),
             KeyType::ViewingAddress => self.wallet_db.get_viewing_address_key_counter(),
+            _ => unimplemented!(),
         }
     }
 
@@ -1366,7 +1353,7 @@ impl WalletState {
         let Some(scan_mode_configuration) = &self.configuration.scan_mode else {
             return Vec::new();
         };
-        if !scan_mode_configuration.block_is_in_range(new_block) {
+        if !scan_mode_configuration.block_height_is_in_range(new_block.header().height) {
             return Vec::new();
         }
 
@@ -2218,6 +2205,13 @@ impl WalletState {
     }
 }
 
+impl UtxoUnlocker for WalletState {
+    fn can_unlock(&self, utxo: &Utxo) -> bool {
+        // resolves to the inherent method above (inherent wins over trait)
+        self.can_unlock(utxo)
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
@@ -2225,6 +2219,21 @@ pub(crate) mod tests {
 
     use generation_address::GenerationSpendingKey;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+    use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use neptune_consensus::transaction::utxo::Coin;
+    use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+    use neptune_consensus::transaction::Transaction;
+    use neptune_primitives::network::Network;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::expected_utxo::ExpectedUtxo;
+    use neptune_wallet::mock_block::make_mock_block;
+    use neptune_wallet::mock_block::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
+    use neptune_wallet::transaction_output::TxOutput;
+    use neptune_wallet::utxo_notification::UtxoNotificationMedium;
     use num_traits::Zero;
     use rand::prelude::*;
     use rand::random;
@@ -2233,25 +2242,10 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::Transaction;
     use crate::api::tx_initiation::initiator::TransactionInitiator;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::protocol::consensus::transaction::utxo::Coin;
-    use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::expected_utxo::ExpectedUtxo;
-    use crate::state::wallet::transaction_output::TxOutput;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::GlobalStateLock;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
-    use crate::tests::shared::blocks::make_mock_block;
-    use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
@@ -2425,8 +2419,7 @@ pub(crate) mod tests {
             alice_key,
             Default::default(),
             network,
-        )
-        .await;
+        );
 
         {
             let mut alice = alice.lock_guard_mut().await;
@@ -2472,8 +2465,7 @@ pub(crate) mod tests {
             bob_key,
             rng.random(),
             network,
-        )
-        .await;
+        );
 
         bob_global_lock
             .set_new_self_composed_tip(block1.clone(), composer_fee_eutxos)
@@ -2520,8 +2512,8 @@ pub(crate) mod tests {
         let config2 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-        let block_height_1 = block1.header().height;
-        let consensus_rule_set_1 = ConsensusRuleSet::infer_from(network, block_height_1);
+        let consensus_rule_set_2 =
+            ConsensusRuleSet::infer_from(network, block1.header().height.next());
         let tx_block2 = bob
             .api()
             .tx_initiator_internal()
@@ -2530,7 +2522,7 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
                 config2,
-                consensus_rule_set_1,
+                consensus_rule_set_2,
             )
             .await
             .unwrap()
@@ -2567,7 +2559,8 @@ pub(crate) mod tests {
         let config3 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-        let consensus_rule_set_2 = ConsensusRuleSet::infer_from(network, block2.header().height);
+        let consensus_rule_set_3 =
+            ConsensusRuleSet::infer_from(network, block2.header().height.next());
         let tx_block3 = bob
             .api()
             .tx_initiator_internal()
@@ -2576,7 +2569,7 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(22),
                 config3,
-                consensus_rule_set_2,
+                consensus_rule_set_3,
             )
             .await
             .unwrap()
@@ -2836,8 +2829,7 @@ pub(crate) mod tests {
                 mock_block_seed,
                 (guesser_fraction, bob_key.to_address().into()),
                 network,
-            )
-            .await;
+            );
 
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let mutxos_1a = bob.wallet_state.wallet_db.monitored_utxos().get_all().await;
@@ -2871,8 +2863,7 @@ pub(crate) mod tests {
                 mock_block_seed,
                 (guesser_fraction, random_address.into()),
                 network,
-            )
-            .await;
+            );
         assert_ne!(
             block_1a.header().guesser_receiver_data,
             block_1b.header().guesser_receiver_data,
@@ -2945,7 +2936,7 @@ pub(crate) mod tests {
 
         let genesis_block = Block::genesis(network);
         let (block1, composer_utxos) =
-            make_mock_block(&genesis_block, None, bob_key, rng.random(), network).await;
+            make_mock_block(&genesis_block, None, bob_key, rng.random(), network);
 
         bob.wallet_state.add_expected_utxos(composer_utxos).await;
         assert!(
@@ -3052,7 +3043,7 @@ pub(crate) mod tests {
         let maintain_mps = true;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo) =
-                make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
+                make_mock_block(&latest_block, None, alice_key, rng.random(), network);
             bob.wallet_state
                 .update_wallet_state_with_new_block(
                     &latest_block.mutator_set_accumulator_after().unwrap(),
@@ -3085,8 +3076,7 @@ pub(crate) mod tests {
             bob_spending_key,
             rng.random(),
             network,
-        )
-        .await;
+        );
         bob.wallet_state
             .add_expected_utxos(composer_expected_utxos_3a)
             .await;
@@ -3115,7 +3105,7 @@ pub(crate) mod tests {
 
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_exp) =
-            make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
+            make_mock_block(&latest_block, None, alice_key, rng.random(), network);
         bob.set_new_tip(block_3b.clone()).await.unwrap();
 
         assert!(
@@ -3139,7 +3129,7 @@ pub(crate) mod tests {
         latest_block = block_3b;
         for _ in 4..=11 {
             let (new_block, _new_block_exp) =
-                make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
+                make_mock_block(&latest_block, None, alice_key, rng.random(), network);
             bob.set_new_tip(new_block.clone()).await.unwrap();
 
             latest_block = new_block;
@@ -3163,8 +3153,7 @@ pub(crate) mod tests {
         );
 
         // Mine *one* more block. Verify that MUTXO is pruned
-        let (block_12, _) =
-            make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
+        let (block_12, _) = make_mock_block(&latest_block, None, alice_key, rng.random(), network);
         bob.set_new_tip(block_12.clone()).await.unwrap();
 
         assert!(
@@ -3249,15 +3238,15 @@ pub(crate) mod tests {
     mod guesser_fee_utxos {
         use futures::channel::oneshot;
         use guesser_fee_utxos::composer_parameters::ComposerParameters;
+        use neptune_consensus::transaction::TransactionProof;
+        use neptune_wallet::composer_parameters;
+        use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
         use rand::rng;
 
         use super::*;
-        use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::channel::NewBlockFound;
-        use crate::application::loops::mine_loop::composer_parameters;
         use crate::application::loops::mine_loop::guess_nonce;
         use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
-        use crate::protocol::consensus::transaction::TransactionProof;
         use crate::tests::shared::blocks::fake_valid_block_proposal_from_tx;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
         use crate::tests::shared::fake_create_block_transaction_for_tests;
@@ -3265,7 +3254,7 @@ pub(crate) mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn registers_guesser_fee_utxos_correctly() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let genesis_block = Block::genesis(network);
             let mut bob = mock_genesis_global_state(
                 3,
@@ -3494,11 +3483,11 @@ pub(crate) mod tests {
             let composer_key = wallet_state.wallet_entropy.nth_generation_spending_key(0);
             let genesis_block = Block::genesis(network);
             let (mut incoming_block, _) =
-                make_mock_block(&genesis_block, None, composer_key, rng.random(), network).await;
+                make_mock_block(&genesis_block, None, composer_key, rng.random(), network);
 
             // other guesser -> no detection
             let rando = GenerationReceivingAddress::derive_from_seed(rng.random());
-            incoming_block.set_header_guesser_address(rando.into());
+            incoming_block.set_header_guesser_data(rando.into());
             assert_eq!(
                 0,
                 wallet_state
@@ -3508,7 +3497,7 @@ pub(crate) mod tests {
 
             // our lucky guess -> guesser fees detected
             let own = wallet_state.wallet_entropy.guesser_fee_key().to_address();
-            incoming_block.set_header_guesser_address(own.into());
+            incoming_block.set_header_guesser_data(own.into());
             assert_eq!(
                 2,
                 wallet_state
@@ -3520,17 +3509,17 @@ pub(crate) mod tests {
 
     mod wallet_balance {
         use generation_address::GenerationReceivingAddress;
+        use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+        use neptune_mempool::upgrade_priority::UpgradePriority;
+        use neptune_primitives::block_height::BlockHeight;
+        use neptune_wallet::address::ReceivingAddress;
+        use neptune_wallet::utxo_notification::UtxoNotificationMedium;
         use num_traits::CheckedSub;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
 
         use super::*;
         use crate::application::config::cli_args;
-        use crate::protocol::consensus::block::block_height::BlockHeight;
-        use crate::state::mempool::upgrade_priority::UpgradePriority;
-        use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-        use crate::state::wallet::address::ReceivingAddress;
-        use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         /// basic test for confirmed and unconfirmed balance.
@@ -3545,7 +3534,7 @@ pub(crate) mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn confirmed_and_unconfirmed_balance() -> Result<()> {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(664505904);
             let mut global_state_lock = mock_genesis_global_state(
                 0,
@@ -3603,6 +3592,7 @@ pub(crate) mod tests {
 
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key)
+                    .with_network(network)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 let consensus_rule_set =
                     ConsensusRuleSet::infer_from(network, BlockHeight::genesis().next());
@@ -3699,8 +3689,7 @@ pub(crate) mod tests {
                     rng.random(),
                     (guesser_fraction, guesser_address.into()),
                     network,
-                )
-                .await;
+                );
 
             // Alice gets all mining rewards
             alice
@@ -3851,8 +3840,9 @@ pub(crate) mod tests {
         }
 
         mod worker {
+            use neptune_database::storage::storage_schema::traits::StorageWriter;
+
             use super::*;
-            use crate::application::database::storage::storage_schema::traits::StorageWriter;
             use crate::tests::shared::files::unit_test_data_directory;
 
             /// tests that all known keys are unique for a given key-type
@@ -3979,10 +3969,11 @@ pub(crate) mod tests {
     }
 
     mod expected_utxos {
+        use neptune_consensus::transaction::lock_script::LockScript;
+        use neptune_consensus::transaction::test_helpers::make_mock_transaction;
+        use neptune_wallet::coinbase_distribution::CoinbaseOutput;
+
         use super::*;
-        use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
-        use crate::protocol::consensus::transaction::lock_script::LockScript;
-        use crate::tests::shared::mock_tx::make_mock_transaction;
 
         #[apply(shared_tokio_runtime)]
         async fn no_expected_utxos_on_custom_coinbase_distribution_and_offchain_notifications() {
@@ -4170,8 +4161,9 @@ pub(crate) mod tests {
         }
 
         mod worker {
+            use neptune_database::storage::storage_schema::traits::StorageWriter;
+
             use super::*;
-            use crate::application::database::storage::storage_schema::traits::StorageWriter;
             use crate::tests::shared::files::unit_test_data_directory;
 
             /// implements a test with 2 variations via `persist` param.
@@ -4258,8 +4250,9 @@ pub(crate) mod tests {
 
     /// Test wallet state's handling of UTXOs abandoned due to reorganization.
     mod abandoned_mutxos {
+        use neptune_consensus::block::test_helpers::invalid_empty_block;
+
         use super::*;
-        use crate::tests::shared::blocks::invalid_empty_block;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -4411,8 +4404,7 @@ pub(crate) mod tests {
                     rng.random(),
                     (guesser_fraction, guesser_address.into()),
                     network,
-                )
-                .await;
+                );
 
             alice_global_lock
                 .set_new_self_composed_tip(block_1a.clone(), composer_expected_utxos_1a)
@@ -4455,17 +4447,17 @@ pub(crate) mod tests {
     pub(crate) mod scan_mode {
         use std::hint::black_box;
 
+        use neptune_consensus::transaction::test_helpers::txkernel;
+        use neptune_primitives::block_height::BlockHeight;
+        use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
+        use neptune_wallet::utxo_notification::UtxoNotificationPayload;
         use proptest::collection;
         use proptest::prelude::any;
         use proptest_arbitrary_interop::arb;
 
         use super::*;
-        use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-        use crate::protocol::consensus::block::block_height::BlockHeight;
-        use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::files::unit_test_data_directory;
-        use crate::tests::shared::strategies::txkernel;
 
         const NUM_FUTURE_KEYS: usize = 20;
 
@@ -4966,18 +4958,19 @@ pub(crate) mod tests {
 
     pub(crate) mod fee_notifications {
 
+        use neptune_consensus::block::block_transaction::BlockTransaction;
+        use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+        use neptune_mempool::upgrade_incentive::UpgradeIncentive;
+        use neptune_primitives::block_height::BlockHeight;
+        use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
+
         use super::*;
-        use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
         use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
         use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
-        use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
         use crate::application::loops::mine_loop::create_block_transaction;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
         use crate::application::loops::peer_loop::channel::MainToPeerTask;
-        use crate::protocol::consensus::block::block_height::BlockHeight;
-        use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-        use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::PEER_CHANNEL_CAPACITY;
 
         #[traced_test]
@@ -5135,7 +5128,7 @@ pub(crate) mod tests {
             let mut rng = StdRng::from_seed(seed);
 
             // set up premine recipient
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let cli_args = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 network,
@@ -5171,16 +5164,50 @@ pub(crate) mod tests {
                 .await;
             let now = network.launch_date() + Timestamp::months(7);
             let dummy_queue = TritonVmJobQueue::get_instance();
+            let job_options = TritonVmProofJobOptions::default_with_network(network);
+
+            // On networks where the gamma rule set (and thus lustration) is
+            // active from genesis, block 1 *defines* the lustration status and
+            // its transactions are exempt; only blocks at height 2 and above
+            // enforce lustration. So mine an empty block 1 first and create the
+            // transaction against *that* tip -- then it carries the lustration
+            // announcements that the later blocks require.
+            let block1_timestamp = network.launch_date() + Timestamp::months(6);
+            let (block1_tx, _) = create_block_transaction(
+                &genesis_block,
+                alice.clone(),
+                block1_timestamp,
+                job_options.clone(),
+            )
+            .await
+            .unwrap();
+            let block1 = Block::compose(
+                genesis_block.clone(),
+                block1_tx,
+                block1_timestamp,
+                dummy_queue.clone(),
+                job_options.clone(),
+            )
+            .await
+            .unwrap();
+            alice
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block1.clone())
+                .await
+                .unwrap();
 
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(change_key.into())
+                .with_network(network)
                 .with_prover_capability(TxProvingCapability::ProofCollection);
 
-            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
+            let consensus_rule_set1 =
+                ConsensusRuleSet::infer_from(network, BlockHeight::genesis().next());
             let proof_collection_transaction = alice
                 .api()
                 .tx_initiator_internal()
-                .create_transaction(tx_outputs.into(), fee, now, config, consensus_rule_set)
+                .create_transaction(tx_outputs.into(), fee, now, config, consensus_rule_set1)
                 .await
                 .unwrap()
                 .transaction;
@@ -5197,6 +5224,12 @@ pub(crate) mod tests {
             };
             let mut rando =
                 mock_genesis_global_state(2, rando_wallet_secret.clone(), rando_cli_args).await;
+            rando
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block1.clone())
+                .await
+                .unwrap();
             let upgrade_incentive = UpgradeIncentive::Gobble(fee);
             let (gobble_fee_recipient, recipient_preimage) = rando
                 .global_state_lock
@@ -5210,7 +5243,7 @@ pub(crate) mod tests {
                         .proof
                         .clone()
                         .into_proof_collection(),
-                    genesis_block.mutator_set_accumulator_after().unwrap(),
+                    block1.mutator_set_accumulator_after().unwrap(),
                     upgrade_incentive,
                     gobble_fee_recipient,
                     recipient_preimage,
@@ -5234,46 +5267,42 @@ pub(crate) mod tests {
 
             // create block ignoring that transaction. Rando has upgraded tx
             // in mempool, alice does not. Alice composes block.
-            let (block_transaction, _composer_utxos) = create_block_transaction(
-                &genesis_block,
-                alice.clone(),
-                now,
-                TritonVmProofJobOptions::default(),
-            )
-            .await
-            .unwrap();
-            let block_one = Block::compose(
-                genesis_block.clone(),
+            let (block_transaction, _composer_utxos) =
+                create_block_transaction(&block1, alice.clone(), now, job_options.clone())
+                    .await
+                    .unwrap();
+            let block2 = Block::compose(
+                block1.clone(),
                 block_transaction,
                 now,
                 dummy_queue.clone(),
-                TritonVmProofJobOptions::default(),
+                job_options.clone(),
             )
             .await
             .unwrap();
             alice
                 .lock_guard_mut()
                 .await
-                .set_new_tip(block_one.clone())
+                .set_new_tip(block2.clone())
                 .await
                 .unwrap();
             rando
                 .lock_guard_mut()
                 .await
-                .set_new_tip(block_one.clone())
+                .set_new_tip(block2.clone())
                 .await
                 .unwrap();
 
             // upgrade transaction again
             // this time mutator set data
-            let genesis_mutator_set = genesis_block.mutator_set_accumulator_after().unwrap();
+            let block1_mutator_set = block1.mutator_set_accumulator_after().unwrap();
             let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
-                genesis_mutator_set,
-                block_one.mutator_set_update().unwrap(),
+                block1_mutator_set,
+                block2.mutator_set_update().unwrap(),
                 upgrade_incentive,
-                consensus_rule_set,
+                consensus_rule_set1,
             ));
             let (channel_to_nowhere_two, nowhere_two) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
@@ -5300,34 +5329,34 @@ pub(crate) mod tests {
             // merge with some other transaction to set merge bit, Alice gets
             // composer rewards.
             let (some_other_transaction, _) = create_block_transaction(
-                &block_one,
+                &block2,
                 alice,
-                block_one.header().timestamp + Timestamp::minutes(10),
-                TritonVmProofJobOptions::default(),
+                block2.header().timestamp + Timestamp::minutes(10),
+                job_options.clone(),
             )
             .await
             .unwrap();
 
-            let consensus_rule_set_one =
-                ConsensusRuleSet::infer_from(network, block_one.header().height);
-            let block_two_transaction = BlockTransaction::merge(
+            let consensus_rule_set3 =
+                ConsensusRuleSet::infer_from(network, block2.header().height.next());
+            let block3_transaction = BlockTransaction::merge(
                 some_other_transaction.into(),
                 upgraded_transaction,
                 rng.random(),
                 dummy_queue.clone(),
-                TritonVmProofJobOptions::default(),
-                consensus_rule_set_one,
+                job_options.clone(),
+                consensus_rule_set3,
             )
             .await
             .unwrap();
 
             // create block with that transaction
-            let block_two = Block::compose(
-                block_one,
-                block_two_transaction,
+            let block3 = Block::compose(
+                block2,
+                block3_transaction,
                 now + Timestamp::minutes(10),
                 dummy_queue,
-                TritonVmProofJobOptions::default(),
+                job_options,
             )
             .await
             .unwrap();
@@ -5342,7 +5371,7 @@ pub(crate) mod tests {
             rando
                 .lock_guard_mut()
                 .await
-                .set_new_tip(block_two.clone())
+                .set_new_tip(block3.clone())
                 .await
                 .unwrap();
 

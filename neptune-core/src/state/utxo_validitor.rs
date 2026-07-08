@@ -1,11 +1,11 @@
+use neptune_archive::archival_state::ArchivalState;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 
-use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// Enumerates the ways in which UTXO validity (spent status and AOCL inclusion
 /// status) can be verified relative to a mutator set.
@@ -116,8 +116,9 @@ impl<'a> UtxoValidator<'a> {
 
 #[cfg(test)]
 mod tests {
+    use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+
     use super::*;
-    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
     impl<'a> UtxoValidator<'a> {
         pub(crate) async fn fetch_ms_membership_proof(

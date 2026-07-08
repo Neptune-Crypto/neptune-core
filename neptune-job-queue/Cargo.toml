@@ -1,0 +1,28 @@
+[package]
+name = "neptune-job-queue"
+description = "Prioritized, heterogeneous async/blocking job queue used by neptune-cash"
+authors = ["Triton Software"]
+
+version = "0.12.0"
+edition = "2021"
+license = "Apache-2.0"
+
+homepage = "https://neptune.cash/"
+repository = "https://github.com/Neptune-Crypto/neptune-core/"
+
+[dependencies]
+async-trait = "0.1.83"
+rand = "0.9"
+strum = { version = "0.27.0", features = ["derive"] }
+thiserror = "1.0.65"
+tokio = { version = "1.47", features = ["sync", "rt", "time", "macros"] }
+tracing = "0.1"
+
+[dev-dependencies]
+anyhow = { version = "1.0", features = ["backtrace"] }
+futures = "0.3"
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time"] }
+tracing-test = "0.2"
+
+[lints]
+workspace = true

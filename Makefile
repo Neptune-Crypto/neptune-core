@@ -56,7 +56,7 @@ format:
 
 happy: clippy format
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items
-	cargo test --doc
+	cargo test --doc --workspace
 
 install: ensure-clang
 	cargo install --force --locked --path neptune-core/
@@ -80,7 +80,7 @@ test: export RUST_BACKTRACE = 1
 test: ensure-clang
 	$(info RUSTFLAGS is $(RUSTFLAGS))
 	cargo nextest r
-	cargo test --doc
+	cargo test --doc --workspace
 
 bench: ensure-clang
 	$(info RUSTFLAGS is $(RUSTFLAGS))

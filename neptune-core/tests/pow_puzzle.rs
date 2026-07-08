@@ -2,10 +2,10 @@ mod common;
 
 use common::genesis_node::GenesisNode;
 use common::logging;
-use neptune_cash::api::export::Network;
-use neptune_cash::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
-use neptune_cash::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
+use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 /// test: Generate a local block proposal and find a valid PoW solution for it.
@@ -35,7 +35,7 @@ pub async fn can_find_valid_pow_solution() {
         .expect("Just set block proposal")
         .clone();
     let (guesser_address, _) = alice.gsl.lock_guard().await.mining_rewards_address();
-    proposal.set_header_guesser_address(guesser_address);
+    proposal.set_header_guesser_data(guesser_address.into());
 
     let latest_block_header = *alice.gsl.lock_guard().await.chain.tip().header();
     let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);

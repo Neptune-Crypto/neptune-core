@@ -3,7 +3,7 @@
 A small async collection of clients for talking to a running **Neptune Cash** node over JSON-RPC.
 HTTP client built on top of [`reqwest`](https://docs.rs/reqwest).
 
---- 
+---
 
 ### Example
 

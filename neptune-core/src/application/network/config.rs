@@ -2,8 +2,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 
 use libp2p::Multiaddr;
-
-use crate::api::export::Network;
+use neptune_primitives::network::Network;
 
 pub(crate) const DEFAULT_SUBDIRECTORY: &str = "network/";
 pub(crate) const DEFAULT_IDENTITY_FILENAME: &str = "identity.key";

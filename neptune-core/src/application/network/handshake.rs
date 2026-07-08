@@ -10,9 +10,8 @@ use libp2p::core::upgrade::OutboundUpgrade;
 use libp2p::core::upgrade::UpgradeInfo;
 use libp2p::Stream;
 use libp2p::StreamProtocol;
-
-use crate::protocol::peer::handshake_data::HandshakeData;
-use crate::protocol::peer::handshake_data::HandshakeValidationError;
+use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::handshake_data::HandshakeValidationError;
 
 /// The protocol negotiation and handshake logic for a stream.
 ///

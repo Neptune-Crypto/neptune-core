@@ -9,19 +9,19 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use neptune_cash::api::export::GlobalStateLock;
-use neptune_cash::api::export::Network;
-use neptune_cash::api::export::TransactionKernelId;
-use neptune_cash::api::export::TransactionProofType;
 use neptune_cash::application::config::cli_args::Args;
-use neptune_cash::application::config::data_directory::DataDirectory;
-use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
 use neptune_cash::state::sync_status::SyncStatus;
-use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
-use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
-use neptune_cash::state::wallet::wallet_file::WalletFile;
-use neptune_cash::state::wallet::wallet_file::WalletFileContext;
-use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::wallet_entropy::WalletEntropy;
+use neptune_wallet::wallet_file::WalletFile;
+use neptune_wallet::wallet_file::WalletFileContext;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use tokio::net::TcpListener;
@@ -354,7 +354,7 @@ impl GenesisNode {
         // Function may not hold a keep holding a read lock since the node needs
         // a write lock to update the mempool transaction with a new proof.
         let start = std::time::Instant::now();
-        while self.gsl.lock_guard().await.mempool.get(txid).is_none() {
+        while self.gsl.lock_guard().await.mempool().get(txid).is_none() {
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
                 anyhow::bail!("tx not in mempool after {} seconds", timeout_secs);
             }
@@ -376,7 +376,7 @@ impl GenesisNode {
         // a write lock to update the mempool transaction with a new proof.
         let start = std::time::Instant::now();
         loop {
-            if let Some(tx) = self.gsl.lock_guard().await.mempool.get(txid) {
+            if let Some(tx) = self.gsl.lock_guard().await.mempool().get(txid) {
                 if tx.proof.is_proof_collection() {
                     break;
                 }
@@ -406,7 +406,7 @@ impl GenesisNode {
                     .gsl
                     .lock_guard()
                     .await
-                    .mempool
+                    .mempool()
                     .get(txid)
                     .expect("Referenced tx must be in mempool")
                     .is_confirmable_relative_to(mutator_set)
@@ -436,7 +436,7 @@ impl GenesisNode {
                 .gsl
                 .lock_guard()
                 .await
-                .mempool
+                .mempool()
                 .num_with_proof_type(proof_type);
             if num_txs_in_mempool == n {
                 break;
@@ -463,7 +463,7 @@ impl GenesisNode {
     ) -> anyhow::Result<()> {
         let start = std::time::Instant::now();
         loop {
-            if let Some(tx) = self.gsl.lock_guard().await.mempool.get(txid) {
+            if let Some(tx) = self.gsl.lock_guard().await.mempool().get(txid) {
                 if tx.proof.is_single_proof() {
                     break;
                 }

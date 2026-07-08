@@ -1,5 +1,5 @@
 use clap::Parser;
-use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+use neptune_primitives::block_selector::BlockSelector;
 
 /// Statistics Command -- a command computing and showing statistics related to
 /// the blockchain.

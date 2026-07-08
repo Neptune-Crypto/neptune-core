@@ -3,11 +3,11 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use async_trait::async_trait;
-use neptune_cash::application::json_rpc::core::api::client::transport::Transport;
-use neptune_cash::application::json_rpc::core::model::json::JsonError;
-use neptune_cash::application::json_rpc::core::model::json::JsonRequest;
-use neptune_cash::application::json_rpc::core::model::json::JsonResponse;
-use neptune_cash::application::json_rpc::core::model::json::JsonResult;
+use neptune_rpc_api::api::client::transport::Transport;
+use neptune_rpc_api::model::json::JsonError;
+use neptune_rpc_api::model::json::JsonRequest;
+use neptune_rpc_api::model::json::JsonResponse;
+use neptune_rpc_api::model::json::JsonResult;
 use reqwest::Client;
 
 #[derive(Clone, Debug)]
@@ -76,26 +76,26 @@ mod tests {
     use std::time::Duration;
 
     use neptune_cash::api::export::Args;
-    use neptune_cash::api::export::BlockHeight;
     use neptune_cash::api::export::Digest;
-    use neptune_cash::api::export::KeyType;
-    use neptune_cash::api::export::NativeCurrencyAmount;
-    use neptune_cash::api::export::Network;
-    use neptune_cash::api::export::ReceivingAddress;
-    use neptune_cash::api::export::TransactionKernelId;
-    use neptune_cash::api::export::TxProvingCapability;
-    use neptune_cash::application::json_rpc::core::api::ops::Namespace;
-    use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
-    use neptune_cash::application::json_rpc::core::api::rpc::RpcError;
-    use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
-    use neptune_cash::application::json_rpc::core::model::json::JsonError;
-    use neptune_cash::protocol::consensus::block::Block;
-    use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
     use neptune_cash::state::GlobalState;
     use neptune_cash::state::GlobalStateLock;
-    use neptune_cash::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
+    use neptune_consensus::block::Block;
+    use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+    use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::block_selector::BlockSelector;
+    use neptune_primitives::block_selector::BlockSelectorLiteral;
+    use neptune_primitives::network::Network;
+    use neptune_rpc_api::api::ops::Namespace;
+    use neptune_rpc_api::api::rpc::RpcApi;
+    use neptune_rpc_api::api::rpc::RpcError;
+    use neptune_rpc_api::model::block::transaction_kernel::RpcAdditionRecord;
+    use neptune_rpc_api::model::json::JsonError;
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::Zero;
     use rand::distr::Alphanumeric;
     use rand::distr::SampleString;
@@ -521,7 +521,7 @@ mod tests {
             let alice = alice_gsl.lock_guard().await;
             wait_until_tx_in_mempool_has_single_proof(
                 &alice,
-                send_resp.transaction_kernel_id,
+                send_resp.transaction_kernel_id.into(),
                 Duration::from_secs(20),
             )
             .await;
@@ -668,7 +668,7 @@ mod tests {
     ) {
         let start = std::time::Instant::now();
         loop {
-            if let Some(tx) = gs.mempool.get(txid)
+            if let Some(tx) = gs.mempool().get(txid)
                 && tx.proof.is_single_proof()
             {
                 break;

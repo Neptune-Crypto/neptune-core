@@ -1,0 +1,64 @@
+use macro_rules_attr::apply;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::error::CreateProofError;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJobError;
+use neptune_consensus::proof_abstractions::tasm::prover_job::VmProcessError;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+use neptune_consensus::transaction::validity::single_proof::produce_single_proof;
+use neptune_consensus::type_scripts::native_currency::NativeCurrency;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutputList;
+use neptune_wallet::unlocked_utxo::TxInputs;
+use tasm_lib::triton_vm::error::InstructionError;
+use tasm_lib::triton_vm::isa::error::AssertionError;
+use tracing_test::traced_test;
+
+use crate::tests::shared_tokio_runtime;
+
+#[traced_test]
+#[apply(shared_tokio_runtime)]
+async fn disallow_empty_transaction_with_non_zero_fee() {
+    // Ensure that we cannot create a transaction with non-zero fee when
+    // transaction has no inputs or outputs.
+    let network = Network::Testnet(42);
+    let genesis = Block::genesis(network);
+
+    let msa = genesis.mutator_set_accumulator_after().unwrap();
+    let now = network.launch_date() + Timestamp::hours(12);
+    let cheated_fee = NativeCurrencyAmount::coins(100);
+    let fee_tx = TransactionDetails::new_without_coinbase(
+        TxInputs::default(),
+        TxOutputList::default(),
+        cheated_fee,
+        now,
+        msa.clone(),
+        network,
+    );
+
+    let fee_tx = fee_tx.primitive_witness();
+    let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+    let fee_sp_error = produce_single_proof(
+        &fee_tx,
+        vm_job_queue(),
+        TritonVmProofJobOptions::default(),
+        consensus_rule_set,
+    )
+    .await
+    .unwrap_err();
+    let CreateProofError::ProverJobError(ProverJobError::TritonVmProverFailed(
+        VmProcessError::TritonVmFailed(InstructionError::AssertionFailed(AssertionError {
+            id: error_id,
+            ..
+        })),
+    )) = fee_sp_error
+    else {
+        panic!("Expected Triton VM prover error");
+    };
+
+    assert_eq!(Some(NativeCurrency::NO_INFLATION_VIOLATION), error_id);
+}

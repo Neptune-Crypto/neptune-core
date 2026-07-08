@@ -6,15 +6,14 @@ use std::path::PathBuf;
 
 use common::logging;
 use itertools::Itertools;
-use neptune_cash::api::export::BlockHeight;
-use neptune_cash::api::export::NativeCurrencyAmount;
-use neptune_cash::api::export::Network;
-use neptune_cash::api::export::Timestamp;
-use neptune_cash::application::config::data_directory::DataDirectory;
-use neptune_cash::protocol::consensus::block::validity::block_program::BlockProgram;
-use neptune_cash::protocol::consensus::block::Block;
-use neptune_cash::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_cash::state::archival_state::ArchivalState;
+use neptune_archive::archival_state::ArchivalState;
+use neptune_consensus::block::validity::block_program::BlockProgram;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tracing::info;
@@ -26,24 +25,6 @@ use crate::common::genesis_node::GenesisNode;
 const MAIN_NET_GENESIS_HASH: &str =
     "7962e48729acd97e08efa77b5b28d49f2dc0e5609a4f1f1affca5b4549c78e520462a7f955371386";
 
-/// test: Verify that the genesis block on main net has not changed.
-#[test]
-pub fn genesis_block_hasnt_changed_main_net() {
-    assert_eq!(
-        MAIN_NET_GENESIS_HASH,
-        Block::genesis(Network::Main).hash().to_hex()
-    );
-}
-
-/// test: Verify that the genesis block on testnet-0 has not changed.
-#[test]
-pub fn genesis_block_hasnt_changed_testnet_0() {
-    assert_eq!(
-        "bb1fa49a35a294dd2c09811c648c4d76f6ea17acc61fe7a6f1c3c8d81c967bc68e7cdb41f472544e",
-        Block::genesis(Network::Testnet(0)).hash().to_hex()
-    );
-}
-
 #[tokio::test(flavor = "multi_thread")]
 pub async fn first_few_block_hashes_are_unchanged_main_net() {
     const BLOCK1_HASH: &str =
@@ -53,7 +34,7 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
     const BLOCK2B_HASH: &str =
         "12e6e69d7447691dba85c462c9b214274064ea1dd8835c2dd731618add0320588706d4cc0b000000";
 
-    let network = Network::Testnet(0);
+    let network = Network::Main;
     let expected_blk_files = ["blk0.dat"];
     let test_data_dir =
         ensure_blocks_in_test_data_dir(expected_blk_files.to_vec(), network, None).await;
@@ -81,7 +62,7 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn gamma_hardfork_on_tesnet() {
+async fn gamma_hardfork_on_tesnet0() {
     // Verify that blocks spanning consensus rule change on testnet are
     // considered valid.
     logging::tracing_logger();
@@ -115,6 +96,99 @@ async fn gamma_hardfork_on_tesnet() {
         assert!(block.has_proof_of_work(network, latest.header()));
         latest = block;
     }
+}
+
+/// Assert that a single main-net `blk` file whose blocks span a consensus-rule-set
+/// change (hard fork) validates end to end: every block is valid relative to its
+/// predecessor and carries valid proof-of-work, across the fork boundary.
+async fn assert_hardfork_boundary_blocks_are_valid(
+    sub_dir: &str,
+    blk_file: &str,
+    end_consensus_rules: ConsensusRuleSet,
+) {
+    logging::tracing_logger();
+
+    let network = Network::Main;
+
+    // Pre-gamma main-net proofs were retroactively found unsound, so their
+    // validity is asserted via the checkpoint rather than re-verification.
+    // Without it, pre-hardfork blocks fail.
+    ArchivalState::accept_checkpoint(network).await;
+
+    // Keep the file in its own subdirectory so it does not interfere with other
+    // tests that import the entire main-net data directory.
+    let test_data_dir =
+        ensure_blocks_in_test_data_dir(vec![blk_file], network, Some(sub_dir)).await;
+    let block_file_paths =
+        ArchivalState::read_block_file_names_from_directory(&test_data_dir).unwrap();
+    let block_file_paths: Vec<_> = block_file_paths
+        .into_iter()
+        .filter(|x| x.to_string_lossy().contains(blk_file))
+        .collect();
+    let blocks = ArchivalState::blocks_from_file_without_record(&block_file_paths[0])
+        .await
+        .unwrap();
+
+    // The file must actually straddle the hard fork, otherwise this test would
+    // silently stop exercising the rule-set transition.
+    let first_rule_set = ConsensusRuleSet::infer_from(network, blocks[0].header().height);
+    let last_rule_set =
+        ConsensusRuleSet::infer_from(network, blocks.last().unwrap().header().height);
+    assert_ne!(
+        first_rule_set, last_rule_set,
+        "{blk_file} must span a consensus-rule-set change"
+    );
+    assert_eq!(
+        end_consensus_rules, last_rule_set,
+        "last block in {blk_file} must follow {end_consensus_rules}"
+    );
+
+    let now = Timestamp::now();
+    let mut latest = blocks[0].clone();
+    for block in blocks.into_iter().skip(1) {
+        let height = block.header().height;
+        let hash = block.hash();
+        println!("Checking validity of main-net block of height {height}; hash: {hash:x}");
+        block.validate(&latest, now, network).await.unwrap();
+        assert!(block.has_proof_of_work(network, latest.header()));
+        latest = block;
+    }
+}
+
+/// Verify that the sequence of main-net blocks spanning the hardfork-alpha
+/// boundary (height 15,000) is valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn alpha_hardfork_on_main_net() {
+    assert_hardfork_boundary_blocks_are_valid(
+        "hf-alpha-validity",
+        "blk121.dat",
+        ConsensusRuleSet::HardforkAlpha,
+    )
+    .await;
+}
+
+/// Verify that the sequence of main-net blocks spanning the hardfork-beta
+/// boundary (height 38,000) is valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn beta_hardfork_on_main_net() {
+    assert_hardfork_boundary_blocks_are_valid(
+        "hf-beta-validity",
+        "blk325.dat",
+        ConsensusRuleSet::HardforkBeta,
+    )
+    .await;
+}
+
+/// Verify that the sequence of main-net blocks spanning the hardfork-gamma
+/// boundary (height 40,300) is valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn gamma_hardfork_on_main_net() {
+    assert_hardfork_boundary_blocks_are_valid(
+        "hf-gamma-validity",
+        "blk344.dat",
+        ConsensusRuleSet::HardforkGamma,
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

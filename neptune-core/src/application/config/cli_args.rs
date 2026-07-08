@@ -15,26 +15,26 @@ use clap::Parser;
 use itertools::Itertools;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use neptune_consensus::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
+use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
+use neptune_primitives::network::Network;
+use neptune_rpc_api::api::ops::Namespace;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
+use neptune_wallet::scan_mode_configuration::ScanModeConfiguration;
 use num_traits::Zero;
 use tracing::error;
 
-use super::fee_notification_policy::FeeNotificationPolicy;
-use super::network::Network;
-use crate::api::export::ReceivingAddress;
 use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::parser::CliArgsParseError;
-use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
-use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::application::json_rpc::core::api::ops::Namespace;
-use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 
 const MAX_NUM_INPUTS_FOR_PC_BACKED_TXS: u64 = 200;
 
@@ -101,7 +101,7 @@ pub struct Args {
     /// from peers in bad standing are refused.
     ///
     /// For a list of reasons that cause bad standing, see
-    /// [NegativePeerSanction](crate::protocol::peer::NegativePeerSanction).
+    /// [NegativePeerSanction](neptune_p2p::peer::NegativePeerSanction).
     #[clap(
         long,
         default_value = "1000",
@@ -1089,13 +1089,13 @@ impl Args {
 impl From<&Args> for ProverJobSettings {
     fn from(cli: &Args) -> Self {
         let triton_vm_env_vars: TritonVmEnvVars = cli.triton_vm_env_vars.clone();
-        Self {
-            max_log2_padded_height_for_proofs: cli.max_log2_padded_height_for_proofs,
-            network: cli.network,
-            tx_proving_capability: cli.proving_capability(),
-            proof_type: cli.proving_capability().into(),
+        ProverJobSettings::new(
+            cli.max_log2_padded_height_for_proofs,
+            cli.network,
+            cli.proving_capability(),
+            cli.proving_capability().into(),
             triton_vm_env_vars,
-        }
+        )
     }
 }
 
@@ -1115,10 +1115,11 @@ mod tests {
     use std::net::Ipv6Addr;
     use std::ops::RangeBounds;
 
+    use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
+
     use super::*;
-    use crate::api::export::WalletEntropy;
     use crate::application::config::parser::multiaddr::parse_to_multiaddr;
-    use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 
     // extra methods for tests.
     impl Args {
@@ -1127,7 +1128,7 @@ mod tests {
             proof_type: TransactionProofType,
         ) -> TritonVmProofJobOptions {
             let mut options: TritonVmProofJobOptions = self.into();
-            options.job_settings.proof_type = proof_type;
+            options.job_settings.set_proof_type(proof_type);
             options
         }
 

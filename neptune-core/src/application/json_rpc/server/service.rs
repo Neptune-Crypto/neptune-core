@@ -6,53 +6,55 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use itertools::Itertools;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::FUTUREDATING_LIMIT;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::transaction_proof::TransactionProof;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_database::storage::storage_vec::traits::StorageVecStream;
+use neptune_mempool::mempool::MEMPOOL_TX_THRESHOLD_AGE;
+use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::announcement_flag::AnnouncementFlag;
+use neptune_primitives::block_selector::BlockSelector;
+use neptune_rpc_api::api::rpc::*;
+use neptune_rpc_api::model::block::header::RpcBlockHeader;
+use neptune_rpc_api::model::block::header::TransactionKernelWithPriority;
+use neptune_rpc_api::model::block::RpcBlock;
+use neptune_rpc_api::model::common::RpcNativeCurrencyAmount;
+use neptune_rpc_api::model::json::JsonError;
+use neptune_rpc_api::model::message::*;
+use neptune_rpc_api::model::mining::template::RpcBlockTemplate;
+use neptune_rpc_api::model::mining::template::RpcBlockTemplateMetadata;
+use neptune_rpc_api::model::wallet::block::RpcWalletBlock;
+use neptune_rpc_api::model::wallet::mutator_set::RpcMsMembershipSnapshot;
+use neptune_rpc_api::model::wallet::personal_history::InitiatedTransaction;
+use neptune_rpc_api::model::wallet::personal_history::InitiatedTransactionInput;
+use neptune_rpc_api::model::wallet::personal_history::InitiatedTransactionOutput;
+use neptune_rpc_api::model::wallet::personal_history::ReceivedTransactionOutput;
+use neptune_rpc_api::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
+use neptune_rpc_api::model::wallet::transaction::RpcPrivateNotificationData;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use tasm_lib::prelude::Digest;
 use tokio::sync::oneshot;
 use tracing::debug;
 
-use crate::api::export::AdditionRecord;
-use crate::api::export::AnnouncementFlag;
-use crate::api::export::ChangePolicy;
 use crate::api::export::InputSelectionPriority;
-use crate::api::export::KeyType;
-use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::OutputFormat;
-use crate::api::export::ReceivingAddress;
-use crate::api::export::Transaction;
-use crate::api::export::TransactionProof;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
-use crate::application::database::storage::storage_vec::traits::StorageVecStream;
-use crate::application::json_rpc::core::api::rpc::*;
-use crate::application::json_rpc::core::model::block::header::RpcBlockHeader;
-use crate::application::json_rpc::core::model::block::header::TransactionKernelWithPriority;
-use crate::application::json_rpc::core::model::block::RpcBlock;
-use crate::application::json_rpc::core::model::common::RpcNativeCurrencyAmount;
-use crate::application::json_rpc::core::model::json::JsonError;
-use crate::application::json_rpc::core::model::message::*;
-use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
-use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplateMetadata;
-use crate::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
-use crate::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
-use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransaction;
-use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionInput;
-use crate::application::json_rpc::core::model::wallet::personal_history::InitiatedTransactionOutput;
-use crate::application::json_rpc::core::model::wallet::personal_history::ReceivedTransactionOutput;
-use crate::application::json_rpc::core::model::wallet::personal_history::RpcCoinWithPossibleTimeLock;
-use crate::application::json_rpc::core::model::wallet::transaction::RpcPrivateNotificationData;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
-use crate::protocol::consensus::block::block_selector::BlockSelector;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE;
+use crate::state::block_selector::BlockSelectorExt;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
-use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 #[async_trait]
 impl RpcApi for RpcServer {
@@ -93,7 +95,7 @@ impl RpcApi for RpcServer {
         let proof = &state.chain.tip().proof;
 
         Ok(TipProofResponse {
-            proof: proof.into(),
+            proof: neptune_rpc_api::model::block::rpc_block_proof_from(proof),
         })
     }
 
@@ -211,7 +213,7 @@ impl RpcApi for RpcServer {
                 .await
                 .unwrap()
                 .as_ref()
-                .map(|b| (&b.proof).into()),
+                .map(|b| neptune_rpc_api::model::block::rpc_block_proof_from(&b.proof)),
             None => None,
         };
 
@@ -517,7 +519,7 @@ impl RpcApi for RpcServer {
         &self,
         request: ValidateAddressRequest,
     ) -> RpcResult<ValidateAddressResponse> {
-        use crate::state::wallet::address::ReceivingAddress;
+        use neptune_wallet::address::ReceivingAddress;
 
         let network = self.state.cli().network;
         let Some(addr) = ReceivingAddress::from_bech32m(&request.address_string, network).ok()
@@ -545,7 +547,7 @@ impl RpcApi for RpcServer {
         &self,
         request: ValidateCoinsAmountRequest,
     ) -> RpcResult<ValidateCoinsAmountResponse> {
-        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
         let Ok(amount) = NativeCurrencyAmount::coins_from_str(&request.amount_string) else {
             return Ok(ValidateCoinsAmountResponse { amount: None });
@@ -564,7 +566,7 @@ impl RpcApi for RpcServer {
         &self,
         request: ValidateNauAmountRequest,
     ) -> RpcResult<ValidateNauAmountResponse> {
-        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
         let Ok(num_naus) = request.nau_string.parse::<i128>() else {
             return Ok(ValidateNauAmountResponse { amount: None });
@@ -1349,7 +1351,7 @@ impl RpcApi for RpcServer {
             .expect("Main loop must still be running");
 
         let resp = SendResponse {
-            transaction_kernel_id,
+            transaction_kernel_id: transaction_kernel_id.into(),
             inputs: tx_inputs,
             outputs: tx_outputs,
             unowned_offchain_notifications: unowned_offchain_notifications
@@ -1416,7 +1418,7 @@ impl RpcApi for RpcServer {
         let address =
             ReceivingAddress::from_bech32m(&request.guesser_address, self.state.cli().network)
                 .map_err(|_| RpcError::InvalidAddress)?;
-        proposal.set_header_guesser_address(address);
+        proposal.set_header_guesser_data(address.into());
 
         let template = RpcBlockTemplate {
             block: RpcBlock::from(&proposal),
@@ -1572,9 +1574,9 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .fee_density_iter()
-            .map(|(txkid, _)| txkid)
+            .map(|(txkid, _)| txkid.into())
             .collect();
 
         Ok(TransactionsResponse { transactions })
@@ -1588,8 +1590,8 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
-            .get(request.id)
+            .mempool()
+            .get(request.id.into())
             .cloned();
 
         Ok(GetTransactionKernelResponse {
@@ -1605,8 +1607,8 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
-            .get(request.id)
+            .mempool()
+            .get(request.id.into())
             .cloned();
 
         Ok(GetTransactionProofResponse {
@@ -1634,7 +1636,7 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .with_matching_addition_records(&addition_records);
 
         let transactions = transactions
@@ -1663,7 +1665,7 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .with_matching_absolute_index_sets(&absolute_index_sets);
 
         let transactions = transactions
@@ -1691,7 +1693,7 @@ impl RpcApi for RpcServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get_transactions_for_block_composition(usize::MAX, Some(1));
         let tx = tx.first();
         let tx = BestTransactionForNextBlockResponse {
@@ -1796,7 +1798,9 @@ impl RpcApi for RpcServer {
         // Await receipt.
         let timeout_period = Duration::from_secs(1);
         match tokio::time::timeout(timeout_period, rx).await {
-            Ok(Ok(network_overview)) => Ok(NetworkOverviewResponse { network_overview }),
+            Ok(Ok(network_overview)) => Ok(NetworkOverviewResponse {
+                network_overview: network_overview.into(),
+            }),
             Ok(Err(_e)) => Err(RpcError::RxChannel),
             Err(_e) => Err(RpcError::Timeout(timeout_period)),
         }
@@ -1810,56 +1814,57 @@ pub mod tests {
 
     use libp2p::Multiaddr;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_announcements;
+    use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
+    use neptune_consensus::block::PREMINE_MAX_SIZE;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+    use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::transaction::announcement::Announcement;
+    use neptune_consensus::transaction::test_helpers::make_plenty_mock_transaction_supported_by_primitive_witness;
+    use neptune_consensus::transaction::test_helpers::txkernel;
+    use neptune_consensus::transaction::utxo::Utxo;
+    use neptune_consensus::transaction::Transaction;
+    use neptune_consensus::transaction::TransactionProof;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_mempool::transaction_kernel_id::Txid;
+    use neptune_mempool::upgrade_priority::UpgradePriority;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::shared::NUM_TRIALS;
+    use neptune_primitives::announcement_flag::AnnouncementFlag;
+    use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+    use neptune_primitives::network::Network;
+    use neptune_primitives::timestamp::Timestamp;
+    use neptune_rpc_api::api::ops::Namespace;
+    use neptune_rpc_api::api::rpc::RpcApi;
+    use neptune_rpc_api::api::rpc::RpcError;
+    use neptune_rpc_api::api::rpc::MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS;
+    use neptune_rpc_api::model::common::RpcBlockSelector;
+    use neptune_rpc_api::model::message::BlockHeightsByFlagsRequest;
+    use neptune_rpc_api::model::mining::template::RpcBlockTemplate;
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::Zero;
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::bfe_vec;
     use tracing_test::traced_test;
 
-    use crate::api::export::Announcement;
-    use crate::api::export::AnnouncementFlag;
-    use crate::api::export::KeyType;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::Network;
     use crate::api::export::OutputFormat;
-    use crate::api::export::Timestamp;
-    use crate::api::export::TxProvingCapability;
-    use crate::api::export::Utxo;
     use crate::application::config::cli_args;
-    use crate::application::json_rpc::core::api::ops::Namespace;
-    use crate::application::json_rpc::core::api::rpc::RpcApi;
-    use crate::application::json_rpc::core::api::rpc::RpcError;
-    use crate::application::json_rpc::core::api::rpc::MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS;
-    use crate::application::json_rpc::core::model::common::RpcBlockSelector;
-    use crate::application::json_rpc::core::model::message::BlockHeightsByFlagsRequest;
-    use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
     use crate::application::json_rpc::server::rpc::RpcServer;
     use crate::application::network::arbitrary::arb_multiaddr;
-    use crate::protocol::consensus::block::block_height::BlockHeight;
-    use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
-    use crate::protocol::consensus::block::INITIAL_BLOCK_SUBSIDY;
-    use crate::protocol::consensus::block::PREMINE_MAX_SIZE;
-    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-    use crate::protocol::consensus::transaction::Transaction;
-    use crate::protocol::consensus::transaction::TransactionProof;
-    use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::mining::block_proposal::BlockProposal;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::state::wallet::wallet_status::SyncedUtxo;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
-    use crate::tests::shared::blocks::invalid_empty_block;
-    use crate::tests::shared::blocks::invalid_empty_block_with_announcements;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
-    use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
-    use crate::BFieldElement;
     use crate::Block;
 
     async fn test_rpc_server_with_cli_args_and_wallet(
@@ -1902,13 +1907,15 @@ pub mod tests {
     /// endpoint element-by-element.
     #[apply(shared_tokio_runtime)]
     async fn batch_are_bloom_indices_set_matches_single_set() {
-        let mut rpc_server = test_rpc_server().await;
+        let mut rpc_cli = cli_args::Args::default_with_network(Network::Testnet(42));
+        rpc_cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
+        let mut rpc_server = test_rpc_server_with_cli_args(rpc_cli).await;
         let network = rpc_server.state.cli().network;
 
         // Have the devnet wallet spend the premine into the rpc_server's wallet.
         // Once the resulting block is applied, the spent premine input's absolute
         // index set is "set", while the freshly received output's set is not.
-        let mut cli = cli_args::Args::default_with_network(Network::Main);
+        let mut cli = cli_args::Args::default_with_network(network);
         cli.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
         let mut devnet_node =
             mock_genesis_global_state(0, WalletEntropy::devnet_wallet(), cli).await;
@@ -2034,7 +2041,7 @@ pub mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn tip_calls_are_consistent(
         #[strategy(txkernel::with_lengths(0, 2, 2, true))]
-        tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block1: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
 
@@ -2068,7 +2075,7 @@ pub mod tests {
     async fn get_block_calls_are_consistent(
         #[strategy(0usize..8)] _num_announcements: usize,
         #[strategy(txkernel::with_lengths(0, 2, #_num_announcements, true))]
-    tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block1: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
 
@@ -2145,9 +2152,9 @@ pub mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn get_block_digests_returns_competing_blocks(
         #[strategy(txkernel::with_lengths(0, 2, 2, true))]
-    tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block1: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
         #[strategy(txkernel::with_lengths(0, 2, 2, true))]
-    tx_block2: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block2: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
 
@@ -2206,7 +2213,7 @@ pub mod tests {
     async fn utxo_calls_are_consistent(
         #[strategy(0usize..8)] _num_outputs: usize,
         #[strategy(txkernel::with_lengths(0usize, #_num_outputs, 0usize, true))]
-        transaction_kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        transaction_kernel: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let mut rpc_server = test_rpc_server().await;
 
@@ -2266,7 +2273,7 @@ pub mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn remote_wallets_behave_correctly() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let rpc_cli = cli_args::Args::default_with_network(network);
         let mut rpc_server = test_rpc_server_with_cli_args_and_wallet(
             rpc_cli,
@@ -2396,10 +2403,15 @@ pub mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn mining_scenarios_validated_properly() {
-        use crate::application::json_rpc::core::api::rpc::SubmitBlockError;
+        use neptune_rpc_api::api::rpc::SubmitBlockError;
 
-        let mut rpc_server = test_rpc_server().await;
-        let network = rpc_server.state.cli().network;
+        let network = Network::Testnet(42);
+        let rpc_cli = cli_args::Args::default_with_network(network);
+        let mut rpc_server = test_rpc_server_with_cli_args_and_wallet(
+            rpc_cli,
+            WalletEntropy::new_pseudorandom([0u8; 32]),
+        )
+        .await;
 
         let genesis = Block::genesis(network);
         let block1 = fake_valid_deterministic_successor(&genesis, network).await;
@@ -2433,7 +2445,7 @@ pub mod tests {
             RpcError::SubmitBlock(SubmitBlockError::InsufficientWork)
         );
 
-        let solution = metadata.solve(ConsensusRuleSet::Reboot);
+        let solution = metadata.solve(ConsensusRuleSet::HardforkGamma);
         assert!(
             rpc_server
                 .submit_block(block.clone(), solution)
@@ -2486,12 +2498,20 @@ pub mod tests {
             let id = tx.txid();
 
             // Test transaction kernel can be extracted and contents match.
-            let kernel = rpc_server.get_transaction_kernel(id).await.unwrap().kernel;
+            let kernel = rpc_server
+                .get_transaction_kernel(id.into())
+                .await
+                .unwrap()
+                .kernel;
             assert!(kernel.is_some());
             assert_eq!(tx.kernel, kernel.unwrap().into());
 
             // Test transaction proofs can be extracted and contents match.
-            let proof = rpc_server.get_transaction_proof(id).await.unwrap().proof;
+            let proof = rpc_server
+                .get_transaction_proof(id.into())
+                .await
+                .unwrap()
+                .proof;
             match tx.proof {
                 // Witness-backed transactions proofs cannot be exposed as it exposes private data.
                 TransactionProof::Witness(_) => assert!(proof.is_none()),
@@ -2792,14 +2812,15 @@ pub mod tests {
     }
 
     mod send {
+        use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+        use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+
         use super::*;
-        use crate::api::export::UtxoTriple;
-        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn send_from_premine_receiver() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let cli = cli_args::Args {
                 network,
                 rpc_modules: vec![Namespace::Personal, Namespace::Mempool],
@@ -2848,13 +2869,14 @@ pub mod tests {
     }
 
     mod history {
+        use neptune_database::storage::storage_vec::traits::StorageVecBase;
+        use neptune_wallet::address::ReceivingAddress;
+
         use super::*;
-        use crate::api::export::ReceivingAddress;
-        use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 
         #[apply(shared_tokio_runtime)]
         async fn incoming_history_no_filter() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let num_transactions = 25;
             let amt_per_tx = NativeCurrencyAmount::from_nau(17);
             let fee_per_tx = NativeCurrencyAmount::from_nau(2);
@@ -2914,7 +2936,7 @@ pub mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn incoming_history_filter_lock_script_hash() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let num_transactions = 19;
             let amt_per_tx = NativeCurrencyAmount::from_nau(18);
             let fee_per_tx = NativeCurrencyAmount::from_nau(23);
@@ -2984,7 +3006,7 @@ pub mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn incoming_history_pagination() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
 
             // total num monitored UTXOS: {num_transactions} * 2 + 1 = 17
             let num_transactions = 8;
@@ -3029,7 +3051,7 @@ pub mod tests {
         async fn outgoing_history_is_consistent() {
             // Verify that transaction filtering works.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let num_transactions = 20;
             let amt_per_tx = NativeCurrencyAmount::one_nau();
             let fee_per_tx = NativeCurrencyAmount::one_nau();

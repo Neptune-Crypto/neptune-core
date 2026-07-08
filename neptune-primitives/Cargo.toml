@@ -1,0 +1,52 @@
+[package]
+name = "neptune-primitives"
+description = "Foundational primitives shared across neptune-cash"
+authors = ["Triton Software"]
+
+version = "0.12.0"
+edition = "2021"
+license = "Apache-2.0"
+
+homepage = "https://neptune.cash/"
+repository = "https://github.com/Neptune-Crypto/neptune-core/"
+
+[features]
+# implements arbitrary::Arbitrary (and proptest strategies) for various types
+arbitrary-impls = ["dep:arbitrary", "dep:proptest", "dep:proptest-arbitrary-interop"]
+
+# exposes test-support constructors and proptest strategies (e.g.
+# `Network::arbitrary`, `Network::all_networks`) needed by downstream tests.
+test-helpers = ["arbitrary-impls"]
+
+[dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+directories = "5.0"
+get-size2 = { version = "0.7", features = ["derive"] }
+itertools = "0.14"
+num-bigint = { version = "0.4", features = ["serde"] }
+num-traits = "0.2"
+rand = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+strum = { version = "0.27.0", features = ["derive"] }
+tasm-lib = "7.0.0"
+thiserror = "1.0.65"
+tokio = { version = "1.47", features = ["fs"] }
+
+# optional: required for unit tests and the arbitrary-impls feature.
+# duplicated (non-optional) in [dev-dependencies] for this crate's own tests.
+arbitrary = { version = "1.4.1", features = ["derive"], optional = true }
+proptest = { version = "1.7", optional = true }
+proptest-arbitrary-interop = { version = "0.1", optional = true }
+
+[dev-dependencies]
+arbitrary = { version = "1.4.1", features = ["derive"] }
+num-rational = "0.4"
+serde_json = "1.0"
+proptest = "1.7"
+proptest-arbitrary-interop = "0.1"
+rand_distr = "0.5"
+test-strategy = "0.3"
+
+[lints]
+workspace = true

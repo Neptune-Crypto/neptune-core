@@ -4,37 +4,37 @@
 //! the wallet for change output(s).  see [TransactionDetailsBuilder::build()]
 //! for details.
 //!
-//! The resulting `TransactionDetails` contains all data needed for a [Transaction](crate::protocol::consensus::transaction::Transaction)
-//! except for a [TransactionProof](crate::protocol::consensus::transaction::TransactionProof).
+//! The resulting `TransactionDetails` contains all data needed for a [Transaction](neptune_consensus::transaction::Transaction)
+//! except for a [TransactionProof](neptune_consensus::transaction::TransactionProof).
 //!
 //! see [builder](super) for examples of using the builders together.
+use neptune_consensus::block::pow::LustrationStatus;
+use neptune_consensus::transaction::announcement::Announcement;
+use neptune_consensus::transaction::lock_script::LockScript;
+use neptune_consensus::transaction::transparent_input::TransparentInput;
+use neptune_consensus::transaction::transparent_transaction_info::TransparentTransactionInfo;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::transaction_output::TxOutputList;
+use neptune_wallet::unlocked_utxo::TxInputs;
+use neptune_wallet::unlocked_utxo::UnlockedUtxo;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
 use tracing::debug;
 
-use crate::api::export::TransparentInput;
-use crate::api::export::TransparentTransactionInfo;
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::pow::LustrationStatus;
-use crate::protocol::consensus::transaction::announcement::Announcement;
-use crate::protocol::consensus::transaction::lock_script::LockScript;
-use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::transaction::transaction_details::TransactionDetails;
-use crate::state::wallet::address::KeyType;
-use crate::state::wallet::address::SpendingKey;
-use crate::state::wallet::change_policy::ChangePolicy;
-use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::transaction_output::TxOutputList;
-use crate::state::wallet::unlocked_utxo::TxInputs;
-use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::GlobalState;
 use crate::state::StateLock;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::WalletState;
 
 /// a builder to generate [TransactionDetails].
@@ -323,7 +323,8 @@ impl TransactionDetailsBuilder {
             custom_announcements.push(transparent_transaction_details.to_announcement());
         }
 
-        // If transaction needs to lustrate, do so here.
+        // If transaction needs to lustrate, do so here. Only those inputs that
+        // must be lustrated will be so.
         if let Some(lustration_status) = lustration_status {
             debug!(
                 "Lustration rules activated. Checking all inputs for lustration requirements.
@@ -332,6 +333,11 @@ impl TransactionDetailsBuilder {
                 lustration_status.max_lustrating_aocl_leaf_index
             );
 
+            let tx_inputs = tx_inputs
+                .iter()
+                .cloned()
+                .map(TransparentInput::from)
+                .collect::<Vec<_>>();
             custom_announcements.extend(Announcement::lustration_announcements(
                 lustration_status,
                 &tx_inputs,

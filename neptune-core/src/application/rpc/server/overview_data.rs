@@ -1,13 +1,13 @@
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::TxProvingCapability;
 use crate::application::network::overview::NetworkOverview;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mining::mining_status::MiningStatus;
 use crate::state::sync_status::SyncStatus;
 

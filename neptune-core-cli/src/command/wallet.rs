@@ -1,8 +1,8 @@
 pub(crate) mod quarry;
 
 use clap::Parser;
-use neptune_cash::api::export::KeyType;
-use neptune_cash::api::export::Network;
+use neptune_primitives::network::Network;
+use neptune_wallet::address::KeyType;
 
 use crate::command::wallet::quarry::RescanQuarry;
 use crate::models::claim_utxo::ClaimUtxoFormat;

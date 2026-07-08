@@ -4,27 +4,27 @@ use std::str::FromStr;
 use std::time::SystemTime;
 
 use libp2p::PeerId;
+use neptune_consensus::block::Block;
+use neptune_mempool::mempool::Mempool;
+use neptune_p2p::peer::handshake_data::VersionString;
+use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+use neptune_p2p::peer::peer_info::PeerConnectionInfo;
+use neptune_p2p::peer::peer_info::PeerInfo;
+use neptune_primitives::network::Network;
+use neptune_wallet::wallet_entropy::WalletEntropy;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
-use crate::api::export::Network;
 use crate::application::config::cli_args;
 use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::peer::handshake_data::VersionString;
-use crate::protocol::peer::peer_info::pseudorandom_peer_id;
-use crate::protocol::peer::peer_info::PeerConnectionInfo;
-use crate::protocol::peer::peer_info::PeerInfo;
 use crate::state::blockchain_state::BlockchainState;
 use crate::state::light_state::LightState;
-use crate::state::mempool::Mempool;
 use crate::state::networking_state::NetworkingState;
 use crate::state::wallet::wallet_configuration::WalletConfiguration;
-use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::HandshakeData;
@@ -45,10 +45,11 @@ pub(crate) async fn mock_genesis_global_state_with_block(
 
     cli.second_parse().unwrap();
 
-    let archival_state = crate::state::archival_state::ArchivalState::new(
+    let archival_state = neptune_archive::archival_state::ArchivalState::new(
         data_dir.clone(),
         genesis_block.clone(),
-        &cli,
+        cli.utxo_index,
+        cli.network,
     )
     .await;
 
@@ -137,7 +138,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
         .mining_rewards_address();
     for coinbase_sender_randomness in coinbase_sender_randomness_coll {
         let (next_block, composer_utxos) =
-            super::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+            neptune_wallet::mock_block::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                 &previous_block,
                 vec![],
                 vec![],
@@ -146,8 +147,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
                 coinbase_sender_randomness,
                 (0.5, guesser_address.clone()),
                 network,
-            )
-            .await;
+            );
 
         global_state_lock
             .set_new_self_composed_tip(next_block.clone(), composer_utxos)

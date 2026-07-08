@@ -1,10 +1,10 @@
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mempool::transaction_kernel_id::Txid;
 use serde::Deserialize;
 use serde::Serialize;
-
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::Transaction;
-use crate::api::export::TransactionKernelId;
-use crate::api::export::TransactionProofType;
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct MempoolTransactionInfo {

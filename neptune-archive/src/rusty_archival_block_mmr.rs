@@ -1,0 +1,50 @@
+use neptune_archival_mmr::ArchivalMmr;
+use neptune_database::NeptuneLevelDb;
+use neptune_database::storage::storage_schema::DbtVec;
+use neptune_database::storage::storage_schema::RustyKey;
+use neptune_database::storage::storage_schema::RustyValue;
+use neptune_database::storage::storage_schema::SimpleRustyStorage;
+use neptune_database::storage::storage_schema::traits::*;
+use tasm_lib::prelude::Digest;
+
+#[derive(Debug)]
+pub struct RustyArchivalBlockMmr {
+    ammr: ArchivalMmr<DbtVec<Digest>>,
+    storage: SimpleRustyStorage,
+}
+
+impl RustyArchivalBlockMmr {
+    pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
+        let mut storage = SimpleRustyStorage::new(db);
+
+        // We do not need a sync-label since the last leaf of the MMR will
+        // be the sync-label, i.e., the block digest of the latest block added.
+        let abmmr = storage.schema.new_vec::<Digest>("archival_block_mmr").await;
+        let abmmr = ArchivalMmr::new(abmmr).await;
+
+        Self {
+            ammr: abmmr,
+            storage,
+        }
+    }
+
+    #[inline]
+    pub fn ammr(&self) -> &ArchivalMmr<DbtVec<Digest>> {
+        &self.ammr
+    }
+
+    #[inline]
+    pub fn ammr_mut(&mut self) -> &mut ArchivalMmr<DbtVec<Digest>> {
+        &mut self.ammr
+    }
+}
+
+impl StorageWriter for RustyArchivalBlockMmr {
+    async fn persist(&mut self) {
+        self.storage.persist().await;
+    }
+
+    async fn drop_unpersisted(&mut self) {
+        self.storage.drop_unpersisted().await;
+    }
+}

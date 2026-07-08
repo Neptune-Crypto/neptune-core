@@ -5,13 +5,14 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use super::super::wallet::address::SpendingKey;
-use super::super::wallet::change_policy::ChangePolicy;
-use super::super::wallet::utxo_notification::UtxoNotificationMedium;
-use super::tx_proving_capability::TxProvingCapability;
-use crate::application::triton_vm_job_queue::vm_job_queue;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_primitives::network::Network;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone)]
@@ -45,11 +46,20 @@ impl TxCreationConfig {
         self
     }
 
+    pub(crate) fn with_network(mut self, network: Network) -> Self {
+        self.proof_job_options.job_settings.set_network(network);
+        self
+    }
+
     /// Configure the proving capacity.
     pub(crate) fn with_prover_capability(mut self, prover_capability: TxProvingCapability) -> Self {
         // note: legacy tests consider prover_capability and target proof_type to be the same thing
-        self.proof_job_options.job_settings.tx_proving_capability = prover_capability;
-        self.proof_job_options.job_settings.proof_type = prover_capability.into();
+        self.proof_job_options
+            .job_settings
+            .set_tx_proving_capability(prover_capability);
+        self.proof_job_options
+            .job_settings
+            .set_proof_type(prover_capability.into());
         self
     }
 

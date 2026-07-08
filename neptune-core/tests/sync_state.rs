@@ -2,8 +2,8 @@ mod common;
 
 use common::genesis_node::GenesisNode;
 use common::logging;
-use neptune_cash::api::export::Network;
-use neptune_cash::api::export::TxProvingCapability;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_primitives::network::Network;
 use tracing::info;
 
 #[tokio::test(flavor = "multi_thread")]

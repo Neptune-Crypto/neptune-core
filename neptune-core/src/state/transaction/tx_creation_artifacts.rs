@@ -1,17 +1,15 @@
 use std::sync::Arc;
 
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::primitive_witness::WitnessValidationError;
+use neptune_consensus::transaction::Transaction;
+use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::utxo_notification::PrivateNotificationData;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
-
-use crate::application::config::network::Network;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::primitive_witness::WitnessValidationError;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::state::transaction::transaction_details::TransactionDetails;
-use crate::state::wallet::utxo_notification::PrivateNotificationData;
 
 /// represents a [Transaction] and its corresponding [TransactionDetails]
 ///
@@ -21,7 +19,7 @@ use crate::state::wallet::utxo_notification::PrivateNotificationData;
 ///
 /// A [Transaction] contains blinded data that can be sent over the network to
 /// other neptune-core nodes.  The [TransactionDetails] contains the unblinded
-/// data that the `Transaction` is generated from, minus the [TransactionProof](crate::protocol::consensus::transaction::transaction_proof::TransactionProof).
+/// data that the `Transaction` is generated from, minus the [TransactionProof](neptune_consensus::transaction::transaction_proof::TransactionProof).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxCreationArtifacts {
     pub(crate) transaction: Arc<Transaction>,
@@ -117,9 +115,7 @@ impl TxCreationArtifacts {
 
         // 2. verify that Transaction and TransactionDetails match.
         let tx_hash = self.transaction.kernel.mast_hash();
-        let details_hash = PrimitiveWitness::from_transaction_details(&self.details)
-            .kernel
-            .mast_hash();
+        let details_hash = self.details.primitive_witness().kernel.mast_hash();
 
         if details_hash != tx_hash {
             return Err(TxCreationArtifactsError::TxDetailsMismatch {

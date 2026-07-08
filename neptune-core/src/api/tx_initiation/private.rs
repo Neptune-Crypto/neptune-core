@@ -1,10 +1,11 @@
 // private module. module docs not needed.
 use std::sync::Arc;
 
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
 use super::error;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 
@@ -66,11 +67,13 @@ impl TransactionInitiatorPrivate {
             tracing::warn!(
                 "Cannot initiate transaction because transaction proving capability is too weak."
             );
-            return Err(error::CreateProofError::TooWeak {
-                proof_type,
-                capability,
-            }
-            .into());
+            return Err(
+                neptune_consensus::proof_abstractions::error::CreateProofError::TooWeak {
+                    proof_type,
+                    capability,
+                }
+                .into(),
+            );
         }
 
         self.check_rate_limit().await

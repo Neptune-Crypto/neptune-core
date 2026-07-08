@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use neptune_cash::api::export::NativeCurrencyAmount;
-use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 
 use crate::parser::beneficiary::Beneficiary;
 

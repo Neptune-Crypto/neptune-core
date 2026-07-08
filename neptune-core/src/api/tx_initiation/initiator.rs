@@ -13,10 +13,21 @@
 
 use std::sync::Arc;
 
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutputList;
+use neptune_wallet::unlocked_utxo::TxInputs;
 use tracing::trace;
 
 use super::error;
-use crate::api::export::Timestamp;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::input_selector::InputSelector;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
@@ -26,20 +37,8 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-use crate::application::triton_vm_job_queue::vm_job_queue;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::state::transaction::transaction_details::TransactionDetails;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
-use crate::state::wallet::change_policy::ChangePolicy;
 use crate::state::wallet::input_candidate::InputCandidate;
-use crate::state::wallet::transaction_output::TxOutputList;
-use crate::state::wallet::unlocked_utxo::TxInputs;
 use crate::state::StateLock;
 use crate::GlobalStateLock;
 
@@ -139,7 +138,7 @@ impl TransactionInitiator {
     ///
     /// see [builder::transaction_proof_builder](super::builder::transaction_proof_builder) for details.
     pub fn generate_witness_proof(&self, tx_details: Arc<TransactionDetails>) -> TransactionProof {
-        let primitive_witness = PrimitiveWitness::from_transaction_details(&tx_details);
+        let primitive_witness = tx_details.primitive_witness();
         TransactionProof::Witness(primitive_witness)
     }
 
@@ -229,7 +228,7 @@ impl TransactionInitiator {
         self.global_state_lock
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get(txid)
             .map(|tx| (&tx.proof).into())
             .ok_or(error::UpgradeProofError::TxNotInMempool)

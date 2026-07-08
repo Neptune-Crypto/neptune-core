@@ -1,0 +1,50 @@
+[package]
+name = "neptune-archive"
+description = "Neptune archival state: on-disk block storage, the archival block MMR, the archival mutator set, and the optional UTXO index"
+authors = ["Triton Software"]
+version = "0.12.0"
+edition = "2024"
+license = "Apache-2.0"
+
+homepage = "https://neptune.cash/"
+repository = "https://github.com/Neptune-Crypto/neptune-core/"
+
+[features]
+# exposes test-support surface needed by downstream crates' tests. off by default.
+test-helpers = []
+
+[dependencies]
+anyhow = { version = "1.0", features = ["backtrace"] }
+bincode = "1.3"
+hex = "0.4.3"
+itertools = "0.14"
+memmap2 = "0.9"
+neptune-archival-mmr = { version = "0.12.0", path = "../neptune-archival-mmr" }
+neptune-consensus = { version = "0.12.0", path = "../neptune-consensus" }
+neptune-database = { version = "0.12.0", path = "../neptune-database" }
+neptune-locks = { version = "0.12.0", path = "../neptune-locks" }
+neptune-mutator-set = { version = "0.12.0", path = "../neptune-mutator-set" }
+neptune-primitives = { version = "0.12.0", path = "../neptune-primitives" }
+num-traits = "0.2"
+regex = "1.11.0"
+serde = { version = "1.0", features = ["derive"] }
+tasm-lib = "7.0.0"
+tokio = { version = "1.47", features = ["fs", "io-util", "sync"] }
+tracing = "0.1"
+
+[dev-dependencies]
+macro_rules_attr = "0.1.3"
+neptune-consensus = { version = "0.12.0", path = "../neptune-consensus", features = [
+    "test-helpers",
+] }
+neptune-wallet = { version = "0.12.0", path = "../neptune-wallet", features = [
+    "test-helpers",
+] }
+proptest = "1.7"
+proptest-arbitrary-interop = "0.1"
+rand = "0.9"
+test-strategy = "0.3"
+tracing-test = "0.2"
+
+[lints]
+workspace = true

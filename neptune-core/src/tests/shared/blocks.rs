@@ -1,68 +1,36 @@
 use futures::channel::oneshot;
-use itertools::Itertools;
-use num_traits::Zero;
+use neptune_consensus::block::block_transaction::BlockTransaction;
+use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+use neptune_consensus::block::validity::block_program::BlockProgram;
+use neptune_consensus::block::validity::block_proof_witness::BlockProofWitness;
+use neptune_consensus::block::Block;
+use neptune_consensus::block::BlockProof;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
+use neptune_consensus::transaction::validity::neptune_proof::Proof;
+use neptune_consensus::transaction::Transaction;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+use neptune_wallet::address::generation_address::GenerationSpendingKey;
+use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
+use neptune_wallet::composer_parameters::ComposerParameters;
+use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
+use neptune_wallet::mock_block::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use tasm_lib::prelude::Digest;
-use tasm_lib::twenty_first;
-use tasm_lib::twenty_first::bfe;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-use crate::api::export::Announcement;
-use crate::api::export::GenerationSpendingKey;
 use crate::api::export::GlobalStateLock;
-use crate::api::export::Network;
 use crate::api::export::OutputFormat;
-use crate::api::export::ReceivingAddress;
-use crate::api::export::Timestamp;
-use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::loops::channel::NewBlockFound;
-use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::compose_block_helper;
-use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::loops::mine_loop::guess_nonce;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
-use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-use crate::protocol::consensus::block::block_appendix::BlockAppendix;
-use crate::protocol::consensus::block::block_body::BlockBody;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-use crate::protocol::consensus::block::difficulty_control::Difficulty;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
-use crate::protocol::consensus::block::guesser_receiver_data::GuesserReceiverData;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::block::pow::Pow;
-use crate::protocol::consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
-use crate::protocol::consensus::block::validity::block_program::BlockProgram;
-use crate::protocol::consensus::block::validity::block_proof_witness::BlockProofWitness;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::block::BlockProof;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
-use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::verifier::cache_true_claims;
-use crate::state::wallet::address::generation_address;
-use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::mock_tx::send_coins;
 use crate::tests::shared::Randomness;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-use crate::util_types::mutator_set::shared::NUM_TRIALS;
-use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 /// Create a valid block on top of provided block. Returned block is valid in
 /// terms of both block validity and PoW, and is thus the new canonical block of
@@ -85,7 +53,7 @@ pub(crate) async fn next_block(
         parent.clone(),
         global_state_lock.clone(),
         coinbase_timestamp,
-        TritonVmProofJobOptions::default(),
+        TritonVmProofJobOptions::default_with_network(network),
     )
     .await
     .unwrap();
@@ -126,309 +94,6 @@ pub(crate) async fn next_block(
     child
 }
 
-/// Return a block with the specified puts, along with randomized
-/// composer rewards.
-pub(crate) async fn block_with_puts(
-    network: Network,
-    predecessor: &Block,
-    outputs: Vec<AdditionRecord>,
-    inputs: Vec<RemovalRecord>,
-) -> Block {
-    let mut rng = rand::rng();
-    let (block, _) = make_mock_block_with_inputs_and_outputs(
-        predecessor,
-        inputs,
-        outputs,
-        None,
-        GenerationSpendingKey::derive_from_seed(rng.random()),
-        rng.random(),
-        network,
-    )
-    .await;
-
-    block
-}
-
-/// Create an invalid block with the provided transaction kernel, using the
-/// provided mutator set as the predessor block's mutator set. Invalid block in
-/// most ways you can think of but the mutator set evolution is consistent.
-pub(crate) fn invalid_block_with_kernel_and_mutator_set(
-    transaction_kernel: TransactionKernel,
-    predecessor_mutator_set: MutatorSetAccumulator,
-) -> Block {
-    let new_block_height: BlockHeight = 1u64.into();
-    let block_header = BlockHeader {
-        version: bfe!(0),
-        height: new_block_height,
-        prev_block_digest: Digest::default(),
-        timestamp: transaction_kernel.timestamp,
-        pow: Pow::default(),
-        guesser_receiver_data: GuesserReceiverData::default(),
-        cumulative_proof_of_work: ProofOfWork::zero(),
-        difficulty: Difficulty::MINIMUM,
-    };
-
-    let block_mmr = MmrAccumulator::new_from_leafs(vec![]);
-    let ms_update = MutatorSetUpdate::new(
-        transaction_kernel.inputs.clone(),
-        transaction_kernel.outputs.clone(),
-    );
-
-    let mut mutator_set = predecessor_mutator_set;
-    ms_update.apply_to_accumulator(&mut mutator_set).unwrap();
-
-    let transaction = BlockTransaction::from_tx_kernel(transaction_kernel);
-
-    let lock_free_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
-    let body = BlockBody::new(
-        transaction.kernel.into(),
-        mutator_set,
-        lock_free_mmr_accumulator,
-        block_mmr,
-    );
-    let appendix = BlockAppendix::default();
-
-    Block::new(block_header, body, appendix, BlockProof::Invalid)
-}
-
-pub(crate) fn invalid_block_with_tx_kernel(
-    previous_block: &Block,
-    tx_kernel: TransactionKernel,
-) -> Block {
-    // 60s min block time on main and testnet
-    let minimum_block_time = Timestamp::seconds(60);
-    let timestamp = Timestamp::max(
-        previous_block.header().timestamp + minimum_block_time,
-        tx_kernel.timestamp,
-    );
-    let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
-    let difficulty = previous_block.header().difficulty;
-    let block_header = BlockHeader {
-        version: bfe!(0),
-        height: new_block_height,
-        prev_block_digest: previous_block.hash(),
-        timestamp,
-        pow: Pow::default(),
-        guesser_receiver_data: GuesserReceiverData::default(),
-        cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work + difficulty,
-        difficulty,
-    };
-
-    let mut next_mutator_set = previous_block.mutator_set_accumulator_after().unwrap();
-    let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
-    block_mmr.append(previous_block.hash());
-
-    let ms_update = MutatorSetUpdate::new(tx_kernel.inputs.clone(), tx_kernel.outputs.clone());
-    ms_update
-        .apply_to_accumulator(&mut next_mutator_set)
-        .unwrap();
-
-    let transaction = BlockTransaction::from_tx_kernel(tx_kernel);
-    let body = BlockBody::new(
-        transaction.kernel.into(),
-        next_mutator_set,
-        previous_block.body().lock_free_mmr_accumulator.clone(),
-        block_mmr,
-    );
-    let appendix = BlockAppendix::default();
-
-    Block::new(block_header, body, appendix, BlockProof::Invalid)
-}
-
-/// Create a block containing the supplied transaction.
-///
-/// The returned block has an invalid block proof.
-pub(crate) fn invalid_block_with_transaction(
-    previous_block: &Block,
-    transaction: Transaction,
-) -> Block {
-    invalid_block_with_tx_kernel(previous_block, transaction.kernel)
-}
-
-/// Build a fake and invalid block where the caller can specify the
-/// guesser-preimage and guesser fraction.
-///
-/// Returns (block, composer's expected UTXOs).
-#[expect(clippy::too_many_arguments)]
-pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-    previous_block: &Block,
-    inputs: Vec<RemovalRecord>,
-    outputs: Vec<AdditionRecord>,
-    block_timestamp: Option<Timestamp>,
-    composer_key: generation_address::GenerationSpendingKey,
-    coinbase_sender_randomness: Digest,
-    guesser_parameters: (f64, ReceivingAddress),
-    network: Network,
-) -> (Block, Vec<ExpectedUtxo>) {
-    let (guesser_fraction, guesser_address) = guesser_parameters;
-
-    // Build coinbase UTXO and associated data
-    let block_timestamp = match block_timestamp {
-        Some(ts) => ts,
-        None => previous_block.kernel.header.timestamp + network.target_block_interval(),
-    };
-
-    let coinbase_distribution = CoinbaseDistribution::solo(composer_key.to_address().into());
-    let composer_parameters = ComposerParameters::new(
-        coinbase_distribution,
-        coinbase_sender_randomness,
-        Some(composer_key.receiver_preimage()),
-        guesser_fraction,
-        FeeNotificationPolicy::OffChain,
-    );
-
-    let cli = crate::application::config::cli_args::Args {
-        network,
-        ..Default::default()
-    };
-
-    let consensus_rule_set =
-        ConsensusRuleSet::infer_from(network, previous_block.header().height.next());
-    let (mut transaction, composer_txos) = make_coinbase_transaction_stateless(
-        previous_block,
-        composer_parameters,
-        block_timestamp,
-        TritonVmJobQueue::get_instance(),
-        cli.proof_job_options_primitive_witness(),
-        consensus_rule_set,
-    )
-    .await
-    .unwrap();
-
-    let kernel_proxy = TransactionKernelProxy::from(transaction.kernel.clone());
-    let new_outputs = [kernel_proxy.outputs, outputs].concat();
-    let new_inputs = [kernel_proxy.inputs, inputs].concat();
-
-    let new_kernel = TransactionKernelModifier::default()
-        .outputs(new_outputs)
-        .inputs(new_inputs)
-        .modify(transaction.kernel.clone());
-    transaction.kernel = new_kernel;
-    let transaction = BlockTransaction::upgrade(transaction);
-
-    let mut block = Block::block_template_invalid_proof(
-        previous_block,
-        transaction,
-        block_timestamp,
-        None,
-        network,
-    );
-    block.set_header_guesser_address(guesser_address);
-
-    let composer_expected_utxos = composer_txos
-        .iter()
-        .map(|txo| {
-            ExpectedUtxo::new(
-                txo.utxo(),
-                txo.sender_randomness(),
-                composer_key.receiver_preimage(),
-                crate::state::wallet::expected_utxo::UtxoNotifier::OwnMinerComposeBlock,
-            )
-        })
-        .collect();
-
-    (block, composer_expected_utxos)
-}
-
-/// Return a block with the specied number of inputs/outputs. Inputs and
-/// outputs are random. Also contains randomized composer rewards.
-///
-/// Does not have a valid proof, nor valid PoW. Not deterministic.
-pub(crate) async fn block_with_num_puts(
-    network: Network,
-    predecessor: &Block,
-    num_inputs: u128,
-    num_outputs: usize,
-) -> Block {
-    let mut rng = rand::rng();
-    let active_window_start = u128::from(
-        predecessor
-            .mutator_set_accumulator_after()
-            .unwrap()
-            .get_batch_index(),
-    ) * u128::from(CHUNK_SIZE);
-    let inputs = (0..num_inputs)
-        .map(|_| RemovalRecord {
-            absolute_indices: AbsoluteIndexSet::new(
-                (0..NUM_TRIALS)
-                    .map(|_| rng.random_range(u128::from(CHUNK_SIZE * 3)..u128::from(WINDOW_SIZE)))
-                    .map(|ri| ri + active_window_start)
-                    .collect_vec()
-                    .try_into()
-                    .unwrap(),
-            ),
-            target_chunks: ChunkDictionary::default(),
-        })
-        .collect_vec();
-
-    let outputs = vec![rng.random(); num_outputs];
-
-    let (block, _) = make_mock_block_with_inputs_and_outputs(
-        predecessor,
-        inputs,
-        outputs,
-        None,
-        GenerationSpendingKey::derive_from_seed(rng.random()),
-        rng.random(),
-        network,
-    )
-    .await;
-
-    block
-}
-
-/// Build a fake block with a random hash, containing *two* outputs for the
-/// composer.
-///
-/// Returns (block, composer-utxos).
-pub(crate) async fn make_mock_block(
-    previous_block: &Block,
-    block_timestamp: Option<Timestamp>,
-    composer_key: generation_address::GenerationSpendingKey,
-    coinbase_sender_randomness: Digest,
-    network: Network,
-) -> (Block, Vec<ExpectedUtxo>) {
-    make_mock_block_with_inputs_and_outputs(
-        previous_block,
-        vec![],
-        vec![],
-        block_timestamp,
-        composer_key,
-        coinbase_sender_randomness,
-        network,
-    )
-    .await
-}
-
-/// Build a fake block with a random hash, containing the given inputs and
-/// outputs as well as two outputs for the composer.
-///
-/// Returns (block, composer-utxos).
-pub(crate) async fn make_mock_block_with_inputs_and_outputs(
-    previous_block: &Block,
-    inputs: Vec<RemovalRecord>,
-    outputs: Vec<AdditionRecord>,
-    block_timestamp: Option<Timestamp>,
-    composer_key: generation_address::GenerationSpendingKey,
-    coinbase_sender_randomness: Digest,
-    network: Network,
-) -> (Block, Vec<ExpectedUtxo>) {
-    let deterministic_generation_spending_key =
-        GenerationSpendingKey::derive_from_seed(Digest::default());
-    let guesser_address = deterministic_generation_spending_key.to_address();
-    make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-        previous_block,
-        inputs,
-        outputs,
-        block_timestamp,
-        composer_key,
-        coinbase_sender_randomness,
-        (0f64, guesser_address.into()),
-        network,
-    )
-    .await
-}
-
 /// Create and store the next block including any transactions presently in the
 /// mempool.  The coinbase and guesser fee will go to our own wallet.
 ///
@@ -441,13 +106,14 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     let tip = global_state_lock.lock_guard().await.chain.tip().to_owned();
 
     let timestamp = timestamp.unwrap_or_else(|| tip.header().timestamp + Timestamp::minutes(10));
-
+    let network = global_state_lock.cli().network;
+    let job_options = TritonVmProofJobOptions::default_with_network(network);
     let (transaction, expected_composer_utxos) =
         crate::application::loops::mine_loop::create_block_transaction(
             &tip,
             global_state_lock.clone(),
             timestamp,
-            Default::default(),
+            job_options,
         )
         .await?;
 
@@ -455,29 +121,15 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .lock_guard()
         .await
         .mining_rewards_address();
-    let network = global_state_lock.cli().network;
     let mut block =
         Block::block_template_invalid_proof(&tip, transaction, timestamp, None, network);
-    block.set_header_guesser_address(guesser_address);
+    block.set_header_guesser_data(guesser_address.into());
 
     global_state_lock
         .set_new_self_composed_tip(block.clone(), expected_composer_utxos)
         .await?;
 
     Ok(block)
-}
-
-pub(crate) fn invalid_empty_block_with_proof_size(
-    predecessor: &Block,
-    network: Network,
-    proof_size: usize,
-) -> Block {
-    let mut block = invalid_empty_block(predecessor, network);
-    block.set_proof(BlockProof::SingleProof(Proof::invalid_with_size(
-        proof_size,
-    )));
-
-    block
 }
 
 pub(crate) async fn invalid_empty_block1_with_guesser_fraction(
@@ -498,100 +150,7 @@ pub(crate) async fn invalid_empty_block1_with_guesser_fraction(
         (guesser_fraction, guesser_receiver.into()),
         network,
     )
-    .await
     .0
-}
-
-pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {
-    invalid_empty_block_with_num_outputs(predecessor, network, 0)
-}
-
-pub(crate) fn invalid_empty_block_with_num_outputs(
-    predecessor: &Block,
-    network: Network,
-    num_outputs: usize,
-) -> Block {
-    let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
-    let outputs = vec![AdditionRecord::new(Digest::default()); num_outputs];
-    let tx =
-        crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash_and_timestamp(
-            vec![],
-            outputs,
-            predecessor.mutator_set_accumulator_after().unwrap().hash(),
-            timestamp,
-        );
-    let tx = BlockTransaction::upgrade(tx);
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
-}
-
-/// Return a list of `n` invalid, empty blocks.
-pub(crate) fn invalid_empty_blocks_with_proof_size(
-    parent: &Block,
-    n: usize,
-    network: Network,
-    proof_size: usize,
-) -> Vec<Block> {
-    let mut blocks = vec![];
-    let mut predecessor = parent;
-    for _ in 0..n {
-        blocks.push(invalid_empty_block_with_proof_size(
-            predecessor,
-            network,
-            proof_size,
-        ));
-        predecessor = blocks.last().unwrap();
-    }
-
-    blocks
-}
-
-pub(crate) fn invalid_empty_block_with_announcements(
-    predecessor: &Block,
-    network: Network,
-    announcements: Vec<Announcement>,
-) -> Block {
-    let tx = crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash(
-        vec![],
-        vec![],
-        predecessor.mutator_set_accumulator_after().unwrap().hash(),
-    );
-    let kernel = TransactionKernelModifier::default()
-        .announcements(announcements)
-        .clone_modify(&tx.kernel);
-    let tx = Transaction {
-        kernel,
-        proof: tx.proof,
-    };
-    let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
-    let tx = BlockTransaction::upgrade(tx);
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
-}
-
-/// Return a list of `n` invalid, empty blocks.
-pub(crate) fn invalid_empty_blocks(ancestor: &Block, n: usize, network: Network) -> Vec<Block> {
-    let mut blocks = vec![];
-    let mut predecessor = ancestor;
-    for _ in 0..n {
-        blocks.push(invalid_empty_block(predecessor, network));
-        predecessor = blocks.last().unwrap();
-    }
-
-    blocks
-}
-
-pub(crate) fn invalid_empty_block_with_timestamp(
-    predecessor: &Block,
-    timestamp: Timestamp,
-    network: Network,
-) -> Block {
-    let tx = super::mock_tx::make_mock_transaction_with_mutator_set_hash_and_timestamp(
-        vec![],
-        vec![],
-        predecessor.mutator_set_accumulator_after().unwrap().hash(),
-        timestamp,
-    );
-    let tx = BlockTransaction::upgrade(tx);
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
 
 /// Create a fake block proposal; will pass `is_valid` but fail pow-check. Will
@@ -601,7 +160,7 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     tx: BlockTransaction,
     network: Network,
 ) -> Block {
-    let timestamp = tx.kernel.timestamp;
+    let timestamp = tx.kernel().timestamp;
 
     let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), tx, network);
 

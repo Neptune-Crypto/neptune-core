@@ -1,13 +1,13 @@
+use neptune_consensus::block::Block;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
 use tasm_lib::prelude::Digest;
 use tracing::info;
 
 use super::error::RegTestError;
-use crate::api::export::Timestamp;
-use crate::protocol::consensus::block::mock_block_generator::MockBlockGenerator;
-use crate::protocol::consensus::block::Block;
+use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
 use crate::protocol::shared::SIZE_20MB_IN_BYTES;
 use crate::state::mining::block_proposal::BlockProposal;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 
@@ -149,7 +149,7 @@ impl RegTestPrivate {
 
         // retrieve selected tx from mempool for block inclusion.
         let txs_from_mempool = if include_mempool_txs {
-            gs.mempool.get_transactions_for_block_composition(
+            gs.mempool().get_transactions_for_block_composition(
                 SIZE_20MB_IN_BYTES,
                 Some(gsl.cli().max_num_compose_mergers.get()),
             )

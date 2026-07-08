@@ -1,3 +1,4 @@
+pub mod consensus_integration;
 pub mod shared;
 
 use std::sync::OnceLock;

@@ -1,126 +1,46 @@
-use bytesize::ByteSize;
+use neptune_consensus::block::block_transaction::BlockOrRegularTransaction;
+use neptune_consensus::block::block_transaction::BlockTransaction;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
+use neptune_consensus::transaction::test_helpers::make_mock_transaction;
+use neptune_consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
+use neptune_consensus::transaction::validity::neptune_proof::Proof;
+use neptune_consensus::transaction::validity::single_proof::single_proof_claim;
+use neptune_consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_wallet::wallet_entropy::WalletEntropy;
 use tasm_lib::prelude::Digest;
-use tasm_lib::triton_vm::prelude::BFieldElement;
-use tasm_lib::twenty_first::bfe;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::ChangePolicy;
 use crate::api::export::InputSelectionPriority;
-use crate::api::export::KeyType;
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::Network;
 use crate::api::export::OutputFormat;
-use crate::api::export::Timestamp;
-use crate::api::export::Transaction;
-use crate::api::export::TxProvingCapability;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::application::config::cli_args;
-use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
-use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
-use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
-use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::protocol::proof_abstractions::verifier::cache_true_claims;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
-use crate::state::wallet::transaction_output::TxOutput;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::GlobalStateLock;
 use crate::state::StateLock;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-pub mod testrunning;
-
-pub(crate) fn make_plenty_mock_transaction_supported_by_invalid_single_proofs(
-    count: usize,
-) -> Vec<Transaction> {
-    let mut sp_backeds =
-        testrunning::make_plenty_mock_transaction_supported_by_primitive_witness(count);
-    for pw_backed in &mut sp_backeds {
-        pw_backed.proof = TransactionProof::invalid();
-    }
-
-    sp_backeds
-}
-
-/// Return a list of transactions backed by invalid single proofs where each
-/// single proof has a specified size.
-pub(crate) fn mock_transactions_with_sized_single_proof(
-    count: usize,
-    proof_size: ByteSize,
-) -> Vec<Transaction> {
-    let mut sp_backeds =
-        testrunning::make_plenty_mock_transaction_supported_by_primitive_witness(count);
-    let proof_size_in_bytes: usize = proof_size.as_u64().try_into().unwrap();
-    let proof_size_in_num_bfes = proof_size_in_bytes / BFieldElement::BYTES;
-    for sp_backed in &mut sp_backeds {
-        sp_backed.proof =
-            TransactionProof::SingleProof(Proof::from(vec![bfe!(0); proof_size_in_num_bfes]));
-    }
-
-    sp_backeds
-}
 
 /// A SingleProof-backed transaction with no inputs or outputs
 pub(crate) fn invalid_empty_single_proof_transaction() -> Transaction {
     let tx = make_mock_transaction(vec![], vec![]);
     assert!(matches!(tx.proof, TransactionProof::SingleProof(_)));
     tx
-}
-
-/// Make a transaction with `Invalid` transaction proof.
-pub fn make_mock_transaction(
-    inputs: Vec<RemovalRecord>,
-    outputs: Vec<AdditionRecord>,
-) -> Transaction {
-    make_mock_transaction_with_mutator_set_hash(inputs, outputs, Digest::default())
-}
-
-pub(crate) fn make_mock_transaction_with_mutator_set_hash_and_timestamp(
-    inputs: Vec<RemovalRecord>,
-    outputs: Vec<AdditionRecord>,
-    mutator_set_hash: Digest,
-    timestamp: Timestamp,
-) -> Transaction {
-    Transaction {
-        kernel:
-            crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy {
-                inputs,
-                outputs,
-                announcements: vec![],
-                fee: NativeCurrencyAmount::coins(1),
-                timestamp,
-                coinbase: None,
-                mutator_set_hash,
-                merge_bit: false,
-            }
-            .into_kernel(),
-        proof: TransactionProof::invalid(),
-    }
-}
-
-pub(crate) fn make_mock_transaction_with_mutator_set_hash(
-    inputs: Vec<RemovalRecord>,
-    outputs: Vec<AdditionRecord>,
-    mutator_set_hash: Digest,
-) -> Transaction {
-    let timestamp = Timestamp::now();
-
-    make_mock_transaction_with_mutator_set_hash_and_timestamp(
-        inputs,
-        outputs,
-        mutator_set_hash,
-        timestamp,
-    )
 }
 
 pub(crate) fn make_mock_block_transaction_with_mutator_set_hash(
@@ -144,10 +64,10 @@ pub(crate) fn make_mock_block_transaction_with_mutator_set_hash(
 /// scenes, this method updates the true claims cache, such that the call to
 /// `triton_vm::verify` will be by-passed.
 pub(super) async fn fake_create_transaction_from_details_for_tests(
-    transaction_details: crate::api::export::TransactionDetails,
+    transaction_details: neptune_wallet::transaction_details::TransactionDetails,
     consensus_rule_set: ConsensusRuleSet,
 ) -> Transaction {
-    let kernel = PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
+    let kernel = transaction_details.primitive_witness().kernel;
 
     let claim = single_proof_claim(kernel.mast_hash(), consensus_rule_set);
     cache_true_claims([claim.clone()]).await;
@@ -181,10 +101,10 @@ pub(super) async fn fake_merge_block_transactions_for_tests(
     let claim = single_proof_claim(new_kernel.mast_hash(), consensus_rule_set);
     cache_true_claims([claim]).await;
 
-    Ok(BlockTransaction {
-        kernel: new_kernel.try_into().unwrap(),
-        proof: TransactionProof::SingleProof(Proof::invalid()),
-    })
+    Ok(BlockTransaction::new(
+        new_kernel.try_into().unwrap(),
+        TransactionProof::SingleProof(Proof::invalid()),
+    ))
 }
 
 /// Return a valid, deterministic transaction with a specified proof type.
@@ -206,6 +126,7 @@ pub(crate) async fn genesis_tx_with_proof_type(
     let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
     let config = TxCreationConfig::default()
         .recover_change_on_chain(bob_spending_key.into())
+        .with_network(network)
         .with_prover_capability(proof_type);
 
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());

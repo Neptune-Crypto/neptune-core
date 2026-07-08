@@ -1,23 +1,20 @@
 use std::sync::Arc;
 
-use futures::channel::oneshot;
 use libp2p::Multiaddr;
+use neptune_consensus::block::Block;
+use neptune_consensus::transaction::Transaction;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 
-use crate::api::export::KeyType;
-use crate::api::export::ReceivingAddress;
-use crate::api::export::SpendingKey;
 use crate::api::export::TxCreationArtifacts;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::network::overview::NetworkOverview;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 
 #[derive(Clone, Debug, strum::Display)]
@@ -79,22 +76,6 @@ pub(crate) enum MinerToMain {
     Shutdown(i32),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct BlockProposalNotification {
-    pub(crate) body_mast_hash: Digest,
-    pub(crate) guesser_fee: NativeCurrencyAmount,
-    pub(crate) height: BlockHeight,
-}
-
-impl From<&Block> for BlockProposalNotification {
-    fn from(value: &Block) -> Self {
-        Self {
-            body_mast_hash: value.body().mast_hash(),
-            guesser_fee: value.body().transaction_kernel.fee,
-            height: value.header().height,
-        }
-    }
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ClaimUtxoData {
     /// Some(mutxo) if UTXO has already been mined. Otherwise, None.
@@ -161,14 +142,4 @@ pub(crate) enum RPCServerToMain {
         transaction: TxCreationArtifacts,
         increment_change_key_counter: bool,
     },
-}
-
-pub trait Cancelable: Send + Sync {
-    fn is_canceled(&self) -> bool;
-}
-
-impl<T: Send + Sync> Cancelable for oneshot::Sender<T> {
-    fn is_canceled(&self) -> bool {
-        self.is_canceled()
-    }
 }

@@ -1,0 +1,457 @@
+//! provides an abstraction over key and address types.
+
+use anyhow::bail;
+use anyhow::Result;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use arbitrary::Arbitrary;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
+use neptune_consensus::transaction::announcement::Announcement;
+use neptune_primitives::network::Network;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::triton_vm::prelude::Digest;
+
+use super::generation_address;
+use super::symmetric_key;
+use crate::address::elliptic_curve_hybrid;
+use crate::address::elliptic_curve_hybrid::ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG;
+use crate::address::generation_address::GENERATION_FLAG;
+use crate::address::symmetric_key::SYMMETRIC_KEY_FLAG;
+use crate::address::viewing_address;
+use crate::address::viewing_address::VIEWING_ADDRESS_FLAG;
+use crate::address::KeyType;
+use crate::utxo_notification::UtxoNotificationPayload;
+
+// note: assigning the flags to `KeyType` variants as discriminants has bonus
+// that we get a compiler verification that values do not conflict.  which is
+// nice since they are (presently) defined in separate files.
+//
+// anyway it is a desirable property that KeyType variants match the values
+// actually stored in Announcement.
+
+/// Represents any type of Neptune receiving Address.
+///
+/// This enum provides an abstraction API for Address types, so that
+/// a method or struct may simply accept a `ReceivingAddress` and be
+/// forward-compatible with new types of Address as they are implemented.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
+#[non_exhaustive]
+pub enum ReceivingAddress {
+    /// a [generation_address]
+    Generation(Box<generation_address::GenerationReceivingAddress>),
+
+    /// a [symmetric_key] acting as an address.
+    Symmetric(symmetric_key::SymmetricKey),
+
+    /// An address that should only be known by sender and receiver.
+    ///
+    /// If an attacker knows both the address and has a powerful quantum
+    /// computer, they can read the transaction history of all on-chain
+    /// announced UTXOs.
+    EcHybrid(elliptic_curve_hybrid::EcHybridAddress),
+
+    /// An address that should only be known by sender and receiver.
+    ///
+    /// Any attacker in possession of the address can decrypt all announcement
+    /// to the address and thus read the address' entire transaction history,
+    /// assuming onchain announcements are used.
+    ViewingAddress(viewing_address::ViewingAddress),
+}
+
+impl From<generation_address::GenerationReceivingAddress> for ReceivingAddress {
+    fn from(a: generation_address::GenerationReceivingAddress) -> Self {
+        Self::Generation(Box::new(a))
+    }
+}
+
+impl From<&generation_address::GenerationReceivingAddress> for ReceivingAddress {
+    fn from(a: &generation_address::GenerationReceivingAddress) -> Self {
+        Self::Generation(Box::new(*a))
+    }
+}
+
+impl From<symmetric_key::SymmetricKey> for ReceivingAddress {
+    fn from(k: symmetric_key::SymmetricKey) -> Self {
+        Self::Symmetric(k)
+    }
+}
+
+impl From<&symmetric_key::SymmetricKey> for ReceivingAddress {
+    fn from(k: &symmetric_key::SymmetricKey) -> Self {
+        Self::Symmetric(*k)
+    }
+}
+
+impl From<elliptic_curve_hybrid::EcHybridAddress> for ReceivingAddress {
+    fn from(value: elliptic_curve_hybrid::EcHybridAddress) -> Self {
+        Self::EcHybrid(value)
+    }
+}
+
+impl From<viewing_address::ViewingAddress> for ReceivingAddress {
+    fn from(value: viewing_address::ViewingAddress) -> Self {
+        Self::ViewingAddress(value)
+    }
+}
+
+/// The lock script hash and the receiver digest are the only parts of an
+/// guesser-receiver address that the block sees.
+impl From<ReceivingAddress> for GuesserReceiverData {
+    fn from(address: ReceivingAddress) -> Self {
+        GuesserReceiverData {
+            receiver_digest: address.privacy_digest(),
+            lock_script_hash: address.lock_script_hash(),
+        }
+    }
+}
+
+impl From<generation_address::GenerationReceivingAddress> for GuesserReceiverData {
+    fn from(address: generation_address::GenerationReceivingAddress) -> Self {
+        ReceivingAddress::from(address).into()
+    }
+}
+
+impl TryFrom<ReceivingAddress> for generation_address::GenerationReceivingAddress {
+    type Error = anyhow::Error;
+
+    fn try_from(a: ReceivingAddress) -> Result<Self> {
+        let ReceivingAddress::Generation(a) = a else {
+            bail!("not a generation address");
+        };
+
+        Ok(*a)
+    }
+}
+
+impl ReceivingAddress {
+    /// returns `receiver_identifier`
+    pub fn receiver_identifier(&self) -> BFieldElement {
+        match self {
+            Self::Generation(a) => a.receiver_identifier(),
+            Self::Symmetric(a) => a.receiver_identifier(),
+            Self::EcHybrid(a) => a.receiver_id(),
+            Self::ViewingAddress(a) => a.receiver_id(),
+        }
+    }
+
+    pub fn flag(&self) -> BFieldElement {
+        match self {
+            ReceivingAddress::Generation(_) => GENERATION_FLAG,
+            ReceivingAddress::Symmetric(_) => SYMMETRIC_KEY_FLAG,
+            ReceivingAddress::EcHybrid(_) => ELLIPTIC_CURVE_HYBRID_ADDRESS_FLAG,
+            ReceivingAddress::ViewingAddress(_) => VIEWING_ADDRESS_FLAG,
+        }
+    }
+
+    /// generates a [Announcement] for an output Utxo
+    ///
+    /// The announcement contains a [`Vec<BFieldElement>`] with fields:
+    ///   0    --> type flag.  (flag of key type)
+    ///   1    --> receiver_identifier  (fingerprint derived from seed)
+    ///   2..n --> ciphertext (encrypted utxo + sender_randomness)
+    ///
+    /// Fields |0,1| enable the receiver to determine the ciphertext
+    /// is intended for them and decryption should be attempted.
+    pub fn generate_announcement(
+        &self,
+        utxo_notification_payload: UtxoNotificationPayload,
+    ) -> Announcement {
+        match self {
+            ReceivingAddress::Generation(addr) => {
+                addr.generate_announcement(&utxo_notification_payload)
+            }
+            ReceivingAddress::Symmetric(symmetric_key) => {
+                symmetric_key.generate_announcement(&utxo_notification_payload)
+            }
+            ReceivingAddress::EcHybrid(addr) => {
+                addr.generate_announcement(&utxo_notification_payload)
+            }
+            ReceivingAddress::ViewingAddress(addr) => {
+                addr.generate_announcement(&utxo_notification_payload)
+            }
+        }
+    }
+
+    pub fn private_notification(
+        &self,
+        utxo_notification_payload: UtxoNotificationPayload,
+        network: Network,
+    ) -> String {
+        match self {
+            ReceivingAddress::Generation(addr) => {
+                addr.private_utxo_notification(&utxo_notification_payload, network)
+            }
+            ReceivingAddress::Symmetric(symmetric_key) => {
+                symmetric_key.private_utxo_notification(&utxo_notification_payload, network)
+            }
+            ReceivingAddress::EcHybrid(addr) => {
+                addr.private_utxo_notification(&utxo_notification_payload, network)
+            }
+            ReceivingAddress::ViewingAddress(addr) => {
+                addr.private_utxo_notification(&utxo_notification_payload, network)
+            }
+        }
+    }
+
+    /// returns a privacy digest which is the post-image of privacy preimage of
+    /// the matching [SpendingKey](super::SpendingKey)
+    pub fn privacy_digest(&self) -> Digest {
+        match self {
+            Self::Generation(a) => a.receiver_postimage(),
+            Self::Symmetric(k) => k.receiver_postimage(),
+            Self::EcHybrid(a) => a.receiver_postimage(),
+            Self::ViewingAddress(a) => a.receiver_postimage(),
+        }
+    }
+
+    /// encrypts a [Utxo] and `sender_randomness` secret for purpose of transferring to payment recipient
+    #[cfg(test)]
+    pub fn encrypt(
+        &self,
+        utxo_notification_payload: &UtxoNotificationPayload,
+    ) -> Vec<BFieldElement> {
+        match self {
+            Self::Generation(a) => a.encrypt(utxo_notification_payload),
+            Self::Symmetric(a) => a.encrypt(utxo_notification_payload),
+            Self::EcHybrid(a) => a.encrypt(utxo_notification_payload),
+            Self::ViewingAddress(a) => a.encrypt(utxo_notification_payload),
+        }
+    }
+
+    /// encodes this address as bech32m
+    ///
+    /// For any key-type, the resulting bech32m can be provided as input to
+    /// Self::from_bech32m() and will generate the original ReceivingAddress.
+    ///
+    /// Security: for key-type==Symmetric the resulting string exposes
+    /// the secret-key.  As such, great care must be taken and it should
+    /// never be used for display purposes.
+    ///
+    /// For most uses, prefer [Self::to_display_bech32m()] instead.
+    pub fn to_bech32m(&self, network: Network) -> Result<String> {
+        match self {
+            Self::Generation(k) => k.to_bech32m(network),
+            Self::Symmetric(k) => k.to_bech32m(network),
+            Self::EcHybrid(a) => Ok(a.to_bech32m(network)),
+            Self::ViewingAddress(a) => Ok(a.to_bech32m(network)),
+        }
+    }
+
+    /// returns an abbreviated bech32m encoded address.
+    ///
+    /// This method *may* reveal secret-key information for some key-types.  For
+    /// general display purposes, prefer
+    /// [Self::to_display_bech32m_abbreviated()].
+    ///
+    /// The idea is that this suitable for human recognition purposes
+    ///
+    /// ```text
+    /// format:  <hrp><start>...<end>
+    ///
+    ///   [4 or 6] human readable prefix. 4 for symmetric-key, 6 for generation.
+    ///   12 start of address.
+    ///   12 end of address.
+    /// ```
+    pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
+        Ok(self.bech32m_abbreviate(self.to_bech32m(network)?, network))
+    }
+
+    /// returns a bech32m string suitable for display purposes.
+    ///
+    /// This method does not reveal secret-key information for any key-type.
+    ///
+    /// The resulting bech32m string is not guaranteed to result in the same
+    /// [ReceivingAddress] if provided as input to [Self::from_bech32m()].  For
+    /// that, [Self::to_bech32m()] should be used instead.
+    ///
+    /// For [Self::Generation] and [Self::EcHybrid] keys, this is
+    /// equivalent to calling [Self::to_bech32m()].
+    /// For [Self::Symmetric] keys, this returns the privacy_preimage hash
+    ///  bech32m encoded instead of the key itself.
+    pub fn to_display_bech32m(&self, network: Network) -> anyhow::Result<String> {
+        match self {
+            Self::Generation(k) => k.to_bech32m(network),
+            Self::Symmetric(k) => k.to_display_bech32m(network),
+            Self::EcHybrid(a) => Ok(a.to_bech32m(network)),
+            Self::ViewingAddress(a) => Ok(a.to_bech32m(network)),
+        }
+    }
+
+    /// returns an abbreviated address suitable for display purposes.
+    ///
+    /// This method does not reveal secret-key information for any key-type.
+    ///
+    /// The idea is that this suitable for human recognition purposes
+    ///
+    /// ```text
+    /// format:  <hrp><start>...<end>
+    ///
+    ///   [4 or 6] human readable prefix. 4 for symmetric-key, 6 for generation.
+    ///   12 start of address.
+    ///   12 end of address.
+    /// ```
+    pub fn to_display_bech32m_abbreviated(&self, network: Network) -> Result<String> {
+        Ok(self.bech32m_abbreviate(self.to_display_bech32m(network)?, network))
+    }
+
+    fn bech32m_abbreviate(&self, bech32m: String, network: Network) -> String {
+        let first_len = self.get_hrp(network).len() + 12usize;
+        let last_len = 12usize;
+
+        assert!(bech32m.len() > first_len + last_len);
+
+        let (first, _) = bech32m.split_at(first_len);
+        let (_, last) = bech32m.split_at(bech32m.len() - last_len);
+
+        format!("{first}...{last}")
+    }
+
+    /// parses an address from its bech32m encoding
+    pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
+        if encoded.starts_with(elliptic_curve_hybrid::ECH_HRP_PREFIX) {
+            return Ok(
+                elliptic_curve_hybrid::EcHybridAddress::from_bech32m(encoded, network)?.into(),
+            );
+        }
+
+        if encoded.starts_with(generation_address::HRP_PREFIX) {
+            return Ok(
+                generation_address::GenerationReceivingAddress::from_bech32m(encoded, network)?
+                    .into(),
+            );
+        }
+
+        if encoded.starts_with(viewing_address::VIEWING_ADDRESS_HRP_PREFIX) {
+            return Ok(viewing_address::ViewingAddress::from_bech32m(encoded, network)?.into());
+        }
+
+        let key = symmetric_key::SymmetricKey::from_bech32m(encoded, network)?;
+        Ok(key.into())
+    }
+
+    /// returns human-readable-prefix (hrp) for a given network
+    pub fn get_hrp(&self, network: Network) -> String {
+        KeyType::from(self).get_hrp(network)
+    }
+
+    /// Returns the address's lock script hash.
+    ///
+    /// In the general case, only the receiver knows the lock script.
+    pub fn lock_script_hash(&self) -> Digest {
+        match self {
+            Self::Generation(x) => x.lock_script().hash(),
+            Self::Symmetric(x) => x.lock_script().hash(),
+            Self::EcHybrid(x) => x.lock_script().hash(),
+            Self::ViewingAddress(x) => x.lock_script().hash(),
+        }
+    }
+
+    /// returns true if the [Announcement] has a type-flag that matches the type of this address.
+    pub fn matches_announcement_key_type(&self, pa: &Announcement) -> bool {
+        matches!(KeyType::try_from(pa), Ok(kt) if kt == KeyType::from(self))
+    }
+}
+
+impl From<&ReceivingAddress> for neptune_primitives::announcement_flag::AnnouncementFlag {
+    fn from(value: &ReceivingAddress) -> Self {
+        Self {
+            flag: value.flag(),
+            receiver_id: value.receiver_identifier(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bech32::ToBase32;
+    use bech32::Variant;
+    use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
+    use strum::IntoEnumIterator;
+    use test_strategy::proptest;
+
+    use super::*;
+    use crate::address::elliptic_curve_hybrid::EcHybridKey;
+    use crate::address::generation_address::GenerationSpendingKey;
+    use crate::address::symmetric_key::SymmetricKey;
+    use crate::address::viewing_address::ViewingAddress;
+
+    fn address_from_seed(seed: Digest, key_type: KeyType) -> ReceivingAddress {
+        match key_type {
+            KeyType::Generation => GenerationSpendingKey::derive_from_seed(seed)
+                .to_address()
+                .into(),
+            KeyType::Symmetric => ReceivingAddress::Symmetric(SymmetricKey::from_seed(seed)),
+            KeyType::EcHybrid => EcHybridKey::from_seed(seed).to_address().into(),
+            KeyType::ViewingAddress => ViewingAddress::from_seed(seed).into(),
+        }
+    }
+
+    #[proptest]
+    fn address_encode_decode_identity_prop(#[strategy(arb())] address: ReceivingAddress) {
+        let network = Network::Main;
+        let address_again =
+            ReceivingAddress::from_bech32m(&address.to_bech32m(network).unwrap(), network).unwrap();
+        prop_assert_eq!(address, address_again);
+    }
+
+    #[test]
+    fn address_encode_decode_identity_unit() {
+        let seed = Digest::default();
+        let network = Network::Main;
+        for key_type in KeyType::iter() {
+            let address = address_from_seed(seed, key_type);
+            assert_eq!(
+                address,
+                ReceivingAddress::from_bech32m(&address.to_bech32m(network).unwrap(), network,)
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn no_crash_in_bech32_decoding() {
+        const SHORT_PREFIX: &str = "n";
+        let network = Network::Main;
+
+        // Encodings with valid checksum
+        let short_prefix =
+            bech32::encode(SHORT_PREFIX, vec![].to_base32(), Variant::Bech32m).unwrap();
+        let long_prefix =
+            bech32::encode("nolganolga", vec![].to_base32(), Variant::Bech32m).unwrap();
+
+        for str in [short_prefix, long_prefix] {
+            assert!(
+                SymmetricKey::from_bech32m(&str, network).is_err(),
+                "Invalid bech32 encoding must lead to error: {str}"
+            );
+        }
+
+        // Not valid checksums.
+        for i in 0..10 {
+            let as_ = "a".repeat(i);
+            assert!(
+                ReceivingAddress::from_bech32m(&as_, network).is_err(),
+                "Invalid bech32 encoding must lead to error 1"
+            );
+            assert!(
+                ReceivingAddress::from_bech32m(
+                    &format!("{}1{as_}", generation_address::HRP_PREFIX),
+                    network
+                )
+                .is_err(),
+                "Invalid bech32 encoding must lead to error 2"
+            );
+            assert!(
+                ReceivingAddress::from_bech32m(&format!("{SHORT_PREFIX}1{as_}"), network).is_err(),
+                "Invalid bech32 encoding must lead to error 3"
+            );
+            assert!(
+                ReceivingAddress::from_bech32m(&format!("1{as_}"), network).is_err(),
+                "Invalid bech32 encoding must lead to error 4"
+            );
+        }
+    }
+}

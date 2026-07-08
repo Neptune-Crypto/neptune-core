@@ -11,11 +11,11 @@
 //!
 //! ```
 //! use neptune_cash::{api, api::export, api::tx_initiation::{self, send}};
-//! use export::ChangePolicy;
+//! use neptune_wallet::change_policy::ChangePolicy;
 //! use export::GlobalStateLock;
-//! use export::NativeCurrencyAmount;
-//! use export::ReceivingAddress;
-//! use export::Timestamp;
+//! use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+//! use neptune_wallet::address::ReceivingAddress;
+//! use neptune_primitives::timestamp::Timestamp;
 //! use export::TxCreationArtifacts;
 //!
 //! async fn my_send_transaction(gsl: GlobalStateLock, recipient: ReceivingAddress, amount: NativeCurrencyAmount, change_policy: ChangePolicy, fee: NativeCurrencyAmount) -> Result<TxCreationArtifacts, tx_initiation::error::SendError> {
@@ -33,13 +33,14 @@
 //! }
 //! ```
 
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::change_policy::ChangePolicy;
+
 use super::error;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::initiator::TransactionInitiator;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
-use crate::state::wallet::change_policy::ChangePolicy;
 use crate::GlobalStateLock;
 
 /// provides a send() method to send a neptune transaction in one call.

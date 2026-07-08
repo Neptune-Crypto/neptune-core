@@ -1,12 +1,12 @@
 //! This module implements a builder for [TritonVmProofJobOptions]
 
-use crate::application::config::network::Network;
-use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
-use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use neptune_consensus::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_primitives::network::Network;
 
 /// a builder for [TritonVmProofJobOptions]
 ///
@@ -22,7 +22,7 @@ use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 ///
 /// ```
 /// use neptune_cash::api::export::Args;
-/// use neptune_cash::api::export::TransactionProofType;
+/// use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 ///
 /// let args = Args::default();
@@ -35,10 +35,10 @@ use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 /// Example: (setting all fields)
 ///
 /// ```
-/// use neptune_cash::api::export::TritonVmJobPriority;
-/// use neptune_cash::api::export::Network;
-/// use neptune_cash::api::export::TxProvingCapability;
-/// use neptune_cash::api::export::TransactionProofType;
+/// use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+/// use neptune_primitives::network::Network;
+/// use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+/// use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 ///
 /// let (_tx, cancel_job_rx) = tokio::sync::watch::channel(());
@@ -80,7 +80,7 @@ impl TritonVmProofJobOptionsBuilder {
     ///
     /// ```
     /// use neptune_cash::api::export::Args;
-    /// use neptune_cash::api::export::TransactionProofType;
+    /// use neptune_consensus::transaction::transaction_proof::TransactionProofType;
     /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
     ///
     /// let args = Args::default();
@@ -99,10 +99,10 @@ impl TritonVmProofJobOptionsBuilder {
     ///
     /// this will set all fields from [ProverJobSettings] at once.
     pub fn prover_job_settings(mut self, js: &ProverJobSettings) -> Self {
-        self.max_log2_padded_height_for_proofs = js.max_log2_padded_height_for_proofs;
-        self.network = Some(js.network);
-        self.tx_proving_capability = Some(js.tx_proving_capability);
-        self.proof_type = Some(js.proof_type);
+        self.max_log2_padded_height_for_proofs = js.max_log2_padded_height_for_proofs();
+        self.network = Some(js.network());
+        self.tx_proving_capability = Some(js.tx_proving_capability());
+        self.proof_type = Some(js.proof_type());
         self.triton_vm_env_vars = js.triton_vm_env_vars.clone();
         self
     }
@@ -126,11 +126,11 @@ impl TritonVmProofJobOptionsBuilder {
     /// Example:
     ///
     /// ```
-    /// use neptune_cash::api::export::TransactionDetails;
-    /// use neptune_cash::api::export::TransactionProof;
+    /// use neptune_wallet::transaction_details::TransactionDetails;
+    /// use neptune_consensus::transaction::transaction_proof::TransactionProof;
     /// use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
-    /// use neptune_cash::application::triton_vm_job_queue::vm_job_queue;
+    /// use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     /// use std::time::Duration;
     ///
     /// async fn prove_with_timeout(tx_details: TransactionDetails, timeout: Duration) -> anyhow::Result<TransactionProof> {
@@ -226,13 +226,13 @@ impl TritonVmProofJobOptionsBuilder {
         let tx_proving_capability = tx_proving_capability.unwrap_or_default();
         let proof_type = proof_type.unwrap_or(tx_proving_capability.into());
 
-        let job_settings = ProverJobSettings {
+        let job_settings = ProverJobSettings::new(
             max_log2_padded_height_for_proofs,
             network,
             tx_proving_capability,
             proof_type,
             triton_vm_env_vars,
-        };
+        );
 
         TritonVmProofJobOptions {
             job_priority,

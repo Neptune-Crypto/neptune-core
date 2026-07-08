@@ -18,11 +18,11 @@ use libp2p::swarm::THandlerOutEvent;
 use libp2p::swarm::ToSwarm;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_p2p::peer::handshake_data::HandshakeData;
 
 use crate::application::network::actor::NetworkActor;
 use crate::application::network::handshake::HandshakeResult;
 use crate::application::network::handshake::HandshakeUpgrade;
-use crate::protocol::peer::handshake_data::HandshakeData;
 use crate::state::GlobalStateLock;
 
 /// Manages the lifecycle of one specific connection.

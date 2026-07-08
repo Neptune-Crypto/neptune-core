@@ -1,6 +1,5 @@
 pub(crate) mod network_event_handler;
 pub mod proof_upgrader;
-pub(crate) mod upgrade_incentive;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -16,6 +15,23 @@ use anyhow::Result;
 use itertools::Either;
 use itertools::Itertools;
 use libp2p::PeerId;
+use neptune_consensus::block::Block;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_mempool::mempool_update_job::MempoolUpdateJob;
+use neptune_mempool::mempool_update_job_result::MempoolUpdateJobResult;
+use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mempool::upgrade_incentive::UpgradeIncentive;
+use neptune_mempool::upgrade_priority::UpgradePriority;
+use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::peer_info::PeerInfo;
+use neptune_p2p::peer::transaction_notification::TransactionNotification;
+use neptune_primitives::timestamp::Timestamp;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
@@ -37,7 +53,6 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
-use crate::api::export::Timestamp;
 use crate::application::config::auto_consolidation::ConsolidationTarget;
 use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::loops::channel::MainToMiner;
@@ -48,7 +63,6 @@ use crate::application::loops::connect_to_peers::call_peer;
 use crate::application::loops::connect_to_peers::precheck_incoming_connection_is_allowed;
 use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
-use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::sync_loop::channel::BlockRequest;
@@ -57,25 +71,11 @@ use crate::application::loops::sync_loop::handle::SyncLoopHandle;
 use crate::application::loops::sync_loop::SYNC_LOOP_CHANNEL_CAPACITY;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
-use crate::application::triton_vm_job_queue::vm_job_queue;
-use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::peer::handshake_data::HandshakeData;
-use crate::protocol::peer::peer_info::PeerInfo;
-use crate::protocol::peer::transaction_notification::TransactionNotification;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
-use crate::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
-use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposal;
 use crate::state::networking_state::SyncAnchor;
 use crate::state::sync_status::SyncStatus;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
@@ -1046,7 +1046,7 @@ impl MainLoopHandler {
                     .global_state_lock
                     .lock_guard()
                     .await
-                    .mempool
+                    .mempool()
                     .own_transactions_confirmed_by_block(block.as_ref())
                     .len();
                 if num_own_txs_confirmed > 0 {
@@ -1957,11 +1957,11 @@ impl MainLoopHandler {
                 let mut notifications = vec![];
                 {
                     let state = self.global_state_lock.lock_guard().await;
-                    for (txid, _) in state.mempool.fee_density_iter() {
+                    for (txid, _) in state.mempool().fee_density_iter() {
                         // Since a read-lock is held over global state, the
                         // transaction must exist in the mempool.
                         let tx = state
-                            .mempool
+                            .mempool()
                             .get(txid)
                             .expect("Transaction from iter must exist in mempool");
                         if tx.proof.is_witness() {
@@ -2593,19 +2593,19 @@ mod tests {
     use std::time::UNIX_EPOCH;
 
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+    use neptune_primitives::network::Network;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::utxo_notification::UtxoNotificationMedium;
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::KeyType;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::ReceivingAddress;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
-    use crate::protocol::peer::peer_info::pseudorandom_peer_id;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::blocks::block_with_outputs;
-    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
     use crate::tests::shared::globalstate::get_test_genesis_setup;
@@ -2886,8 +2886,9 @@ mod tests {
     }
 
     mod update_mempool_txs {
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
         use super::*;
-        use crate::api::export::NativeCurrencyAmount;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
@@ -2899,13 +2900,15 @@ mod tests {
             // transaction is updated to be valid under the new mutator set
             // after the application of the block and the invocation of the
             // relevant functions.
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let fee = NativeCurrencyAmount::coins(1);
+            let proof_job_options = TritonVmProofJobOptions::default_with_network(network);
 
             let genesis_block = Block::genesis(network);
             let block1 = fake_valid_deterministic_successor(&genesis_block, network).await;
             let cli = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                network,
                 ..Default::default()
             };
             for tx_proving_capability in [
@@ -2951,7 +2954,7 @@ mod tests {
                     update_jobs,
                     vm_job_queue(),
                     update_sender,
-                    TritonVmProofJobOptions::default(),
+                    proof_job_options.clone(),
                 )
                 .await;
 
@@ -2976,7 +2979,7 @@ mod tests {
                         .global_state_lock
                         .lock_guard()
                         .await
-                        .mempool
+                        .mempool()
                         .get(txid)
                         .unwrap()
                         .clone()
@@ -2997,16 +3000,17 @@ mod tests {
     }
 
     mod proof_upgrader {
+        use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+        use neptune_consensus::transaction::Transaction;
+        use neptune_consensus::transaction::TransactionProof;
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
+        use neptune_primitives::block_height::BlockHeight;
+        use neptune_primitives::timestamp::Timestamp;
+        use neptune_wallet::transaction_output::TxOutput;
+
         use super::*;
-        use crate::api::export::BlockHeight;
-        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-        use crate::protocol::consensus::transaction::Transaction;
-        use crate::protocol::consensus::transaction::TransactionProof;
-        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-        use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
-        use crate::protocol::proof_abstractions::timestamp::Timestamp;
         use crate::state::transaction::tx_creation_config::TxCreationConfig;
-        use crate::state::wallet::transaction_output::TxOutput;
 
         async fn tx_no_outputs(
             global_state_lock: &mut GlobalStateLock,
@@ -3055,7 +3059,7 @@ mod tests {
 
             // Force instance to create SingleProofs, otherwise CI and other
             // weak machines fail.
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let cli = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 tx_proof_upgrading: true,
@@ -3120,13 +3124,13 @@ mod tests {
                 .global_state_lock
                 .lock_guard()
                 .await
-                .mempool
+                .mempool()
                 .fee_density_iter()
                 .next_back()
                 .expect("mempool should contain one item here");
 
             let state = main_loop_handler.global_state_lock.lock_guard().await;
-            let (mempool_tx, priority) = state.mempool.get_with_priority(merged_txid).unwrap();
+            let (mempool_tx, priority) = state.mempool().get_with_priority(merged_txid).unwrap();
             assert!(
                 matches!(mempool_tx.proof, TransactionProof::SingleProof(_)),
                 "Proof in mempool must now be of type single proof"
@@ -3434,11 +3438,11 @@ mod tests {
 
     mod bootstrapper_mode {
 
+        use neptune_p2p::peer::PeerMessage;
+        use neptune_p2p::peer::TransferConnectionStatus;
         use rand::Rng;
 
         use super::*;
-        use crate::protocol::peer::PeerMessage;
-        use crate::protocol::peer::TransferConnectionStatus;
         use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;
         use crate::tests::shared::to_bytes;
 
@@ -3612,8 +3616,9 @@ mod tests {
     }
 
     mod peer_messages {
+        use neptune_primitives::block_height::BlockHeight;
+
         use super::*;
-        use crate::api::export::BlockHeight;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -3700,7 +3705,8 @@ mod tests {
         async fn new_block_from_peer_invokes_block_notify() {
             use std::fs;
 
-            use crate::tests::shared::files::test_helper_data_dir;
+            use neptune_consensus::proof_abstractions::test_helpers::test_helper_data_dir;
+
             use crate::tests::shared::files::unit_test_data_directory;
             use crate::tests::shared::files::wait_for_file_to_exist;
 

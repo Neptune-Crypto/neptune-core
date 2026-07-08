@@ -1,30 +1,30 @@
 use std::cmp::Ordering;
 
 use futures::Stream;
+use neptune_database::storage::storage_schema::traits::*;
+use neptune_database::storage::storage_schema::DbtVec;
+use neptune_database::storage::storage_schema::RustyKey;
+use neptune_database::storage::storage_schema::RustyValue;
+use neptune_database::storage::storage_schema::SimpleRustyStorage;
+use neptune_database::storage::storage_vec::traits::StorageVecBase;
+use neptune_database::storage::storage_vec::traits::StorageVecStream;
+use neptune_database::storage::storage_vec::Index;
+use neptune_database::NeptuneLevelDb;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use super::expected_utxo::ExpectedUtxo;
 use super::migrate_db;
 use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
 use super::wallet_db_tables::WalletDbTables;
 use super::wallet_db_tables::WALLET_DB_SCHEMA_VERSION;
-use crate::api::export::AdditionRecord;
-use crate::api::export::BlockHeight;
-use crate::api::export::Timestamp;
-use crate::application::database::storage::storage_schema::traits::*;
-use crate::application::database::storage::storage_schema::DbtVec;
-use crate::application::database::storage::storage_schema::RustyKey;
-use crate::application::database::storage::storage_schema::RustyValue;
-use crate::application::database::storage::storage_schema::SimpleRustyStorage;
-use crate::application::database::storage::storage_vec::traits::StorageVecBase;
-use crate::application::database::storage::storage_vec::traits::StorageVecStream;
-use crate::application::database::storage::storage_vec::Index;
-use crate::application::database::NeptuneLevelDb;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 #[derive(Debug)]
 pub struct RustyWalletDatabase {
@@ -553,10 +553,10 @@ impl From<anyhow::Error> for WalletDbConnectError {
 pub(crate) mod tests {
     use std::collections::HashSet;
 
+    use neptune_database::storage::storage_schema::DbtMap;
     use num_traits::Zero;
 
     use super::*;
-    use crate::application::database::storage::storage_schema::DbtMap;
 
     impl RustyWalletDatabase {
         pub fn storage(&self) -> &SimpleRustyStorage {

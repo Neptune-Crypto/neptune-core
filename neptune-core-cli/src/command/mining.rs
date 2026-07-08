@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use neptune_cash::api::export::TransactionKernelId;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 
 /// Mining Command -- a command related to the process of finding new blocks.
 #[derive(Debug, Clone, Parser)]

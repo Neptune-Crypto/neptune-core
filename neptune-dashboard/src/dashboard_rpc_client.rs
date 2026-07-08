@@ -1,15 +1,7 @@
 use std::net::IpAddr;
 use std::ops::Deref;
 
-use neptune_cash::api::export::BlockHeight;
-use neptune_cash::api::export::ChangePolicy;
-use neptune_cash::api::export::KeyType;
-use neptune_cash::api::export::NativeCurrencyAmount;
-use neptune_cash::api::export::Network;
 use neptune_cash::api::export::OutputFormat;
-use neptune_cash::api::export::ReceivingAddress;
-use neptune_cash::api::export::SpendingKey;
-use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::TxCreationArtifacts;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
@@ -17,7 +9,15 @@ use neptune_cash::application::rpc::server::overview_data::OverviewData;
 use neptune_cash::application::rpc::server::ui_utxo::UiUtxo;
 use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::application::rpc::server::RpcResult;
-use neptune_cash::protocol::peer::peer_info::PeerInfo;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_p2p::peer::peer_info::PeerInfo;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::change_policy::ChangePolicy;
 use tasm_lib::prelude::Digest;
 
 #[derive(Debug, Clone)]

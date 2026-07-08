@@ -1,11 +1,11 @@
+use neptune_archive::archival_state::ArchivalState;
+use neptune_consensus::block::pow::LustrationStatus;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::block_height::BlockHeight;
 use tasm_lib::prelude::Digest;
 
-use super::archival_state::ArchivalState;
 use super::light_state::LightState;
-use crate::api::export::BlockHeight;
-use crate::protocol::consensus::block::pow::LustrationStatus;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Block;
 
 /// `BlockChainState` provides an `Archival` variant

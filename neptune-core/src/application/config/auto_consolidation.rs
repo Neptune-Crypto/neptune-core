@@ -1,5 +1,5 @@
-use crate::api::export::Network;
-use crate::api::export::ReceivingAddress;
+use neptune_primitives::network::Network;
+use neptune_wallet::address::ReceivingAddress;
 
 #[derive(Debug, Clone, Default)]
 pub struct AutoConsolidationSettings {

@@ -8,7 +8,6 @@
 //! their own.  This is facilitated by [StateLock](crate::api::export::StateLock).
 
 pub mod input_selector;
-pub mod proof_builder;
 pub mod transaction_builder;
 pub mod transaction_details_builder;
 pub mod transaction_proof_builder;

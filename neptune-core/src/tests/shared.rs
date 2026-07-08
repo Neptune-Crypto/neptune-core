@@ -9,39 +9,36 @@ use futures::sink;
 use futures::stream;
 use futures::task::Context;
 use futures::task::Poll;
-use itertools::Itertools;
 use mock_tx::fake_create_transaction_from_details_for_tests;
+use neptune_consensus::block::block_transaction::BlockOrRegularTransaction;
+use neptune_consensus::block::block_transaction::BlockTransaction;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::lock_script::LockScript;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_database::storage::storage_vec::traits::StorageVecBase;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_p2p::peer::PeerMessage;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::composer_parameters::prepare_coinbase_transaction_stateless;
+use neptune_wallet::composer_parameters::ComposerParameters;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutputList;
 use num_traits::Zero;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
-use tasm_lib::triton_vm::prelude::BFieldElement;
 use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use tracing::warn;
 
-use crate::api::export::TransactionDetails;
-use crate::api::export::TxOutputList;
-use crate::application::config::network::Network;
-use crate::application::database::storage::storage_vec::traits::StorageVecBase;
-use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
-use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
-use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::lock_script::LockScript;
-use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::peer::PeerMessage;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
 use crate::state::wallet::wallet_state::WalletState;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 pub mod blocks;
 pub mod files;
@@ -176,7 +173,7 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
 }
 
 pub(crate) async fn mock_genesis_wallet_state(
-    wallet_entropy: crate::state::wallet::wallet_entropy::WalletEntropy,
+    wallet_entropy: neptune_wallet::wallet_entropy::WalletEntropy,
     cli_args: &crate::application::config::cli_args::Args,
 ) -> WalletState {
     let data_dir = unit_test_data_directory(cli_args.network).unwrap();
@@ -266,14 +263,6 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
     }
 
     true
-}
-
-// TODO: Use this function from `tasm-lib` once upgraded to latest
-// version. And delete this function.
-pub(crate) fn pop_encodable<T: BFieldCodec>(stack: &mut Vec<BFieldElement>) -> T {
-    let len = T::static_length().unwrap();
-    let limbs = (0..len).map(|_| stack.pop().unwrap()).collect_vec();
-    *T::decode(&limbs).unwrap()
 }
 
 /// Waits for an async predicate to return true or a timeout.

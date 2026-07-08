@@ -5,6 +5,10 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use itertools::Itertools;
+use neptune_consensus::block::Block;
+use neptune_p2p::synchronization_bit_mask::SynchronizationBitMask;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
 use rand::rng;
 use rand::Rng;
 use tokio::sync::mpsc;
@@ -14,8 +18,6 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::Network;
 use crate::application::loops::sync_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::BlockRequest;
 use crate::application::loops::sync_loop::channel::MainToSync;
@@ -24,15 +26,12 @@ use crate::application::loops::sync_loop::channel::SyncToMain;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownload;
 use crate::application::loops::sync_loop::rapid_block_download::RapidBlockDownloadError;
 use crate::application::loops::sync_loop::sync_progress::SyncProgress;
-use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
-use crate::protocol::consensus::block::Block;
 
 mod block_validator;
 pub(crate) mod channel;
 pub(crate) mod handle;
 pub(crate) mod rapid_block_download;
 pub mod sync_progress;
-pub(crate) mod synchronization_bit_mask;
 
 pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 100;
 
@@ -884,15 +883,15 @@ mod tests {
     use std::sync::Arc;
 
     use macro_rules_attr::apply;
+    use neptune_consensus::block::Block;
+    use neptune_primitives::network::Network;
     use rand::rngs::StdRng;
     use rand::RngCore;
     use rand::SeedableRng;
     use tokio::sync::Mutex;
 
     use super::*;
-    use crate::api::export::Network;
     use crate::application::loops::sync_loop::handle::SyncLoopHandle;
-    use crate::protocol::consensus::block::Block;
     use crate::tests::shared_tokio_runtime;
 
     /// A channel for informing the [MockMainLoop] about peer (dis)connections.

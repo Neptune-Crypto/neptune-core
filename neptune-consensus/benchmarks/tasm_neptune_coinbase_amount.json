@@ -1,0 +1,24 @@
+[
+  {
+    "name": "tasm_neptune_coinbase_amount",
+    "benchmark_result": {
+      "clock_cycle_count": 82,
+      "hash_table_height": 78,
+      "u32_table_height": 131,
+      "op_stack_table_height": 57,
+      "ram_table_height": 5
+    },
+    "case": "CommonCase"
+  },
+  {
+    "name": "tasm_neptune_coinbase_amount",
+    "benchmark_result": {
+      "clock_cycle_count": 26,
+      "hash_table_height": 78,
+      "u32_table_height": 0,
+      "op_stack_table_height": 19,
+      "ram_table_height": 1
+    },
+    "case": "WorstCase"
+  }
+]

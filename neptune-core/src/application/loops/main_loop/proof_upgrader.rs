@@ -1,6 +1,35 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::validity::neptune_proof::Proof;
+use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mempool::upgrade_incentive::UpgradeIncentive;
+use neptune_mempool::upgrade_priority::UpgradePriority;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_wallet::utxo_notification::UtxoNotificationMethod;
+use neptune_wallet::wallet_entropy::WalletEntropy;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -10,39 +39,11 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-use crate::api::export::ReceivingAddress;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
-use crate::application::config::network::Network;
-use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
-use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::mempool::upgrade_priority::UpgradePriority;
-use crate::state::transaction::transaction_details::TransactionDetails;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
-use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
-use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 pub(crate) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
 const MINIMUM_FEE_FOR_FREE_MERGE: NativeCurrencyAmount =
@@ -540,11 +541,15 @@ impl UpgradeJob {
                     // the transaction can be merged with anything favorable to
                     // us.
                     if upgrade_job.performs_raise() {
-                        let merge_tx = global_state_lock.lock_guard().await.mempool.merge_partner(
-                            &upgraded.kernel,
-                            consensus_rule_set,
-                            MINIMUM_FEE_FOR_FREE_MERGE,
-                        );
+                        let merge_tx = global_state_lock
+                            .lock_guard()
+                            .await
+                            .mempool()
+                            .merge_partner(
+                                &upgraded.kernel,
+                                consensus_rule_set,
+                                MINIMUM_FEE_FOR_FREE_MERGE,
+                            );
                         if let Some((right_kernel, single_proof_right, right_priority)) = merge_tx {
                             info!("Found merge candidate for newly upgraded transaction.");
 
@@ -666,7 +671,7 @@ impl UpgradeJob {
             mutator_set,
             old_tx_timestamp,
             utxo_notification_method,
-            proof_job_options.job_settings.network,
+            proof_job_options.job_settings.network(),
         );
 
         let gobbler_witness = gobbler.primitive_witness();
@@ -687,7 +692,7 @@ impl UpgradeJob {
             .build();
 
         let consensus_rule_set = ConsensusRuleSet::infer_from(
-            proof_job_options.job_settings.network,
+            proof_job_options.job_settings.network(),
             current_block_height,
         );
         let proof = TransactionProofBuilder::new()
@@ -726,7 +731,7 @@ impl UpgradeJob {
         let gobble_data = self.gobble_data();
         let mutator_set = self.mutator_set();
         let old_tx_timestamp = self.old_tx_timestamp();
-        let network = proof_job_options.job_settings.network;
+        let network = proof_job_options.job_settings.network();
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, current_block_height);
 
         let (maybe_gobbler, expected_utxos) =
@@ -864,7 +869,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
 
     // Do we have any `ProofCollection`s?
     let proof_collection_job = if let Some((kernel, proof, upgrade_priority)) = global_state
-        .mempool
+        .mempool()
         .preferred_proof_collection(num_proofs_threshold, upgrade_filter)
     {
         if kernel.mutator_set_hash != tip_mutator_set.hash() {
@@ -912,7 +917,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
         [(left_kernel, left_single_proof), (right_kernel, right_single_proof)],
         upgrade_priority,
     )) = global_state
-        .mempool
+        .mempool()
         .preferred_single_proof_pair(upgrade_filter)
     {
         // Sanity check
@@ -966,20 +971,20 @@ mod tests {
     use std::collections::HashSet;
 
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
+    use neptune_consensus::block::Block;
+    use neptune_mempool::upgrade_priority::UpgradePriority;
+    use neptune_primitives::network::Network;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::transaction_output::TxOutput;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
 
     use super::*;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
-    use crate::protocol::consensus::block::Block;
-    use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::transaction_output::TxOutput;
     use crate::tests::shared::blocks::fake_block_successor_with_merged_tx;
-    use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
     use crate::tests::shared::globalstate::get_test_genesis_setup;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
@@ -1030,7 +1035,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn dont_upgrade_foreign_proof_collection_if_fee_too_low() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         // Alice is premine recipient, so she can make a transaction (after
         // expiry of timelock). Rando is not premine recipient.
@@ -1091,7 +1096,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn happy_path() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         for proving_capability in [
             TxProvingCapability::ProofCollection,
@@ -1145,7 +1150,7 @@ mod tests {
             let mempool_tx = alice
                 .lock_guard()
                 .await
-                .mempool
+                .mempool()
                 .get(pwtx.kernel.txid())
                 .unwrap()
                 .to_owned();
@@ -1171,7 +1176,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn race_condition_with_one_new_block() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let proving_capabilities = [
             TxProvingCapability::ProofCollection,
             TxProvingCapability::SingleProof,
@@ -1246,7 +1251,7 @@ mod tests {
             let mempool_tx = alice
                 .lock_guard()
                 .await
-                .mempool
+                .mempool()
                 .get(pwtx.kernel.txid())
                 .unwrap()
                 .to_owned();
@@ -1276,7 +1281,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn merge_after_single_proof_upgrade() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
         let cli = cli_args::Args {
@@ -1329,7 +1334,7 @@ mod tests {
             .await;
         assert_eq!(
             1,
-            bob.lock_guard().await.mempool.len(),
+            bob.lock_guard().await.mempool().len(),
             "Upgraded tx must be merged"
         );
 
@@ -1342,7 +1347,7 @@ mod tests {
         let mempool_tx = bob
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get_transactions_for_block_composition(usize::MAX, None);
         assert_eq!(1, mempool_tx.len());
         let mempool_tx = &mempool_tx[0];
@@ -1381,7 +1386,7 @@ mod tests {
     async fn reward_mining_address_with_gobbling_fee() {
         // Ensure that gobbling fee goes to the right address, the one set in
         // the CLI arguments, if one such is set.
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
         let rando = WalletEntropy::new_pseudorandom(rng.random());
@@ -1430,7 +1435,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn dont_share_partly_mined_merge_upgrade() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         // Alice is premine recipient and has mined one block, so she can make
         // (at least) two transaction.
@@ -1520,11 +1525,11 @@ mod tests {
         // Since one transacion got mined, and the other didn't, we should still
         // have the unmined transaction in the mempool. Since this transcation
         // is owned by this client, we want to keep it in the mempool.
-        assert_eq!(1, alice.lock_guard().await.mempool.len());
+        assert_eq!(1, alice.lock_guard().await.mempool().len());
         assert!(alice
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .contains(unmined_tx.kernel.txid()));
     }
 }

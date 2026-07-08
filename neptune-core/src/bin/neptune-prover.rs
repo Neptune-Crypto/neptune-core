@@ -2,8 +2,8 @@
 
 use std::io::Write;
 
-use neptune_cash::protocol::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
-use neptune_cash::protocol::proof_abstractions::tasm::prover_job::PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE;
+use neptune_consensus::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
+use neptune_consensus::proof_abstractions::tasm::prover_job::PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE;
 use tasm_lib::triton_vm::aet::AlgebraicExecutionTrace;
 use tasm_lib::triton_vm::config::overwrite_lde_trace_caching_to;
 use tasm_lib::triton_vm::config::CacheDecision;
@@ -182,7 +182,7 @@ fn main() {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod neptune_prover_tests {
-    use neptune_cash::application::config::triton_vm_env_vars::TritonVmEnvVars;
+    use neptune_consensus::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::isa::triton_asm;
 

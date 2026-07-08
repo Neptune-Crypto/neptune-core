@@ -16,7 +16,7 @@ use crate::GlobalStateLock;
 /// ```
 /// # use neptune_cash::api::export::GlobalStateLock;
 /// # use neptune_cash::api::export::WalletBalances;
-/// # use neptune_cash::api::export::Timestamp;
+/// # use neptune_primitives::timestamp::Timestamp;
 ///
 /// # async fn get_balances(global_state_lock: GlobalStateLock) -> WalletBalances {
 /// global_state_lock

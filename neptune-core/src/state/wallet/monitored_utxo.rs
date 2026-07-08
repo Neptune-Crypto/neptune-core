@@ -2,22 +2,22 @@ use std::collections::VecDeque;
 use std::fmt::Display;
 
 use itertools::Itertools;
+use neptune_archive::archival_state::ArchivalState;
+use neptune_consensus::block::Block;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::transaction::utxo::Utxo;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
-use crate::state::archival_state::ArchivalState;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 /// Enumerates the possible spent spend-statuses of a monitored UTXO.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -44,8 +44,8 @@ pub enum MonitoredUtxoSpentStatus {
 /// The UTXO must, at one point, have  been mined, although the block in which
 /// it was mined might have been abandoned.
 ///
-/// See also: [`IncomingUtxo`](super::incoming_utxo::IncomingUtxo),
-/// [`ExpectedUtxo`](super::expected_utxo::ExpectedUtxo),
+/// See also: [`IncomingUtxo`](neptune_wallet::incoming_utxo::IncomingUtxo),
+/// [`ExpectedUtxo`](neptune_wallet::expected_utxo::ExpectedUtxo),
 /// [`MonitoredUtxo`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MonitoredUtxo {

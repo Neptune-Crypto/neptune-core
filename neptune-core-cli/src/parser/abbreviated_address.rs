@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
-use neptune_cash::api::export::KeyType;
-use neptune_cash::api::export::Network;
+use neptune_primitives::network::Network;
+use neptune_wallet::address::KeyType;
 use strum::IntoEnumIterator;
 
 /// Type for abbreviated addresses that clap can pase
@@ -110,11 +110,11 @@ impl FromStr for AbbreviatedAddress {
 #[cfg(test)]
 mod tests {
     use neptune_cash::api::export::Digest;
-    use neptune_cash::state::wallet::address::elliptic_curve_hybrid::EcHybridAddress;
-    use neptune_cash::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use neptune_cash::state::wallet::address::symmetric_key::SymmetricKey;
-    use neptune_cash::state::wallet::address::viewing_address::ViewingAddress;
-    use neptune_cash::state::wallet::address::ReceivingAddress;
+    use neptune_wallet::address::elliptic_curve_hybrid::EcHybridAddress;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::address::symmetric_key::SymmetricKey;
+    use neptune_wallet::address::viewing_address::ViewingAddress;
+    use neptune_wallet::address::ReceivingAddress;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;

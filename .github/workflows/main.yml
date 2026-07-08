@@ -71,8 +71,6 @@ jobs:
             test(mine_20_blocks_in_40_seconds) |
             test(hash_rate_independent_of_tx_size) |
             test(blocks_with_0_to_10_inputs_and_successors_are_valid) |
-            test(can_cancel_preprocess_within_one_second) |
-            test(can_cancel_merkle_tree_construction_within_two_seconds) |
             test(update_mutator_set_on_own_transaction_one_new_block_self_mined) |
             test(update_mutator_set_on_own_transaction_two_new_blocks_from_peer) |
             test(validate_donation_address) |

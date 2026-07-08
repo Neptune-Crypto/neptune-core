@@ -7,13 +7,13 @@
 
 use clap::Parser;
 use itertools::Itertools;
-use neptune_cash::api::export::Network;
+use neptune_archive::archival_state::ArchivalState;
 use neptune_cash::application::config::cli_args;
-use neptune_cash::application::config::data_directory::DataDirectory;
-use neptune_cash::protocol::consensus::block::validity::block_program::BlockProgram;
-use neptune_cash::protocol::consensus::block::Block;
-use neptune_cash::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_cash::state::archival_state::ArchivalState;
+use neptune_consensus::block::validity::block_program::BlockProgram;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::network::Network;
 
 #[derive(Parser, Debug, Clone)]
 #[clap()]
@@ -50,8 +50,13 @@ async fn print_block_claims(min_height: u64, max_height: u64, network: Option<Ne
     let genesis = Block::genesis(cli_args.network);
     let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)
         .expect("data directory exists");
-    let archival_state =
-        ArchivalState::new(data_directory.clone(), genesis.clone(), &cli_args).await;
+    let archival_state = ArchivalState::new(
+        data_directory.clone(),
+        genesis.clone(),
+        cli_args.utxo_index,
+        cli_args.network,
+    )
+    .await;
 
     // For all canonical blocks:
     let tip = archival_state.get_tip().await;

@@ -3445,6 +3445,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "neptune-archival-mmr"
+version = "0.12.0"
+dependencies = [
+ "futures",
+ "itertools",
+ "macro_rules_attr",
+ "neptune-database",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "tokio",
+]
+
+[[package]]
+name = "neptune-archive"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "hex",
+ "itertools",
+ "macro_rules_attr",
+ "memmap2",
+ "neptune-archival-mmr",
+ "neptune-consensus",
+ "neptune-database",
+ "neptune-locks",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "neptune-wallet",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "regex",
+ "serde",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "tokio",
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
 name = "neptune-cash"
 version = "0.12.0"
 dependencies = [
@@ -3454,7 +3500,6 @@ dependencies = [
  "arbitrary",
  "arraystring",
  "assert2",
- "async-stream",
  "async-trait",
  "axum",
  "bech32",
@@ -3479,8 +3524,20 @@ dependencies = [
  "libp2p",
  "macro_rules_attr",
  "memmap2",
+ "neptune-archival-mmr",
+ "neptune-archive",
  "neptune-cash",
+ "neptune-consensus",
+ "neptune-database",
+ "neptune-job-queue",
+ "neptune-locks",
+ "neptune-mempool",
+ "neptune-mutator-set",
+ "neptune-p2p",
+ "neptune-primitives",
+ "neptune-rpc-api",
  "neptune-rpc-macros",
+ "neptune-wallet",
  "num-bigint",
  "num-rational",
  "num-traits",
@@ -3523,6 +3580,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "neptune-consensus"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "arbitrary",
+ "assert2",
+ "async-trait",
+ "bincode",
+ "clap",
+ "clienter",
+ "codspeed-divan-compat",
+ "field_count",
+ "futures",
+ "get-size2",
+ "itertools",
+ "macro_rules_attr",
+ "neptune-consensus",
+ "neptune-job-queue",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "num-bigint",
+ "num-rational",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "rand_distr 0.5.1",
+ "rayon",
+ "readonly",
+ "regex",
+ "serde",
+ "serde_arrays",
+ "serde_json",
+ "statrs",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
 name = "neptune-core-cli"
 version = "0.12.0"
 dependencies = [
@@ -3534,6 +3635,10 @@ dependencies = [
  "itertools",
  "libp2p",
  "neptune-cash",
+ "neptune-consensus",
+ "neptune-mempool",
+ "neptune-primitives",
+ "neptune-wallet",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.4",
@@ -3560,6 +3665,10 @@ dependencies = [
  "libp2p",
  "multiaddr",
  "neptune-cash",
+ "neptune-consensus",
+ "neptune-p2p",
+ "neptune-primitives",
+ "neptune-wallet",
  "num-traits",
  "rand 0.9.4",
  "ratatui",
@@ -3571,12 +3680,208 @@ dependencies = [
 ]
 
 [[package]]
+name = "neptune-database"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "bincode",
+ "futures",
+ "itertools",
+ "leveldb-sys",
+ "macro_rules_attr",
+ "neptune-locks",
+ "rand 0.9.4",
+ "rs-leveldb",
+ "serde",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "twenty-first",
+]
+
+[[package]]
+name = "neptune-job-queue"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "rand 0.9.4",
+ "strum",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
+name = "neptune-locks"
+version = "0.12.0"
+dependencies = [
+ "futures",
+ "macro_rules_attr",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
+name = "neptune-mempool"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "arbitrary",
+ "bincode",
+ "bytesize",
+ "get-size2",
+ "itertools",
+ "macro_rules_attr",
+ "neptune-consensus",
+ "neptune-mempool",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "neptune-rpc-api",
+ "num-bigint",
+ "num-rational",
+ "num-traits",
+ "priority-queue",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "serde",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "tokio",
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
+name = "neptune-mutator-set"
+version = "0.12.0"
+dependencies = [
+ "arbitrary",
+ "bincode",
+ "get-size2",
+ "itertools",
+ "macro_rules_attr",
+ "neptune-archival-mmr",
+ "neptune-database",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "serde",
+ "serde_arrays",
+ "serde_json",
+ "statrs",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "neptune-p2p"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "arbitrary",
+ "arraystring",
+ "itertools",
+ "libp2p-identity",
+ "macro_rules_attr",
+ "multiaddr",
+ "multihash",
+ "neptune-consensus",
+ "neptune-mempool",
+ "neptune-p2p",
+ "neptune-primitives",
+ "num-bigint",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "semver",
+ "serde",
+ "sha2",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "thiserror 1.0.69",
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
+name = "neptune-primitives"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "arbitrary",
+ "chrono",
+ "directories",
+ "get-size2",
+ "itertools",
+ "num-bigint",
+ "num-rational",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "rand_distr 0.5.1",
+ "serde",
+ "serde_json",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "neptune-rpc-api"
+version = "0.12.0"
+dependencies = [
+ "async-trait",
+ "hex",
+ "macro_rules_attr",
+ "multiaddr",
+ "neptune-consensus",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "neptune-rpc-macros",
+ "neptune-wallet",
+ "num-bigint",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "serde",
+ "serde_arrays",
+ "serde_json",
+ "serde_tuple",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "neptune-rpc-client"
 version = "0.12.0"
 dependencies = [
  "async-trait",
  "itertools",
  "neptune-cash",
+ "neptune-consensus",
+ "neptune-mempool",
+ "neptune-primitives",
+ "neptune-rpc-api",
+ "neptune-wallet",
  "num-traits",
  "rand 0.9.4",
  "reqwest",
@@ -3592,6 +3897,42 @@ dependencies = [
  "convert_case 0.9.0",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "neptune-wallet"
+version = "0.12.0"
+dependencies = [
+ "aead",
+ "aes-gcm",
+ "anyhow",
+ "arbitrary",
+ "bech32",
+ "bincode",
+ "clap",
+ "get-size2",
+ "itertools",
+ "k256",
+ "neptune-consensus",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "neptune-wallet",
+ "num-traits",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha3",
+ "strum",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "thiserror 1.0.69",
+ "tiny-bip39",
+ "tokio",
+ "tracing",
+ "zeroize",
 ]
 
 [[package]]

@@ -18,10 +18,9 @@ use itertools::Itertools;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use libp2p::StreamProtocol;
+use neptune_primitives::network::Network;
 use serde::Deserialize;
 use serde::Serialize;
-
-use crate::application::config::network::Network;
 
 pub(crate) const ADDRESS_BOOK_MAX_SIZE: usize = 1000_usize;
 

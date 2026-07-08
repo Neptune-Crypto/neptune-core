@@ -46,7 +46,7 @@
 pub mod coinbase_output_readable;
 pub mod mempool_transaction_info;
 pub mod overview_data;
-pub mod proof_of_work_puzzle;
+pub mod restore_ms_membership_proof;
 pub mod ui_utxo;
 
 use std::collections::HashMap;
@@ -61,6 +61,43 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_header::BlockPow;
+use neptune_consensus::block::block_kernel::BlockKernel;
+use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::announcement::Announcement;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_database::storage::storage_vec::traits::StorageVecBase;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+#[cfg(test)]
+use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_p2p::peer::peer_info::PeerInfo;
+use neptune_p2p::peer::InstanceId;
+use neptune_p2p::peer::PeerStanding;
+use neptune_primitives::announcement_flag::AnnouncementFlag;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::block_selector::BlockSelector;
+use neptune_primitives::difficulty_control::Difficulty;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutputList;
+use neptune_wallet::unlocked_utxo::TxInputs;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -77,66 +114,32 @@ use tracing::warn;
 
 use super::auth;
 use crate::api;
-use crate::api::export::AnnouncementFlag;
 use crate::api::export::ConsolidationError;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
-use crate::application::config::network::Network;
-use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
-use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::network::overview::NetworkOverview;
+use crate::application::rpc::block_info::BlockInfo;
 use crate::application::rpc::server::coinbase_output_readable::CoinbaseOutputReadable;
 use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
 use crate::application::rpc::server::overview_data::OverviewData;
-use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
+use crate::application::rpc::server::restore_ms_membership_proof::ResponseMsMembershipProofPrivacyPreserving;
 use crate::application::rpc::server::ui_utxo::UiUtxo;
 use crate::application::rpc::server::ui_utxo::UtxoStatusEvent;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_header::BlockPow;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::block_info::BlockInfo;
-use crate::protocol::consensus::block::block_kernel::BlockKernel;
-use crate::protocol::consensus::block::block_selector::BlockSelector;
-use crate::protocol::consensus::block::difficulty_control::Difficulty;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::announcement::Announcement;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::peer::peer_info::PeerInfo;
-use crate::protocol::peer::InstanceId;
-use crate::protocol::peer::PeerStanding;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::block_selector::BlockSelectorExt;
 use crate::state::claim_error::ClaimError;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
-use crate::state::transaction::transaction_details::TransactionDetails;
-use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
-use crate::state::wallet::address::KeyType;
-use crate::state::wallet::address::ReceivingAddress;
-use crate::state::wallet::address::SpendingKey;
-use crate::state::wallet::change_policy::ChangePolicy;
-use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
-use crate::state::wallet::transaction_output::TxOutputList;
-use crate::state::wallet::unlocked_utxo::TxInputs;
 use crate::state::wallet::wallet_status::WalletStatus;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::archival_mutator_set::ResponseMsMembershipProofPrivacyPreserving;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -474,8 +477,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
+    /// use neptune_primitives::block_selector::BlockSelector;
+    /// use neptune_primitives::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -558,7 +561,7 @@ pub trait RPC {
     /// [`AnnouncementFlag`]s in more than
     /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST] blocks.
     ///
-    /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: crate::state::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
+    /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: neptune_archive::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
     async fn block_heights_by_announcement_flags(
         token: auth::Token,
         announcement_flags: Vec<AnnouncementFlag>,
@@ -568,8 +571,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+    /// use neptune_primitives::block_selector::BlockSelector;
+    /// use neptune_primitives::block_height::BlockHeight;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -609,8 +612,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
+    /// use neptune_primitives::block_selector::BlockSelector;
+    /// use neptune_primitives::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -650,7 +653,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+    /// use neptune_primitives::block_selector::BlockSelector;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -694,8 +697,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
+    /// use neptune_primitives::block_selector::BlockSelector;
+    /// use neptune_primitives::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -926,7 +929,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::state::wallet::address::KeyType;
+    /// use neptune_wallet::address::KeyType;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1009,7 +1012,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::state::wallet::address::KeyType;
+    /// use neptune_wallet::address::KeyType;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1169,7 +1172,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::application::config::network::Network;
+    /// use neptune_primitives::network::Network;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1252,7 +1255,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    /// use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1530,8 +1533,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelectorLiteral;
+    /// use neptune_primitives::block_selector::BlockSelector;
+    /// use neptune_primitives::block_selector::BlockSelectorLiteral;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1764,7 +1767,7 @@ pub trait RPC {
     /// `fee` represents the fee in native coins to pay the miner who mines
     /// the block that initially confirms the resulting transaction.
     ///
-    /// a [Digest] of the resulting [Transaction](crate::protocol::consensus::transaction::Transaction) is returned on success, else [None].
+    /// a [Digest] of the resulting [Transaction](neptune_consensus::transaction::Transaction) is returned on success, else [None].
     ///
     /// A list of the encoded transaction notifications is also returned. The
     /// relevant notifications should be sent to the transaction receiver(s) in
@@ -1772,13 +1775,13 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::config::network::Network;
-    /// # use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    /// # use neptune_cash::state::wallet::address::ReceivingAddress;
-    /// # use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+    /// # use neptune_primitives::network::Network;
+    /// # use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    /// # use neptune_wallet::address::ReceivingAddress;
+    /// # use neptune_wallet::utxo_notification::UtxoNotificationMedium;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
-    /// # use neptune_cash::api::export::ChangePolicy;
+    /// # use neptune_wallet::change_policy::ChangePolicy;
     /// # use neptune_cash::api::export::OutputFormat;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
@@ -2226,7 +2229,7 @@ impl NeptuneRPCServer {
             proposal.header().difficulty
         };
 
-        proposal.set_header_guesser_address(guesser_address);
+        proposal.set_header_guesser_data(guesser_address.into());
         let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty);
 
         // Record block proposal in case of guesser-success, for later
@@ -3038,7 +3041,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.lock_guard().await.mempool.len())
+        Ok(self.state.lock_guard().await.mempool().len())
     }
 
     // documented in trait. do not add doc-comment.
@@ -3050,7 +3053,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.lock_guard().await.mempool.get_size())
+        Ok(self.state.lock_guard().await.mempool().get_size())
     }
 
     async fn mempool_tx_ids(
@@ -3064,7 +3067,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .fee_density_iter()
             .map(|(kernel_id, _)| kernel_id)
             .collect();
@@ -3119,15 +3122,15 @@ impl RPC for NeptuneRPCServer {
         let syncing = state.net.sync_status;
         let mempool_size = {
             log_slow_scope!(fn_name!() + "::mempool.get_size()");
-            state.mempool.get_size()
+            state.mempool().get_size()
         };
         let mempool_total_tx_count = {
             log_slow_scope!(fn_name!() + "::mempool.len()");
-            state.mempool.len()
+            state.mempool().len()
         };
         let mempool_own_tx_count = {
             log_slow_scope!(fn_name!() + "::mempool.num_own_txs()");
-            state.mempool.num_own_txs()
+            state.mempool().num_own_txs()
         };
         let cpu_temp = None; // disable for now.  call is too slow.
         let proving_capability = self.state.cli().proving_capability();
@@ -3568,7 +3571,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get_with_priority(tx_kernel_id)
             .map(|(x, y)| (x.to_owned(), y))
         else {
@@ -4180,7 +4183,7 @@ impl RPC for NeptuneRPCServer {
             (proposal, difficulty)
         };
 
-        proposal.set_header_guesser_address(guesser_fee_address);
+        proposal.set_header_guesser_data(guesser_fee_address.into());
 
         let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty);
 
@@ -4573,7 +4576,7 @@ impl RPC for NeptuneRPCServer {
 
         let global_state = self.state.lock_guard().await;
         let mempool_txkids = global_state
-            .mempool
+            .mempool()
             .fee_density_iter()
             .skip(start_index)
             .take(number)
@@ -4590,7 +4593,7 @@ impl RPC for NeptuneRPCServer {
         let mempool_transactions = mempool_txkids
             .iter()
             .filter_map(|id| {
-                global_state.mempool.get(*id).map(|tx| {
+                global_state.mempool().get(*id).map(|tx| {
                     let pos_balance_effect = incoming.get(id).copied().unwrap_or_default();
                     let neg_balance_effect = outgoing.get(id).copied().unwrap_or_default();
                     MempoolTransactionInfo::new(
@@ -4620,7 +4623,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .get(tx_kernel_id)
             .map(|tx| &tx.kernel)
             .cloned())
@@ -4748,6 +4751,20 @@ pub mod error {
 mod tests {
     use anyhow::Result;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::transaction::test_helpers::txkernel;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_p2p::peer::NegativePeerSanction;
+    use neptune_p2p::peer::PeerSanction;
+    use neptune_primitives::block_selector::BlockSelectorLiteral;
+    use neptune_primitives::mast_hash::MastHash;
+    use neptune_primitives::network::Network;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::address::generation_address::GenerationSpendingKey;
+    use neptune_wallet::mock_block::make_mock_block;
+    use neptune_wallet::utxo_notification::UtxoNotificationMedium;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::One;
     use num_traits::Zero;
     use proptest::prop_assume;
@@ -4756,31 +4773,16 @@ mod tests {
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Tip5;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::twenty_first::bfe;
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::TxProvingCapability;
     use crate::application::config::cli_args;
-    use crate::application::config::network::Network;
-    use crate::application::database::storage::storage_vec::traits::*;
     use crate::application::rpc::server::NeptuneRPCServer;
-    use crate::protocol::consensus::block::block_selector::BlockSelectorLiteral;
-    use crate::protocol::peer::NegativePeerSanction;
-    use crate::protocol::peer::PeerSanction;
-    use crate::protocol::proof_abstractions::mast_hash::MastHash;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::address::generation_address::GenerationSpendingKey;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
-    use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use crate::BFieldElement;
     use crate::Block;
 
     const NUM_ANNOUNCEMENTS_BLOCK1: usize = 7;
@@ -5278,18 +5280,18 @@ mod tests {
         );
 
         // Broadcast transaction and verify insertion into mempool
-        assert_eq!(0, rpc_server.state.lock_guard().await.mempool.len());
+        assert_eq!(0, rpc_server.state.lock_guard().await.mempool().len());
         rpc_server
             .clone()
             .record_and_broadcast_transaction(ctx, token, tx_artifacts)
             .await
             .unwrap();
-        assert_eq!(1, rpc_server.state.lock_guard().await.mempool.len());
+        assert_eq!(1, rpc_server.state.lock_guard().await.mempool().len());
         assert!(rpc_server
             .state
             .lock_guard()
             .await
-            .mempool
+            .mempool()
             .contains(tx.txid()));
 
         // Ensure `proof_type` endpoint finds the transaction in the mempool
@@ -5652,7 +5654,7 @@ mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn utxo_origin_block_test(
         #[strategy(txkernel::with_lengths(0usize, 1usize, 0usize, false))]
-        transaction_kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        transaction_kernel: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         prop_assume!(!transaction_kernel.fee.is_negative());
 
@@ -5849,7 +5851,7 @@ mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn announcements_in_block_test(
         #[strategy(txkernel::with_lengths(0usize, 2usize, NUM_ANNOUNCEMENTS_BLOCK1, false))]
-        tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
+        tx_block1: neptune_consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let network = Network::Main;
         let mut rpc_server = test_rpc_server(
@@ -6203,19 +6205,19 @@ mod tests {
     }
 
     mod pow_puzzle_tests {
+        use neptune_consensus::block::block_header::BlockPow;
+        use neptune_consensus::block::pow::Pow;
+        use neptune_consensus::block::test_helpers::invalid_empty_block;
+        use neptune_consensus::block::BlockProof;
+        use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+        use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+        use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+        use neptune_wallet::address::KeyType;
         use rand::random;
 
         use super::*;
-        use crate::protocol::consensus::block::block_header::BlockPow;
-        use crate::protocol::consensus::block::pow::Pow;
-        use crate::protocol::consensus::block::BlockProof;
-        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-        use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
         use crate::state::mining::block_proposal::BlockProposal;
-        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-        use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
-        use crate::tests::shared::blocks::invalid_empty_block;
 
         #[test]
         fn pow_puzzle_is_consistent_with_block_hash() {
@@ -6224,7 +6226,7 @@ mod tests {
             let mut block1 = invalid_empty_block(&genesis, network);
             let mut rng = StdRng::seed_from_u64(3409875378456);
             let guesser_address = GenerationReceivingAddress::derive_from_seed(rng.random());
-            block1.set_header_guesser_address(guesser_address.into());
+            block1.set_header_guesser_data(guesser_address.into());
 
             let guess_challenge =
                 ProofOfWorkPuzzle::new(block1.clone(), genesis.header().difficulty);
@@ -6268,7 +6270,7 @@ mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn full_pow_puzzle_test() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let bob = WalletEntropy::new_random();
             let mut bob = test_rpc_server(
                 bob.clone(),
@@ -6315,7 +6317,7 @@ mod tests {
                 "Node must reject new tip with invalid PoW solution."
             );
 
-            let solution = puzzle.solve(ConsensusRuleSet::Reboot);
+            let solution = puzzle.solve(ConsensusRuleSet::HardforkGamma);
             assert!(
                 bob.clone()
                     .provide_new_tip(
@@ -6425,7 +6427,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn exported_pow_puzzle_is_consistent_with_block_hash() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let bob = WalletEntropy::new_random();
             let mut bob = test_rpc_server(
                 bob.clone(),
@@ -6493,7 +6495,7 @@ mod tests {
                 let resulting_block_hash = pow_puzzle.pow_mast_paths.fast_mast_hash(pow);
 
                 block1.set_header_pow(pow);
-                block1.set_header_guesser_address(guesser_address.into());
+                block1.set_header_guesser_data(guesser_address.into());
                 assert_eq!(block1.hash(), resulting_block_hash);
                 assert_eq!(
                     block1.body().total_guesser_reward().unwrap(),
@@ -6501,22 +6503,13 @@ mod tests {
                 );
 
                 // Check that succesful guess is accepted by endpoint.
-                let consensus_rule_set = ConsensusRuleSet::Reboot;
-                let guesser_buffer = block1.guess_preprocess(None, None, consensus_rule_set);
                 let mast_auth_paths = block1.pow_mast_paths();
                 let version = block1.header().version;
-                let index_picker_preimage = guesser_buffer.index_picker_preimage(&mast_auth_paths);
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
-                    if let Some(valid_pow) = Pow::guess(
-                        &guesser_buffer,
-                        &mast_auth_paths,
-                        index_picker_preimage,
-                        random(),
-                        target,
-                        None,
-                        Some(version),
-                    ) {
+                    if let Some(valid_pow) =
+                        Pow::guess(&mast_auth_paths, random(), target, None, Some(version))
+                    {
                         break valid_pow;
                     }
                 };
@@ -6582,11 +6575,11 @@ mod tests {
 
         mod worker {
             use cli_args::Args;
+            use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+            use neptune_consensus::block::test_helpers::invalid_empty_block;
+            use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 
             use super::*;
-            use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-            use crate::tests::shared::blocks::invalid_block_with_transaction;
-            use crate::tests::shared::blocks::invalid_empty_block;
 
             pub(super) async fn claim_utxo_unowned(claim_after_confirmed: bool) -> Result<()> {
                 let network = Network::Main;
@@ -6653,8 +6646,7 @@ mod tests {
 
                     let cb_key = wallet_entropy.nth_generation_spending_key(0);
                     let (block1, composer_expected_utxos) =
-                        make_mock_block(&genesis_block, None, cb_key, Default::default(), network)
-                            .await;
+                        make_mock_block(&genesis_block, None, cb_key, Default::default(), network);
                     blocks.push(block1.clone());
 
                     rpc_server
@@ -6802,8 +6794,7 @@ mod tests {
                 let bob_key = bob_wallet.nth_generation_spending_key(0);
                 let genesis_block = Block::genesis(network);
                 let (block1, composer_expected_utxos) =
-                    make_mock_block(&genesis_block, None, bob_key, Default::default(), network)
-                        .await;
+                    make_mock_block(&genesis_block, None, bob_key, Default::default(), network);
 
                 bob.state
                     .set_new_self_composed_tip(block1.clone(), composer_expected_utxos)
@@ -6989,10 +6980,9 @@ mod tests {
     }
 
     mod send_tests {
+        use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+
         use super::*;
-        use crate::api::export::TxProvingCapability;
-        use crate::application::rpc::server::error::RpcError;
-        use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -7053,71 +7043,14 @@ mod tests {
             Ok(())
         }
 
-        /// checks that the sending rate limit kicks in after 2 tx are sent.
-        /// note: rate-limit only applies below block 25000
-        #[traced_test]
-        #[apply(shared_tokio_runtime)]
-        async fn send_rate_limit() -> Result<()> {
-            let mut rng = StdRng::seed_from_u64(1815);
-            let network = Network::Main;
-            let cli_args = cli_args::Args {
-                tx_proving_capability: Some(TxProvingCapability::SingleProof),
-                network,
-                ..Default::default()
-            };
-            let mut rpc_server = test_rpc_server(WalletEntropy::devnet_wallet(), 2, cli_args).await;
-
-            let ctx = context::current();
-            let token = cookie_token(&rpc_server).await;
-            let timestamp = network.launch_date() + Timestamp::months(7);
-
-            // obtain some funds, so we have two inputs available.
-            mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, Some(timestamp))
-                .await?;
-
-            let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
-                .to_address()
-                .into();
-            let amount = NativeCurrencyAmount::coins(rng.random_range(0..2));
-            let fee = NativeCurrencyAmount::coins(1);
-
-            let output: OutputFormat = (address, amount, UtxoNotificationMedium::OnChain).into();
-            let outputs = vec![output];
-            let accept_lustrations = true;
-
-            for i in 0..10 {
-                let result = rpc_server
-                    .clone()
-                    .send(
-                        ctx,
-                        token,
-                        outputs.clone(),
-                        ChangePolicy::Burn,
-                        fee,
-                        accept_lustrations,
-                    )
-                    .await;
-
-                // any attempts after the 2nd send should result in RateLimit error.
-                match i {
-                    0..2 => assert!(result.is_ok()),
-                    _ => assert!(matches!(
-                        result,
-                        Err(RpcError::SendError(s)) if s.contains("Send rate limit reached")
-                    )),
-                }
-            }
-
-            Ok(())
-        }
-
         mod worker {
+            use neptune_wallet::address::elliptic_curve_hybrid::EcHybridKey;
+            use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+            use neptune_wallet::address::symmetric_key::SymmetricKey;
+            use neptune_wallet::address::viewing_address::ViewingAddressKey;
+            use neptune_wallet::address::SpendingKey;
+
             use super::*;
-            use crate::state::wallet::address::elliptic_curve_hybrid::EcHybridKey;
-            use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-            use crate::state::wallet::address::symmetric_key::SymmetricKey;
-            use crate::state::wallet::address::viewing_address::ViewingAddressKey;
-            use crate::state::wallet::address::SpendingKey;
 
             // sends a tx with two outputs: one self, one external.
             //
@@ -7171,8 +7104,7 @@ mod tests {
                 // wallet ---
                 let timestamp = network.launch_date() + Timestamp::days(1);
                 let (block_1, composer_utxos) =
-                    make_mock_block(&genesis_block, Some(timestamp), key, rng.random(), network)
-                        .await;
+                    make_mock_block(&genesis_block, Some(timestamp), key, rng.random(), network);
 
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
@@ -7214,6 +7146,7 @@ mod tests {
                     KeyType::ViewingAddress => {
                         ViewingAddressKey::from_seed(key_seed).to_address().into()
                     }
+                    _ => unimplemented!(),
                 };
                 let output1: OutputFormat = (
                     external_receiving_address.clone(),

@@ -2,21 +2,21 @@
 
 Let’s say you want to add a new method called `submit_block`.
 
-## Core
+## API crate (`neptune-rpc-api`)
 
 1. **Add a new operation**
 
-   * In `json_rpc::core::api::ops::RpcMethods`, create a new variant (e.g. `SubmitBlock`).
+   * In `neptune_rpc_api::api::ops::RpcMethods`, create a new variant (e.g. `SubmitBlock`).
 
 2. **Create request and response types**
 
-   * In `json_rpc::core::model::message`, define a matching pair of structs:
+   * In `neptune_rpc_api::model::message`, define a matching pair of structs:
      `SubmitBlockRequest` and `SubmitBlockResponse`. Note that the `Request` must derive
      `Serialize_tuple, Deserialize_tuple` whereas the `Response` must derive `Serialize, Deserialize`.
 
 3. **Update the RPC API**
 
-   * In `json_rpc::core::api::rpc::RpcApi`, add two async functions:
+   * In `neptune_rpc_api::api::rpc::RpcApi`, add two async functions:
 
      ```rust
      /// Documentation goes here

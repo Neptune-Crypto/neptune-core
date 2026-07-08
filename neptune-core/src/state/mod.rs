@@ -1,16 +1,21 @@
-pub mod archival_state;
+pub mod block_selector;
 pub mod blockchain_state;
 pub mod claim_error;
 pub mod database;
 pub mod light_state;
-pub mod mempool;
 pub mod mining;
 pub mod networking_state;
-pub mod shared;
 pub mod sync_status;
 pub mod transaction;
 pub mod utxo_validitor;
 pub mod wallet;
+
+// GlobalState-coupled mempool tests
+#[cfg(test)]
+mod archival_state_tests;
+
+#[cfg(test)]
+mod mempool_tests;
 
 use std::cmp::max;
 use std::collections::HashMap;
@@ -28,12 +33,65 @@ use blockchain_state::BlockchainArchivalState;
 use blockchain_state::BlockchainState;
 use itertools::Itertools;
 use light_state::LightState;
-use mempool::Mempool;
 use mining::block_proposal::BlockProposal;
 use mining::mining_state::MiningState;
 use mining::mining_status::ComposingWorkInfo;
 use mining::mining_status::GuessingWorkInfo;
 use mining::mining_status::MiningStatus;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_database::storage::storage_schema::traits::StorageWriter as SW;
+use neptune_database::storage::storage_vec::traits::*;
+use neptune_locks::tokio as sync_tokio;
+use neptune_locks::tokio::AtomicRwReadGuard;
+use neptune_locks::tokio::AtomicRwWriteGuard;
+use neptune_mempool::mempool::Mempool;
+use neptune_mempool::mempool_update_job::MempoolUpdateJob;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
+use neptune_mempool::upgrade_incentive::UpgradeIncentive;
+use neptune_mempool::upgrade_priority::UpgradePriority;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::handshake_data::VersionString;
+use neptune_p2p::peer::peer_info::PeerInfo;
+use neptune_p2p::peer::transfer_block::TransferBlock;
+use neptune_p2p::peer::SyncChallenge;
+use neptune_p2p::peer::SyncChallengeResponse;
+use neptune_p2p::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
+use neptune_primitives::announcement_flag::AnnouncementFlag;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::difficulty_control::ProofOfWork;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
+use neptune_wallet::composer_parameters::ComposerParameters;
+#[cfg(test)]
+use neptune_wallet::expected_utxo::ExpectedUtxo;
+use neptune_wallet::expected_utxo::UtxoNotifier;
+use neptune_wallet::incoming_utxo::IncomingUtxo;
+use neptune_wallet::incoming_utxo::IncomingUtxoRecoveryData;
+use neptune_wallet::unlocked_utxo::TxInputs;
+use neptune_wallet::unlocked_utxo::UnlockedUtxo;
+use neptune_wallet::wallet_entropy::WalletEntropy;
+use neptune_wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -45,86 +103,35 @@ use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
-use transaction::transaction_kernel_id::TransactionKernelId;
 use transaction::tx_creation_artifacts::TxCreationArtifacts;
 use transaction::tx_creation_artifacts::TxCreationArtifactsError;
-use transaction::tx_proving_capability::TxProvingCapability;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
 use crate::api;
-use crate::api::export::NeptuneProof;
-use crate::api::export::ReceivingAddress;
-use crate::api::export::SpendingKey;
-use crate::api::export::TxInputs;
 use crate::application::config::cli_args;
-use crate::application::config::data_directory::DataDirectory;
-use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::application::database::storage::storage_schema::traits::StorageWriter as SW;
-use crate::application::database::storage::storage_vec::traits::*;
-use crate::application::locks::tokio as sync_tokio;
-use crate::application::locks::tokio::AtomicRwReadGuard;
-use crate::application::locks::tokio::AtomicRwWriteGuard;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
 use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
-use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
-use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
-use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::protocol::consensus::block::block_header::BlockHeader;
-use crate::protocol::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
-use crate::protocol::consensus::block::block_height::BlockHeight;
-use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
-use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
-use crate::protocol::consensus::block::Block;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
-use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
-use crate::protocol::consensus::transaction::Transaction;
-use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::peer::handshake_data::HandshakeData;
-use crate::protocol::peer::handshake_data::VersionString;
-use crate::protocol::peer::peer_info::PeerInfo;
-use crate::protocol::peer::transfer_block::TransferBlock;
-use crate::protocol::peer::SyncChallenge;
-use crate::protocol::peer::SyncChallengeResponse;
-use crate::protocol::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
-use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::claim_error::ClaimError;
-use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
-use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::utxo_validitor::UtxoValidator;
-use crate::state::wallet::address::announcement_flag::AnnouncementFlag;
-use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use crate::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::state::wallet::expected_utxo::UtxoNotifier;
-use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::state::wallet::input_candidate::InputCandidate;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxoSpentStatus;
 use crate::state::wallet::monitored_utxo_state::MonitoredUtxoState;
 use crate::state::wallet::rusty_wallet_database::MonitoredUtxoInsertResult;
 use crate::state::wallet::sent_transaction::SentTransaction;
-use crate::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
-use crate::state::wallet::wallet_entropy::WalletEntropy;
-use crate::state::wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
-use crate::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::ArchivalState;
 use crate::RPCServerToMain;
 use crate::WalletFileContext;
 use crate::VERSION;
 
 /// `GlobalStateLock` holds a
-/// [`tokio::AtomicRw`](crate::application::locks::tokio::AtomicRw)
+/// [`tokio::AtomicRw`](neptune_locks::tokio::AtomicRw)
 /// ([`RwLock`](tokio::sync::RwLock)) over [`GlobalState`].
 ///
 /// Conceptually** all reads and writes of application state
@@ -224,7 +231,7 @@ impl GlobalStateLock {
     /// immediately.
     ///
     /// This function is for obtaining the node's
-    /// [`HandshakeData`](crate::protocol::peer::handshake_data) without
+    /// [`HandshakeData`](neptune_p2p::peer::handshake_data) without
     /// immediately (*i.e.*, without blocking) in a synchronous environment.
     /// In other cases, call [`GlobalState::get_own_handshakedata`] instead.
     pub(crate) fn get_own_handshakedata_sync(&self) -> HandshakeData {
@@ -767,8 +774,16 @@ pub struct GlobalState {
     /// The `cli_args::Args` are read-only and accessible by all tasks.
     cli: cli_args::Args,
 
-    /// The `Mempool` may only be updated by the main task.
-    pub mempool: Mempool,
+    /// The transaction mempool.
+    ///
+    /// This field is deliberately **private**. Read access is granted through
+    /// the [`GlobalState::mempool`] accessor, which hands out only a shared
+    /// `&Mempool`. Mutation must go through the `mempool_*` methods on
+    /// [`GlobalState`] (e.g. [`GlobalState::mempool_insert`]), which wrap every
+    /// change so the resulting `MempoolEvent`s are broadcast to the wallet and
+    /// other consumers. See `mempool_field_is_private` for a test that trips if
+    /// this visibility is ever widened.
+    mempool: Mempool,
 
     /// The `mining_state` can be updated by main task, mining task, or RPC server.
     pub mining_state: MiningState,
@@ -836,7 +851,8 @@ impl GlobalState {
         cli: cli_args::Args,
         wallet_state: WalletState,
     ) -> Result<Self> {
-        let archival_state = ArchivalState::new(data_directory.clone(), genesis, &cli).await;
+        let archival_state =
+            ArchivalState::new(data_directory.clone(), genesis, cli.utxo_index, cli.network).await;
         debug!("Got archival state");
 
         // Get latest block. Use hardcoded genesis block if nothing is in database.
@@ -1085,7 +1101,7 @@ impl GlobalState {
 
         let own_guesser_key: SpendingKey =
             self.wallet_state.wallet_entropy.guesser_fee_key().into();
-        let own_guesser_address = own_guesser_key.to_address();
+        let own_guesser_data: GuesserReceiverData = own_guesser_key.to_address().into();
         let receiver_preimage = own_guesser_key.privacy_preimage();
         let num_mps_per_mutxo = self.cli().number_of_mps_per_utxo;
 
@@ -1110,7 +1126,7 @@ impl GlobalState {
                 .await
                 .expect("Must have block header for canonical block");
 
-            if !block_header.was_guessed_by(&own_guesser_address) {
+            if !block_header.was_guessed_by(&own_guesser_data) {
                 trace!("block {block_height} not guessed by us.");
                 continue;
             }
@@ -1120,13 +1136,14 @@ impl GlobalState {
             let guesser_rewards = self
                 .chain
                 .archival_state()
-                .guesser_reward_strong_keys_for_block(block_height)
+                .guesser_reward_addition_records_for_block(block_height)
                 .await
                 .expect("Must know block if block hash could be found");
 
             let mut all_present = true;
-            for guesser_reward in &guesser_rewards {
-                if !self.wallet_state.wallet_db.has_mutxo(guesser_reward).await {
+            for (addition_record, aocl_index) in &guesser_rewards {
+                let guesser_reward = StrongUtxoKey::new(*addition_record, *aocl_index);
+                if !self.wallet_state.wallet_db.has_mutxo(&guesser_reward).await {
                     all_present = false;
                     break;
                 }
@@ -1152,7 +1169,7 @@ impl GlobalState {
                 .expect("Block in archival MMR must be present on disk");
 
             let sender_randomness = block_hash;
-            for (guesser_utxo, guesser_strong_key) in block
+            for (guesser_utxo, (_addition_record, aocl_index)) in block
                 .kernel
                 .guesser_fee_utxos()
                 .expect("Stored block must have guesser UTXOs")
@@ -1162,7 +1179,7 @@ impl GlobalState {
                 let mutxo = MonitoredUtxo::new(
                     guesser_utxo.clone(),
                     num_mps_per_mutxo,
-                    guesser_strong_key.aocl_index,
+                    aocl_index,
                     sender_randomness,
                     receiver_preimage,
                     &block,
@@ -1175,7 +1192,7 @@ impl GlobalState {
                     utxo: guesser_utxo,
                     sender_randomness,
                     receiver_preimage,
-                    aocl_index: guesser_strong_key.aocl_index,
+                    aocl_index,
                 };
                 recovery_list.push(utxo_ms_recovery_data);
             }
@@ -3156,7 +3173,7 @@ impl GlobalState {
                 .unwrap_or_else(|| {
                     panic!("Pow-witness for block with hash {block_hash} must exist")
                 });
-            block_hash = pow_witness.header.prev_block_digest;
+            block_hash = pow_witness.header().prev_block_digest;
             pow_witnesses.push(pow_witness);
         }
 
@@ -3232,6 +3249,16 @@ impl GlobalState {
         )
         .await
         .ok()
+    }
+
+    /// Shared, read-only access to the mempool.
+    ///
+    /// This is the only way to reach the mempool from outside the `state`
+    /// module: it hands out a `&Mempool`, never `&mut`, so mutation stays
+    /// funneled through the event-emitting `mempool_*` gateway methods. See the
+    /// `mempool` field's documentation for the rationale.
+    pub fn mempool(&self) -> &Mempool {
+        &self.mempool
     }
 
     /// Remove one transaction from the mempool and notify wallet of changes.
@@ -3459,11 +3486,64 @@ impl GlobalState {
     }
 }
 
+/// Trip-wire guarding [`GlobalState`]'s `mempool` field visibility.
+///
+/// The field is private on purpose (see its docs): that is what forces all
+/// mutation through the event-emitting `mempool_*` gateway. This test reads
+/// this very source file and fails if a visibility modifier ever appears before
+/// the declaration. The search needle is built at runtime so this test's own
+/// text cannot match itself.
+#[cfg(test)]
+#[test]
+fn mempool_field_is_private() {
+    let src = include_str!("mod.rs");
+    let needle = format!("mempool{} Mempool", ':');
+    let mut found = 0;
+    for (idx, _) in src.match_indices(&needle) {
+        found += 1;
+        let prefix = src[..idx].trim_end_matches(' ');
+        assert!(
+            prefix.ends_with('\n'),
+            "GlobalState.mempool must remain private: a visibility modifier was \
+             found before a `{needle}` declaration. Keep the field private and \
+             route access through GlobalState::mempool() or a mempool_* method."
+        );
+    }
+    assert!(
+        found >= 1,
+        "expected to find the mempool field declaration in state/mod.rs"
+    );
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::block_transaction::BlockTransaction;
+    use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
+    use neptune_consensus::block::Block;
+    use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+    use neptune_consensus::transaction::lock_script::LockScript;
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use neptune_consensus::transaction::utxo::Utxo;
+    use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+    use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_primitives::network::Network;
+    use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+    use neptune_wallet::address::generation_address::GenerationSpendingKey;
+    use neptune_wallet::address::KeyType;
+    use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::expected_utxo::UtxoNotifier;
+    use neptune_wallet::mock_block::make_mock_block;
+    use neptune_wallet::mock_block::make_mock_block_with_inputs_and_outputs;
+    use neptune_wallet::transaction_output::TxOutput;
+    use neptune_wallet::transaction_output::TxOutputList;
+    use neptune_wallet::utxo_notification::UtxoNotificationMedium;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::random;
@@ -3472,41 +3552,17 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tracing_test::traced_test;
-    use wallet::address::generation_address::GenerationSpendingKey;
-    use wallet::address::KeyType;
-    use wallet::expected_utxo::UtxoNotifier;
-    use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
-    use crate::api::export::ReceivingAddress;
-    use crate::api::export::TxOutputList;
-    use crate::application::config::network::Network;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::protocol::consensus::block::block_transaction::BlockTransaction;
-    use crate::protocol::consensus::block::Block;
-    use crate::protocol::consensus::transaction::lock_script::LockScript;
-    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::state::wallet::transaction_output::TxOutput;
-    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_status::WalletStatusExportFormat;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
-    use crate::tests::shared::blocks::invalid_block_with_transaction;
-    use crate::tests::shared::blocks::invalid_empty_block;
-    use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
-    use crate::tests::shared::blocks::make_mock_block;
-    use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::mock_tx::send_coins;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-    use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum AnnouncementScanMode {
@@ -3593,7 +3649,7 @@ mod tests {
         /// the specific kind of rescan that they want, not use a catch-all,
         /// since all these functions can be somewhat slow.
         ///
-        /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: crate::state::archival_state::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
+        /// [MAX_NUM_BLOCKS_IN_LOOKUP_LIST]: neptune_archive::rusty_utxo_index::MAX_NUM_BLOCKS_IN_LOOKUP_LIST
         pub(crate) async fn rescan_announced_incoming_from_flag_index(
             &mut self,
             keys: Vec<SpendingKey>,
@@ -3652,10 +3708,10 @@ mod tests {
     mod helper {
 
         use futures::future;
+        use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+        use neptune_mutator_set::addition_record::AdditionRecord;
 
         use super::*;
-        use crate::api::export::AdditionRecord;
-        use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
 
         /// Create 3 branches and return them in an array.
         ///
@@ -3678,7 +3734,7 @@ mod tests {
             .await
         }
 
-        pub(crate) async fn make_one_branch(
+        pub(crate) fn make_one_branch(
             network: Network,
             first_block: &Block,
             branch_length: usize,
@@ -3741,8 +3797,7 @@ mod tests {
                     coinbase_recipient.to_owned(),
                     rng.random(),
                     network,
-                )
-                .await;
+                );
                 branch.push(next_block.clone());
                 let mut test_msa = block.mutator_set_accumulator_after().unwrap();
                 block = next_block;
@@ -3854,8 +3909,7 @@ mod tests {
                         branch_length,
                         &coinbase_recipient,
                         seed,
-                    )
-                    .await;
+                    );
 
                     all_branches.lock().await[i] = Some(branch);
                 }));
@@ -4064,7 +4118,7 @@ mod tests {
         let mut current_block = genesis.clone();
         for _ in 0..3 {
             let (block, alice_composer_expected_utxos) =
-                make_mock_block(&current_block, None, alice_key, rng.random(), network).await;
+                make_mock_block(&current_block, None, alice_key, rng.random(), network);
             alice_gsl
                 .wallet_state
                 .add_expected_utxos(alice_composer_expected_utxos)
@@ -4141,8 +4195,7 @@ mod tests {
             2 * branch_length / 3,
             &bob_key,
             rng.random(),
-        )
-        .await;
+        );
         for block in more_a_blocks {
             alice_gsl.set_new_tip(block.clone()).await.unwrap();
             a_blocks.push(block);
@@ -4580,7 +4633,7 @@ mod tests {
             let guesser_fraction = 1f64;
             let mut block1 =
                 invalid_empty_block1_with_guesser_fraction(network, guesser_fraction).await;
-            block1.set_header_guesser_address(alice_guesser_address);
+            block1.set_header_guesser_data(alice_guesser_address.into());
 
             alice.set_new_tip(block1.clone()).await.unwrap();
 
@@ -5097,7 +5150,7 @@ mod tests {
                 // 1. Create new block 1 and store it, but do not update wallet
                 // with the new block.
                 let (mock_block_1a, _) =
-                    make_mock_block(&genesis_block, None, bob_key, rng.random(), network).await;
+                    make_mock_block(&genesis_block, None, bob_key, rng.random(), network);
 
                 {
                     alice
@@ -5175,7 +5228,7 @@ mod tests {
                 // 1. Create new block 1a where we receive a coinbase UTXO, store it
                 let genesis_block = alice.chain.archival_state().get_tip().await;
                 let (mock_block_1a, composer_expected_utxos_1a) =
-                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
+                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network);
                 alice
                     .wallet_state
                     .add_expected_utxos(composer_expected_utxos_1a)
@@ -5201,7 +5254,7 @@ mod tests {
                 let mut parent_block = genesis_block;
                 for _ in 0..5 {
                     let (next_block, _) =
-                        make_mock_block(&parent_block, None, bob_key, rng.random(), network).await;
+                        make_mock_block(&parent_block, None, bob_key, rng.random(), network);
                     alice.set_new_tip(next_block.clone()).await.unwrap();
                     parent_block = next_block;
                 }
@@ -5276,7 +5329,7 @@ mod tests {
                 // 1. Create new block 1 where Alice receives two composer UTXOs, store it.
                 let genesis_block = alice.chain.archival_state().get_tip().await;
                 let (block_1, alice_composer_expected_utxos_1) =
-                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
+                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network);
                 {
                     alice
                         .wallet_state
@@ -5465,7 +5518,7 @@ mod tests {
         // around.
 
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce12210c467f93u64);
-        let network = Network::Main;
+        let network = Network::Testnet(42);
 
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
@@ -5498,7 +5551,7 @@ mod tests {
                 &genesis_block,
                 &premine_receiver,
                 in_seven_months,
-                TritonVmJobPriority::Normal.into(),
+                TritonVmProofJobOptions::default_with_network(network),
             )
             .await
             .unwrap();
@@ -5605,7 +5658,7 @@ mod tests {
             tx_to_alice_and_bob,
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -5616,7 +5669,7 @@ mod tests {
             block_transaction,
             in_seven_months,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -5734,6 +5787,7 @@ mod tests {
 
         let config_alice = TxCreationConfig::default()
             .recover_change_off_chain(alice_spending_key.into())
+            .with_network(network)
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_alice = alice
             .api()
@@ -5741,7 +5795,7 @@ mod tests {
             .create_transaction(
                 tx_outputs_from_alice.clone().into(),
                 NativeCurrencyAmount::coins(1),
-                in_seven_months,
+                in_eight_months,
                 config_alice,
                 consensus_rule_set,
             )
@@ -5770,6 +5824,7 @@ mod tests {
 
         let config_bob = TxCreationConfig::default()
             .recover_change_off_chain(bob_spending_key.into())
+            .with_network(network)
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_bob = bob
             .api()
@@ -5777,7 +5832,7 @@ mod tests {
             .create_transaction(
                 tx_outputs_from_bob.clone().into(),
                 NativeCurrencyAmount::coins(1),
-                in_seven_months,
+                in_eight_months,
                 config_bob,
                 consensus_rule_set,
             )
@@ -5808,8 +5863,8 @@ mod tests {
         let (coinbase_transaction2, _expected_utxo) = make_coinbase_transaction_from_state_lock(
             light_state.tip(),
             &premine_receiver,
-            in_seven_months,
-            TritonVmJobPriority::Normal.into(),
+            in_eight_months,
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -5826,7 +5881,7 @@ mod tests {
             tx_from_alice.into(),
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -5836,7 +5891,7 @@ mod tests {
             tx_from_bob.into(),
             Default::default(),
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
         )
         .await
@@ -5855,7 +5910,7 @@ mod tests {
             block_transaction2,
             in_eight_months,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
@@ -5870,7 +5925,7 @@ mod tests {
     async fn mock_global_state_is_valid() {
         // Verify that the states, not just the blocks, are valid.
 
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let mut global_state_lock = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
@@ -6183,8 +6238,7 @@ mod tests {
             let mut previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(&previous_block, None, spending_key, rng.random(), network)
-                        .await;
+                    make_mock_block(&previous_block, None, spending_key, rng.random(), network);
                 global_state_lock
                     .set_new_self_composed_tip(next_block.clone(), expected)
                     .await
@@ -6205,8 +6259,7 @@ mod tests {
             previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(&previous_block, None, spending_key, rng.random(), network)
-                        .await;
+                    make_mock_block(&previous_block, None, spending_key, rng.random(), network);
                 global_state_lock
                     .set_new_self_composed_tip(next_block.clone(), expected)
                     .await
@@ -6262,8 +6315,7 @@ mod tests {
             assert_eq!(genesis_block.hash(), alice.chain.tip().hash());
 
             let cb_key = WalletEntropy::new_random().nth_generation_spending_key(0);
-            let (block_1, _) =
-                make_mock_block(&genesis_block, None, cb_key, rng.random(), network).await;
+            let (block_1, _) = make_mock_block(&genesis_block, None, cb_key, rng.random(), network);
 
             alice.store_block_not_tip(block_1.clone()).await.unwrap();
             assert_eq!(
@@ -6282,17 +6334,13 @@ mod tests {
         }
 
         /// Return a list of (Block, parent) pairs, of length N.
-        async fn chain_of_blocks_and_parents(
-            network: Network,
-            length: usize,
-        ) -> Vec<(Block, Block)> {
+        fn chain_of_blocks_and_parents(network: Network, length: usize) -> Vec<(Block, Block)> {
             let mut rng = rand::rng();
             let cb_key = WalletEntropy::new_random().nth_generation_spending_key(0);
             let mut parent = Block::genesis(network);
             let mut chain = vec![];
             for _ in 0..length {
-                let (block, _) =
-                    make_mock_block(&parent, None, cb_key, rng.random(), network).await;
+                let (block, _) = make_mock_block(&parent, None, cb_key, rng.random(), network);
                 chain.push((block.clone(), parent.clone()));
                 parent = block;
             }
@@ -6314,7 +6362,7 @@ mod tests {
             let mut alice = alice.global_state_lock.lock_guard_mut().await;
 
             let a_length = 12;
-            let chain_a = chain_of_blocks_and_parents(network, a_length).await;
+            let chain_a = chain_of_blocks_and_parents(network, a_length);
             for (block, _) in &chain_a {
                 alice.set_new_tip(block.to_owned()).await.unwrap();
             }
@@ -6333,7 +6381,7 @@ mod tests {
             // Store all blocks from a new chain, except the last, without
             // marking any of them as tips.  Verify no change in tip.
             let b_length = 15;
-            let chain_b = chain_of_blocks_and_parents(network, b_length).await;
+            let chain_b = chain_of_blocks_and_parents(network, b_length);
             for (block, _) in chain_b.iter().take(b_length - 1) {
                 alice.store_block_not_tip(block.clone()).await.unwrap();
             }
@@ -6381,8 +6429,8 @@ mod tests {
                 .await;
                 let mut alice = alice.global_state_lock.lock_guard_mut().await;
                 assert_eq!(genesis_block.hash(), alice.chain.tip().hash());
-                let chain_a = chain_of_blocks_and_parents(network, depth).await;
-                let chain_b = chain_of_blocks_and_parents(network, depth).await;
+                let chain_a = chain_of_blocks_and_parents(network, depth);
+                let chain_b = chain_of_blocks_and_parents(network, depth);
                 let blocks_and_parents = [chain_a, chain_b].concat();
                 for (block, _) in &blocks_and_parents {
                     alice.store_block_not_tip(block.clone()).await.unwrap();
@@ -6426,11 +6474,11 @@ mod tests {
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1a, composer_expected_utxos_1a) =
-                make_mock_block(&genesis_block, None, spending_key, rng.random(), network).await;
+                make_mock_block(&genesis_block, None, spending_key, rng.random(), network);
             let (block_2a, composer_expected_utxos_2a) =
-                make_mock_block(&block_1a, None, spending_key, rng.random(), network).await;
+                make_mock_block(&block_1a, None, spending_key, rng.random(), network);
             let (block_3a, composer_expected_utxos_3a) =
-                make_mock_block(&block_2a, None, spending_key, rng.random(), network).await;
+                make_mock_block(&block_2a, None, spending_key, rng.random(), network);
 
             let cli_args = cli_args::Args {
                 number_of_mps_per_utxo: 30,
@@ -6485,7 +6533,7 @@ mod tests {
                 // Verify that we can also reorganize with last shared ancestor being
                 // the genesis block.
                 let (block_1b, _) =
-                    make_mock_block(&genesis_block, None, spending_key, random(), network).await;
+                    make_mock_block(&genesis_block, None, spending_key, random(), network);
                 global_state.set_new_tip(block_1b.clone()).await.unwrap();
                 assert_correct_global_state(
                     &global_state,
@@ -6500,8 +6548,7 @@ mod tests {
                 let mut previous_block = block_1b;
                 for block_height in 2..60 {
                     let (next_block, composer_expected_utxos) =
-                        make_mock_block(&previous_block, None, spending_key, rng.random(), network)
-                            .await;
+                        make_mock_block(&previous_block, None, spending_key, rng.random(), network);
                     global_state
                         .wallet_state
                         .add_expected_utxos(composer_expected_utxos.clone())
@@ -6542,7 +6589,7 @@ mod tests {
             let spend_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1, composer_expected_utxos_1) =
-                make_mock_block(&genesis_block, None, spend_key, rng.random(), network).await;
+                make_mock_block(&genesis_block, None, spend_key, rng.random(), network);
 
             for claim_coinbase in [false, true] {
                 let mut global_state_lock = mock_genesis_global_state(
@@ -6587,8 +6634,9 @@ mod tests {
 
     mod import_blocks_from_directory {
 
+        use neptune_consensus::block::test_helpers::invalid_empty_blocks_with_proof_size;
+
         use super::*;
-        use crate::tests::shared::blocks::invalid_empty_blocks_with_proof_size;
 
         async fn state_with_three_big_mocked_blocks(network: Network) -> GlobalStateLock {
             // Ensure more than one file is used to store blocks.
@@ -6796,7 +6844,7 @@ mod tests {
             change_key_type: KeyType,
         ) {
             // setup initial conditions
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(10001);
 
             let genesis_block = Block::genesis(network);
@@ -6920,7 +6968,7 @@ mod tests {
                     &genesis_block,
                     charlie_state_lock,
                     seven_months_post_launch,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmProofJobOptions::default_with_network(network),
                     TxMergeOrigin::ExplicitList(vec![Arc::into_inner(alice_to_bob_tx).unwrap()]),
                 )
                 .await
@@ -6930,7 +6978,7 @@ mod tests {
                     block_1_tx,
                     seven_months_post_launch,
                     TritonVmJobQueue::get_instance(),
-                    TritonVmJobPriority::default().into(),
+                    TritonVmProofJobOptions::default_with_network(network),
                 )
                 .await
                 .unwrap();
@@ -7070,6 +7118,165 @@ mod tests {
                         )
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod composer_parameters_tests {
+    use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
+    use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::network::Network;
+    use neptune_primitives::timestamp::Timestamp;
+    use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
+
+    use crate::application::config::cli_args;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::mock_genesis_wallet_state;
+
+    #[tokio::test]
+    async fn dynamic_overriding_trumps_cli_override() {
+        let network = Network::Main;
+        let devnet_wallet = WalletEntropy::devnet_wallet();
+        let another_wallet = WalletEntropy::new_random();
+        let third_wallet = WalletEntropy::new_random();
+
+        let cli_override = cli_args::Args {
+            network,
+            guesser_fraction: 0.4,
+            mining_address: Some(
+                third_wallet
+                    .composer_fee_key()
+                    .to_address()
+                    .to_bech32m(network)
+                    .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let mut dynamic_override =
+            mock_genesis_global_state(0, devnet_wallet.clone(), cli_override).await;
+        let mut dynamic_override = dynamic_override.lock_guard_mut().await;
+
+        let composition_receiver: ReceivingAddress = another_wallet
+            .nth_generation_spending_key(0)
+            .to_address()
+            .into();
+        let overridden_cb_distribution = CoinbaseDistribution::solo(composition_receiver.clone());
+
+        let now = Timestamp::now();
+        let coinbase_amount = INITIAL_BLOCK_SUBSIDY;
+        let next_height = BlockHeight::genesis().next();
+        dynamic_override
+            .mining_state
+            .set_coinbase_distribution(overridden_cb_distribution);
+        let dynamic_overriden_composer_outputs = dynamic_override
+            .composer_parameters(next_height)
+            .tx_outputs(coinbase_amount, now);
+
+        let another_wallet = mock_genesis_wallet_state(
+            another_wallet,
+            &cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let third_wallet =
+            mock_genesis_wallet_state(third_wallet, &cli_args::Args::default_with_network(network))
+                .await;
+        for output in dynamic_overriden_composer_outputs.iter() {
+            assert!(
+                another_wallet.can_unlock(&output.utxo()),
+                "Dynamic mining recipient must be able to spend composer reward."
+            );
+            assert!(
+                !third_wallet.can_unlock(&output.utxo()),
+                "Mining address set in CLI argument must be overridden by dynamic override."
+            );
+            assert!(
+                !dynamic_override.wallet_state.can_unlock(&output.utxo()),
+                "Wallet may not be able to spend composition rewards when composer distribution is overridden."
+            );
+            assert_eq!(
+                composition_receiver.privacy_digest(),
+                output.receiver_digest(),
+                "Receiver digest of composer output must match that from overridden mining address"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn composer_parameters_respect_cli_flag_overriding() {
+        let network = Network::Main;
+        let devnet_wallet = WalletEntropy::devnet_wallet();
+
+        // No override
+        let no_override = cli_args::Args {
+            network,
+            guesser_fraction: 0.4,
+            ..Default::default()
+        };
+        let no_override = mock_genesis_global_state(0, devnet_wallet.clone(), no_override).await;
+        let no_override = no_override.lock_guard().await;
+
+        let now = Timestamp::now();
+        let coinbase_amount = INITIAL_BLOCK_SUBSIDY;
+        let next_height = BlockHeight::genesis().next();
+
+        let no_override_composer_outputs = no_override
+            .composer_parameters(next_height)
+            .tx_outputs(coinbase_amount, now);
+        assert_eq!(
+            2,
+            no_override_composer_outputs.len(),
+            "Default parameters must produce exactly two coinbase outputs"
+        );
+
+        for output in no_override_composer_outputs.iter() {
+            assert!(
+                no_override.wallet_state.can_unlock(&output.utxo()),
+                "Wallet must be able to spend composition rewards when explicit mining address is not set."
+            );
+        }
+
+        // CLI flag override
+        let another_wallet = WalletEntropy::new_random();
+        let mining_address: ReceivingAddress = another_wallet
+            .nth_generation_spending_key(0)
+            .to_address()
+            .into();
+        let another_wallet = mock_genesis_wallet_state(
+            another_wallet,
+            &cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let cli_override = cli_args::Args {
+            network,
+            guesser_fraction: 0.4,
+            mining_address: Some(mining_address.to_display_bech32m(network).unwrap()),
+            ..Default::default()
+        };
+
+        let cli_override = mock_genesis_global_state(0, devnet_wallet.clone(), cli_override).await;
+        let cli_override = cli_override.lock_guard().await;
+        let cli_override_composer_outputs = cli_override
+            .composer_parameters(next_height)
+            .tx_outputs(coinbase_amount, now);
+
+        for output in cli_override_composer_outputs.iter() {
+            assert!(
+                another_wallet.can_unlock(&output.utxo()),
+                "Mining recipient must be able to unlock composer reward."
+            );
+            assert!(
+                !cli_override.wallet_state.can_unlock(&output.utxo()),
+                "Wallet may not be able to spend composition rewards when mining reward address is overridden through a CLI flag."
+            );
+            assert_eq!(
+                mining_address.privacy_digest(),
+                output.receiver_digest(),
+                "Receiver digest of composer output must match that from overridden mining address"
+            );
         }
     }
 }

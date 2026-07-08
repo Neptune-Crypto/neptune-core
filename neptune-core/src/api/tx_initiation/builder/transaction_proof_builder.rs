@@ -26,26 +26,27 @@ use std::borrow::Borrow;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use super::proof_builder::ProofBuilder;
-use crate::api::export::NeptuneProof;
-use crate::api::tx_initiation::error::CreateProofError;
-use crate::api::tx_initiation::error::ProofRequirement;
-use crate::application::triton_vm_job_queue::vm_job_queue;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
-use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
-use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof_mock;
-use crate::protocol::consensus::transaction::validity::single_proof::SingleProof;
-use crate::protocol::consensus::transaction::validity::single_proof::SingleProofWitness;
-use crate::protocol::consensus::transaction::validity::tasm::single_proof::update_branch::UpdateWitness;
-use crate::protocol::consensus::transaction::TransactionProof;
-use crate::protocol::proof_abstractions::tasm::program::TritonProgram;
-use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::protocol::proof_abstractions::SecretWitness;
-use crate::state::transaction::transaction_details::TransactionDetails;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::error::CreateProofError;
+use neptune_consensus::proof_abstractions::error::ProofRequirement;
+use neptune_consensus::proof_abstractions::proof_builder::ProofBuilder;
+use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
+use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+use neptune_consensus::proof_abstractions::SecretWitness;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::validity::single_proof::produce_single_proof;
+use neptune_consensus::transaction::validity::single_proof::produce_single_proof_mock;
+use neptune_consensus::transaction::validity::single_proof::SingleProof;
+use neptune_consensus::transaction::validity::single_proof::SingleProofWitness;
+use neptune_consensus::transaction::validity::tasm::single_proof::update_branch::UpdateWitness;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_wallet::transaction_details::TransactionDetails;
+
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
 
@@ -273,7 +274,11 @@ impl<'a> TransactionProofBuilder<'a> {
 
         // note: evaluation order must match order stated in the method doc-comment.
 
-        if proof_job_options.job_settings.proof_type.is_single_proof() {
+        if proof_job_options
+            .job_settings
+            .proof_type()
+            .is_single_proof()
+        {
             #[expect(unused_variables, reason = "anticipate future fork")]
             let consensus_rule_set =
                 consensus_rule_set.ok_or(ProofRequirement::ConsensusRuleSet)?;
@@ -314,7 +319,7 @@ impl<'a> TransactionProofBuilder<'a> {
         };
 
         // PrimitiveWitness -> single proof
-        match proof_job_options.job_settings.proof_type {
+        match proof_job_options.job_settings.proof_type() {
             TransactionProofType::PrimitiveWitness => {
                 Ok(TransactionProof::Witness(primitive_witness.into_owned()))
             }
@@ -377,7 +382,7 @@ where
 ///
 /// # Panics
 ///
-///  - If `proof_job_options.job_settings.proof_type
+///  - If `proof_job_options.job_settings.proof_type()
 ///           != TransactionProofType::ProofCollection`
 async fn proof_collection_from_witness(
     witness_cow: Cow<'_, PrimitiveWitness>,
@@ -386,16 +391,16 @@ async fn proof_collection_from_witness(
     valid_mock: bool,
 ) -> Result<ProofCollection, CreateProofError> {
     let proof_type = TransactionProofType::ProofCollection;
-    assert_eq!(proof_type, proof_job_options.job_settings.proof_type);
+    assert_eq!(proof_type, proof_job_options.job_settings.proof_type());
 
     // generate mock proof, if network uses mock proofs.
-    if proof_job_options.job_settings.network.use_mock_proof() {
+    if proof_job_options.job_settings.network().use_mock_proof() {
         let pc = ProofCollection::produce_mock(witness_cow.borrow(), valid_mock);
         return Ok(pc);
     }
 
     // abort early if machine is too weak
-    let capability = proof_job_options.job_settings.tx_proving_capability;
+    let capability = proof_job_options.job_settings.tx_proving_capability();
     if !capability.can_prove(proof_type) {
         return Err(CreateProofError::TooWeak {
             proof_type,
@@ -414,7 +419,7 @@ async fn proof_collection_from_witness(
 ///
 /// # Panics
 ///
-///  - If `proof_job_options.job_settings.proof_type
+///  - If `proof_job_options.job_settings.proof_type()
 ///           != TransactionProofType::SingleProof`
 async fn single_proof_from_witness(
     witness_cow: Cow<'_, PrimitiveWitness>,
@@ -424,16 +429,19 @@ async fn single_proof_from_witness(
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<NeptuneProof, CreateProofError> {
     let single_proof_type = TransactionProofType::SingleProof;
-    assert_eq!(single_proof_type, proof_job_options.job_settings.proof_type);
+    assert_eq!(
+        single_proof_type,
+        proof_job_options.job_settings.proof_type()
+    );
 
     // generate mock proof, if network uses mock proofs.
-    if proof_job_options.job_settings.network.use_mock_proof() {
+    if proof_job_options.job_settings.network().use_mock_proof() {
         let sp = produce_single_proof_mock(valid_mock);
         return Ok(sp);
     }
 
     // abort early if machine is too weak
-    let capability = proof_job_options.job_settings.tx_proving_capability;
+    let capability = proof_job_options.job_settings.tx_proving_capability();
     if !capability.can_prove(single_proof_type) {
         return Err(CreateProofError::TooWeak {
             proof_type: single_proof_type,

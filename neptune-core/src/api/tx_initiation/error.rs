@@ -1,16 +1,12 @@
 //! provides error types related to initiating transactions.
 
+use neptune_consensus::proof_abstractions::error::CreateProofError;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mutator_set::MutatorSetError;
+use neptune_primitives::block_height::BlockHeight;
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::BlockHeight;
-use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::RecordTransactionError;
-use crate::application::job_queue::errors::AddJobError;
-use crate::application::job_queue::errors::JobHandleError;
-use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
-use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
-use crate::state::transaction::tx_proving_capability::TxProvingCapability;
-use crate::util_types::mutator_set::MutatorSetError;
 
 /// enumerates possible transaction send errors
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -63,54 +59,6 @@ pub enum CreateTxError {
     #[error("Mutator set error: {0}")]
     MutatorSetError(MutatorSetError),
 }
-
-#[derive(Debug, Clone, thiserror::Error, strum::Display)]
-#[non_exhaustive]
-pub enum ProofRequirement {
-    Program,
-    Claim,
-    NonDeterminism,
-    ProofJobOptions,
-    TransactionProofInput,
-    ConsensusRuleSet,
-}
-
-/// enumerates possible proof generation errors
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum CreateProofError {
-    #[error("missing required data to build proof: {0}")]
-    MissingRequirement(#[from] ProofRequirement),
-
-    #[error(
-        "machine capability {capability} is insufficient to generate proof of type: {proof_type}"
-    )]
-    TooWeak {
-        proof_type: TransactionProofType,
-        capability: TxProvingCapability,
-    },
-
-    #[error("target proof type {0} is not a triton-vm proof.")]
-    NotVmProof(TransactionProofType),
-
-    #[error(transparent)]
-    AddJobError(#[from] AddJobError),
-
-    #[error(transparent)]
-    ProverJobError(#[from] ProverJobError),
-
-    #[error(transparent)]
-    JobHandleError(#[from] JobHandleError),
-
-    #[error("Could not forward job cancellation msg to proving job. {0}")]
-    JobCancelSendError(#[from] tokio::sync::watch::error::SendError<()>),
-
-    #[error(
-        "Cannot produce Triton Vm proofs for old consensus rule sets. Are you fully synced yet?"
-    )]
-    DeprecatedConsensusRules,
-}
-
 /// enumerates possible upgrade-proof errors
 #[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]

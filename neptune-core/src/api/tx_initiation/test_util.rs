@@ -3,12 +3,14 @@
 //!
 //! Going forward test authors are encouraged to use the public APIs instead.
 
-use crate::api::export::ChangePolicy;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::change_policy::ChangePolicy;
+use neptune_wallet::transaction_output::TxOutputList;
+
 use crate::api::export::InputCandidate;
-use crate::api::export::NativeCurrencyAmount;
-use crate::api::export::Timestamp;
 use crate::api::export::TxCreationArtifacts;
-use crate::api::export::TxOutputList;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::input_selector::InputSelectionPriority;
 use crate::api::tx_initiation::builder::input_selector::InputSelector;
@@ -16,7 +18,6 @@ use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
-use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::state::StateLock;
 use crate::GlobalStateLock;

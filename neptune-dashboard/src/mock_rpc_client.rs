@@ -2,17 +2,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use neptune_cash::api::export::BlockHeight;
-use neptune_cash::api::export::ChangePolicy;
-use neptune_cash::api::export::GenerationSpendingKey;
-use neptune_cash::api::export::KeyType;
-use neptune_cash::api::export::NativeCurrencyAmount;
-use neptune_cash::api::export::Network;
 use neptune_cash::api::export::OutputFormat;
-use neptune_cash::api::export::ReceivingAddress;
-use neptune_cash::api::export::SpendingKey;
-use neptune_cash::api::export::SymmetricKey;
-use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::TxCreationArtifacts;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::application::rpc::server::error::RpcError;
@@ -20,8 +10,18 @@ use neptune_cash::application::rpc::server::mempool_transaction_info::MempoolTra
 use neptune_cash::application::rpc::server::overview_data::OverviewData;
 use neptune_cash::application::rpc::server::ui_utxo::UiUtxo;
 use neptune_cash::application::rpc::server::RpcResult;
-use neptune_cash::protocol::peer::peer_info::PeerInfo;
-use neptune_cash::state::wallet::address::generation_address::GenerationReceivingAddress;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_p2p::peer::peer_info::PeerInfo;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_wallet::address::generation_address::GenerationReceivingAddress;
+use neptune_wallet::address::generation_address::GenerationSpendingKey;
+use neptune_wallet::address::symmetric_key::SymmetricKey;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::change_policy::ChangePolicy;
 use rand::rng;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -223,7 +223,7 @@ impl MockRpcClient {
                 state.generation_address.clone()
             }
             KeyType::Symmetric => {
-                state.symmetric_address = neptune_cash::api::export::ReceivingAddress::Symmetric(
+                state.symmetric_address = neptune_wallet::address::ReceivingAddress::Symmetric(
                     SymmetricKey::from_seed(rng().random()),
                 );
                 state.symmetric_address.clone()

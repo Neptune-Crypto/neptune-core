@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
 use futures::pin_mut;
+use neptune_database::storage::storage_schema::SimpleRustyStorage;
+use neptune_database::storage::storage_vec::traits::*;
 use tasm_lib::prelude::Tip5;
 use tracing::debug;
 use tracing::trace;
 
-use crate::application::database::storage::storage_schema::SimpleRustyStorage;
-use crate::application::database::storage::storage_vec::traits::*;
 use crate::state::wallet::migrate_db::v2_to_v3::migration::schema_v2;
 use crate::state::wallet::migrate_db::v2_to_v3::migration::schema_v2::load_v2_schema_in_order;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
@@ -196,14 +196,14 @@ mod migration {
     pub(super) mod schema_v1 {
         use std::collections::VecDeque;
 
+        use neptune_consensus::transaction::utxo::Utxo;
+        use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+        use neptune_primitives::block_height::BlockHeight;
         use serde::Deserialize;
         use serde::Serialize;
         use tasm_lib::prelude::Digest;
 
-        use crate::api::export::BlockHeight;
-        use crate::protocol::consensus::transaction::utxo::Utxo;
         use crate::state::Timestamp;
-        use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
         // this is a copy of MonitoredUtxo as it was in v1 schema.
         #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,31 +225,31 @@ mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_consensus::transaction::lock_script::LockScript;
+    use neptune_consensus::transaction::utxo::Utxo;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_database::storage::storage_schema::traits::StorageWriter;
+    use neptune_database::storage::storage_schema::DbtSingleton;
+    use neptune_database::storage::storage_schema::DbtVec;
+    use neptune_database::storage::storage_schema::RustyKey;
+    use neptune_database::storage::storage_schema::RustyValue;
+    use neptune_database::NeptuneLevelDb;
+    use neptune_mutator_set::commit;
+    use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+    use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+    use neptune_primitives::network::Network;
+    use neptune_primitives::timestamp::Timestamp;
+    use neptune_wallet::expected_utxo::ExpectedUtxo;
+    use neptune_wallet::expected_utxo::UtxoNotifier;
     use tasm_lib::prelude::Digest;
     use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
     use super::*;
-    use crate::api::export::NativeCurrencyAmount;
-    use crate::api::export::Timestamp;
-    use crate::api::export::Utxo;
-    use crate::application::config::network::Network;
-    use crate::application::database::storage::storage_schema::traits::StorageWriter;
-    use crate::application::database::storage::storage_schema::DbtSingleton;
-    use crate::application::database::storage::storage_schema::DbtVec;
-    use crate::application::database::storage::storage_schema::RustyKey;
-    use crate::application::database::storage::storage_schema::RustyValue;
-    use crate::application::database::NeptuneLevelDb;
-    use crate::protocol::consensus::transaction::lock_script::LockScript;
-    use crate::state::wallet::expected_utxo::ExpectedUtxo;
-    use crate::state::wallet::expected_utxo::UtxoNotifier;
     use crate::state::wallet::migrate_db::worker;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::state::BlockHeight;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-    use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 
     impl migration::schema_v1::MonitoredUtxo {
         pub(in super::super) fn new(utxo: Utxo, number_of_mps_per_utxo: usize) -> Self {
