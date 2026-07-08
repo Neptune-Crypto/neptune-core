@@ -11,6 +11,8 @@ use crate::upgrade_incentive::UpgradeIncentive;
 #[cfg_attr(any(test, feature = "test-helpers"), derive(serde::Serialize))]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub enum UpgradePriority {
+    /// This transaction was received from a 3rd party and does not have a
+    /// financial interest for this node operator.
     #[default]
     Irrelevant,
 

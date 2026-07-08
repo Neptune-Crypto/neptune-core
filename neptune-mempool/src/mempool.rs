@@ -784,6 +784,25 @@ impl Mempool {
                 .get(&txid)
                 .and_then(|tx| tx.primitive_witness.clone())
         };
+
+        // A transaction's upgrade priority reflects our financial interest in
+        // seeing it confirmed, and that interest does not vanish when the
+        // transaction is superseded. A copy that reaches us over the wire is
+        // inserted with `Irrelevant` priority — whether it's our own
+        // transaction gossiped back, or, more importantly, a third party's
+        // merge that folded our inputs and outputs into a larger transaction.
+        // A merge carries a *new* txid, but it still conflicts with (and, when
+        // inserted below, kicks out) our original transaction. So the inserted
+        // transaction must inherit at least the highest priority among the
+        // conflicts it replaces; otherwise the mempool would stop
+        // mutator-set-updating the transaction carrying our funds. Compute this
+        // before the conflicting transactions are removed below.
+        let priority = conflicts
+            .keys()
+            .filter_map(|conflicting_txid| self.tx_dictionary.get(conflicting_txid))
+            .map(|conflicting| conflicting.upgrade_priority)
+            .fold(priority, |acc, conflicting| acc.max(conflicting));
+
         let new_tx = MempoolTransaction {
             transaction: new_tx,
             upgrade_priority: priority,
@@ -2327,6 +2346,107 @@ mod tests {
                     updated_tx.kernel.mutator_set_hash
                 ),
                 "Must return false on original after insertion of updated tx"
+            );
+        }
+
+        /// Regression test: a transaction inserted with a *lower* priority that
+        /// kicks out higher-priority conflicts must inherit their priority.
+        ///
+        /// The motivating case: we initiate transaction `a` (`Critical`). A
+        /// third party merges `a` with their own transaction `b` into `c`. `c`
+        /// carries our inputs and outputs (so it conflicts with, and replaces,
+        /// `a`) but has a *new* txid and reaches us over the wire as
+        /// `Irrelevant`. If `c` kept `Irrelevant`, the mempool would stop
+        /// mutator-set-updating the transaction that now carries our funds
+        /// (both `update_with_block` and `preferred_update` gate updating single
+        /// proofs on the stored `Critical` priority).
+        #[proptest(cases = 15, async = "tokio")]
+        async fn merge_received_over_wire_inherits_replaced_priority(
+            #[strategy(1usize..10)] _num_inputs_own: usize,
+            #[strategy(1usize..10)] _num_outputs_own: usize,
+            #[strategy(1usize..10)] _num_inputs_foreign: usize,
+            #[strategy(1usize..10)] _num_outputs_foreign: usize,
+            #[strategy(PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets(
+            [(#_num_inputs_own, #_num_outputs_own, 0),
+            (#_num_inputs_foreign, #_num_outputs_foreign, 0),],
+    ))]
+            pws: [PrimitiveWitness; 2],
+        ) {
+            use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+            // Transactions in the mempool do not need to be valid, so we just
+            // pretend that the primitive-witness backed transactions have a
+            // SingleProof. Skip cases where the (arbitrary) mutator set happens
+            // to match the genesis tip, so the transactions count as unsynced.
+            let genesis_block = Block::genesis(Network::Main);
+            let genesis_ms_hash = genesis_block
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .hash();
+            let [own_pw, foreign_pw] = pws;
+            prop_assume!(own_pw.kernel.mutator_set_hash != genesis_ms_hash);
+
+            // Our transaction, with a small fee.
+            let own_kernel = TransactionKernelModifier::default()
+                .fee(NativeCurrencyAmount::from_nau(1))
+                .modify(own_pw.kernel);
+            let own_tx = Transaction {
+                kernel: own_kernel.clone(),
+                proof: TransactionProof::invalid(),
+            };
+
+            // A third party's merge of our transaction with theirs: it carries
+            // both parties' inputs and outputs (so it conflicts with `own_tx`),
+            // a large combined fee (so it wins the fee-density replacement), and
+            // therefore a new txid.
+            let merged_kernel = TransactionKernelModifier::default()
+                .inputs([own_kernel.inputs.clone(), foreign_pw.kernel.inputs.clone()].concat())
+                .outputs(
+                    [
+                        own_kernel.outputs.clone(),
+                        foreign_pw.kernel.outputs.clone(),
+                    ]
+                    .concat(),
+                )
+                .fee(NativeCurrencyAmount::coins(1))
+                .modify(own_kernel);
+            let merged_tx = Transaction {
+                kernel: merged_kernel,
+                proof: TransactionProof::invalid(),
+            };
+            prop_assert_ne!(own_tx.kernel.txid(), merged_tx.kernel.txid());
+
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::SingleProof,
+                &genesis_block,
+            );
+
+            // We initiated `own_tx`, so it enters the mempool as `Critical`.
+            mempool.insert(own_tx.clone(), UpgradePriority::Critical);
+
+            // The merge arrives over the wire as `Irrelevant`. It kicks out
+            // `own_tx` (shared inputs, higher combined fee density) ...
+            mempool.insert(merged_tx.clone(), UpgradePriority::Irrelevant);
+            prop_assert!(
+                !mempool.contains(own_tx.kernel.txid()),
+                "merge must replace our transaction"
+            );
+            prop_assert!(mempool.contains(merged_tx.kernel.txid()));
+
+            // ... but must inherit our `Critical` interest so the mempool keeps
+            // mutator-set-updating the transaction carrying our funds. The
+            // transactions are unsynced relative to the genesis tip, so
+            // `preferred_update` returns the merge along with its stored
+            // priority.
+            let (returned_kernel, _, priority) = mempool
+                .preferred_update(TxUpgradeFilter::match_all())
+                .expect("unsynced single-proof tx must be returned for update");
+            prop_assert_eq!(returned_kernel.txid(), merged_tx.kernel.txid());
+            prop_assert_eq!(
+                UpgradePriority::Critical,
+                priority,
+                "merge that replaces a Critical tx must inherit its priority"
             );
         }
     }
