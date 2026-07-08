@@ -17,9 +17,6 @@ pub mod rusty_archival_block_mmr;
 pub mod shared;
 
 #[cfg(test)]
-mod archival_state_tests;
-
-#[cfg(test)]
 mod test_utils {
     macro_rules! shared_tokio_runtime {
         (
