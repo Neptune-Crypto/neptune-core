@@ -3,7 +3,7 @@ name = "neptune-job-queue"
 description = "Prioritized, heterogeneous async/blocking job queue used by neptune-cash"
 authors = ["Triton Software"]
 
-version = "0.12.0"
+version = "0.14.0"
 edition = "2021"
 license = "Apache-2.0"
 

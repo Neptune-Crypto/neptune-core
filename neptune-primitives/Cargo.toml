@@ -3,7 +3,7 @@ name = "neptune-primitives"
 description = "Foundational primitives shared across neptune-cash"
 authors = ["Triton Software"]
 
-version = "0.12.0"
+version = "0.14.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -12,7 +12,11 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
 [features]
 # implements arbitrary::Arbitrary (and proptest strategies) for various types
-arbitrary-impls = ["dep:arbitrary", "dep:proptest", "dep:proptest-arbitrary-interop"]
+arbitrary-impls = [
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-arbitrary-interop",
+]
 
 # exposes test-support constructors and proptest strategies (e.g.
 # `Network::arbitrary`, `Network::all_networks`) needed by downstream tests.

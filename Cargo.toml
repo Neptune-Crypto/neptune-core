@@ -75,7 +75,7 @@ unused_async = "warn"
 used_underscore_binding = "warn"
 verbose_bit_mask = "warn"
 # Newly default-enabled by a rustc/clippy upgrade; fires on pre-existing message
-# enums (e.g. PeerTaskToMain) unrelated to current work. Silenced on this branch.
+# enums (e.g. PeerTaskToMain).
 result_large_err = "allow"
 
 # `opt-level = 3` is needed because it otherwise takes too long to sign

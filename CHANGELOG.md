@@ -1,5 +1,75 @@
 Note: (!) indicates a breaking change.
 
+## [0.14.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.12.0..v0.14.0) - 2026-07-09
+
+### ✨ Features
+
+- *(composer)* Check mempool again after building nop ([2903c595](https://github.com/Neptune-Crypto/neptune-core/commit/2903c595))
+- *(json_rpc)* Recover UTXO history without revealing addition record ([c0c3bade](https://github.com/Neptune-Crypto/neptune-core/commit/c0c3bade))
+
+### 🐛 Bug Fixes
+
+- Don't allow job queue to grow indefinitely ([e222af32](https://github.com/Neptune-Crypto/neptune-core/commit/e222af32))
+- Return job with highest upgrade incentive ([05f899a7](https://github.com/Neptune-Crypto/neptune-core/commit/05f899a7))
+- Keep upgrade-priority when receiving merged transaction ([425fe410](https://github.com/Neptune-Crypto/neptune-core/commit/425fe410))
+
+### 📚 Documentation
+
+- Update release checklist for multi-crate workspace ([691f4e0a](https://github.com/Neptune-Crypto/neptune-core/commit/691f4e0a))
+
+### ♻️ Refactor
+
+- Create crates neptune-locks and neptune-database ([e3be3167](https://github.com/Neptune-Crypto/neptune-core/commit/e3be3167))
+- Extract job queue into neptune-job-queue crate ([4ff6634d](https://github.com/Neptune-Crypto/neptune-core/commit/4ff6634d))
+- Extract archival MMR into neptune-archival-mmr crate ([32f416e6](https://github.com/Neptune-Crypto/neptune-core/commit/32f416e6))
+- Extract mutator set into neptune-mutator-set crate ([7e2601db](https://github.com/Neptune-Crypto/neptune-core/commit/7e2601db))
+- (!) Delete unused `set_block` function ([0c7d4c50](https://github.com/Neptune-Crypto/neptune-core/commit/0c7d4c50))
+- Move premine logic from block::mod into block::premine ([071afb02](https://github.com/Neptune-Crypto/neptune-core/commit/071afb02))
+- Untangle state-related transaction from consensus-related transactions ([f4e17660](https://github.com/Neptune-Crypto/neptune-core/commit/f4e17660))
+- Extract neptune-consensus crate ([4ca631e2](https://github.com/Neptune-Crypto/neptune-core/commit/4ca631e2))
+- Remove test/production divergence from Block and proving ([2f5c42d5](https://github.com/Neptune-Crypto/neptune-core/commit/2f5c42d5))
+- Create neptune-wallet crate; move two leaf wallet types ([9878437a](https://github.com/Neptune-Crypto/neptune-core/commit/9878437a))
+- Drop support for memory-hard pow guessing ([db8d677b](https://github.com/Neptune-Crypto/neptune-core/commit/db8d677b))
+- Remove neptune-crate re-export facades; consumers import from real crates ([5a71e12b](https://github.com/Neptune-Crypto/neptune-core/commit/5a71e12b))
+- Extract the mempool into the neptune-mempool crate ([6e6c10e5](https://github.com/Neptune-Crypto/neptune-core/commit/6e6c10e5))
+- Extract peer-to-peer types into the neptune-p2p crate ([cd33d14d](https://github.com/Neptune-Crypto/neptune-core/commit/cd33d14d))
+- Extract archival state into the neptune-archive crate ([73152606](https://github.com/Neptune-Crypto/neptune-core/commit/73152606))
+- Don't auto-consolidate fewer than specified UTXOs ([197e8dff](https://github.com/Neptune-Crypto/neptune-core/commit/197e8dff))
+
+### ✅ Testing
+
+- Very basic test of `utxo_origin_blocks_from_absolute_index_sets` ([992c8d18](https://github.com/Neptune-Crypto/neptune-core/commit/992c8d18))
+- Add two tests related to premine/claim amounts ([5edbe388](https://github.com/Neptune-Crypto/neptune-core/commit/5edbe388))
+- Move consensus integration tests out of the consensus subtree ([dcafddfb](https://github.com/Neptune-Crypto/neptune-core/commit/dcafddfb))
+- Route consensus test overrides through the test-helpers feature ([9acc5361](https://github.com/Neptune-Crypto/neptune-core/commit/9acc5361))
+- (!) Migrate PoW/proof tests to Testnet(42) after Block divergence removal ([4d3e5c6f](https://github.com/Neptune-Crypto/neptune-core/commit/4d3e5c6f))
+- Add main-net hardfork consensus-transition validity tests ([2c1f5906](https://github.com/Neptune-Crypto/neptune-core/commit/2c1f5906))
+- Fix pow-solving test to avoid memory hardness ([314343c0](https://github.com/Neptune-Crypto/neptune-core/commit/314343c0))
+- Verify that tx-proof upgrader wants to update ([994e3df5](https://github.com/Neptune-Crypto/neptune-core/commit/994e3df5))
+- Verify that a tx update leaves outputs unchanged ([5c54ff13](https://github.com/Neptune-Crypto/neptune-core/commit/5c54ff13))
+
+### 🏗️ Build
+
+- Run workspace doctests in `make happy`/`make test` ([b1b999c2](https://github.com/Neptune-Crypto/neptune-core/commit/b1b999c2))
+
+### ⚙️ Miscellaneous
+
+- Allow clippy::result_large_err ([8631f88e](https://github.com/Neptune-Crypto/neptune-core/commit/8631f88e))
+- Drop local Merkle tree validation implementation ([0f7d384a](https://github.com/Neptune-Crypto/neptune-core/commit/0f7d384a))
+- Cargo update ([f8588fe1](https://github.com/Neptune-Crypto/neptune-core/commit/f8588fe1))
+- Make future linter happy ([488f1d55](https://github.com/Neptune-Crypto/neptune-core/commit/488f1d55))
+
+### 🪵 Log
+
+- Show progress on expensive UTXO indexing ([78d3520e](https://github.com/Neptune-Crypto/neptune-core/commit/78d3520e))
+- Log warning if job queue big ([88280e2f](https://github.com/Neptune-Crypto/neptune-core/commit/88280e2f))
+
+### 🪢 Merge
+
+- Merge([#940](https://github.com/Neptune-Crypto/neptune-core/issues/940)): Neptune-Crypto/proof-upgrading-fixes ([c374f2dd](https://github.com/Neptune-Crypto/neptune-core/commit/c374f2dd))
+- Merge([#941](https://github.com/Neptune-Crypto/neptune-core/issues/941)): Neptune-Crypto/thv/crate-separation ([f1d6fb9b](https://github.com/Neptune-Crypto/neptune-core/commit/f1d6fb9b))
+
+
 ## [0.12.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.11.0..v0.12.0) - 2026-06-18
 
 ### 🔱 Fork
