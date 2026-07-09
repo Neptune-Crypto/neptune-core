@@ -1433,7 +1433,12 @@ impl MainLoopHandler {
                 .as_ref()
                 .is_some_and(|x| !x.is_finished());
             let vm_job_queue = vm_job_queue();
-            let busy = vm_job_queue.num_queued_jobs() > 0;
+            let num_queue_jobs = vm_job_queue.num_queued_jobs();
+            let busy = num_queue_jobs > 1;
+
+            if busy {
+                warn!("Not starting any proof upgrading because of {num_queue_jobs} queue jobs.");
+            }
 
             global_state.cli().tx_proof_upgrading
                 && !busy
@@ -1507,7 +1512,7 @@ impl MainLoopHandler {
         // Don't do anything if there are already too many jobs in the queue.
         // A later block will hopefully update the transaction in question, or
         // the current-running job will self correct.
-        if num_queued_job > 2 {
+        if num_queued_job > 3 {
             warn!(
                 "Not updating mempool txs since job queue \
                    already contains {num_queued_job} jobs"
