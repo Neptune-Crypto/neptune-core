@@ -195,7 +195,8 @@ pub struct Args {
     #[clap(skip)]
     pub(crate) auto_consolidate_cache: OnceLock<AutoConsolidationSettings>,
 
-    /// Upper number of inputs per consolidation transaction.
+    /// Number of inputs per automated consolidation transaction. Will never
+    /// auto-consolidate with any other number of inputs than this.
     ///
     /// Sets the number of inputs that each consolidation transaction will
     /// contain.

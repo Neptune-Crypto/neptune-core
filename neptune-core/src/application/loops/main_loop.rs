@@ -850,7 +850,7 @@ impl MainLoopHandler {
                 let update_jobs = update_jobs.into_values().collect_vec();
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
-                let (consolidate, maybe_consolidation_address, max_num_inputs, accept_lustrations) = {
+                let (consolidate, maybe_consolidation_address, num_inputs, accept_lustrations) = {
                     let settings = self.global_state_lock.cli().auto_consolidate();
                     let (cons, cons_addr) = match settings.policy {
                         ConsolidationTarget::Inactive => (false, None),
@@ -861,7 +861,7 @@ impl MainLoopHandler {
                     (
                         cons,
                         cons_addr,
-                        settings.max_num_inpus,
+                        settings.num_inputs,
                         settings.accept_lustrations,
                     )
                 };
@@ -872,7 +872,7 @@ impl MainLoopHandler {
                     tokio::task::spawn(async move {
                         let _ = tx_initiator
                             .consolidate(
-                                max_num_inputs as usize,
+                                num_inputs as usize,
                                 maybe_consolidation_address,
                                 timestamp,
                                 accept_lustrations,

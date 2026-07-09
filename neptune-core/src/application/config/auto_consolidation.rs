@@ -3,8 +3,14 @@ use neptune_wallet::address::ReceivingAddress;
 
 #[derive(Debug, Clone, Default)]
 pub struct AutoConsolidationSettings {
-    pub(crate) max_num_inpus: u8,
+    /// The number of inputs used in each consolidation transaction. Will never
+    /// consolidate with another number of inputs than this.
+    pub(crate) num_inputs: u8,
+
+    /// Where the consolidated outputs should be sent.
     pub(crate) policy: ConsolidationTarget,
+
+    /// Whether the lustration of the consolidated inputs is acceptable.
     pub(crate) accept_lustrations: bool,
 }
 
@@ -39,7 +45,7 @@ impl AutoConsolidationSettings {
         };
 
         Ok(AutoConsolidationSettings {
-            max_num_inpus: num_consolidation_inputs_cli,
+            num_inputs: num_consolidation_inputs_cli,
             policy,
             accept_lustrations,
         })
