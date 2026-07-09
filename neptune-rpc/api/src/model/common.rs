@@ -110,11 +110,10 @@ impl FromStr for RpcBFieldElements {
 
         let bytes = hex::decode(s)?;
         let bfes = bytes
-            .chunks_exact(8)
-            .map(|chunk| {
-                let array: [u8; 8] = chunk.try_into().expect("8-byte chunk expected");
-                BFieldElement::new(u64::from_be_bytes(array))
-            })
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|chunk| BFieldElement::new(u64::from_be_bytes(*chunk)))
             .collect();
 
         Ok(Self(bfes))

@@ -164,7 +164,9 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             .collect_vec();
         while layer.len() > 1 {
             layer = layer
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|pair| Tip5::hash_pair(pair[0], pair[1]))
                 .collect();
         }
