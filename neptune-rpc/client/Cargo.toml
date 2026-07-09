@@ -2,7 +2,7 @@
 name = "neptune-rpc-client"
 description = "library for interacting with neptune-cash's JSON-RPC"
 authors = ["Triton Software"]
-version = "0.14.0"
+version = "0.14.1"
 edition = "2024"
 license = "Apache-2.0"
 
