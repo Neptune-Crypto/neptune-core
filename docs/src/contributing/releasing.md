@@ -56,11 +56,23 @@ An appropriate commit message could be:
 Bump the version of all crates in `Cargo.toml` [as appropriate](https://doc.rust-lang.org/cargo/reference/semver.html), including cross-dependencies between the crates.
 
 At the time of writing, you need to bump the versions in these files:
- - `neptune-core-cli/Cargo.toml`
+ - `neptune-archival-mmr/Cargo.toml`
+ - `neptune-archive/Cargo.toml`
+ - `neptune-consensus/Cargo.toml`
  - `neptune-core/Cargo.toml`
+ - `neptune-core-cli/Cargo.toml`
  - `neptune-dashboard/Cargo.toml`
+ - `neptune-database/Cargo.toml`
+ - `neptune-job-queue/Cargo.toml`
+ - `neptune-locks/Cargo.toml`
+ - `neptune-mempool/Cargo.toml`
+ - `neptune-mutator-set/Cargo.toml`
+ - `neptune-p2p/Cargo.toml`
+ - `neptune-primitives/Cargo.toml`
+ - `neptune-rpc/api/Cargo.toml`
  - `neptune-rpc/client/Cargo.toml`
  - `neptune-rpc/macros/Cargo.toml`
+ - `neptune-wallet/Cargo.toml`
 
 The `RPC_API_VERSION` constant needs to be bumped whenever there are *breaking* changes to the JSON RPC interface. That, however, is the responsibility of the
 JSON RPC developers and not of the releaser.
@@ -68,12 +80,7 @@ JSON RPC developers and not of the releaser.
 
 ### Confirm Version Bump as Semantic
 
-> ℹ️ Because binaries cannot be used as a dependency, this step is only relevant if Neptune Core has library targets.
-<!---
-    At the time of writing, there are no library targets.
-    Remove the note above if there is a library target.
-    Remove every mention to `cargo-semver-checks` if it is certain that Neptune Core will never have library targets.
---->
+The workspace has library targets (e.g. `neptune-consensus`, `neptune-wallet`) that are consumed as dependencies, so this step is relevant.
 
 Make sure that the version bump conforms to semantic versioning.
 
@@ -146,14 +153,7 @@ cargo test --all-targets
 ### Publish to `crates.io`
 
 The tool `cargo-release` helps to publish multiple, possibly inter-depending crates with a single command.
-
-> ℹ️ If the workspace has only one member, `cargo publish` (instead of `cargo release`) works fine.
->    With `cargo publish`, you will need to create git tags manually.
-<!---
-    At the time of writing, the Neptune Core workspace has only one member crate.
-    Remove the note above if there is more than one workspace member.
-    Remove every mention to `cargo-release` if it is certain that Neptune Core will always have only one workspace member.
---->
+The workspace has many inter-depending member crates, so `cargo release` (rather than `cargo publish`) is the appropriate tool.
 
 ```sh
 cargo release --execute --no-push
