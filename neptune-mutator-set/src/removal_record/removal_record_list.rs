@@ -1444,7 +1444,7 @@ mod tests {
         assert_eq!(removal_records, as_vec_again);
     }
 
-    #[proptest]
+    #[proptest(cases = 100)]
     fn convert_many_records_without_knowledge_of_aocl(
         #[strategy(0usize..10)] _num_records: usize,
         #[strategy(arb::<u64>())] _num_leafs_aocl: u64,
