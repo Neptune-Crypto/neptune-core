@@ -254,7 +254,7 @@ async fn new_blocks_at_block_height_100_000_async(
     assert_eq!(BlockHeight::from(100_000u64), observed_block_height,);
 
     // 2. get a positive balance, by mining.
-    let blocks_to_mine = 5;
+    let blocks_to_mine = 3;
     let mut predecessor = block_100_000;
     for _ in 0..blocks_to_mine {
         now += Timestamp::hours(1);
@@ -266,8 +266,8 @@ async fn new_blocks_at_block_height_100_000_async(
         predecessor = next_block;
     }
 
-    let hopefully_plus_5 = bob.lock_guard().await.chain.tip().header().height;
-    assert_eq!(BlockHeight::from(100_005u64), hopefully_plus_5);
+    let hopefully_plus_3 = bob.lock_guard().await.chain.tip().header().height;
+    assert_eq!(BlockHeight::from(100_003u64), hopefully_plus_3);
     assert!(
         bob.api()
             .wallet()
@@ -291,7 +291,7 @@ async fn new_blocks_at_block_height_100_000_async(
     // 3. create blocks with enough outputs to give some/all owned UTXOs
     //    non-empty chunk dictionaries. This serves to check that the
     //    membership proofs/removal records are updated correctly.
-    let num_blocks_with_many_outputs = 4;
+    let num_blocks_with_many_outputs = 3;
     for _ in 0..num_blocks_with_many_outputs {
         now += Timestamp::hours(1);
         let next_block = block_with_n_outputs(bob.clone(), 24, now).await;

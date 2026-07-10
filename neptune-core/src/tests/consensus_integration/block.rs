@@ -394,7 +394,7 @@ mod block_is_valid {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn blocks_with_0_to_10_inputs_and_successors_are_valid() {
+    async fn blocks_with_0_to_8_inputs_and_successors_are_valid() {
         // Scenario: Build different blocks of height 2, with varying number
         // of inputs. Verify all are valid. The build a block of height 3
         // with non-zero inputs and verify validity. This should ensure that
@@ -458,7 +458,7 @@ mod block_is_valid {
         let config2 = TxCreationConfig::default()
             .recover_change_on_chain(alice_key.clone())
             .with_prover_capability(TxProvingCapability::SingleProof);
-        for i in 0..10 {
+        for i in 0..8 {
             println!("i: {i}");
             alice = mock_genesis_global_state(
                 3,

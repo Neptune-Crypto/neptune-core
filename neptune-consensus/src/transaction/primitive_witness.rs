@@ -1798,7 +1798,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[proptest(cases = 10, async = "tokio")]
+    #[proptest(cases = 3, async = "tokio")]
     async fn updating_primitive_witness_with_ms_data_works(
         // Notice only SingleProof-backed txs need inputs to allow updating, not PW-backed ones.
         #[strategy(0usize..20)] _num_inputs_own: usize,

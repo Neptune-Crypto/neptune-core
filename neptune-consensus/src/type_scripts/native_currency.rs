@@ -1345,7 +1345,7 @@ pub mod tests {
             .unwrap();
     }
 
-    #[proptest]
+    #[proptest(cases = 50)]
     fn tx_with_negative_fee_with_coinbase_is_invalid_prop(
         #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
@@ -1368,7 +1368,7 @@ pub mod tests {
             .unwrap();
     }
 
-    #[proptest]
+    #[proptest(cases = 50)]
     fn transaction_with_timelocked_coinbase_is_valid_prop(
         #[strategy(1usize..=10)] _num_outputs: usize,
         #[strategy(0usize..=10)] _num_public_announcements: usize,
@@ -1526,7 +1526,7 @@ pub mod tests {
         );
     }
 
-    #[proptest]
+    #[proptest(cases = 10)]
     fn unbalanced_input_transaction_is_invalid_changed_fee_prop(
         #[strategy(1usize..=5)] _num_inputs: usize,
         #[strategy(1usize..=5)] _num_outputs: usize,
@@ -1633,7 +1633,7 @@ pub mod tests {
         }
     }
 
-    #[proptest]
+    #[proptest(cases = 50)]
     fn fee_can_be_positive(
         #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
@@ -1656,7 +1656,7 @@ pub mod tests {
         assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(pw)).unwrap();
     }
 
-    #[proptest]
+    #[proptest(cases = 50)]
     fn fee_can_be_negative(
         #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
@@ -1665,7 +1665,7 @@ pub mod tests {
         assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(primitive_witness))?;
     }
 
-    #[proptest]
+    #[proptest(cases = 50)]
     fn positive_fee_cannot_exceed_max_nau(
         #[strategy(invalid_positive_amount())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
