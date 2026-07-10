@@ -702,15 +702,10 @@ pub(crate) async fn mine(
 ) -> Result<()> {
     // Set PoW guessing to restart every N seconds, if it has been started. Only
     // the guesser task may set this to actually resolve, as this will otherwise
-    // abort e.g. the composer. Since preprocessing is expensive, don't do this
-    // very often!
-    const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 1800;
+    // abort e.g. the composer.
+    const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
 
     // we disable the initial sleep when invoked for unit tests.
-    //
-    // note: it can take an arbitrary amount of time to obtain latest-block info
-    // from peers.  If that is important, we should be listening on a channel
-    // instead or better this task should not be started until obtained.
     #[cfg(not(test))]
     {
         // Wait before starting mining task to ensure that peers have sent us
@@ -811,7 +806,7 @@ pub(crate) async fn mine(
             );
 
             // Only run for N seconds to allow for updating of block's timestamp
-            // and difficulty.
+            // and difficulty. And for getting more favorable block proposals.
             guess_restart_timer
                 .as_mut()
                 .reset(tokio::time::Instant::now() + guess_restart_interval);
