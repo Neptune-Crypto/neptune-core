@@ -20,6 +20,7 @@ hex = "0.4.3"
 itertools = "0.14"
 memmap2 = "0.9"
 neptune-archival-mmr = { version = "0.14.0", path = "../neptune-archival-mmr" }
+neptune-archival-mutator-set = { version = "0.14.0", path = "../neptune-archival-mutator-set" }
 neptune-consensus = { version = "0.14.0", path = "../neptune-consensus" }
 neptune-database = { version = "0.14.0", path = "../neptune-database" }
 neptune-locks = { version = "0.14.0", path = "../neptune-locks" }

@@ -8,9 +8,10 @@ use neptune_database::storage::storage_schema::SimpleRustyStorage;
 use neptune_database::NeptuneLevelDb;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use super::active_window::ActiveWindow;
-use super::archival_mutator_set::ArchivalMutatorSet;
-use super::removal_record::chunk::Chunk;
+use neptune_mutator_set::active_window::ActiveWindow;
+use neptune_mutator_set::removal_record::chunk::Chunk;
+
+use crate::archival_mutator_set::ArchivalMutatorSet;
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;
@@ -108,11 +109,12 @@ mod tests {
     use rand::random;
     use rand::RngCore;
 
+    use neptune_mutator_set::commit;
+    use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+    use neptune_mutator_set::shared::BATCH_SIZE;
+    use neptune_mutator_set::test_shared::*;
+
     use super::*;
-    use crate::commit;
-    use crate::ms_membership_proof::MsMembershipProof;
-    use crate::shared::BATCH_SIZE;
-    use crate::test_shared::*;
     use crate::test_utils::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]

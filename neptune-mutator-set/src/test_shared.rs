@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use neptune_database::storage::storage_vec::traits::*;
-use neptune_database::NeptuneLevelDb;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::RngCore;
@@ -16,40 +14,13 @@ use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_inde
 
 use crate::active_window::ActiveWindow;
 use crate::addition_record::AdditionRecord;
-use crate::archival_mutator_set::ArchivalMutatorSet;
 use crate::commit;
 use crate::ms_membership_proof::MsMembershipProof;
 use crate::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::removal_record::chunk::Chunk;
 use crate::removal_record::RemovalRecord;
-use crate::rusty_archival_mutator_set::RustyArchivalMutatorSet;
-use crate::shared::CHUNK_SIZE;
 use crate::shared::WINDOW_SIZE;
 
-pub async fn get_all_indices_with_duplicates<
-    MmrStorage: StorageVec<Digest> + Send + Sync,
-    ChunkStorage: StorageVec<Chunk> + Send + Sync,
->(
-    archival_mutator_set: &mut ArchivalMutatorSet<MmrStorage, ChunkStorage>,
-) -> Vec<u128> {
-    let mut ret: Vec<u128> = vec![];
-
-    for index in &archival_mutator_set.swbf_active.sbf {
-        ret.push(u128::from(*index));
-    }
-
-    let chunk_count = archival_mutator_set.chunks.len().await;
-    for chunk_index in 0..chunk_count {
-        let chunk = archival_mutator_set.chunks.get(chunk_index).await;
-        for index in &chunk.relative_indices {
-            ret.push(u128::from(*index) + u128::from(CHUNK_SIZE) * u128::from(chunk_index));
-        }
-    }
-
-    ret
-}
-
-pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
+pub fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
     let mut rng = rand::rng();
     let item: Digest = rng.random();
     let sender_randomness: Digest = rng.random();
@@ -63,14 +34,6 @@ pub fn mock_item_mp_rr_for_init_msa() -> (Digest, MsMembershipProof, RemovalReco
     let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
     let removal_record: RemovalRecord = accumulator.drop(item, &mp);
     (item, mp, removal_record)
-}
-
-pub async fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
-    let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
-        .await
-        .unwrap();
-    let rusty_mutator_set: RustyArchivalMutatorSet = RustyArchivalMutatorSet::connect(db).await;
-    rusty_mutator_set
 }
 
 pub fn insert_mock_item(mutator_set: &mut MutatorSetAccumulator) -> (MsMembershipProof, Digest) {
@@ -372,19 +335,7 @@ fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use macro_rules_attr::apply;
-
     use super::*;
-    use crate::test_utils::shared_tokio_runtime;
-
-    #[apply(shared_tokio_runtime)]
-    async fn can_call() {
-        let mut rms = empty_rusty_mutator_set().await;
-        let ams = rms.ams_mut();
-        let _ = get_all_indices_with_duplicates(ams).await;
-        let _ = mock_item_and_randomnesses();
-        let _ = insert_mock_item(&mut ams.accumulator().await);
-    }
 
     #[test]
     fn test_pseudorandom_mmra_with_single_mp() {

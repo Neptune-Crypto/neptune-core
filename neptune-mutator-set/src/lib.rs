@@ -15,7 +15,6 @@ use crate::shared::BATCH_SIZE;
 
 pub mod active_window;
 pub mod addition_record;
-pub mod archival_mutator_set;
 pub mod authenticated_item;
 pub mod mmra_and_membership_proofs;
 pub mod ms_membership_proof;
@@ -24,7 +23,6 @@ pub mod msa_and_records;
 pub mod mutator_set_accumulator;
 pub mod removal_record;
 pub mod root_and_paths;
-pub mod rusty_archival_mutator_set;
 pub mod shared;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod strategies;
@@ -246,25 +244,6 @@ mod tests {
             .to_array()
             .iter()
             .all(|&x| (x as u32) < WINDOW_SIZE + 17 * CHUNK_SIZE && (x as u32) >= 17 * CHUNK_SIZE));
-    }
-
-    #[apply(shared_tokio_runtime)]
-    async fn init_test() {
-        let accumulator = MutatorSetAccumulator::default();
-        let mut rms = empty_rusty_mutator_set().await;
-        let archival = rms.ams_mut();
-
-        // Verify that function to get batch index does not overflow for the empty MS
-        assert_eq!(
-            0,
-            accumulator.get_batch_index(),
-            "Batch index must be zero for empty MS accumulator"
-        );
-        assert_eq!(
-            0,
-            archival.get_batch_index_async().await,
-            "Batch index must be zero for empty archival MS"
-        );
     }
 
     #[test]

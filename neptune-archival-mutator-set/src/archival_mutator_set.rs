@@ -4,74 +4,24 @@ use std::error::Error;
 use itertools::Itertools;
 use neptune_archival_mmr::ArchivalMmr;
 use neptune_database::storage::storage_vec::traits::*;
-use serde::Deserialize;
-use serde::Serialize;
+use neptune_mutator_set::active_window::ActiveWindow;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::ms_membership_proof::IndexedAoclAuthPath;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProofPrivacyPreserving;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::chunk::Chunk;
+use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_mutator_set::shared::BATCH_SIZE;
+use neptune_mutator_set::shared::CHUNK_SIZE;
+use neptune_mutator_set::shared::WINDOW_SIZE;
+use neptune_mutator_set::MutatorSetError;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-
-use super::active_window::ActiveWindow;
-use super::addition_record::AdditionRecord;
-use super::ms_membership_proof::MsMembershipProof;
-use super::mutator_set_accumulator::MutatorSetAccumulator;
-use super::removal_record::chunk::Chunk;
-use super::removal_record::chunk_dictionary::ChunkDictionary;
-use super::removal_record::RemovalRecord;
-use super::shared::BATCH_SIZE;
-use super::shared::CHUNK_SIZE;
-use crate::archival_mutator_set::mmr::mmr_membership_proof::MmrMembershipProof;
-use crate::removal_record::absolute_index_set::AbsoluteIndexSet;
-use crate::shared::WINDOW_SIZE;
-use crate::MutatorSetError;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexedAoclAuthPath {
-    pub leaf_index: u64,
-    pub auth_path: MmrMembershipProof,
-}
-
-/// Data structure for returning components of a mutator set membership proof
-/// from an archival state, without callee learning more than the unmined
-/// transaction reveals, namely a fuzzy timestamp of the input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MsMembershipProofPrivacyPreserving {
-    pub aocl_auth_paths: Vec<IndexedAoclAuthPath>,
-    pub target_chunks: ChunkDictionary,
-}
-
-impl MsMembershipProofPrivacyPreserving {
-    /// Build the required membership proof by supplying the correct AOCL leaf
-    /// index to extract the right MMR authentication path and the missing
-    /// cryptographic data.
-    pub fn extract_ms_membership_proof(
-        self,
-        aocl_leaf_index: u64,
-        sender_randomness: Digest,
-        receiver_preimage: Digest,
-    ) -> Result<MsMembershipProof, Box<dyn Error>> {
-        let aocl_mmr = self
-            .aocl_auth_paths
-            .into_iter()
-            .find(|x| x.leaf_index == aocl_leaf_index)
-            .map(|x| x.auth_path);
-        let Some(aocl_mmr) = aocl_mmr else {
-            return Err(Box::new(
-                MutatorSetError::RequestedAoclAuthPathNotContainedInResponse {
-                    request_aocl_leaf_index: aocl_leaf_index,
-                },
-            ));
-        };
-
-        Ok(MsMembershipProof {
-            sender_randomness,
-            receiver_preimage,
-            auth_path_aocl: aocl_mmr,
-            aocl_leaf_index,
-            target_chunks: self.target_chunks,
-        })
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct ArchivalMutatorSet<MmrStorage, ChunkStorage>
@@ -174,7 +124,7 @@ where
         // fetch them there.
         let mut new_chunks: HashMap<u64, Chunk> = HashMap::new();
         for removal_record in removal_records {
-            for (chunk_index, (_, chunk)) in removal_record.target_chunks.dictionary {
+            for (chunk_index, (_, chunk)) in removal_record.target_chunks.into_inner() {
                 debug_assert!(
                     new_chunks
                         .get(&chunk_index)
@@ -666,13 +616,13 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
 
+    use neptune_mutator_set::commit;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::shared::NUM_TRIALS;
+    use neptune_mutator_set::test_shared::mock_item_and_randomnesses;
+
     use super::*;
-    use crate::commit;
-    use crate::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use crate::shared::BATCH_SIZE;
-    use crate::shared::NUM_TRIALS;
     use crate::test_shared::empty_rusty_mutator_set;
-    use crate::test_shared::mock_item_and_randomnesses;
     use crate::test_utils::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]

@@ -3,6 +3,7 @@ resolver="2"
 
 members = [
     "neptune-archival-mmr",
+    "neptune-archival-mutator-set",
     "neptune-archive",
     "neptune-consensus",
     "neptune-core",

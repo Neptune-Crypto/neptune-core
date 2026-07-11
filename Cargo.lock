@@ -3517,6 +3517,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "neptune-archival-mutator-set"
+version = "0.14.0"
+dependencies = [
+ "itertools",
+ "macro_rules_attr",
+ "neptune-archival-mmr",
+ "neptune-database",
+ "neptune-mutator-set",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.4",
+ "tasm-lib",
+ "test-strategy 0.3.1",
+ "tokio",
+]
+
+[[package]]
 name = "neptune-archive"
 version = "0.14.0"
 dependencies = [
@@ -3527,6 +3544,7 @@ dependencies = [
  "macro_rules_attr",
  "memmap2",
  "neptune-archival-mmr",
+ "neptune-archival-mutator-set",
  "neptune-consensus",
  "neptune-database",
  "neptune-locks",
@@ -3826,7 +3844,6 @@ dependencies = [
  "itertools",
  "macro_rules_attr",
  "neptune-archival-mmr",
- "neptune-database",
  "num-traits",
  "proptest",
  "proptest-arbitrary-interop",

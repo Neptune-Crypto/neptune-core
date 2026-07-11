@@ -41,7 +41,7 @@ pub const MAX_NUM_BLOCKS_IN_LOOKUP_LIST: usize = 10_000;
 /// Block heights are often preferred over block digests due to their smaller
 /// serialized size (8 bytes vs. 40).
 ///
-/// [`ArchivalMutatorSet`]: neptune_mutator_set::archival_mutator_set::ArchivalMutatorSet
+/// [`ArchivalMutatorSet`]: neptune_archival_mutator_set::archival_mutator_set::ArchivalMutatorSet
 /// [`ArchivalState`]: crate::archival_state::ArchivalState
 #[derive(Debug)]
 pub struct RustyUtxoIndex {

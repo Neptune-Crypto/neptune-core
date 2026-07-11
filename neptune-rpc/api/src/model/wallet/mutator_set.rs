@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use neptune_mutator_set::archival_mutator_set::IndexedAoclAuthPath;
-use neptune_mutator_set::archival_mutator_set::MsMembershipProofPrivacyPreserving;
+use neptune_mutator_set::ms_membership_proof::IndexedAoclAuthPath;
 use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProofPrivacyPreserving;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
