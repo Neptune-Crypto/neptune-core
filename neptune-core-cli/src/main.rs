@@ -85,18 +85,46 @@ struct Config {
     command: Command,
 }
 
+/// The binary name completions are generated for. Must match the `[[bin]]` name
+/// so the generated `complete`/`compdef` registration fires for `neptune-cli`.
+const BIN_NAME: &str = "neptune-cli";
+
+/// Render shell completions for [`Config`], working around a `clap_complete` bug.
+///
+/// With a hyphenated bin name and `#[command(flatten)]`ed subcommands, the
+/// generated *bash* script computes dispatch tokens like
+/// `neptune__cli__subcmd__send` (hyphen → `__`) but labels each subcommand's
+/// option arm `neptune__subcmd__cli__subcmd__send` (hyphen → `__subcmd__`). The
+/// two never match, so completion of subcommand flags/arguments is dead. See
+/// <https://github.com/clap-rs/clap/pull/6428>.
+///
+/// We repair it by globally rewriting the mangled bin-name prefix to the form
+/// the dispatch loop uses. The rewrite is a no-op for zsh/fish (which don't emit
+/// that token) and becomes a no-op for bash too once the upstream fix lands and
+/// the dependency is bumped, since the broken token will no longer be generated.
+fn shell_completions(shell: Shell) -> Vec<u8> {
+    let mut buf = Vec::new();
+    generate(shell, &mut Config::command(), BIN_NAME, &mut buf);
+
+    let dispatch_prefix = BIN_NAME.replace('-', "__");
+    let mangled_prefix = BIN_NAME.replace('-', "__subcmd__");
+    String::from_utf8_lossy(&buf)
+        .replace(&mangled_prefix, &dispatch_prefix)
+        .into_bytes()
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Config = Config::parse();
 
     // Handle commands that don't require a server
     match &args.command {
-        Command::Completions => {
-            if let Some(shell) = Shell::from_env() {
-                generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
+        Command::Completions { shell } => {
+            if let Some(shell) = (*shell).or_else(Shell::from_env) {
+                stdout().write_all(&shell_completions(shell))?;
                 return Ok(());
             }
-            bail!("Unknown shell. Shell completions not available.")
+            bail!("Unknown shell. Pass --shell <bash|zsh|fish|...> or set $SHELL.")
         }
         Command::Wallet(WalletCommand::WhichWallet { network }) => {
             let wallet_dir =
@@ -463,7 +491,7 @@ async fn main() -> Result<()> {
     .into();
 
     match args.command {
-        Command::Completions
+        Command::Completions { .. }
         | Command::Wallet(
             WalletCommand::GenerateWallet { .. }
             | WalletCommand::WhichWallet { .. }
@@ -1346,5 +1374,52 @@ fn enter_seed_phrase_dialog() -> Result<SecretKeyMaterial> {
 fn print_seed_phrase_dialog(wallet_secret: SecretKeyMaterial) {
     for (i, word) in wallet_secret.to_phrase().into_iter().enumerate() {
         println!("{}. {word}", i + 1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    /// Every command the generated bash script dispatches to (`cmd="<token>"`)
+    /// must have a matching case arm (`<token>)`) that supplies its completion
+    /// options. Otherwise subcommand flag/argument completion silently dies.
+    ///
+    /// This encodes the invariant repaired by [`shell_completions`]; it holds
+    /// both with our workaround and with the upstream fix
+    /// (<https://github.com/clap-rs/clap/pull/6428>), and fails on the raw,
+    /// unpatched `clap_complete` output.
+    #[test]
+    fn bash_completion_dispatch_tokens_have_matching_arms() {
+        let script = String::from_utf8(shell_completions(Shell::Bash)).unwrap();
+
+        let dispatched: BTreeSet<&str> = script
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("cmd=\""))
+            .filter_map(|rest| rest.strip_suffix('"'))
+            .filter(|token| !token.is_empty())
+            .collect();
+
+        let arms: BTreeSet<&str> = script
+            .lines()
+            .map(str::trim)
+            .filter_map(|line| line.strip_suffix(')'))
+            .filter(|label| label.starts_with("neptune__") && !label.contains(','))
+            .collect();
+
+        let missing: Vec<&&str> = dispatched.difference(&arms).collect();
+        assert!(
+            missing.is_empty(),
+            "bash completion dispatch tokens without a matching option arm \
+             (subcommand completion would be broken): {missing:?}"
+        );
+        // Guard against the extraction silently matching nothing.
+        assert!(
+            dispatched.len() > 50,
+            "expected many dispatched subcommands, found {}",
+            dispatched.len()
+        );
     }
 }

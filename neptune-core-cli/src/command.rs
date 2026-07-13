@@ -1,4 +1,5 @@
 use clap::Parser;
+use clap_complete::Shell;
 
 use crate::command::blockchain::BlockchainCommand;
 use crate::command::mempool::MempoolCommand;
@@ -26,7 +27,12 @@ pub(crate) mod wallet;
 #[command(version)]
 pub(crate) enum Command {
     /// Dump shell completions.
-    Completions,
+    Completions {
+        /// Shell to generate completions for. Defaults to the `$SHELL`
+        /// environment variable when omitted.
+        #[arg(long, value_name = "SHELL")]
+        shell: Option<Shell>,
+    },
 
     #[command(flatten)]
     Network(NetworkCommand),
