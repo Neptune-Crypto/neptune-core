@@ -5,7 +5,7 @@ use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
 use neptune_consensus::transaction::test_helpers::make_mock_transaction;
-use neptune_consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
+use neptune_consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_timestamp_and_proof_size;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::validity::single_proof::single_proof_claim;
 use neptune_consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
@@ -43,18 +43,20 @@ pub(crate) fn invalid_empty_single_proof_transaction() -> Transaction {
     tx
 }
 
-pub(crate) fn make_mock_block_transaction_with_mutator_set_hash(
+pub(crate) fn make_mock_block_transaction_with_mutator_set_hash_and_proof_size(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
     mutator_set_hash: Digest,
+    proof_size: usize,
 ) -> BlockTransaction {
     let timestamp = Timestamp::now();
 
-    let transaction = make_mock_transaction_with_mutator_set_hash_and_timestamp(
+    let transaction = make_mock_transaction_with_mutator_set_hash_timestamp_and_proof_size(
         inputs,
         outputs,
         mutator_set_hash,
         timestamp,
+        proof_size,
     );
     BlockTransaction::upgrade(transaction)
 }

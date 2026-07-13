@@ -28,6 +28,29 @@ pub fn make_mock_transaction(
     make_mock_transaction_with_mutator_set_hash(inputs, outputs, Digest::default())
 }
 
+pub fn make_mock_transaction_with_mutator_set_hash_timestamp_and_proof_size(
+    inputs: Vec<RemovalRecord>,
+    outputs: Vec<AdditionRecord>,
+    mutator_set_hash: Digest,
+    timestamp: Timestamp,
+    proof_size: usize,
+) -> Transaction {
+    Transaction {
+        kernel: TransactionKernelProxy {
+            inputs,
+            outputs,
+            announcements: vec![],
+            fee: NativeCurrencyAmount::coins(1),
+            timestamp,
+            coinbase: None,
+            mutator_set_hash,
+            merge_bit: false,
+        }
+        .into_kernel(),
+        proof: TransactionProof::invalid_single_proof_of_size(proof_size),
+    }
+}
+
 pub fn make_mock_transaction_with_mutator_set_hash_and_timestamp(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
