@@ -37,9 +37,12 @@ pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 100;
 
 /// After this long without a response from a given peer, that peer will be sent
 /// another block request.
-#[cfg(not(test))]
+///
+/// The fast test value is gated on `test-helpers` (not just `test`) so it also
+/// applies to integration tests
+#[cfg(not(any(test, feature = "test-helpers")))]
 const PEER_RESPONSE_REMINDER_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 const PEER_RESPONSE_REMINDER_TIMEOUT: Duration = Duration::from_millis(1);
 
 /// After this long without a response from a peer, that peer will be punished.
@@ -49,9 +52,9 @@ const PEER_RESPONSE_PUNISHMENT_TIMEOUT: Duration = Duration::from_secs(10);
 const FAST_TICK_PERIOD: Duration = Duration::from_micros(100);
 
 /// Compute the status every so often.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-helpers")))]
 const STATUS_TICK_PERIOD: Duration = Duration::from_secs(5);
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 const STATUS_TICK_PERIOD: Duration = Duration::from_micros(200);
 
 type PeerHandle = libp2p::PeerId;
