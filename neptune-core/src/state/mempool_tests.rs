@@ -1483,6 +1483,67 @@ mod tests {
                 "Only one match from mutually exclusive filters"
             );
         }
+
+        /// Issue #946: a `ProofCollection`-backed transaction without a
+        /// primitive witness must be *kept* in the mempool when a new block
+        /// arrives, and must remain selectable for proof-upgrading
+        /// even though it is now unsynced.
+        #[apply(shared_tokio_runtime)]
+        async fn unsynced_proof_collection_is_kept_and_upgradable_after_new_block() {
+            let network = Network::Testnet(42);
+            let fee = NativeCurrencyAmount::coins(1);
+            let pc_tx =
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
+                    .await;
+            let txid = pc_tx.kernel.txid();
+
+            let mut rng = rand::rng();
+            let genesis_block = Block::genesis(network);
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::SingleProof,
+                &genesis_block,
+            );
+            mempool.insert(pc_tx.into(), UpgradePriority::Irrelevant);
+
+            assert_eq!(1, mempool.len());
+
+            // While synced, the ProofCollection is selectable for a raise.
+            assert!(mempool
+                .preferred_proof_collection(usize::MAX, TxUpgradeFilter::match_all())
+                .is_some());
+
+            // A new, non-conflicting block arrives, making the transaction
+            // unsynced.
+            let block1 = fake_valid_successor_for_tests(
+                &genesis_block,
+                genesis_block.header().timestamp + Timestamp::hours(1),
+                rng.random(),
+                network,
+            )
+            .await;
+            let (_events, update_jobs) = mempool.update_with_block(&block1).unwrap();
+
+            // The transaction is retained rather than kicked out ...
+            assert!(
+                mempool.contains(txid),
+                "Non-conflicting ProofCollection tx must survive a new block (#946a)"
+            );
+
+            // ... and, lacking a primitive witness, produces no block-update job.
+            assert!(
+                update_jobs.is_empty(),
+                "no update job is produced without a primitive witness"
+            );
+
+            // (b) Although now unsynced, it is still returned for proof-upgrading.
+            assert!(
+                mempool
+                    .preferred_proof_collection(usize::MAX, TxUpgradeFilter::match_all())
+                    .is_some(),
+                "unsynced ProofCollection must still be upgradable (#946b)"
+            );
+        }
     }
 
     mod proof_quality_tests {

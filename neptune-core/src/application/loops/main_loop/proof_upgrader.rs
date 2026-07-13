@@ -870,42 +870,51 @@ pub(super) async fn get_upgrade_task_from_mempool(
 
     let upgrade_filter = global_state.cli().tx_upgrade_filter;
 
-    // Do we have any `ProofCollection`s?
-    let proof_collection_job = if let Some((kernel, proof, upgrade_priority)) = global_state
+    // Do we have any `ProofCollection`s? These may be raised to a SingleProof
+    // even when they are no longer synced to the current tip: raising a
+    // ProofCollection does not depend on the mutator set, and the resulting
+    // (possibly unsynced) SingleProof can be cheaply updated to the tip
+    // afterwards.
+    //
+    // Decide whether there is a worthwhile ProofCollection to raise while the
+    // mempool is still borrowed, and only clone the (potentially large)
+    // ProofCollection when we are actually going to build the job.
+    let proof_collection_candidate = global_state
         .mempool()
         .preferred_proof_collection(num_proofs_threshold, upgrade_filter)
-    {
-        if kernel.mutator_set_hash != tip_mutator_set.hash() {
-            error!("Deprecated transaction found in mempool. Has ProofCollection in need of updating. Consider clearing mempool.");
-            return None;
-        }
+        .and_then(|(kernel, proof, upgrade_priority)| {
+            let gobbling_potential = kernel.fee.lossy_f64_fraction_mul(gobbling_fraction);
+            let upgrade_incentive =
+                upgrade_priority.incentive_given_gobble_potential(gobbling_potential);
+            upgrade_incentive
+                .upgrade_is_worth_it(min_gobbling_fee)
+                .then(|| (kernel.to_owned(), proof.to_owned(), upgrade_incentive))
+        });
 
-        let (gobble_fee_recipient, gobble_fee_recipient_preimage) =
-            global_state.mining_rewards_address();
-        let gobbling_potential = kernel.fee.lossy_f64_fraction_mul(gobbling_fraction);
-        let upgrade_incentive =
-            upgrade_priority.incentive_given_gobble_potential(gobbling_potential);
-        if upgrade_incentive.upgrade_is_worth_it(min_gobbling_fee) {
-            let upgrade_job =
-                UpgradeJob::ProofCollectionToSingleProof(Box::new(ProofCollectionToSingleProof {
-                    kernel: kernel.to_owned(),
-                    proof: proof.to_owned(),
-                    mutator_set: tip_mutator_set.clone(),
-                    upgrade_incentive,
-                    gobble_fee_recipient,
-                    gobble_fee_recipient_preimage,
-                }));
-            Some(upgrade_job)
-        } else {
-            None
+    let raise_job = if let Some((kernel, proof, upgrade_incentive)) = proof_collection_candidate {
+        // Build the raise job against the transaction's *own* mutator set
+        // (looked up in the archival state), so that any fee-gobbler ends up
+        // on the same mutator set as the raised transaction and the two can
+        // be merged.
+        match global_state
+            .upgrade_proof_collection_job(kernel, proof, upgrade_incentive)
+            .await
+        {
+            Ok(raise_job) => Some(UpgradeJob::ProofCollectionToSingleProof(Box::new(
+                raise_job,
+            ))),
+            Err(error) => {
+                warn!("Could not build ProofCollection upgrade job: {error}");
+                None
+            }
         }
     } else {
         None
     };
 
-    if let Some(upgrade_job) = &proof_collection_job {
+    if let Some(upgrade_job) = &raise_job {
         if let UpgradeIncentive::Critical = upgrade_job.upgrade_incentive() {
-            return proof_collection_job;
+            return raise_job;
         }
     }
 
@@ -959,7 +968,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
     };
 
     // pick the most profitable option
-    let mut jobs = [proof_collection_job, merge_job, update_job]
+    let mut jobs = [raise_job, merge_job, update_job]
         .into_iter()
         .flatten()
         .collect_vec();
@@ -1114,6 +1123,168 @@ mod tests {
                 .upgrade_is_worth_it(bob.min_gobbling_fee()),
             "Update must be worthy after successful raise"
         );
+
+        drop(main_to_peer_rx);
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn upgrades_unsynced_foreign_proof_collection() {
+        // Issue #946: a ProofCollection that has become unsynced because a
+        // new block arrived must still be picked up for raising by the proof
+        // upgrader. The raised (still unsynced) SingleProof can then be cheaply
+        // updated to the tip.
+        let network = Network::RegTest;
+        let cli_args = cli_args::Args {
+            min_gobbling_fee: NativeCurrencyAmount::from_nau(5),
+            network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            gobbling_fraction: 1.0,
+            ..Default::default()
+        };
+
+        let alice =
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args.clone()).await;
+        let pc_fee = NativeCurrencyAmount::coins(1);
+        let pc_tx = transaction_from_state(
+            alice.clone(),
+            512777439428,
+            TxProvingCapability::ProofCollection,
+            pc_fee,
+        )
+        .await;
+
+        let mut bob =
+            mock_genesis_global_state(2, WalletEntropy::new_random(), cli_args.clone()).await;
+        bob.lock_guard_mut()
+            .await
+            .mempool_insert(pc_tx.clone().into(), UpgradePriority::Irrelevant)
+            .await;
+
+        // A new block arrives *before* the raise, making the ProofCollection
+        // unsynced. It must be retained (#946a) rather than kicked out.
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+        bob.set_new_tip(block1.clone()).await.unwrap();
+
+        let mut bob = bob.lock_guard_mut().await;
+        assert!(
+            bob.mempool().contains(pc_tx.kernel.txid()),
+            "unsynced ProofCollection must be retained across a new block (#946a)"
+        );
+
+        // The upgrader still returns a raise job for the now-unsynced PC.
+        let Some(job @ UpgradeJob::ProofCollectionToSingleProof(_)) =
+            get_upgrade_task_from_mempool(&mut bob).await
+        else {
+            panic!("unsynced foreign ProofCollection must still yield a raise job (#946b)");
+        };
+
+        // The raise job must target the transaction's *own* (older) mutator set
+        // rather than the current tip, so that a fee-gobbler is built on the
+        // same mutator set as the raised transaction and the two can be merged.
+        assert_eq!(
+            pc_tx.kernel.mutator_set_hash,
+            job.mutator_set().hash(),
+            "raise job must use the transaction's own mutator set"
+        );
+        assert_ne!(
+            bob.chain.tip_mutator_set_after().hash(),
+            job.mutator_set().hash(),
+            "sanity: the transaction is genuinely unsynced to the tip"
+        );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn unsynced_raise_registers_offchain_gobbler_utxos() {
+        // Regression test for #946: raising an *unsynced* ProofCollection with
+        // an off-chain fee-gobbler must still register the gobbler's expected
+        // UTXOs (the upgrader's reward).
+        let network = Network::RegTest;
+        let cli_args = cli_args::Args {
+            min_gobbling_fee: NativeCurrencyAmount::from_nau(5),
+            network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            gobbling_fraction: 1.0,
+            // Off-chain fee notification makes the gobbler produce expected
+            // UTXOs that the wallet must record (no mining address is set, so
+            // `mining_rewards_address` yields a preimage the wallet can spend).
+            fee_notification:
+                neptune_wallet::fee_notification_policy::FeeNotificationPolicy::OffChain,
+            ..Default::default()
+        };
+
+        let alice =
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args.clone()).await;
+        let pc_fee = NativeCurrencyAmount::coins(1);
+        let pc_tx = transaction_from_state(
+            alice.clone(),
+            512777439428,
+            TxProvingCapability::ProofCollection,
+            pc_fee,
+        )
+        .await;
+
+        let mut bob =
+            mock_genesis_global_state(2, WalletEntropy::new_random(), cli_args.clone()).await;
+        bob.lock_guard_mut()
+            .await
+            .mempool_insert(pc_tx.clone().into(), UpgradePriority::Irrelevant)
+            .await;
+
+        // A new block makes the ProofCollection unsynced
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+        bob.set_new_tip(block1.clone()).await.unwrap();
+
+        let num_expected_before = bob
+            .lock_guard()
+            .await
+            .wallet_state
+            .num_expected_utxos()
+            .await;
+
+        // Fetch and execute the raise job for the now-unsynced ProofCollection.
+        let job = {
+            let mut bob = bob.lock_guard_mut().await;
+            get_upgrade_task_from_mempool(&mut bob).await.unwrap()
+        };
+        assert!(
+            matches!(job, UpgradeJob::ProofCollectionToSingleProof(_)),
+            "expected a ProofCollection -> SingleProof raise job"
+        );
+
+        let (main_to_peer_tx, main_to_peer_rx) =
+            broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+        job.handle_upgrade(
+            TritonVmJobQueue::get_instance(),
+            bob.clone(),
+            main_to_peer_tx,
+        )
+        .await;
+
+        // The gobbler's expected UTXO must be registered even though the raise
+        // was performed against an older (unsynced) mutator set.
+        let num_expected_after = bob
+            .lock_guard()
+            .await
+            .wallet_state
+            .num_expected_utxos()
+            .await;
+        assert!(
+            num_expected_after > num_expected_before,
+            "off-chain gobbler expected UTXO must be registered on the unsynced raise path (#946)"
+        );
+
+        // Once upgraded (raised and updated), the transaction must be ready for
+        // block inclusion.
+        let txs = bob
+            .lock_guard()
+            .await
+            .mempool()
+            .get_transactions_for_block_composition(usize::MAX, None);
+        assert_eq!(1, txs.len());
 
         drop(main_to_peer_rx);
     }

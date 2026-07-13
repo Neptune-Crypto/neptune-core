@@ -57,7 +57,6 @@ use priority_queue::priority_queue::iterators::IntoSortedIter as SingleEndedIter
 use tasm_lib::prelude::Digest;
 use tracing::debug;
 use tracing::error;
-use tracing::warn;
 
 use crate::mempool_event::MempoolEvent;
 use crate::mempool_update_job::MempoolUpdateJob;
@@ -448,7 +447,10 @@ impl Mempool {
     /// mempool has been deemed to have a financial interest in the transaction,
     /// in which case the filter is ignored.
     ///
-    /// Will only return transactions that are synced to the latest tip.
+    /// May return transactions that are *not* synced to the latest tip. Raising
+    /// a `ProofCollection` to a `SingleProof` does not depend on the mutator
+    /// set, so an unsynced `ProofCollection` can be raised and then cheaply
+    /// updated to the current tip afterwards.
     ///
     /// Also returns the upgrade priority of this transactions, for the node
     /// operator.
@@ -463,9 +465,6 @@ impl Mempool {
             .chain(self.fee_density_iter().map(|(txid, _)| txid))
         {
             let candidate = self.tx_dictionary.get(&candidate_txid).unwrap();
-            if !self.tx_is_synced(&candidate.transaction.kernel) {
-                continue;
-            }
 
             let TransactionProof::ProofCollection(proof_collection) = &candidate.transaction.proof
             else {
@@ -1272,27 +1271,29 @@ impl Mempool {
         let mut update_jobs = vec![];
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         for (tx_id, tx) in &self.tx_dictionary {
+            // Transactions without inputs are always kicked out of the mempool,
+            // as they cannot be updated. All other transactions are kept in the
+            // mempool and only removed once they become double-spends (one of
+            // their inputs were mined), or they expire (their age exceeds a
+            // threshold).
             if tx.transaction.kernel.inputs.is_empty() {
                 debug!("Not updating transaction since empty transactions cannot be updated.");
                 kick_outs.push(*tx_id);
                 continue;
             }
 
-            let (update_job, keep_in_mempool) = match &tx.transaction.proof {
+            let update_job = match &tx.transaction.proof {
                 // Proof-collection backed transaction cannot be updated
                 // directly. But if the transaction was initiated locally, the
-                // primitive witness will be known, and it can be updated. Also,
-                // if the proof collection is first upgraded to a SingleProof,
-                // and then update, it could also become synced again that way.
-                // So we could consider keeping PC-backed transactions around
-                // even if we don't have the primitive witness.
+                // primitive witness will be known, and it can be updated to the
+                // new mutator set immediately.
                 TransactionProof::ProofCollection(_) => {
                     if let Some(pw) = &tx.primitive_witness {
                         let pw_update_job = PrimitiveWitnessUpdate::new(pw.to_owned());
                         let pw_update_job = MempoolUpdateJob::ProofCollection(pw_update_job);
-                        (Some(pw_update_job), true)
+                        Some(pw_update_job)
                     } else {
-                        (None, false)
+                        None
                     }
                 }
 
@@ -1300,23 +1301,12 @@ impl Mempool {
                 TransactionProof::Witness(pw) => {
                     let pw_update_job = PrimitiveWitnessUpdate::new(pw.to_owned());
                     let pw_update_job = MempoolUpdateJob::PrimitiveWitness(pw_update_job);
-                    (Some(pw_update_job), true)
+                    Some(pw_update_job)
                 }
 
-                // Single proofs can be updated. So they are kept in the
-                // mempool in the expectation that someone will update them to
-                // be valid under a new mutator set.
-                //
-                // If (the transaction was initiated locally, i.e. deemed
-                // critical), *and* node can produce single-proofs, transaction
+                // If the transaction was initiated locally, i.e. deemed
+                // critical, *and* node can produce single-proofs, transaction
                 // should be updated immediately (and be kept in mempool).
-                //
-                // Note: Do not check for the presence of a primitive witness.
-                // This information is irrelevant for Update tasks and moreover
-                // not always present for critical transactions. For instance:
-                // the edge case in which the transaction was merged (the
-                // primitive witness is dropped) but the merge-sibling was mined
-                // (the current transaction is retrieved from cache).
                 TransactionProof::SingleProof(sp) => {
                     if self.tx_proving_capability == TxProvingCapability::SingleProof
                         && tx.upgrade_priority == UpgradePriority::Critical
@@ -1327,24 +1317,15 @@ impl Mempool {
                             old_single_proof: sp.to_owned(),
                         };
 
-                        (Some(update_sp), true)
+                        Some(update_sp)
                     } else {
-                        (None, true)
+                        None
                     }
                 }
             };
 
             if let Some(update_job) = update_job {
                 update_jobs.push(update_job);
-            }
-
-            if !keep_in_mempool {
-                kick_outs.push(*tx_id);
-                if !tx.upgrade_priority.is_irrelevant() {
-                    warn!(
-                        "Unable to update own transaction to new mutator set. You may need to create this transaction again. Removing {tx_id} from mempool."
-                    );
-                }
             }
         }
 
