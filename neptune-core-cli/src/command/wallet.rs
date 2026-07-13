@@ -39,12 +39,14 @@ pub(crate) enum WalletCommand {
     /// Get next unused generation receiving address
     NextReceivingAddress,
 
-    /// Get the nth generation receiving address.
+    /// Get the nth address of the specified type
     ///
     /// Ignoring the ones that have been generated in the past; re-generate them
     /// if necessary. Do not increment any counters or modify state in any way.
     NthReceivingAddress {
         index: usize,
+
+        key_type: KeyType,
 
         #[clap(long, default_value_t)]
         network: Network,

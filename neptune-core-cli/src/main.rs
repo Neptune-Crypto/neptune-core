@@ -242,11 +242,20 @@ async fn main() -> Result<()> {
             print_seed_phrase_dialog(wallet_secret.secret_key());
             return Ok(());
         }
-        Command::Wallet(WalletCommand::NthReceivingAddress { network, index }) => {
-            return print_nth_receiving_address(*network, args.data_dir.clone(), *index);
+        Command::Wallet(WalletCommand::NthReceivingAddress {
+            network,
+            key_type,
+            index,
+        }) => {
+            return print_nth_receiving_address(*network, args.data_dir.clone(), *key_type, *index);
         }
         Command::Wallet(WalletCommand::PremineReceivingAddress { network }) => {
-            return print_nth_receiving_address(*network, args.data_dir.clone(), 0);
+            return print_nth_receiving_address(
+                *network,
+                args.data_dir.clone(),
+                KeyType::Generation,
+                0,
+            );
         }
         Command::Wallet(WalletCommand::ShamirCombine { t, network }) => {
             let wallet_dir =
@@ -1197,23 +1206,24 @@ fn get_wallet_entropy(network: Network, data_dir: Option<PathBuf>) -> Result<Wal
 fn print_nth_receiving_address(
     network: Network,
     data_dir: Option<PathBuf>,
+    key_type: KeyType,
     index: usize,
 ) -> Result<()> {
     let wallet_entropy = get_wallet_entropy(network, data_dir)?;
 
-    let nth_spending_key = wallet_entropy.nth_generation_spending_key(index as u64);
-    let nth_receiving_address = nth_spending_key.to_address();
-    let nth_address_as_string = match nth_receiving_address.to_bech32m(network) {
+    let key = wallet_entropy.nth_spending_key(key_type, index as u64);
+    let address = key.to_address();
+    let address = match address.to_bech32m(network) {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
-                "Could not export address as bech32m; got error:{e}\nRaw address:\n{nth_receiving_address:?}"
+                "Could not export address as bech32m; got error:{e}\nRaw address:\n{address:?}"
             );
             return Ok(());
         }
     };
 
-    println!("{nth_address_as_string}");
+    println!("{address}");
     Ok(())
 }
 
