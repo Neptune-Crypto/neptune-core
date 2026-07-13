@@ -612,14 +612,13 @@ where
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
-    use rand::rngs::StdRng;
-    use rand::Rng;
-    use rand::SeedableRng;
-
     use neptune_mutator_set::commit;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::shared::NUM_TRIALS;
     use neptune_mutator_set::test_shared::mock_item_and_randomnesses;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
 
     use super::*;
     use crate::test_shared::empty_rusty_mutator_set;

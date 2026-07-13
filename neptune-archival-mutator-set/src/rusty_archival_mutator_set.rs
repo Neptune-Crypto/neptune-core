@@ -6,10 +6,9 @@ use neptune_database::storage::storage_schema::RustyKey;
 use neptune_database::storage::storage_schema::RustyValue;
 use neptune_database::storage::storage_schema::SimpleRustyStorage;
 use neptune_database::NeptuneLevelDb;
-use tasm_lib::twenty_first::tip5::digest::Digest;
-
 use neptune_mutator_set::active_window::ActiveWindow;
 use neptune_mutator_set::removal_record::chunk::Chunk;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use crate::archival_mutator_set::ArchivalMutatorSet;
 
@@ -106,13 +105,12 @@ impl StorageWriter for RustyArchivalMutatorSet {
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
-    use rand::random;
-    use rand::RngCore;
-
     use neptune_mutator_set::commit;
     use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
     use neptune_mutator_set::shared::BATCH_SIZE;
     use neptune_mutator_set::test_shared::*;
+    use rand::random;
+    use rand::RngCore;
 
     use super::*;
     use crate::test_utils::shared_tokio_runtime;
