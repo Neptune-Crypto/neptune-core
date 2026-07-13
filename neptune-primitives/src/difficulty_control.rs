@@ -510,8 +510,8 @@ pub fn max_cumulative_pow_after(
         BigUint::from(cumulative_pow_start).to_f64().unwrap() * (1.0 + EPSILON);
     let cap = BigUint::from(ProofOfWork::MAXIMUM).to_f64().unwrap();
     for _ in 0..num_blocks {
-        max_cumpow += max_difficulty;
         max_difficulty *= f;
+        max_cumpow += max_difficulty;
 
         // Avoid spending more time in loop if we've already reached max.
         if max_cumpow >= cap {
@@ -831,13 +831,15 @@ mod tests {
         let lo = f as u32;
         let hi = (f >> 32) as u32;
         for _ in 0..num_blocks {
-            cumulative_pow = cumulative_pow + difficulty;
+            // Grow before adding: a block adds its own difficulty, which may be up
+            // to `f` times its predecessor's. Mirrors the closed-form bound.
             let (product, overflow) = difficulty.safe_mul_fixed_point_rational(lo, hi);
             difficulty = if overflow == 0 {
                 product
             } else {
                 Difficulty::MAXIMUM
             };
+            cumulative_pow = cumulative_pow + difficulty;
         }
         cumulative_pow
     }
