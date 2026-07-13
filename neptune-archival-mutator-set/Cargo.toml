@@ -1,0 +1,40 @@
+[package]
+name = "neptune-archival-mutator-set"
+description = "Archival mutator set backed by neptune-database storage. The database-backed companion to the in-memory accumulator in neptune-mutator-set."
+authors = ["Triton Software"]
+
+version = "0.14.0"
+edition = "2021"
+license = "Apache-2.0"
+
+homepage = "https://neptune.cash/"
+repository = "https://github.com/Neptune-Crypto/neptune-core/"
+
+[features]
+# exposes the test-support constructors (`empty_rusty_mutator_set`,
+# `get_all_indices_with_duplicates`) needed by downstream crates' tests.
+# off by default; not part of the normal public API.
+test-helpers = ["neptune-mutator-set/test-helpers"]
+
+[dependencies]
+neptune-archival-mmr = { version = "0.14.0", path = "../neptune-archival-mmr" }
+neptune-database = { version = "0.14.0", path = "../neptune-database" }
+neptune-mutator-set = { version = "0.14.0", path = "../neptune-mutator-set" }
+itertools = "0.14"
+tasm-lib = "7.0.0"
+
+[dev-dependencies]
+# the archival tests drive the accumulator types and their test-support
+# constructors + proptest strategies.
+neptune-mutator-set = { version = "0.14.0", path = "../neptune-mutator-set", features = [
+    "test-helpers",
+] }
+macro_rules_attr = "0.1.3"
+proptest = "1.7"
+proptest-arbitrary-interop = "0.1"
+rand = "0.9"
+test-strategy = "0.3"
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

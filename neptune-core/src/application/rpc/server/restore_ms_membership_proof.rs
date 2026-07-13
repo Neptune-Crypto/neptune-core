@@ -1,4 +1,4 @@
-use neptune_mutator_set::archival_mutator_set::MsMembershipProofPrivacyPreserving;
+use neptune_mutator_set::ms_membership_proof::MsMembershipProofPrivacyPreserving;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
 use serde::Deserialize;
