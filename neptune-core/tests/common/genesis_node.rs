@@ -588,7 +588,7 @@ impl GenesisNode {
         let hash_value = hasher.finish();
 
         let min: u64 = 1024;
-        let max: u64 = 65000;
+        let max: u64 = 49000; // below Windows ephemeral range (49152..)
         let range_size: u64 = max - min + 1;
 
         // Scale the hash_value to the size of range_size.
