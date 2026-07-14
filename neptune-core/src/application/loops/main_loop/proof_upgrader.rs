@@ -21,7 +21,6 @@ use neptune_mempool::upgrade_incentive::UpgradeIncentive;
 use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
-use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::ReceivingAddress;
 use neptune_wallet::expected_utxo::ExpectedUtxo;
@@ -242,7 +241,6 @@ impl UpgradeJob {
     /// Since [PrimitiveWitness] contains secret data, this upgrade job can only
     /// be used for transactions that originate locally.
     pub(super) fn from_primitive_witness(
-        network: Network,
         tx_proving_capability: TxProvingCapability,
         primitive_witness: PrimitiveWitness,
     ) -> UpgradeJob {
@@ -253,11 +251,6 @@ impl UpgradeJob {
                 })
             }
             TxProvingCapability::SingleProof => {
-                UpgradeJob::PrimitiveWitnessToSingleProof(PrimitiveWitnessToSingleProof {
-                    primitive_witness,
-                })
-            }
-            TxProvingCapability::PrimitiveWitness if network.use_mock_proof() => {
                 UpgradeJob::PrimitiveWitnessToSingleProof(PrimitiveWitnessToSingleProof {
                     primitive_witness,
                 })
@@ -1209,7 +1202,7 @@ mod tests {
                 panic!("Expected PW-backed tx");
             };
             let pw_to_tx_upgrade_job =
-                UpgradeJob::from_primitive_witness(network, proving_capability, pw.to_owned());
+                UpgradeJob::from_primitive_witness(proving_capability, pw.to_owned());
             pw_to_tx_upgrade_job
                 .handle_upgrade(
                     TritonVmJobQueue::get_instance(),
@@ -1295,8 +1288,7 @@ mod tests {
                 panic!("Expected PW-backed tx");
             };
 
-            let upgrade_job =
-                UpgradeJob::from_primitive_witness(network, proving_capability, pw.to_owned());
+            let upgrade_job = UpgradeJob::from_primitive_witness(proving_capability, pw.to_owned());
 
             // Before handle upgrade completes, a new block comes in. Making the
             // method have to do more work.

@@ -73,18 +73,6 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// test: alice sends funds to bob onchain with primitive witness capability
-///
-/// see description of alice_sends_to_bob() for details
-#[tokio::test(flavor = "multi_thread")]
-pub async fn alice_sends_to_bob_with_primitive_witness_capability() -> anyhow::Result<()> {
-    alice_sends_to_bob(
-        &GenesisNode::cluster_id(None),
-        TxProvingCapability::PrimitiveWitness,
-    )
-    .await
-}
-
 /// test: alice sends funds to bob onchain with proof collection capability
 ///
 /// see description of alice_sends_to_bob() for details
@@ -92,7 +80,7 @@ pub async fn alice_sends_to_bob_with_primitive_witness_capability() -> anyhow::R
 pub async fn alice_sends_to_bob_with_proof_collection_capability() -> anyhow::Result<()> {
     alice_sends_to_bob(
         &GenesisNode::cluster_id(None),
-        TxProvingCapability::PrimitiveWitness,
+        TxProvingCapability::ProofCollection,
     )
     .await
 }
@@ -104,7 +92,7 @@ pub async fn alice_sends_to_bob_with_proof_collection_capability() -> anyhow::Re
 pub async fn alice_sends_to_bob_with_single_proof_capability() -> anyhow::Result<()> {
     alice_sends_to_bob(
         &GenesisNode::cluster_id(None),
-        TxProvingCapability::PrimitiveWitness,
+        TxProvingCapability::SingleProof,
     )
     .await
 }
@@ -219,6 +207,12 @@ pub async fn alice_sends_to_bob(
     // indicating the tx has arrived in his mempool.
     bob.wait_until_unconfirmed_balance(timeout_secs).await?;
 
+    // As there are no transaction proof upgraders on the network, we cannot go
+    // further unless transaction initiator can make single proof transactions.
+    if proving_capability != TxProvingCapability::SingleProof {
+        return Ok(());
+    }
+
     // alice waits until tx has been upgraded to single-proof in mempool
     // which is necessary before it can be included in a block.
     alice
@@ -272,9 +266,15 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
     let timeout_secs = 5;
 
     // alice starts a single node cluster
-    let [mut alice] =
-        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(None), 1, None, timeout_secs)
-            .await?;
+    let mut args = GenesisNode::default_args().await;
+    args.tx_proving_capability = Some(TxProvingCapability::SingleProof);
+    let [mut alice] = GenesisNode::start_connected_cluster(
+        &GenesisNode::cluster_id(None),
+        1,
+        Some(args),
+        timeout_secs,
+    )
+    .await?;
 
     // alice generates a random symmetric key outside her wallet.
     let other_address = SymmetricKey::from_seed(rand::random());
@@ -390,9 +390,15 @@ pub async fn alice_sends_transparent_transaction() -> anyhow::Result<()> {
     let timeout_secs = 5;
 
     // alice starts a single node cluster
-    let [mut alice] =
-        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(None), 1, None, timeout_secs)
-            .await?;
+    let mut args = GenesisNode::default_args().await;
+    args.tx_proving_capability = Some(TxProvingCapability::SingleProof);
+    let [mut alice] = GenesisNode::start_connected_cluster(
+        &GenesisNode::cluster_id(None),
+        1,
+        Some(args),
+        timeout_secs,
+    )
+    .await?;
 
     // alice generates a random symmetric key outside her wallet.
     let other_address = SymmetricKey::from_seed(rand::random());
@@ -542,8 +548,10 @@ pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
     let timeout_secs = 5;
 
     // alice and bob start 2 peer cluster (regtest)
+    let mut args = GenesisNode::default_args().await;
+    args.tx_proving_capability = Some(TxProvingCapability::SingleProof);
     let [mut alice, mut bob] =
-        GenesisNode::start_connected_cluster(&cluster_id, 2, None, timeout_secs).await?;
+        GenesisNode::start_connected_cluster(&cluster_id, 2, Some(args), timeout_secs).await?;
 
     // bob generates receiving address
     let bob_address = bob

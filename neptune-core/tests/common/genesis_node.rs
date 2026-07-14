@@ -104,9 +104,9 @@ impl GenesisNode {
             args.tcp_port = tcp_port;
         }
 
-        // we default proving capability to primitive-witness as lowest common
-        // denominator and because otherwise dev machines often miss this case.
-        args.tx_proving_capability = Some(TxProvingCapability::PrimitiveWitness);
+        // PrimitiveWitness backed transaction cannot be broadcast. So default
+        // to the lowest capability capable of issuing transactions.
+        args.tx_proving_capability = Some(TxProvingCapability::ProofCollection);
 
         // Prevent integration tests from overwriting any real data that might
         // be present on the host machine by setting a unique data directory.

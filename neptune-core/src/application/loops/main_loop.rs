@@ -1874,9 +1874,8 @@ impl MainLoopHandler {
             let vm_job_queue = vm_job_queue();
 
             let proving_capability = self.global_state_lock.cli().proving_capability();
-            let network = self.global_state_lock.cli().network;
             let upgrade_job =
-                UpgradeJob::from_primitive_witness(network, proving_capability, primitive_witness);
+                UpgradeJob::from_primitive_witness(proving_capability, primitive_witness);
 
             // handle_upgrade() broadcasts to peers on success.
             let global_state_lock_clone = self.global_state_lock.clone();
