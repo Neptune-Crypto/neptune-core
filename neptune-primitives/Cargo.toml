@@ -3,7 +3,7 @@ name = "neptune-primitives"
 description = "Foundational primitives shared across neptune-cash"
 authors = ["Triton Software"]
 
-version = "0.14.0"
+version = "0.14.2"
 edition = "2021"
 license = "Apache-2.0"
 

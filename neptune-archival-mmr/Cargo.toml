@@ -3,7 +3,7 @@ name = "neptune-archival-mmr"
 description = "Archival Merkle Mountain Range backed by neptune-database storage. Uses the TIP5 hash function."
 authors = ["Triton Software"]
 
-version = "0.14.0"
+version = "0.14.2"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -16,7 +16,7 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 test-helpers = []
 
 [dependencies]
-neptune-database = { version = "0.14.0", path = "../neptune-database" }
+neptune-database = { version = "0.14.2", path = "../neptune-database" }
 itertools = "0.14"
 tasm-lib = "7.0.0"
 

@@ -1,5 +1,23 @@
 Note: (!) indicates a breaking change.
 
+## [0.14.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.14.0..v0.14.2) - 2026-07-14
+
+### ✨ Features
+
+- *(wallet)* Export viewing keys for EC-hybrid and viewing addresses ([132546dc](https://github.com/Neptune-Crypto/neptune-core/commit/132546dc))
+- *(cli)* Print all key types ([c15f97e1](https://github.com/Neptune-Crypto/neptune-core/commit/c15f97e1))
+
+### 🐛 Bug Fixes
+
+- *(mine_loop)* Avoid race condition when sharing own block proposal ([9809aa74](https://github.com/Neptune-Crypto/neptune-core/commit/9809aa74))
+- *(difficulty_control)* Account for own-difficulty comparison in heuristic ([22af9fbf](https://github.com/Neptune-Crypto/neptune-core/commit/22af9fbf))
+- *(cli)* Repair bash completions and add `--shell` flag ([a4a94d32](https://github.com/Neptune-Crypto/neptune-core/commit/a4a94d32))
+
+### ♻️ Refactor
+
+- *(mine_loop)* Restart guesser every 20 seconds ([0f35312f](https://github.com/Neptune-Crypto/neptune-core/commit/0f35312f))
+- Split archival mutator set into its own crate ([72a5b46e](https://github.com/Neptune-Crypto/neptune-core/commit/72a5b46e))
+
 ## [0.14.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.12.0..v0.14.0) - 2026-07-09
 
 ### ✨ Features
