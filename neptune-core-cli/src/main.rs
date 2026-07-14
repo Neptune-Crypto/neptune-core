@@ -249,6 +249,13 @@ async fn main() -> Result<()> {
         }) => {
             return print_nth_receiving_address(*network, args.data_dir.clone(), *key_type, *index);
         }
+        Command::Wallet(WalletCommand::NthViewingKey {
+            network,
+            key_type,
+            index,
+        }) => {
+            return print_nth_viewing_key(*network, args.data_dir.clone(), *key_type, *index);
+        }
         Command::Wallet(WalletCommand::PremineReceivingAddress { network }) => {
             return print_nth_receiving_address(
                 *network,
@@ -509,6 +516,7 @@ async fn main() -> Result<()> {
             | WalletCommand::ShamirCombine { .. }
             | WalletCommand::ShamirShare { .. }
             | WalletCommand::NthReceivingAddress { .. }
+            | WalletCommand::NthViewingKey { .. }
             | WalletCommand::PremineReceivingAddress { .. }
             | WalletCommand::IndexOf { .. },
         ) => {
@@ -1224,6 +1232,26 @@ fn print_nth_receiving_address(
     };
 
     println!("{address}");
+    Ok(())
+}
+
+/// Print the nth viewing key.
+///
+/// Read the wallet file directly; avoid going through the RPC interface of
+/// `neptune-core`. Report an error if the key type does not support viewing
+/// keys.
+fn print_nth_viewing_key(
+    network: Network,
+    data_dir: Option<PathBuf>,
+    key_type: KeyType,
+    index: usize,
+) -> Result<()> {
+    let wallet_entropy = get_wallet_entropy(network, data_dir)?;
+
+    let key = wallet_entropy.nth_spending_key(key_type, index as u64);
+    let viewing_key = key.to_viewing_key_bech32m(network)?;
+
+    println!("{viewing_key}");
     Ok(())
 }
 

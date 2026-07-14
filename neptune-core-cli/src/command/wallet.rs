@@ -52,6 +52,23 @@ pub(crate) enum WalletCommand {
         network: Network,
     },
 
+    /// Get the nth viewing key of the specified type
+    ///
+    /// A viewing key grants the ability to recognize incoming UTXOs without the
+    /// ability to spend them. Only some key types support viewing keys;
+    /// requesting one for an unsupported key type is an error. Currently only
+    /// the `ec_hybrid` and `viewing_address` key types are supported.
+    ///
+    /// Does not increment any counters or modify state in any way.
+    NthViewingKey {
+        index: usize,
+
+        key_type: KeyType,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
     /// Get a static generation receiving address, for premine recipients.
     ///
     /// This command is an alias for `nth-receiving-address 0`. It will be

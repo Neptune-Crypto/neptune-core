@@ -36,6 +36,8 @@ const ELLIPTIC_CURVE_HYBRID_AES_NONCE: [u8; 12] = [0u8; 12];
 
 pub const ECH_HRP_PREFIX: &str = "nech";
 
+pub const ECH_VIEWING_KEY_HRP_PREFIX: &str = "nechvk";
+
 fn receiver_id(ec_pubkey: &k256::PublicKey) -> BFieldElement {
     let pubkey_encoded = ec_pubkey.to_sec1_bytes().to_vec();
     let [e0, _, _, _, _] = Tip5::hash(&pubkey_encoded).values();
@@ -250,6 +252,117 @@ impl EcHybridViewingKey {
             receiver_digest: self.receiver_digest,
             lock_postimage: self.lock_postimage,
         }
+    }
+
+    /// The number of bytes in the raw (non-bech32m) serialization.
+    ///
+    /// 32 bytes for the elliptic curve secret key, 40 bytes for the receiver
+    /// digest, and 24 bytes for the three-element lock post-image.
+    const RAW_SERIALIZATION_LENGTH: usize = 32 + Digest::BYTES + 3 * BFieldElement::BYTES;
+
+    /// Manually serialize to exactly [`Self::RAW_SERIALIZATION_LENGTH`] bytes to
+    /// avoid bincode overhead, keeping the encoded viewing key as short as
+    /// possible.
+    fn to_raw_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(Self::RAW_SERIALIZATION_LENGTH);
+
+        // 1. Serialize the elliptic curve secret key (32 bytes).
+        bytes.extend_from_slice(self.ec_secret_key.to_bytes().as_slice());
+
+        // 2. Serialize the receiver digest (40 bytes).
+        let digest: [u8; Digest::BYTES] = self.receiver_digest.into();
+        bytes.extend_from_slice(&digest);
+
+        // 3. Serialize the 3 BFieldElements (24 bytes).
+        for element in &self.lock_postimage {
+            bytes.extend_from_slice(&element.value().to_le_bytes());
+        }
+
+        debug_assert_eq!(
+            bytes.len(),
+            Self::RAW_SERIALIZATION_LENGTH,
+            "Viewing key payload must be exactly {} bytes",
+            Self::RAW_SERIALIZATION_LENGTH
+        );
+        bytes
+    }
+
+    /// Manually deserialize from exactly [`Self::RAW_SERIALIZATION_LENGTH`]
+    /// bytes.
+    fn from_raw_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
+        if bytes.len() != Self::RAW_SERIALIZATION_LENGTH {
+            return Err("Invalid byte length for EcHybridViewingKey");
+        }
+
+        // 1. Parse the elliptic curve secret key (bytes 0..32).
+        let ec_secret_key = k256::SecretKey::from_slice(&bytes[0..32])
+            .map_err(|_| "Failed to parse elliptic curve secret key")?;
+
+        // 2. Parse the receiver digest (bytes 32..72).
+        let mut digest_bytes = [0u8; Digest::BYTES];
+        digest_bytes.copy_from_slice(&bytes[32..32 + Digest::BYTES]);
+        let receiver_digest = Digest::try_from(digest_bytes).map_err(|_| "Invalid digest")?;
+
+        // 3. Parse the 3 BFieldElements (bytes 72..96).
+        let mut lock_postimage_elements = Vec::with_capacity(3);
+        for i in 0..3 {
+            let start = 32 + Digest::BYTES + (i * BFieldElement::BYTES);
+            let mut le_bytes = [0u8; BFieldElement::BYTES];
+            le_bytes.copy_from_slice(&bytes[start..start + BFieldElement::BYTES]);
+
+            let elem = BFieldElement::try_from(le_bytes).map_err(|_| "Invalid B field element")?;
+            lock_postimage_elements.push(elem);
+        }
+        let lock_postimage: [BFieldElement; 3] = lock_postimage_elements
+            .try_into()
+            .expect("Guaranteed to be exactly 3 elements");
+
+        Ok(Self {
+            ec_secret_key,
+            receiver_digest,
+            lock_postimage,
+        })
+    }
+
+    pub(super) fn get_hrp(network: Network) -> String {
+        let mut hrp = ECH_VIEWING_KEY_HRP_PREFIX.to_string();
+
+        let network_byte = network_hrp_char(network);
+        hrp.push(network_byte);
+        hrp
+    }
+
+    pub fn to_bech32m(&self, network: Network) -> String {
+        let hrp = Self::get_hrp(network);
+
+        let payload = self.to_raw_bytes();
+
+        let variant = Variant::Bech32m;
+        bech32::encode(&hrp, payload.to_base32(), variant)
+            .expect("Could not encode viewing key as bech32m")
+    }
+
+    pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
+        let (hrp, data, variant) = bech32::decode(encoded)?;
+
+        ensure!(
+            variant == Variant::Bech32m,
+            "Can only decode bech32m viewing keys.",
+        );
+
+        // human-readable part must be prefix plus one character for network
+        ensure!(
+            hrp.len() == ECH_VIEWING_KEY_HRP_PREFIX.len() + 1,
+            "Wrong size for human-readable part",
+        );
+        ensure!(
+            hrp == Self::get_hrp(network),
+            "Could not decode bech32m viewing key because of invalid prefix",
+        );
+
+        let payload = Vec::<u8>::from_base32(&data)?;
+        Self::from_raw_bytes(&payload)
+            .map_err(|e| anyhow!("Could not decode bech32m viewing key because of error: {e}"))
     }
 }
 
@@ -488,6 +601,7 @@ impl<'a> arbitrary::Arbitrary<'a> for EcHybridAddress {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
@@ -575,6 +689,87 @@ mod tests {
             address,
             EcHybridAddress::from_bech32m(&address.to_bech32m(network), network).unwrap()
         );
+    }
+
+    #[proptest(cases = 10)]
+    fn viewing_key_custom_serialization_consistency(#[strategy(arb())] key_seed: Digest) {
+        let viewing_key = EcHybridKey::from_seed(key_seed).viewing_key();
+
+        prop_assert_eq!(
+            viewing_key.clone(),
+            EcHybridViewingKey::from_raw_bytes(&viewing_key.to_raw_bytes()).unwrap()
+        );
+    }
+
+    #[proptest(cases = 10)]
+    fn viewing_key_bech32_consistency(#[strategy(arb())] key_seed: Digest) {
+        let network = Network::Main;
+        let viewing_key = EcHybridKey::from_seed(key_seed).viewing_key();
+
+        prop_assert_eq!(
+            viewing_key.clone(),
+            EcHybridViewingKey::from_bech32m(&viewing_key.to_bech32m(network), network).unwrap()
+        );
+    }
+
+    #[test]
+    fn viewing_key_bech32_representation_is_unchanged() {
+        assert_eq!(
+            "nechvkm1f5fs4yvr2nprwgmhmcrrtc2xl7m8hcu646gyxgh4frvh7m47w2nmy0s0nuzphls4tgy7cmqxpzh6ypyfhp6xx3s28gvpeksgfh8cgsy3mqy7aqvvawpyscsg6svs7sn5affn7v5zsvtp80yxgdqwz2u6ng235mgw",
+            WalletEntropy::devnet_wallet()
+                .nth_ec_hybrid_key(0)
+                .viewing_key()
+                .to_bech32m(Network::Main));
+    }
+
+    #[test]
+    fn no_crash_in_viewing_key_bech32_decoding() {
+        const SHORT_PREFIX: &str = "n";
+        let network = Network::Main;
+
+        // Encodings with valid checksum
+        let short_prefix =
+            bech32::encode(SHORT_PREFIX, vec![].to_base32(), Variant::Bech32m).unwrap();
+        let long_prefix =
+            bech32::encode("nolganolga", vec![].to_base32(), Variant::Bech32m).unwrap();
+
+        for str in [short_prefix, long_prefix] {
+            assert!(
+                EcHybridViewingKey::from_bech32m(&str, network).is_err(),
+                "Invalid bech32 encoding must lead to error: {str}"
+            );
+        }
+
+        // Not valid checksums.
+        for i in 0..10 {
+            let as_ = "a".repeat(i);
+            assert!(
+                EcHybridViewingKey::from_bech32m(&as_, network).is_err(),
+                "Invalid bech32 encoding must lead to error 1"
+            );
+            assert!(
+                EcHybridViewingKey::from_bech32m(
+                    &format!("{ECH_VIEWING_KEY_HRP_PREFIX}1{as_}"),
+                    network
+                )
+                .is_err(),
+                "Invalid bech32 encoding must lead to error 2"
+            );
+        }
+    }
+
+    /// An address bech32m string must not decode as a viewing key, and vice
+    /// versa, even though their prefixes share the `nech` stem.
+    #[proptest(cases = 10)]
+    fn viewing_key_and_address_encodings_do_not_collide(#[strategy(arb())] key_seed: Digest) {
+        let network = Network::Main;
+        let key = EcHybridKey::from_seed(key_seed);
+
+        let address_encoded = key.to_address().to_bech32m(network);
+        let viewing_key_encoded = key.viewing_key().to_bech32m(network);
+
+        prop_assert!(EcHybridViewingKey::from_bech32m(&address_encoded, network).is_err());
+        prop_assert!(EcHybridAddress::from_bech32m(&viewing_key_encoded, network).is_err());
     }
 
     #[test]

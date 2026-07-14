@@ -202,6 +202,25 @@ impl SpendingKey {
         }
     }
 
+    /// Export the viewing key that corresponds to this spending key, encoded as
+    /// bech32m.
+    ///
+    /// A viewing key grants the ability to recognize incoming UTXOs without the
+    /// ability to spend them. Only some key types support viewing keys; for the
+    /// rest this returns an error. Currently only the EC hybrid and viewing
+    /// address key types are supported.
+    pub fn to_viewing_key_bech32m(&self, network: Network) -> Result<String> {
+        match self {
+            Self::EcHybrid(k) => Ok(k.viewing_key().to_bech32m(network)),
+            // For a viewing address, the address *is* the viewing key.
+            Self::ViewingAddressKey(k) => Ok(k.to_address().to_bech32m(network)),
+            Self::Generation(_) | Self::Symmetric(_) => bail!(
+                "Key type {} does not support viewing keys.",
+                KeyType::from(self)
+            ),
+        }
+    }
+
     /// Return the lock script and its witness
     pub fn lock_script_and_witness(&self) -> LockScriptAndWitness {
         match self {
@@ -398,5 +417,31 @@ mod tests {
             println!("as_str: {as_str}");
             assert_eq!(v, KeyType::from_str(&as_str).unwrap());
         }
+    }
+
+    #[test]
+    fn viewing_key_export_supported_only_for_ec_hybrid_and_viewing_address() {
+        let network = Network::Main;
+        let seed = Digest::default();
+
+        // EC hybrid and viewing address support viewing keys and export as
+        // bech32m with the expected human-readable prefixes.
+        let ec_hybrid_vk = SpendingKey::from_seed(seed, KeyType::EcHybrid)
+            .to_viewing_key_bech32m(network)
+            .unwrap();
+        assert!(ec_hybrid_vk.starts_with(elliptic_curve_hybrid::ECH_VIEWING_KEY_HRP_PREFIX));
+
+        let viewing_address_vk = SpendingKey::from_seed(seed, KeyType::ViewingAddress)
+            .to_viewing_key_bech32m(network)
+            .unwrap();
+        assert!(viewing_address_vk.starts_with(viewing_address::VIEWING_ADDRESS_HRP_PREFIX));
+
+        // Generation and symmetric do not support viewing keys.
+        assert!(SpendingKey::from_seed(seed, KeyType::Generation)
+            .to_viewing_key_bech32m(network)
+            .is_err());
+        assert!(SpendingKey::from_seed(seed, KeyType::Symmetric)
+            .to_viewing_key_bech32m(network)
+            .is_err());
     }
 }
