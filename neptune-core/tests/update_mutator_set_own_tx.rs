@@ -172,24 +172,25 @@ async fn worker(mut alice: GenesisNode, new_block_source: SourceOfNewBlocks) {
     assert!(tx.is_confirmable_relative_to(&tip_msa));
 }
 
-/// Test: Alice creates a proof-collection backed transaction.
+/// Test: Alice creates a proof-collection and Single proof-backed transaction.
 ///
-/// this is a test that proof collection backed transactions are updated on the
-/// receival of new blocks.
+/// this is a test that transactions are updated on the receival of new blocks.
 ///
 /// Scenario:
 /// 1. Single unconnected node on regtest network
 /// 2. Alice mines 2 blocks to her own wallet
-/// 3. Alice inserts a primitive witness/proof collection/single proof backed tx
-///    into her mempool
+/// 3. Alice inserts a proof collection/single proof backed tx into her mempool
 /// 4. Alice receives a new block that does not include her transaction
 /// 5. Verify that Alice's proof-collection backed transaction is updated
 ///    after the processing of the new block.
+///
+/// `PrimitiveWitness` is deliberately not tested: it is not a real proving
+/// capability as a client cannot initiate a transaction with primitive-witness
+/// capability only.
 #[traced_test]
 #[tokio::test(flavor = "multi_thread")]
 pub async fn update_mutator_set_on_own_transaction_one_new_block_self_mined() {
     for tx_proving_capability in [
-        TxProvingCapability::PrimitiveWitness,
         TxProvingCapability::ProofCollection,
         TxProvingCapability::SingleProof,
     ] {
