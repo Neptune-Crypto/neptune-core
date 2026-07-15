@@ -15,6 +15,7 @@ use anyhow::Result;
 use itertools::Either;
 use itertools::Itertools;
 use libp2p::PeerId;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::Block;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
@@ -2180,8 +2181,20 @@ impl MainLoopHandler {
 
                 let mut global_state_lock = self.global_state_lock.clone();
                 tokio::task::spawn(async move {
+                    // Derive each known key's guesser data and unlocking preimage
+                    // while holding only a read lock, so the write lock below
+                    // covers just the database rescan.
+                    let known_guessers: HashMap<GuesserReceiverData, Digest> = global_state_lock
+                        .lock_guard()
+                        .await
+                        .wallet_state
+                        .get_all_known_spending_keys()
+                        .map(|key| (key.guesser_receiver_data(), key.privacy_preimage()))
+                        .collect();
                     let mut state = global_state_lock.lock_guard_mut().await;
-                    let _ = state.rescan_guesser_rewards(first, last).await;
+                    let _ = state
+                        .rescan_guesser_rewards(first, last, &known_guessers)
+                        .await;
 
                     // Scan for expenditures to ensure wallet doesn't
                     // erroneously count some new UTXOs as unspent.

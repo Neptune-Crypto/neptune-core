@@ -7,6 +7,7 @@ use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::KeyType;
 use neptune_wallet::utxo_notification::UtxoNotificationMedium;
+use strum::IntoEnumIterator;
 
 fn main() {
     divan::main();
@@ -133,6 +134,48 @@ mod wallet_state {
     #[divan::bench(sample_count = 10)]
     fn set_new_tip_1000_4(bencher: Bencher) {
         set_new_tip::<1000, 4>(bencher);
+    }
+
+    /// Like [`set_new_tip`], but first fills the wallet with many keys of every
+    /// type. This exercises the per-key scanning in
+    /// `update_wallet_state_with_new_block` (the guesser-fee and announced-UTXO
+    /// scans), guarding against O(num_keys) regressions there — e.g. deriving
+    ///  an address per key per block.
+    fn set_new_tip_many_keys<
+        const NUM_OUTPUTS_PER_TX: usize,
+        const NUM_BLOCKS: usize,
+        const NUM_KEYS_PER_TYPE: u64,
+    >(
+        bencher: Bencher,
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut global_state, _) = rt.block_on(setup::<NUM_OUTPUTS_PER_TX, NUM_BLOCKS>());
+        let mut global_state = rt.block_on(global_state.lock_guard_mut());
+
+        // Populate the wallet with NUM_KEYS_PER_TYPE keys of every type.
+        rt.block_on(async {
+            for key_type in KeyType::iter() {
+                global_state
+                    .wallet_state
+                    .bump_derivation_index(key_type, NUM_KEYS_PER_TYPE - 1)
+                    .await;
+            }
+        });
+
+        let next_block = rt.block_on(next_block(&mut global_state, NUM_OUTPUTS_PER_TX));
+
+        bencher.bench_local(|| {
+            rt.block_on(global_state.set_new_tip(next_block.clone()))
+                .unwrap();
+        });
+    }
+
+    #[divan::bench(sample_count = 10)]
+    fn set_new_tip_100_2_1000keys(bencher: Bencher) {
+        // 1000 keys of each of the 4 types = 4000 keys. Sized so a reintroduced
+        // per-key address derivation (lattice keygen ~14us) in the block-update
+        // scans is a clear (~+30%) slowdown here, not lost in the fixed cost.
+        set_new_tip_many_keys::<100, 2, 1000>(bencher);
     }
 
     #[divan::bench(sample_count = 10)]

@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use anyhow::bail;
 use anyhow::Result;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::lock_script::LockScript;
 use neptune_consensus::transaction::lock_script::LockScriptAndWitness;
@@ -240,7 +243,26 @@ impl SpendingKey {
     }
 
     pub fn lock_script_hash(&self) -> Digest {
-        self.lock_script().hash()
+        match self {
+            SpendingKey::Generation(k) => k.lock_script_hash(),
+            SpendingKey::Symmetric(k) => k.lock_script_hash(),
+            SpendingKey::EcHybrid(k) => k.lock_script_hash(),
+            SpendingKey::ViewingAddressKey(k) => k.lock_script_hash(),
+        }
+    }
+
+    /// The [`GuesserReceiverData`] that locks a block's guesser-fee reward to
+    /// this key.
+    ///
+    /// Equivalent to `GuesserReceiverData::from(self.to_address())`, but derived
+    /// straight from the key's hash-based lock and receiver preimage — avoiding
+    /// the expensive lattice-KEM key derivation performed by
+    /// [`Self::to_address`], for generation keys.
+    pub fn guesser_receiver_data(&self) -> GuesserReceiverData {
+        GuesserReceiverData {
+            receiver_digest: self.privacy_preimage().hash(),
+            lock_script_hash: self.lock_script_hash(),
+        }
     }
 
     /// Return the privacy preimage if this spending key has a corresponding
@@ -350,6 +372,74 @@ impl SpendingKey {
             }).collect()
     }
 
+    /// Scan a transaction's announcements for UTXOs decryptable by any of the
+    /// given keys.
+    ///
+    /// Equivalent to calling [`Self::scan_for_announced_utxos`] for each key and
+    /// concatenating the results, but runs in `O(keys + announcements)` rather
+    /// than `O(keys × announcements)`: an announcement names exactly one key via
+    /// its receiver identifier, so the keys are indexed by that identifier and
+    /// each announcement is matched with a single lookup.
+    ///
+    /// Does not verify that the announced UTXOs are actually outputs of the
+    /// transaction; that is the caller's responsibility.
+    pub fn scan_announcements_for_keys(
+        announcements: &[Announcement],
+        keys: impl IntoIterator<Item = SpendingKey>,
+    ) -> Vec<IncomingUtxo> {
+        // Index the keys by receiver identifier. A single identifier mapping to
+        // more than one key is astronomically unlikely but handled for
+        // correctness.
+        let mut keys_by_receiver_id: HashMap<BFieldElement, Vec<SpendingKey>> = HashMap::new();
+        for key in keys {
+            keys_by_receiver_id
+                .entry(key.receiver_identifier())
+                .or_default()
+                .push(key);
+        }
+
+        let mut incoming_utxos = vec![];
+        for announcement in announcements {
+            let Ok(receiver_identifier) =
+                common::receiver_identifier_from_announcement(announcement)
+            else {
+                continue;
+            };
+            let Some(candidate_keys) = keys_by_receiver_id.get(&receiver_identifier) else {
+                continue;
+            };
+            for key in candidate_keys {
+                if let Some(incoming_utxo) = key.incoming_utxo_from_announcement(announcement) {
+                    incoming_utxos.push(incoming_utxo);
+                    // An announcement encrypts a UTXO to a single key.
+                    break;
+                }
+            }
+        }
+
+        incoming_utxos
+    }
+
+    /// Decrypt a single announcement with this key, if it is of this key's type
+    /// and decryptable.
+    ///
+    /// The caller is responsible for having matched the announcement's receiver
+    /// identifier to this key (see [`Self::scan_announcements_for_keys`]); this
+    /// method only checks the key-type flag and attempts decryption.
+    fn incoming_utxo_from_announcement(&self, announcement: &Announcement) -> Option<IncomingUtxo> {
+        if !self.matches_announcement_key_type(announcement) {
+            return None;
+        }
+        let ciphertext = self.ok_warn(common::ciphertext_from_announcement(announcement))?;
+        let (utxo, sender_randomness) = self.ok_warn(self.decrypt(&ciphertext))?;
+        Some(IncomingUtxo {
+            utxo,
+            sender_randomness,
+            receiver_preimage: self.privacy_preimage(),
+            is_guesser_fee: false,
+        })
+    }
+
     /// converts a result into an Option and logs a warning on any error
     fn ok_warn<T>(&self, result: Result<T>) -> Option<T> {
         match result {
@@ -391,6 +481,43 @@ mod tests {
     }
 
     #[test]
+    fn cached_lock_script_hash_matches_freshly_built() {
+        for seed in [Digest::default(), Digest::default().hash()] {
+            for key_type in KeyType::iter() {
+                let key = SpendingKey::from_seed(seed, key_type);
+                assert_eq!(
+                    key.lock_script().hash(),
+                    key.lock_script_hash(),
+                    "cached lock_script_hash must match freshly built hash for {key_type}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn key_serialization_is_seed_only() {
+        // Guards wallet-database compatibility: the cached fields are derived
+        // from the seed and must never appear in the serialized form.
+        // Each key must serialize to exactly its seed, so on-disk
+        // representations are unchanged by the caching.
+        for seed in [Digest::default(), Digest::default().hash()] {
+            let seed_bytes = bincode::serialize(&seed).unwrap();
+            for key_type in KeyType::iter() {
+                let key_bytes = match SpendingKey::from_seed(seed, key_type) {
+                    SpendingKey::Generation(k) => bincode::serialize(&k).unwrap(),
+                    SpendingKey::Symmetric(k) => bincode::serialize(&k).unwrap(),
+                    SpendingKey::EcHybrid(k) => bincode::serialize(&k).unwrap(),
+                    SpendingKey::ViewingAddressKey(k) => bincode::serialize(&k).unwrap(),
+                };
+                assert_eq!(
+                    seed_bytes, key_bytes,
+                    "{key_type} key must serialize to exactly its seed"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn keytype_to_string_is_as_defined() {
         assert_eq!(KeyType::Generation.to_string(), "generation");
         assert_eq!(KeyType::Symmetric.to_string(), "symmetric");
@@ -416,6 +543,20 @@ mod tests {
             let as_str = v.to_string();
             println!("as_str: {as_str}");
             assert_eq!(v, KeyType::from_str(&as_str).unwrap());
+        }
+    }
+
+    #[test]
+    fn guesser_receiver_data_matches_address_derivation() {
+        for seed in [Digest::default(), Digest::default().hash()] {
+            for key_type in KeyType::iter() {
+                let key = SpendingKey::from_seed(seed, key_type);
+                assert_eq!(
+                    GuesserReceiverData::from(key.to_address()),
+                    key.guesser_receiver_data(),
+                    "guesser_receiver_data mismatch for {key_type:?}",
+                );
+            }
         }
     }
 

@@ -94,6 +94,8 @@ pub struct EcHybridKey {
     receiver_preimage: Digest,
 
     unlock_key_preimage: Digest,
+
+    lock_script_hash: Digest,
 }
 
 impl EcHybridKey {
@@ -125,14 +127,23 @@ impl EcHybridKey {
         let ec_public_key = ec_secret_key.public_key();
         let receiver_identifier = receiver_id(&ec_public_key);
 
-        Self {
+        let mut key = Self {
             seed,
             receiver_identifier,
             ec_secret_key,
             ec_public_key,
             receiver_preimage,
             unlock_key_preimage,
-        }
+            lock_script_hash: Digest::default(),
+        };
+        key.lock_script_hash = key.lock_script_and_witness().program.hash();
+        key
+    }
+
+    /// The hash of this key's lock script. Cached; see the `lock_script_hash`
+    /// field.
+    pub fn lock_script_hash(&self) -> Digest {
+        self.lock_script_hash
     }
 
     pub fn viewing_key(&self) -> EcHybridViewingKey {

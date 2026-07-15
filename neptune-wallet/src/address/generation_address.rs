@@ -66,6 +66,12 @@ pub struct GenerationSpendingKey {
 
     #[serde(skip)]
     unlock_key_preimage: Digest,
+
+    /// Cached hash of the lock script. Derived from `unlock_key_preimage`;
+    /// cached because building and hashing the lock-script program is
+    /// expensive.
+    #[serde(skip)]
+    lock_script_hash: Digest,
 }
 
 // manually impl Deserialize so we can derive all other fields from the seed.
@@ -169,6 +175,12 @@ impl GenerationSpendingKey {
         LockScriptAndWitness::standard_hash_lock_from_preimage(self.unlock_key_preimage)
     }
 
+    /// The hash of this key's lock script. Cached; see the `lock_script_hash`
+    /// field.
+    pub fn lock_script_hash(&self) -> Digest {
+        self.lock_script_hash
+    }
+
     pub fn derive_from_seed(seed: Digest) -> Self {
         let privacy_preimage =
             Tip5::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
@@ -178,13 +190,15 @@ impl GenerationSpendingKey {
         let (sk, _pk) = lattice::kem::keygen(randomness);
         let receiver_identifier = common::derive_receiver_id(seed);
 
-        let spending_key = Self {
+        let mut spending_key = Self {
             receiver_identifier,
             decryption_key: sk,
             receiver_preimage: privacy_preimage,
             unlock_key_preimage: unlock_key,
             seed: seed.to_owned(),
+            lock_script_hash: Digest::default(),
         };
+        spending_key.lock_script_hash = spending_key.lock_script_and_witness().program.hash();
 
         // Sanity check that spending key's receiver address can be encoded to
         // bech32m without loss of information.

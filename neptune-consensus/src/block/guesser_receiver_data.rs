@@ -5,8 +5,19 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
+/// Public data in a block header, dictating where the guesser reward goes
 #[derive(
-    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    BFieldCodec,
+    TasmObject,
+    GetSize,
 )]
 #[cfg_attr(
     any(test, feature = "arbitrary-impls"),

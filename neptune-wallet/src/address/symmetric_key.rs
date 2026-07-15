@@ -85,9 +85,40 @@ const HRP_PREFIX: &str = "nsymk";
 /// The implementation can be easily changed later if needed as the type is
 /// opaque.
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
+#[serde(from = "SymmetricKeyDto", into = "SymmetricKeyDto")]
 pub struct SymmetricKey {
     seed: Digest,
+
+    // Cached hash of the lock script; building and hashing the lock-script
+    // program is expensive and done for every known key on every new block.
+    // Derived from the seed, so not serialized (see `SymmetricKeyDto`).
+    lock_script_hash: Digest,
+}
+
+/// Serialization helper for [`SymmetricKey`]: only the seed is stored, all
+/// other fields are re-derived on deserialization.
+#[derive(Serialize, Deserialize)]
+struct SymmetricKeyDto {
+    seed: Digest,
+}
+
+impl From<SymmetricKeyDto> for SymmetricKey {
+    fn from(dto: SymmetricKeyDto) -> Self {
+        Self::from_seed(dto.seed)
+    }
+}
+
+impl From<SymmetricKey> for SymmetricKeyDto {
+    fn from(key: SymmetricKey) -> Self {
+        Self { seed: key.seed }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl<'a> Arbitrary<'a> for SymmetricKey {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self::from_seed(Digest::arbitrary(u)?))
+    }
 }
 
 // future improvements: a strong argument can be made that this type should not
@@ -104,7 +135,18 @@ pub struct SymmetricKey {
 impl SymmetricKey {
     /// instantiate `SymmetricKey` from a random seed
     pub fn from_seed(seed: Digest) -> Self {
-        Self { seed }
+        let mut key = Self {
+            seed,
+            lock_script_hash: Digest::default(),
+        };
+        key.lock_script_hash = key.lock_script_and_witness().program.hash();
+        key
+    }
+
+    /// The hash of this key's lock script. Cached; see the `lock_script_hash`
+    /// field.
+    pub fn lock_script_hash(&self) -> Digest {
+        self.lock_script_hash
     }
 
     /// returns the secret key
