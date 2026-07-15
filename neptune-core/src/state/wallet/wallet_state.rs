@@ -875,7 +875,7 @@ impl WalletState {
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
         let guessing_key = self
             .get_all_known_spending_keys()
-            .find(|key| block.header().was_guessed_by(&key.to_address().into()));
+            .find(|key| block.header().was_guessed_by(&key.guesser_receiver_data()));
 
         let incoming_utxos = if let Some(key) = guessing_key {
             let sender_randomness = block.hash();

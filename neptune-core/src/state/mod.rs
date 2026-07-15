@@ -3615,7 +3615,7 @@ mod tests {
                 self.wallet_state.get_all_known_spending_keys().collect();
             let known_guessers: HashMap<GuesserReceiverData, Digest> = known_keys
                 .iter()
-                .map(|key| (key.to_address().into(), key.privacy_preimage()))
+                .map(|key| (key.guesser_receiver_data(), key.privacy_preimage()))
                 .collect();
             self.rescan_guesser_rewards(first, last, &known_guessers)
                 .await;
@@ -4670,7 +4670,7 @@ mod tests {
             let known_guessers: HashMap<GuesserReceiverData, Digest> = alice
                 .wallet_state
                 .get_all_known_spending_keys()
-                .map(|key| (key.to_address().into(), key.privacy_preimage()))
+                .map(|key| (key.guesser_receiver_data(), key.privacy_preimage()))
                 .collect();
             alice
                 .rescan_guesser_rewards(0u64.into(), 15u64.into(), &known_guessers)
@@ -4727,7 +4727,7 @@ mod tests {
                 let known_guessers: HashMap<GuesserReceiverData, Digest> = alice
                     .wallet_state
                     .get_all_known_spending_keys()
-                    .map(|key| (key.to_address().into(), key.privacy_preimage()))
+                    .map(|key| (key.guesser_receiver_data(), key.privacy_preimage()))
                     .collect();
                 alice
                     .rescan_guesser_rewards(0u64.into(), 15u64.into(), &known_guessers)

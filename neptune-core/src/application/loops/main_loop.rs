@@ -2189,7 +2189,7 @@ impl MainLoopHandler {
                         .await
                         .wallet_state
                         .get_all_known_spending_keys()
-                        .map(|key| (key.to_address().into(), key.privacy_preimage()))
+                        .map(|key| (key.guesser_receiver_data(), key.privacy_preimage()))
                         .collect();
                     let mut state = global_state_lock.lock_guard_mut().await;
                     let _ = state

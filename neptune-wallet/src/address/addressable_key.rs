@@ -1,5 +1,6 @@
 use anyhow::bail;
 use anyhow::Result;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::lock_script::LockScript;
 use neptune_consensus::transaction::lock_script::LockScriptAndWitness;
@@ -243,6 +244,20 @@ impl SpendingKey {
         self.lock_script().hash()
     }
 
+    /// The [`GuesserReceiverData`] that locks a block's guesser-fee reward to
+    /// this key.
+    ///
+    /// Equivalent to `GuesserReceiverData::from(self.to_address())`, but derived
+    /// straight from the key's hash-based lock and receiver preimage — avoiding
+    /// the expensive lattice-KEM key derivation performed by
+    /// [`Self::to_address`], for generation keys.
+    pub fn guesser_receiver_data(&self) -> GuesserReceiverData {
+        GuesserReceiverData {
+            receiver_digest: self.privacy_preimage().hash(),
+            lock_script_hash: self.lock_script_hash(),
+        }
+    }
+
     /// Return the privacy preimage if this spending key has a corresponding
     /// receiving address.
     ///
@@ -416,6 +431,20 @@ mod tests {
             let as_str = v.to_string();
             println!("as_str: {as_str}");
             assert_eq!(v, KeyType::from_str(&as_str).unwrap());
+        }
+    }
+
+    #[test]
+    fn guesser_receiver_data_matches_address_derivation() {
+        for seed in [Digest::default(), Digest::default().hash()] {
+            for key_type in KeyType::iter() {
+                let key = SpendingKey::from_seed(seed, key_type);
+                assert_eq!(
+                    GuesserReceiverData::from(key.to_address()),
+                    key.guesser_receiver_data(),
+                    "guesser_receiver_data mismatch for {key_type:?}",
+                );
+            }
         }
     }
 
