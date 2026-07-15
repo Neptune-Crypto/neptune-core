@@ -243,7 +243,12 @@ impl SpendingKey {
     }
 
     pub fn lock_script_hash(&self) -> Digest {
-        self.lock_script().hash()
+        match self {
+            SpendingKey::Generation(k) => k.lock_script_hash(),
+            SpendingKey::Symmetric(k) => k.lock_script_hash(),
+            SpendingKey::EcHybrid(k) => k.lock_script_hash(),
+            SpendingKey::ViewingAddressKey(k) => k.lock_script_hash(),
+        }
     }
 
     /// The [`GuesserReceiverData`] that locks a block's guesser-fee reward to
@@ -471,6 +476,43 @@ mod tests {
                 KeyType::ViewingAddress => {
                     viewing_address::ViewingAddressKey::from_seed(seed).into()
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn cached_lock_script_hash_matches_freshly_built() {
+        for seed in [Digest::default(), Digest::default().hash()] {
+            for key_type in KeyType::iter() {
+                let key = SpendingKey::from_seed(seed, key_type);
+                assert_eq!(
+                    key.lock_script().hash(),
+                    key.lock_script_hash(),
+                    "cached lock_script_hash must match freshly built hash for {key_type}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn key_serialization_is_seed_only() {
+        // Guards wallet-database compatibility: the cached fields are derived
+        // from the seed and must never appear in the serialized form.
+        // Each key must serialize to exactly its seed, so on-disk
+        // representations are unchanged by the caching.
+        for seed in [Digest::default(), Digest::default().hash()] {
+            let seed_bytes = bincode::serialize(&seed).unwrap();
+            for key_type in KeyType::iter() {
+                let key_bytes = match SpendingKey::from_seed(seed, key_type) {
+                    SpendingKey::Generation(k) => bincode::serialize(&k).unwrap(),
+                    SpendingKey::Symmetric(k) => bincode::serialize(&k).unwrap(),
+                    SpendingKey::EcHybrid(k) => bincode::serialize(&k).unwrap(),
+                    SpendingKey::ViewingAddressKey(k) => bincode::serialize(&k).unwrap(),
+                };
+                assert_eq!(
+                    seed_bytes, key_bytes,
+                    "{key_type} key must serialize to exactly its seed"
+                );
             }
         }
     }

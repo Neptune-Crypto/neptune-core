@@ -78,6 +78,10 @@ pub struct ViewingAddressKey {
     receiver_preimage: Digest,
 
     unlock_key_preimage: Digest,
+
+    // Cached hash of the lock script; building and hashing the lock-script
+    // program is expensive.
+    lock_script_hash: Digest,
 }
 
 impl ViewingAddressKey {
@@ -95,12 +99,21 @@ impl ViewingAddressKey {
         let lockscript_postimage = lock_postimage(unlock_key_preimage);
         let receiver_identifier = receiver_id(lockscript_postimage, receiver_preimage.hash());
 
-        Self {
+        let mut key = Self {
             seed,
             receiver_identifier,
             receiver_preimage,
             unlock_key_preimage,
-        }
+            lock_script_hash: Digest::default(),
+        };
+        key.lock_script_hash = key.lock_script_and_witness().program.hash();
+        key
+    }
+
+    /// The hash of this key's lock script. Cached; see the `lock_script_hash`
+    /// field.
+    pub fn lock_script_hash(&self) -> Digest {
+        self.lock_script_hash
     }
 
     pub fn to_address(&self) -> ViewingAddress {
