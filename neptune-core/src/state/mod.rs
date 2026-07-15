@@ -1091,7 +1091,12 @@ impl GlobalState {
     ///
     /// # Panics
     /// - If start block height is greater than end block height
-    pub(crate) async fn rescan_guesser_rewards(&mut self, first: BlockHeight, last: BlockHeight) {
+    pub(crate) async fn rescan_guesser_rewards(
+        &mut self,
+        first: BlockHeight,
+        last: BlockHeight,
+        known_guessers: &HashMap<GuesserReceiverData, Digest>,
+    ) {
         let first: u64 = first.into();
         let last: u64 = last.into();
         assert!(
@@ -1099,10 +1104,6 @@ impl GlobalState {
             "Must call function with a non-empty range. Got range: {first}..={last}."
         );
 
-        let own_guesser_key: SpendingKey =
-            self.wallet_state.wallet_entropy.guesser_fee_key().into();
-        let own_guesser_data: GuesserReceiverData = own_guesser_key.to_address().into();
-        let receiver_preimage = own_guesser_key.privacy_preimage();
         let num_mps_per_mutxo = self.cli().number_of_mps_per_utxo;
 
         let mut recovery_list = vec![];
@@ -1126,10 +1127,11 @@ impl GlobalState {
                 .await
                 .expect("Must have block header for canonical block");
 
-            if !block_header.was_guessed_by(&own_guesser_data) {
+            let Some(&receiver_preimage) = known_guessers.get(&block_header.guesser_receiver_data)
+            else {
                 trace!("block {block_height} not guessed by us.");
                 continue;
-            }
+            };
 
             // Check if the two guesser rewards have already been added to the
             // wallet.
@@ -3609,19 +3611,22 @@ mod tests {
 
             // All incoming UTXOs must be registered before handling the spending of
             // UTXOs, otherwise spends will not be registered.
-            self.rescan_guesser_rewards(first, last).await;
+            let known_keys: Vec<SpendingKey> =
+                self.wallet_state.get_all_known_spending_keys().collect();
+            let known_guessers: HashMap<GuesserReceiverData, Digest> = known_keys
+                .iter()
+                .map(|key| (key.to_address().into(), key.privacy_preimage()))
+                .collect();
+            self.rescan_guesser_rewards(first, last, &known_guessers)
+                .await;
 
-            let all_keys = self
-                .wallet_state
-                .get_all_known_spending_keys()
-                .collect_vec();
             match announcement_scan_mode {
                 AnnouncementScanMode::Range => {
-                    self.rescan_announced_incoming(all_keys, first, last)
+                    self.rescan_announced_incoming(known_keys, first, last)
                         .await?
                 }
                 AnnouncementScanMode::FlagIndex => {
-                    self.rescan_announced_incoming_from_flag_index(all_keys, first, last)
+                    self.rescan_announced_incoming_from_flag_index(known_keys, first, last)
                         .await?
                 }
             }
@@ -4474,6 +4479,8 @@ mod tests {
     }
 
     mod rescan_wallet {
+        use strum::IntoEnumIterator;
+
         use super::*;
         use crate::tests::shared::blocks::block_with_outputs;
         use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
@@ -4659,8 +4666,14 @@ mod tests {
                     .confirmed_available_balance(block1.header().height, balance_timestamp),
                 "Must have zero balance after clearing monitored UTXOs"
             );
+
+            let known_guessers: HashMap<GuesserReceiverData, Digest> = alice
+                .wallet_state
+                .get_all_known_spending_keys()
+                .map(|key| (key.to_address().into(), key.privacy_preimage()))
+                .collect();
             alice
-                .rescan_guesser_rewards(0u64.into(), 15u64.into())
+                .rescan_guesser_rewards(0u64.into(), 15u64.into(), &known_guessers)
                 .await;
             alice
                 .restore_monitored_utxos_from_archival_mutator_set()
@@ -4673,6 +4686,64 @@ mod tests {
                     .confirmed_available_balance(block1.header().height, balance_timestamp),
                 "Must have liquid balance of 64 after rescan of guesser rewards"
             );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn rescan_guesser_rewards_recovers_reward_locked_to_any_wallet_key() {
+            let network = Network::Main;
+            let cli_args = cli_args::Args {
+                network,
+                ..Default::default()
+            };
+            let mut alice =
+                mock_genesis_global_state(0, WalletEntropy::new_random(), cli_args.clone()).await;
+            let mut alice = alice.lock_guard_mut().await;
+
+            // Guess the block with one of the wallet's keys that is *not* the
+            // dedicated guesser-fee key, as happens with a custom mining address.
+            for key_type in KeyType::iter() {
+                let other_key = alice.wallet_state.next_unused_spending_key(key_type).await;
+
+                let guesser_fraction = 1f64;
+                let mut block1 =
+                    invalid_empty_block1_with_guesser_fraction(network, guesser_fraction).await;
+                block1.set_header_guesser_data(other_key.to_address().into());
+                alice.set_new_tip(block1.clone()).await.unwrap();
+
+                let balance_timestamp = alice.chain.tip().header().timestamp;
+                let expected_balance = NativeCurrencyAmount::coins(64);
+
+                alice.wallet_state.wallet_db.clear_mutxos().await;
+                assert_eq!(
+                    NativeCurrencyAmount::zero(),
+                    alice
+                        .get_wallet_status_for_tip()
+                        .await
+                        .confirmed_available_balance(block1.header().height, balance_timestamp),
+                    "Must have zero balance after clearing monitored UTXOs"
+                );
+
+                let known_guessers: HashMap<GuesserReceiverData, Digest> = alice
+                    .wallet_state
+                    .get_all_known_spending_keys()
+                    .map(|key| (key.to_address().into(), key.privacy_preimage()))
+                    .collect();
+                alice
+                    .rescan_guesser_rewards(0u64.into(), 15u64.into(), &known_guessers)
+                    .await;
+                alice
+                    .restore_monitored_utxos_from_archival_mutator_set()
+                    .await;
+                assert_eq!(
+                    expected_balance,
+                    alice
+                        .get_wallet_status_for_tip()
+                        .await
+                        .confirmed_available_balance(block1.header().height, balance_timestamp),
+                    "Rescan must recover a guesser reward locked to any wallet key"
+                );
+            }
         }
 
         #[traced_test]

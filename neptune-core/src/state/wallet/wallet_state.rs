@@ -861,18 +861,25 @@ impl WalletState {
 
     /// Scan the block for guesser fee UTXOs that this wallet can unlock.
     ///
-    /// Return an iterator over them, which is empty if the block was guessed by
-    /// some other wallet.
-    pub(crate) fn scan_for_guesser_fee_utxos<'a>(
+    /// A block's guesser reward is locked to the miner's chosen address. That is
+    /// the dedicated guesser-fee key by default, but it can be any address —
+    /// including any of this wallet's other keys — when a custom mining address
+    /// is configured. So all known spending keys are checked, not just the
+    /// guesser-fee key.
+    ///
+    /// Return an iterator over the unlockable UTXOs, which is empty if the
+    /// block was guessed by an address none of this wallet's keys can unlock.
+    fn scan_for_guesser_fee_utxos<'a>(
         &'a self,
         block: &Block,
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
-        let own_guesser_key = self.wallet_entropy.guesser_fee_key();
-        let was_guessed_by_us = block
-            .header()
-            .was_guessed_by(&own_guesser_key.to_address().into());
-        let incoming_utxos = if was_guessed_by_us {
+        let guessing_key = self
+            .get_all_known_spending_keys()
+            .find(|key| block.header().was_guessed_by(&key.to_address().into()));
+
+        let incoming_utxos = if let Some(key) = guessing_key {
             let sender_randomness = block.hash();
+            let receiver_preimage = key.privacy_preimage();
             block
                 .kernel
                 .guesser_fee_utxos()
@@ -881,7 +888,7 @@ impl WalletState {
                 .map(|utxo| IncomingUtxo {
                     utxo,
                     sender_randomness,
-                    receiver_preimage: own_guesser_key.receiver_preimage(),
+                    receiver_preimage,
                     is_guesser_fee: true,
                 })
                 .collect_vec()
@@ -3478,7 +3485,7 @@ pub(crate) mod tests {
             let network = Network::Main;
             let mut rng = rng();
             let cli_args = cli_args::Args::default_with_network(network);
-            let wallet_state =
+            let mut wallet_state =
                 mock_genesis_wallet_state(WalletEntropy::new_random(), &cli_args).await;
             let composer_key = wallet_state.wallet_entropy.nth_generation_spending_key(0);
             let genesis_block = Block::genesis(network);
@@ -3495,7 +3502,7 @@ pub(crate) mod tests {
                     .count()
             );
 
-            // our lucky guess -> guesser fees detected
+            // our lucky guess with the dedicated guesser-fee key -> detected
             let own = wallet_state.wallet_entropy.guesser_fee_key().to_address();
             incoming_block.set_header_guesser_data(own.into());
             assert_eq!(
@@ -3504,6 +3511,19 @@ pub(crate) mod tests {
                     .scan_for_guesser_fee_utxos(&incoming_block)
                     .count()
             );
+
+            // guessed with a *different* one of our keys (as happens with a
+            // custom mining address) -> still detected
+            for key_type in KeyType::iter() {
+                let other_key = wallet_state.next_unused_spending_key(key_type).await;
+                incoming_block.set_header_guesser_data(other_key.to_address().into());
+                assert_eq!(
+                    2,
+                    wallet_state
+                        .scan_for_guesser_fee_utxos(&incoming_block)
+                        .count()
+                );
+            }
         }
     }
 
