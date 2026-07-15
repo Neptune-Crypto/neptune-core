@@ -748,21 +748,26 @@ impl WalletState {
         &'a self,
         tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
-        // scan for announced utxos for every known key of every key type.
-        self.get_all_known_spending_keys()
-            .flat_map(|key| key.scan_for_announced_utxos(tx_kernel))
-            .filter(|au| {
-                let transaction_contains_addition_record =
-                    tx_kernel.outputs.contains(&au.addition_record());
-                if !transaction_contains_addition_record {
-                    warn!(
-                        "Transaction does not contain announced UTXO encrypted \
+        // Match every announcement against every known key in
+        // O(keys + announcements), rather than scanning all announcements once
+        // per key.
+        SpendingKey::scan_announcements_for_keys(
+            &tx_kernel.announcements,
+            self.get_all_known_spending_keys(),
+        )
+        .into_iter()
+        .filter(|au| {
+            let transaction_contains_addition_record =
+                tx_kernel.outputs.contains(&au.addition_record());
+            if !transaction_contains_addition_record {
+                warn!(
+                    "Transaction does not contain announced UTXO encrypted \
                         to own receiving address. Announced UTXO was: {:#?}",
-                        au.utxo
-                    );
-                }
-                transaction_contains_addition_record
-            })
+                    au.utxo
+                );
+            }
+            transaction_contains_addition_record
+        })
     }
 
     /// Scan the given transaction for announced UTXOs as recognized by *future*

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::bail;
 use anyhow::Result;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
@@ -363,6 +365,74 @@ impl SpendingKey {
                     is_guesser_fee: false,
                 }
             }).collect()
+    }
+
+    /// Scan a transaction's announcements for UTXOs decryptable by any of the
+    /// given keys.
+    ///
+    /// Equivalent to calling [`Self::scan_for_announced_utxos`] for each key and
+    /// concatenating the results, but runs in `O(keys + announcements)` rather
+    /// than `O(keys × announcements)`: an announcement names exactly one key via
+    /// its receiver identifier, so the keys are indexed by that identifier and
+    /// each announcement is matched with a single lookup.
+    ///
+    /// Does not verify that the announced UTXOs are actually outputs of the
+    /// transaction; that is the caller's responsibility.
+    pub fn scan_announcements_for_keys(
+        announcements: &[Announcement],
+        keys: impl IntoIterator<Item = SpendingKey>,
+    ) -> Vec<IncomingUtxo> {
+        // Index the keys by receiver identifier. A single identifier mapping to
+        // more than one key is astronomically unlikely but handled for
+        // correctness.
+        let mut keys_by_receiver_id: HashMap<BFieldElement, Vec<SpendingKey>> = HashMap::new();
+        for key in keys {
+            keys_by_receiver_id
+                .entry(key.receiver_identifier())
+                .or_default()
+                .push(key);
+        }
+
+        let mut incoming_utxos = vec![];
+        for announcement in announcements {
+            let Ok(receiver_identifier) =
+                common::receiver_identifier_from_announcement(announcement)
+            else {
+                continue;
+            };
+            let Some(candidate_keys) = keys_by_receiver_id.get(&receiver_identifier) else {
+                continue;
+            };
+            for key in candidate_keys {
+                if let Some(incoming_utxo) = key.incoming_utxo_from_announcement(announcement) {
+                    incoming_utxos.push(incoming_utxo);
+                    // An announcement encrypts a UTXO to a single key.
+                    break;
+                }
+            }
+        }
+
+        incoming_utxos
+    }
+
+    /// Decrypt a single announcement with this key, if it is of this key's type
+    /// and decryptable.
+    ///
+    /// The caller is responsible for having matched the announcement's receiver
+    /// identifier to this key (see [`Self::scan_announcements_for_keys`]); this
+    /// method only checks the key-type flag and attempts decryption.
+    fn incoming_utxo_from_announcement(&self, announcement: &Announcement) -> Option<IncomingUtxo> {
+        if !self.matches_announcement_key_type(announcement) {
+            return None;
+        }
+        let ciphertext = self.ok_warn(common::ciphertext_from_announcement(announcement))?;
+        let (utxo, sender_randomness) = self.ok_warn(self.decrypt(&ciphertext))?;
+        Some(IncomingUtxo {
+            utxo,
+            sender_randomness,
+            receiver_preimage: self.privacy_preimage(),
+            is_guesser_fee: false,
+        })
     }
 
     /// converts a result into an Option and logs a warning on any error
