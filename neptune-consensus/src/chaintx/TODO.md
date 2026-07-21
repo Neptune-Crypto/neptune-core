@@ -45,9 +45,11 @@ txs):
   type script trusts this digest blindly, so *a gap here is an inflation path.*
 
 ## Documentation
-- [ ] Revise `transaction.md` (`docs/src/consensus/transaction.md`) to
+- [x] Revise `transaction.md` (`docs/src/consensus/transaction.md`) to
       accurately reflect current transaction initiation pipeline and
-      entity-relation graph.
+      entity-relation graph. (Fixed stale witness field names, `merge_bit`
+      semantics, and duplicate/skipped section labels. Added ASCII diagram of
+      transformations.)
 - [ ] Extend `transaction.md` with an accurate description of the dual
       (introduced in this development streak) pipeline and graph.
 - [ ] Glossary: `thruput` = an `AdditionRecord` that is simultaneously (a) an
