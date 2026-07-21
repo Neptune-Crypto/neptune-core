@@ -40,6 +40,28 @@ A transaction is *valid* if (any of):
  - ***d)*** *(SingleProof -- Merge)* it has a single valid proof that the transaction originates from merging two valid transactions
  - ***e)*** *(SingleProof -- Update)* it has a single valid proof that another single valid proof exists but under an older timestamp or mutator set accumulator.
 
+These forms are not independent: each is produced from an earlier one, and once a transaction is backed by a `SingleProof` it stays a `SingleProof` under `Merge` and `Update`. The possible transitions are shown below.
+
+```text
+        PrimitiveWitness            (a)
+              │
+              │  prove each subclaim individually
+              ▼
+        ProofCollection             (b)
+              │
+              │  Raise              (c)  — prove all subclaims as one proof
+              ▼
+      ╔══┌──────────────────────┐──┐
+  (d) ║  │                      │  │ (e)
+      ╚═▶│      SingleProof     │◀─┘
+         │      (c / d / e)     │
+         └──────────────────────┘
+      Merge  (d): combine two SingleProofs into one
+      Update (e): re-target a newer mutator-set hash or timestamp
+```
+
+Only a `SingleProof`-backed transaction is mineable; `Raise`, `Merge`, and `Update` are the three ways to obtain or preserve one. Note that `Merge` and `Update` consume `SingleProof`s and produce a `SingleProof`, so they can be applied repeatedly.
+
 For the purpose of describing computations and claims, the following notation is used. The symbol `:` denotes the type of an object, whereas `::` denotes the type signature of a computation (interpreting the input and output streams as arguments and return values, respectively).
 
 ### A: Witness Validity
@@ -117,24 +139,23 @@ Diagram 1 shows how the explicit inputs and outputs of all the subprograms relat
 |:-------------------------------------------------------------------:|
 |                **Diagram 1:** Transaction validity.                 |
 
-All subprograms can be proven individually given access to the transaction's witness. The next table shows which fields of the `TransactionPrimitiveWitness` are (potentially) used in which subprogram.
+All subprograms can be proven individually given access to the transaction's witness. The next table shows which fields of the `PrimitiveWitness` are (potentially) used in which subprogram.
 
-| field                     | used by                                                                       |
-|---------------------------|-------------------------------------------------------------------------------|
-| `input_utxos`             | `RemovalRecordsIntegrity`, `CollectLockScripts`, `CollectTypeScripts`         |
-| `input_lock_scripts`      | `CollectLockScripts`, `LockScript`                                            |
-| `type_scripts`            | `CollectTypeScripts`, `TypeScript`                                            |
-| `lock_script_witnesses`   | `LockScript`                                                                  |
-| `input_membership_proofs` | `RemovalRecordsIntegrity`                                                     |
-| `output_utxos`            | `KernelToOutputs`, `CollectTypeScripts`                                       |
-| `mutator_set_accumulator` | `RemovalRecordsIntegrity`                                                     |
-| `kernel`                  | `RemovalRecordsIntegrity`, `KernelToOutputs`, `LockScript`(?) `TypeScript`(?) |
+| field                       | used by                                                                       |
+|-----------------------------|-------------------------------------------------------------------------------|
+| `input_utxos`               | `RemovalRecordsIntegrity`, `CollectLockScripts`, `CollectTypeScripts`         |
+| `input_membership_proofs`   | `RemovalRecordsIntegrity`                                                     |
+| `lock_scripts_and_witnesses`| `CollectLockScripts`, `LockScript`                                            |
+| `type_scripts_and_witnesses`| `CollectTypeScripts`, `TypeScript`                                            |
+| `output_utxos`              | `KernelToOutputs`, `CollectTypeScripts`                                       |
+| `mutator_set_accumulator`   | `RemovalRecordsIntegrity`                                                     |
+| `kernel`                    | `RemovalRecordsIntegrity`, `KernelToOutputs`, `LockScript`(?) `TypeScript`(?) |
 
 Note that none of the subprograms require that each removal record lists one SWBF index that does not yet live in the mutator set SWBF. This absence is required for the transaction to be confirmable, but not for it to be valid. If the transaction has an input whose index set is already entirely contained by the mutator set SWBF, then this transaction can never be confirmed. Even if there is a reorganization that results in the absence criterion being satisfied, the transaction commits to the mutator set hash and this commitment cannot be undone.
 
 ### C: Single Proof -- Raise
 
-Where (b) generates a separate proof for every individual subclaim, (c) generates one proof for the batch of claims. The set of claims established is identical; the main benefit comes from having only one execution of the Triton VM prover.
+Where (b) generates a separate proof for every individual subclaim, (c) generates one proof for the batch of claims. The set of claims established is identical; the main benefit comes from having only one execution of the Triton VM prover. In the code this corresponds to the `SingleProofWitness::Collection` variant. This branch additionally asserts that `kernel.merge_bit == false`: the `merge_bit` may only be set by the `Merge` branch (d), so raising a `ProofCollection` cannot forge a transaction that claims to have passed through a merge.
 
 ### D: SingleProof -- Merge
 
@@ -157,10 +178,11 @@ Two transactions can be merged into one. Among other things, this operation repl
    - set `kernel.fee` to `txa.fee + txb.fee`
    - set `kernel.timestamp` to `max(txa.timestamp, txb.timestamp)`
    - set `kernel.mutator_set_hash` to `txa.mutator_set_hash`
+   - set `kernel.merge_bit` to `true`
  - compute the mast hash of `kernel`
  - verify the computed hash against the given `transaction_kernel_mast_hash`.
 
-### F: SingleProof -- Update
+### E: SingleProof -- Update
 
 A transaction is valid if another transaction that is identical except for fixing an older mutator set hash or timestamp, was valid. Specifically, the program `TransactionDataUpdate :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` verifies the update of transaction data as follows:
  - divine `old_kernel : TransactionKernel`
@@ -168,7 +190,7 @@ A transaction is valid if another transaction that is identical except for fixin
  - create a new `TransactionKernel` object `new_kernel`
  - set all fields of `new_kernel` to the matching field of `old_kernel` except:
    - set `new_kernel.timestamp` such that `new_kernel.timestamp >= old_kernel.timestamp`
-   - set `new_kernel.mutator_set_hash =/= tx.mutator_set_hash` only if the following instructions execute gracefully without crashing
+   - `new_kernel.mutator_set_hash` may differ from `old_kernel.mutator_set_hash`, but only if the new mutator set is reachable from the old one by appending leaves to the AOCL (i.e. the update only confirms new UTXOs, it never removes or rewrites existing ones). This is enforced by requiring the following checks to all pass:
      - divine the mutator set AOCL MMR accumulator `new_kernel_aocl`
      - authenticate `new_kernel_aocl` against the mutator set MAST hash `new_kernel.mutator_set_hash` using a divined authentication path
      - divine the mutator set AOCL MMR accumultar `old_kernel_aocl`
@@ -180,9 +202,9 @@ A transaction is valid if another transaction that is identical except for fixin
      - for every index in the inactive part of the SWBF, verify that it lives in some chunk
      - for every chunk in the chunk dictionary, verify its authentication path (either from `divine_sibling` or memory -- to be decided)
 
-### F: Proof of Integral Mempool Operation
+### Wishlist: Proof of Integral Mempool Operation
 
-**Note:** this section is included as a wishlist item. Proofs of integral mempool operation are not presently supported.
+**Note:** this section is included as a wishlist item. Proofs of integral mempool operation are not presently supported. It is not one of the validity variants (a)–(e) above, and correspondingly there is no `SingleProofWitness::IntegralMempool` variant yet (see the commented-out placeholder in the enum).
 
 A transaction is valid if it was ever added to an integral mempool. The motivating use case for this feature is that mempool operators can delete transaction proofs as long as they store and routinely update one
 
