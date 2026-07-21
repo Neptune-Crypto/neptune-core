@@ -4,4 +4,5 @@
 //! (`LinkTx`) pipeline that runs parallel to the legacy `Transaction` pipeline.
 
 pub mod link_kernel;
+pub mod link_tx;
 pub mod link_witness;
