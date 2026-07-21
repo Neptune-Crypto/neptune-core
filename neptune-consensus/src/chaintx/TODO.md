@@ -72,9 +72,9 @@ txs):
     backed by nothing; this argument covers inputs that have no predecessor.)
 
 ## Data Structures
-- [ ] `LinkKernel { kernel: TransactionKernel, thruputs: Vec<AdditionRecord> }`
+- [x] `LinkKernel { kernel: TransactionKernel, thruputs: Vec<AdditionRecord> }`
       (compose — reuse kernel MAST/hashing, no field drift)
-- [ ] MAST encoding: thruputs as one extra leaf beside the existing kernel
+- [x] MAST encoding: thruputs as one extra leaf beside the existing kernel
       leaves
 - [ ] `LinkTx { kernel: LinkKernel, proof: LinkProof }`
 - [ ] `LinkWitness` — primitive-witness analog consumed by `Forge`
