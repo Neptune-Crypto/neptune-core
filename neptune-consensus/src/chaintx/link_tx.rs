@@ -32,6 +32,22 @@ impl LinkTxProof {
     }
 }
 
+#[cfg(test)]
+impl LinkTxProof {
+    /// Proptest strategy producing both variants: a witness-backed proof (via
+    /// [`LinkWitness::arbitrary_strategy`]) or a proof-backed one.
+    pub fn arbitrary_strategy() -> proptest::strategy::BoxedStrategy<Self> {
+        use proptest::prelude::Strategy;
+        use proptest_arbitrary_interop::arb;
+
+        proptest::prop_oneof![
+            LinkWitness::arbitrary_strategy().prop_map(LinkTxProof::Witness),
+            arb::<NeptuneProof>().prop_map(LinkTxProof::Proof),
+        ]
+        .boxed()
+    }
+}
+
 /// A chained transaction: a [`LinkKernel`] together with the [`LinkTxProof`]
 /// that backs it.
 ///
@@ -52,36 +68,25 @@ pub struct LinkTx {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+    #[cfg(test)]
+    use proptest::{prop_assert_eq, prop_assert_ne};
+    use test_strategy::proptest;
 
     use super::*;
 
-    #[test]
-    fn witness_and_proof_backed_construct_and_clone_eq() {
-        let witness_backed = LinkTx {
-            kernel: LinkKernel::empty(),
-            proof: LinkTxProof::Witness(LinkWitness::empty()),
-        };
-        let proof_backed = LinkTx {
-            kernel: LinkKernel::empty(),
-            proof: LinkTxProof::Proof(NeptuneProof::from(vec![BFieldElement::new(1); 5])),
-        };
-
-        assert!(witness_backed.proof.is_witness());
-        assert!(proof_backed.proof.is_proof());
-        assert_eq!(witness_backed, witness_backed.clone());
-        assert_eq!(proof_backed, proof_backed.clone());
-        assert_ne!(witness_backed.proof, proof_backed.proof);
+    /// Exactly one of the two variant predicates holds.
+    #[proptest]
+    fn proof_is_witness_xor_proof(
+        #[strategy(LinkTxProof::arbitrary_strategy())] proof: LinkTxProof,
+    ) {
+        prop_assert_ne!(proof.is_witness(), proof.is_proof());
     }
 
-    #[test]
-    fn link_tx_proof_bfield_codec_round_trip() {
-        for proof in [
-            LinkTxProof::Witness(LinkWitness::empty()),
-            LinkTxProof::Proof(NeptuneProof::from(vec![BFieldElement::new(42); 5])),
-        ] {
-            let decoded = *LinkTxProof::decode(&proof.encode()).unwrap();
-            assert_eq!(proof, decoded);
-        }
+    #[proptest]
+    fn link_tx_proof_bfield_codec_round_trip(
+        #[strategy(LinkTxProof::arbitrary_strategy())] proof: LinkTxProof,
+    ) {
+        let decoded = *LinkTxProof::decode(&proof.encode()).unwrap();
+        prop_assert_eq!(proof, decoded);
     }
 }
