@@ -76,7 +76,7 @@ txs):
       (compose — reuse kernel MAST/hashing, no field drift)
 - [x] MAST encoding: thruputs as one extra leaf beside the existing kernel
       leaves
-- [ ] `LinkTx { kernel: LinkKernel, proof: LinkProof }`
+- [x] `LinkTx { kernel: LinkKernel, proof: LinkProof }`
 - [ ] `LinkWitness` — primitive-witness analog consumed by `Forge`
 - [ ] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
       (mirror `SingleProofWitness`; note `Fix` is NOT here)
