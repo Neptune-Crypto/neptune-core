@@ -81,35 +81,81 @@ pub struct LinkWitness {
     pub kernel: LinkKernel,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "arbitrary-impls"))]
 impl LinkWitness {
-    /// An empty `LinkWitness`: no inputs, no thruputs, no outputs, wrapping an
-    /// empty [`LinkKernel`]. For use in tests.
-    pub fn empty() -> Self {
-        Self {
-            input_utxos: SaltedUtxos::empty(),
-            input_membership_proofs: vec![],
-            thruput_sender_randomnesses: vec![],
-            thruput_receiver_digests: vec![],
-            lock_scripts_and_witnesses: vec![],
-            type_scripts_and_witnesses: vec![],
-            output_utxos: SaltedUtxos::empty(),
-            output_sender_randomnesses: vec![],
-            output_receiver_digests: vec![],
-            mutator_set_accumulator: MutatorSetAccumulator::default(),
-            kernel: LinkKernel::empty(),
-        }
+    /// Proptest strategy for a structurally-varied `LinkWitness`.
+    ///
+    /// Built from a valid [`PrimitiveWitness`](crate::transaction::primitive_witness::PrimitiveWitness)
+    /// (whose confirmed inputs become this witness's confirmed inputs), plus a
+    /// handful of arbitrary thruputs appended to `input_utxos` and
+    /// `kernel.thruputs`. The thruput commitments are *not* consistent with a
+    /// real predecessor -- this generates well-formed values for encode/decode
+    /// and field-shape tests, not necessarily *valid* ones.
+    pub fn arbitrary_strategy() -> proptest::strategy::BoxedStrategy<Self> {
+        use neptune_mutator_set::addition_record::AdditionRecord;
+        use proptest::collection::vec;
+        use proptest::prelude::Strategy;
+        use proptest_arbitrary_interop::arb;
+
+        use crate::transaction::primitive_witness::PrimitiveWitness;
+        use crate::transaction::utxo::Utxo;
+
+        let thruputs = vec(
+            (
+                arb::<Utxo>(),
+                arb::<Digest>(),
+                arb::<Digest>(),
+                arb::<AdditionRecord>(),
+            ),
+            0..=3,
+        );
+        (
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1),
+            thruputs,
+        )
+            .prop_map(|(pw, thruputs)| {
+                let mut input_utxos = pw.input_utxos;
+                let mut sender_randomnesses = vec![];
+                let mut receiver_digests = vec![];
+                let mut addition_records = vec![];
+                for (utxo, sender_randomness, receiver_digest, addition_record) in thruputs {
+                    input_utxos.utxos.push(utxo);
+                    sender_randomnesses.push(sender_randomness);
+                    receiver_digests.push(receiver_digest);
+                    addition_records.push(addition_record);
+                }
+                Self {
+                    input_utxos,
+                    input_membership_proofs: pw.input_membership_proofs,
+                    thruput_sender_randomnesses: sender_randomnesses,
+                    thruput_receiver_digests: receiver_digests,
+                    lock_scripts_and_witnesses: pw.lock_scripts_and_witnesses,
+                    type_scripts_and_witnesses: pw.type_scripts_and_witnesses,
+                    output_utxos: pw.output_utxos,
+                    output_sender_randomnesses: pw.output_sender_randomnesses,
+                    output_receiver_digests: pw.output_receiver_digests,
+                    mutator_set_accumulator: pw.mutator_set_accumulator,
+                    kernel: LinkKernel {
+                        kernel: pw.kernel,
+                        thruputs: addition_records,
+                    },
+                }
+            })
+            .boxed()
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use test_strategy::proptest;
+
     use super::*;
 
-    #[test]
-    fn bfield_codec_round_trip() {
-        let witness = LinkWitness::empty();
+    #[proptest]
+    fn bfield_codec_round_trip(
+        #[strategy(LinkWitness::arbitrary_strategy())] witness: LinkWitness,
+    ) {
         let decoded = *LinkWitness::decode(&witness.encode()).unwrap();
         assert_eq!(witness, decoded);
     }
