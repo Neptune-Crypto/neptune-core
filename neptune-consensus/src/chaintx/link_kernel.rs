@@ -65,27 +65,35 @@ impl MastHash for LinkKernel {
 }
 
 #[cfg(test)]
+impl LinkKernel {
+    /// An empty `LinkKernel`: an all-default [`TransactionKernel`] with no
+    /// thruputs. For use in tests.
+    pub fn empty() -> Self {
+        use crate::transaction::transaction_kernel::TransactionKernelProxy;
+        Self {
+            kernel: TransactionKernelProxy {
+                inputs: vec![],
+                outputs: vec![],
+                announcements: vec![],
+                fee: Default::default(),
+                coinbase: None,
+                timestamp: Default::default(),
+                mutator_set_hash: Default::default(),
+                merge_bit: false,
+            }
+            .into_kernel(),
+            thruputs: vec![],
+        }
+    }
+}
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use tasm_lib::twenty_first::tip5::digest::Digest;
 
     use super::*;
     use crate::transaction::transaction_kernel::TransactionKernelField;
-    use crate::transaction::transaction_kernel::TransactionKernelProxy;
-
-    fn empty_kernel() -> TransactionKernel {
-        TransactionKernelProxy {
-            inputs: vec![],
-            outputs: vec![],
-            announcements: vec![],
-            fee: Default::default(),
-            coinbase: None,
-            timestamp: Default::default(),
-            mutator_set_hash: Digest::default(),
-            merge_bit: false,
-        }
-        .into_kernel()
-    }
 
     /// Helper: generate a deterministic thruput.
     fn thruput(i: u64) -> AdditionRecord {
@@ -119,7 +127,7 @@ mod tests {
     /// The wrapped kernel's leafs are reused verbatim and thruputs is appended.
     #[test]
     fn mast_sequences_reuse_kernel_leaves_and_append_thruputs() {
-        let kernel = empty_kernel();
+        let kernel = LinkKernel::empty().kernel;
         let link = LinkKernel {
             kernel: kernel.clone(),
             thruputs: vec![thruput(1), thruput(2)],
@@ -136,7 +144,7 @@ mod tests {
     /// Thruputs are bound into the MAST hash: changing them changes the hash.
     #[test]
     fn thruputs_affect_mast_hash() {
-        let kernel = empty_kernel();
+        let kernel = LinkKernel::empty().kernel;
         let none = LinkKernel {
             kernel: kernel.clone(),
             thruputs: vec![],
@@ -156,7 +164,7 @@ mod tests {
     #[test]
     fn bfield_codec_round_trip() {
         let link = LinkKernel {
-            kernel: empty_kernel(),
+            kernel: LinkKernel::empty().kernel,
             thruputs: vec![thruput(7), thruput(8), thruput(9)],
         };
         let encoded = link.encode();
