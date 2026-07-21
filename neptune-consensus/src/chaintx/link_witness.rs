@@ -82,13 +82,11 @@ pub struct LinkWitness {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bfield_codec_round_trip() {
-        let witness = LinkWitness {
+impl LinkWitness {
+    /// An empty `LinkWitness`: no inputs, no thruputs, no outputs, wrapping an
+    /// empty [`LinkKernel`]. For use in tests.
+    pub fn empty() -> Self {
+        Self {
             input_utxos: SaltedUtxos::empty(),
             input_membership_proofs: vec![],
             thruput_sender_randomnesses: vec![],
@@ -100,7 +98,18 @@ mod tests {
             output_receiver_digests: vec![],
             mutator_set_accumulator: MutatorSetAccumulator::default(),
             kernel: LinkKernel::empty(),
-        };
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bfield_codec_round_trip() {
+        let witness = LinkWitness::empty();
         let decoded = *LinkWitness::decode(&witness.encode()).unwrap();
         assert_eq!(witness, decoded);
     }
