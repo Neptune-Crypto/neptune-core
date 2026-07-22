@@ -508,6 +508,22 @@ pub enum WitnessValidationError {
     #[error("Primitive-witness backed transaction cannot have a set merge bit")]
     MergeBitSet,
 
+    #[error(
+        "input UTXO count ({input_utxos}) does not equal confirmed inputs \
+         ({confirmed}) plus thruputs ({thruputs})"
+    )]
+    CardinalityMismatch {
+        input_utxos: usize,
+        confirmed: usize,
+        thruputs: usize,
+    },
+
+    #[error("thruput at index {index} does not match the commitment of its UTXO")]
+    ThruputCommitmentMismatch { index: usize },
+
+    #[error("this witness's kernel cannot carry a coinbase")]
+    CoinbaseSet,
+
     // catch-all error, eg for anyhow errors
     #[error("transaction could not be created.  reason: {0}")]
     Failed(String),
