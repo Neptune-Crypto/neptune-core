@@ -78,8 +78,8 @@ txs):
       leaves
 - [x] `LinkTx { kernel: LinkKernel, proof: LinkProof }`
 - [x] `LinkWitness` — primitive-witness analog consumed by `Forge`
-      (with a *valid* arbitrary strategy obtained by lifting its
-      `PrimitiveWitness` analog)
+  - [x] an arbitrary strategy obtained by lifting its `PrimitiveWitness` analog
+  - [x] `validate` -- analogous to `PrimitiveWitness::validate`
 - [ ] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
       (mirror `SingleProofWitness`; note `Fix` is NOT here)
 - [ ] `SingleProofWitness::Fix(FixWitness)` — new variant on the *existing*
@@ -157,7 +157,68 @@ the worst case, space is wasted, until transactions are evicted.
       before relay
 - [ ] Punish peers for relaying invalid `LinkTx`s
 
+## Reference-validator tests (`LinkWitness::validate`)
+`LinkWitness::validate` is the proof-free, tier-1 predicate (analog of
+`PrimitiveWitness::validate`): it *runs* the lock/type-script sub-VMs directly
+rather than recursively verifying their proofs, so it is the cheap workhorse for
+negative tests. The tasm `Forge` (§Mirror Tests → onto `Forge`) re-establishes
+the same soundness properties by recursion later; these front-run them at a
+fraction of the cost, they do not replace them. Idiom: start from a valid
+witness (lift a `PrimitiveWitness`), then either poke one field, or poke the
+`pw` and lift it — the latter lets `from_primitive_witness` rebuild the type
+scripts so the kernel MAST stays consistent and the intended late-stage check
+fires instead of an early `InvalidTypeScript`.
+
+Positive:
+- [x] round-trip `bfield_codec` (`bfield_codec_round_trip`)
+- [x] lift preserves validity for any `PrimitiveWitness` at any thruput count
+      (`lift_preserves_validity`)
+- [x] all-thruputs (0 confirmed) validates — proves thruput value counts toward
+      the input balance (`all_thruputs_is_valid`)
+
+Negative — one per reachable branch (bracketed items pre-cover a §onto `Forge`
+or §New Tests entry at this tier):
+- [x] cardinality: extra input UTXO / short thruput-randomness vector
+      (`extra_input_utxo_fails_cardinality`,
+      `short_thruput_randomness_fails_cardinality`) [→ Cardinality]
+- [x] bad lock-script witness → `InvalidLockScript`
+      (`bad_lock_script_witness_fails`)
+- [x] bad mutator-set accumulator → `InvalidMembershipProof`
+      (`bad_mutator_set_accumulator_fails`) [→ bad ms acc]
+- [x] unbalanced output / fee-too-big → `InvalidTypeScript`
+      (`unbalanced_output_fails_type_script`, `fee_too_big_fails_type_script`)
+      [→ unbalanced; fee-too-big inflation]
+- [x] missing / too-many type-script witnesses
+      (`missing_type_script_witness_fails`,
+      `too_many_type_script_witnesses_fails`) [→ type scripts present]
+- [x] swapped confirmed removal records → `RemovalRecordsMismatch`
+      (`swapped_removal_records_fail`)
+- [x] tampered thruput addition record / randomness → `ThruputCommitmentMismatch`
+      (`tampered_thruput_addition_record_fails`,
+      `tampered_thruput_randomness_fails`) [→ two representations of thruputs agree]
+- [x] mutator-set-hash mismatch → `MutatorSetMismatch`
+      (`mutator_set_hash_mismatch_is_rejected`)
+- [x] merge bit set → `MergeBitSet` (`merge_bit_is_rejected`)
+- [x] coinbase in kernel → `CoinbaseSet` (`coinbase_kernel_is_rejected`)
+      [→ New Tests: `LinkKernel` carrying a coinbase rejected]
+
+Gap pinned (same gap as `PrimitiveWitness::validate`; enforced later by `Forge`):
+- [x] missing/extra lock script is *not* caught by `validate` — lock-script
+      coverage is `Forge`/`CollectLockScripts`'s job
+      (`missing_or_extra_lock_script_is_not_caught`)
+
+Deferred to `Forge` (sharper there than at the proof-free tier):
+- [ ] bad input MAST auth path / bad absolute index set (confirmed inputs) —
+      reachable here but only as `InvalidMembershipProof`
+- [ ] partition misclassification (confirmed ↔ thruput)
+- [ ] phantom thruput / phantom confirmed UTXO backed by no record — surfaces as
+      cardinality here; the exact inflation-path test belongs on `Forge`
+
 ## Mirror Tests
+Two tiers: the proof-free `LinkWitness::validate` (above) and the tasm programs
+(below). The `validate`-tier tests already cover several §onto `Forge` items;
+when `Forge` exists, mirror those rather than reinventing them.
+
 The soundness tests that sit on the legacy `ProofCollection`/`SingleProof`
 programs test meaningful soundness properties. Some of those properties should be
 tested on the new dual pipeline as well.
