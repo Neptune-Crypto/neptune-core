@@ -102,10 +102,12 @@ impl LinkWitness {
         pw: crate::transaction::primitive_witness::PrimitiveWitness,
         num_thruputs: usize,
     ) -> Self {
+        use itertools::Itertools;
         use neptune_mutator_set::commit;
         use tasm_lib::prelude::Tip5;
 
         use crate::transaction::transaction_kernel::TransactionKernelProxy;
+        use crate::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 
         let num_inputs = pw.input_membership_proofs.len();
         assert!(
@@ -131,6 +133,24 @@ impl LinkWitness {
         // Drop the reclassified inputs' removal records from the kernel.
         let mut proxy = TransactionKernelProxy::from(pw.kernel);
         proxy.inputs.truncate(num_confirmed);
+        let kernel = proxy.into_kernel();
+
+        // Type scripts see this (truncated) kernel, so their mast auth paths
+        // must be regenerated against it -- truncating the `inputs` leaf moved
+        // the kernel mast root. (Mirror of `update_with_new_ms_data`.)
+        let type_scripts_and_witnesses = pw
+            .type_scripts_and_witnesses
+            .iter()
+            .map(|tsaw| {
+                match_type_script_and_generate_witness(
+                    tsaw.program.hash(),
+                    kernel.clone(),
+                    pw.input_utxos.clone(),
+                    pw.output_utxos.clone(),
+                )
+                .expect("type script hash should be known")
+            })
+            .collect_vec();
 
         Self {
             input_utxos: pw.input_utxos, // unchanged: confirmed || thruput
@@ -138,15 +158,12 @@ impl LinkWitness {
             thruput_sender_randomnesses,
             thruput_receiver_digests,
             lock_scripts_and_witnesses: pw.lock_scripts_and_witnesses,
-            type_scripts_and_witnesses: pw.type_scripts_and_witnesses,
+            type_scripts_and_witnesses,
             output_utxos: pw.output_utxos,
             output_sender_randomnesses: pw.output_sender_randomnesses,
             output_receiver_digests: pw.output_receiver_digests,
             mutator_set_accumulator: pw.mutator_set_accumulator,
-            kernel: LinkKernel {
-                kernel: proxy.into_kernel(),
-                thruputs,
-            },
+            kernel: LinkKernel { kernel, thruputs },
         }
     }
 
