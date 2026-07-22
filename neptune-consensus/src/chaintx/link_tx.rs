@@ -16,7 +16,7 @@ use crate::transaction::validity::neptune_proof::NeptuneProof;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum LinkTxProof {
     /// The raw witness. Exposes secrets (spending keys); must not be shared.
-    Witness(LinkWitness),
+    Witness(Box<LinkWitness>),
     /// A link proof: the output of one of `Forge`/`Chain`/`Update`/`Cast`. Does
     /// not expose secrets and can be shared with peers.
     Proof(NeptuneProof),
@@ -41,7 +41,7 @@ impl LinkTxProof {
         use proptest_arbitrary_interop::arb;
 
         proptest::prop_oneof![
-            LinkWitness::arbitrary_strategy().prop_map(LinkTxProof::Witness),
+            LinkWitness::arbitrary_strategy().prop_map(|lw| LinkTxProof::Witness(Box::new(lw))),
             arb::<NeptuneProof>().prop_map(LinkTxProof::Proof),
         ]
         .boxed()
