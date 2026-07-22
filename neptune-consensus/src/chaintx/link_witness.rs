@@ -83,64 +83,86 @@ pub struct LinkWitness {
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 impl LinkWitness {
-    /// Proptest strategy for a structurally-varied `LinkWitness`.
+    /// Build a *valid* `LinkWitness` from a valid `PrimitiveWitness` by
+    /// reclassifying the last `num_thruputs` of its inputs from confirmed
+    /// inputs into thruputs.
     ///
-    /// Built from a valid [`PrimitiveWitness`](crate::transaction::primitive_witness::PrimitiveWitness)
-    /// (whose confirmed inputs become this witness's confirmed inputs), plus a
-    /// handful of arbitrary thruputs appended to `input_utxos` and
-    /// `kernel.thruputs`. The thruput commitments are *not* consistent with a
-    /// real predecessor -- this generates well-formed values for encode/decode
-    /// and field-shape tests, not necessarily *valid* ones.
+    /// A thruput is type-script-identical to a confirmed input (both live in
+    /// `input_utxos` and count toward the input balance); only the backing
+    /// record differs (an `AdditionRecord` in `kernel.thruputs` instead of a
+    /// `RemovalRecord` + membership proof). So a valid `PrimitiveWitness` with
+    /// `n + k` inputs *is* a valid `LinkWitness` with `n` confirmed inputs and
+    /// `k` thruputs, with no re-balancing: `input_utxos`, the type-script
+    /// witnesses, and the mutator set carry over unchanged. Each reclassified
+    /// input reuses its own membership-proof randomness, so its thruput
+    /// addition record is the canonical mutator-set commitment of that UTXO.
+    ///
+    /// Panics if `pw` has fewer than `num_thruputs` inputs.
+    pub fn from_primitive_witness(
+        pw: crate::transaction::primitive_witness::PrimitiveWitness,
+        num_thruputs: usize,
+    ) -> Self {
+        use neptune_mutator_set::commit;
+        use tasm_lib::prelude::Tip5;
+
+        use crate::transaction::transaction_kernel::TransactionKernelProxy;
+
+        let num_inputs = pw.input_membership_proofs.len();
+        assert!(
+            num_thruputs <= num_inputs,
+            "cannot reclassify {num_thruputs} thruputs from a witness with {num_inputs} inputs"
+        );
+        let num_confirmed = num_inputs - num_thruputs;
+
+        let mut thruput_sender_randomnesses = vec![];
+        let mut thruput_receiver_digests = vec![];
+        let mut thruputs = vec![];
+        for (utxo, mp) in pw.input_utxos.utxos[num_confirmed..]
+            .iter()
+            .zip(&pw.input_membership_proofs[num_confirmed..])
+        {
+            let sender_randomness = mp.sender_randomness;
+            let receiver_digest = mp.receiver_preimage.hash();
+            thruputs.push(commit(Tip5::hash(utxo), sender_randomness, receiver_digest));
+            thruput_sender_randomnesses.push(sender_randomness);
+            thruput_receiver_digests.push(receiver_digest);
+        }
+
+        // Drop the reclassified inputs' removal records from the kernel.
+        let mut proxy = TransactionKernelProxy::from(pw.kernel);
+        proxy.inputs.truncate(num_confirmed);
+
+        Self {
+            input_utxos: pw.input_utxos, // unchanged: confirmed || thruput
+            input_membership_proofs: pw.input_membership_proofs[..num_confirmed].to_vec(),
+            thruput_sender_randomnesses,
+            thruput_receiver_digests,
+            lock_scripts_and_witnesses: pw.lock_scripts_and_witnesses,
+            type_scripts_and_witnesses: pw.type_scripts_and_witnesses,
+            output_utxos: pw.output_utxos,
+            output_sender_randomnesses: pw.output_sender_randomnesses,
+            output_receiver_digests: pw.output_receiver_digests,
+            mutator_set_accumulator: pw.mutator_set_accumulator,
+            kernel: LinkKernel {
+                kernel: proxy.into_kernel(),
+                thruputs,
+            },
+        }
+    }
+
+    /// Proptest strategy for a structurally-varied, *valid* `LinkWitness`:
+    /// reclassify the tail of a valid `PrimitiveWitness`'s inputs as thruputs
+    /// (see [`from_primitive_witness`](Self::from_primitive_witness)).
     pub fn arbitrary_strategy() -> proptest::strategy::BoxedStrategy<Self> {
-        use neptune_mutator_set::addition_record::AdditionRecord;
-        use proptest::collection::vec;
         use proptest::prelude::Strategy;
-        use proptest_arbitrary_interop::arb;
 
         use crate::transaction::primitive_witness::PrimitiveWitness;
-        use crate::transaction::utxo::Utxo;
 
-        let thruputs = vec(
-            (
-                arb::<Utxo>(),
-                arb::<Digest>(),
-                arb::<Digest>(),
-                arb::<AdditionRecord>(),
-            ),
-            0..=3,
-        );
         (
-            PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1),
-            thruputs,
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(4), 2, 1),
+            0usize..=2,
         )
-            .prop_map(|(pw, thruputs)| {
-                let mut input_utxos = pw.input_utxos;
-                let mut sender_randomnesses = vec![];
-                let mut receiver_digests = vec![];
-                let mut addition_records = vec![];
-                for (utxo, sender_randomness, receiver_digest, addition_record) in thruputs {
-                    input_utxos.utxos.push(utxo);
-                    sender_randomnesses.push(sender_randomness);
-                    receiver_digests.push(receiver_digest);
-                    addition_records.push(addition_record);
-                }
-                Self {
-                    input_utxos,
-                    input_membership_proofs: pw.input_membership_proofs,
-                    thruput_sender_randomnesses: sender_randomnesses,
-                    thruput_receiver_digests: receiver_digests,
-                    lock_scripts_and_witnesses: pw.lock_scripts_and_witnesses,
-                    type_scripts_and_witnesses: pw.type_scripts_and_witnesses,
-                    output_utxos: pw.output_utxos,
-                    output_sender_randomnesses: pw.output_sender_randomnesses,
-                    output_receiver_digests: pw.output_receiver_digests,
-                    mutator_set_accumulator: pw.mutator_set_accumulator,
-                    kernel: LinkKernel {
-                        kernel: pw.kernel,
-                        thruputs: addition_records,
-                    },
-                }
-            })
+            .prop_map(|(pw, num_thruputs)| Self::from_primitive_witness(pw, num_thruputs))
             .boxed()
     }
 }

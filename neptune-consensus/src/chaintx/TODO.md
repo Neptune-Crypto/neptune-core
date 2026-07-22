@@ -77,7 +77,9 @@ txs):
 - [x] MAST encoding: thruputs as one extra leaf beside the existing kernel
       leaves
 - [x] `LinkTx { kernel: LinkKernel, proof: LinkProof }`
-- [ ] `LinkWitness` — primitive-witness analog consumed by `Forge`
+- [x] `LinkWitness` — primitive-witness analog consumed by `Forge`
+      (with a *valid* arbitrary strategy obtained by lifting its
+      `PrimitiveWitness` analog)
 - [ ] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
       (mirror `SingleProofWitness`; note `Fix` is NOT here)
 - [ ] `SingleProofWitness::Fix(FixWitness)` — new variant on the *existing*
@@ -165,6 +167,10 @@ tested on the new dual pipeline as well.
 - `CollectLockScripts` / `CollectTypeScripts` do NOT survive as separate
   programs; `Forge` absorbs them. Their *net behavior* must be tested on `Forge`
   (below).
+- Reuse strategy: build the base `LinkWitness` via
+  `LinkWitness::from_primitive_witness(pw, k)` off the same legacy
+  `PrimitiveWitness::arbitrary_*` strategy the mirrored test uses, then poke one
+  field (legacy negative-test idiom) — no per-test strategy duplication.
 
 ### onto `Forge`
 - [ ] bad mutator-set accumulator rejected
