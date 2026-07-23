@@ -11,9 +11,9 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 proc-macro = true
 
 [dependencies]
-convert_case = "0.9.0"
-quote = "1.0.40"
-syn = { version = "2.0.106", features = ["full"] }
+convert_case = "0.9"
+quote = "1"
+syn = { version = "3", features = ["full"] }
 
 [lints]
 workspace = true
