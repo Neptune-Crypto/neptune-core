@@ -8,7 +8,7 @@ use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
-use super::link_witness::LinkWitness;
+use super::link_primitive_witness::LinkPrimitiveWitness;
 
 /// Discriminant of [`LinkProofWitness::Forge`].
 ///
@@ -35,8 +35,8 @@ pub(crate) const DISCRIMINANT_FOR_FORGE: u64 = 0;
 /// underneath them.
 #[derive(Debug, Clone, BFieldCodec)]
 pub enum LinkProofWitness {
-    /// `LinkWitness -> LinkTx`: the entry point into the chain pipeline.
-    Forge(Box<LinkWitness>),
+    /// `LinkPrimitiveWitness -> LinkTx`: the entry point into the chain pipeline.
+    Forge(Box<LinkPrimitiveWitness>),
 }
 
 // Required for `decode_from_memory`; `derive(TasmObject)` does not handle enums.
@@ -77,7 +77,7 @@ impl TasmObject for LinkProofWitness {
 }
 
 impl LinkProofWitness {
-    pub fn from_forge(witness: LinkWitness) -> Self {
+    pub fn from_forge(witness: LinkPrimitiveWitness) -> Self {
         Self::Forge(Box::new(witness))
     }
 
@@ -107,7 +107,7 @@ mod tests {
     /// path the `LinkProof` program takes).
     #[proptest]
     fn bfield_codec_round_trip(
-        #[strategy(LinkWitness::arbitrary_strategy())] witness: LinkWitness,
+        #[strategy(LinkPrimitiveWitness::arbitrary_strategy())] witness: LinkPrimitiveWitness,
     ) {
         let original = LinkProofWitness::from_forge(witness);
         let LinkProofWitness::Forge(original) = &original;
@@ -131,7 +131,7 @@ mod tests {
     /// The `LinkProof` program branches on the leading discriminant, so pin it.
     #[proptest]
     fn forge_discriminant_is_pinned(
-        #[strategy(LinkWitness::arbitrary_strategy())] witness: LinkWitness,
+        #[strategy(LinkPrimitiveWitness::arbitrary_strategy())] witness: LinkPrimitiveWitness,
     ) {
         let encoding = LinkProofWitness::from_forge(witness).encode();
         prop_assert_eq!(encoding[0], BFieldElement::new(DISCRIMINANT_FOR_FORGE));

@@ -77,12 +77,12 @@ txs):
 - [x] MAST encoding: thruputs as one extra leaf beside the existing kernel
       leaves
 - [x] `LinkTx { kernel: LinkKernel, proof: LinkProof }`
-- [x] `LinkWitness` — primitive-witness analog consumed by `Forge`
+- [x] `LinkPrimitiveWitness` — primitive-witness analog consumed by `Forge`
   - [x] an arbitrary strategy obtained by lifting its `PrimitiveWitness` analog
   - [x] `validate` -- analogous to `PrimitiveWitness::validate`
 - [ ] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
       (mirror `SingleProofWitness`; note `Fix` is NOT here)
-  - [x] `Forge(Box<LinkWitness>)` variant, discriminant 0 pinned, hand-written
+  - [x] `Forge(Box<LinkPrimitiveWitness>)` variant, discriminant 0 pinned, hand-written
         `TasmObject` impl (derive rejects enums)
   - [ ] `Chain` (1), `Update` (2), `Cast` (3) — land with their witnesses
   - [ ] `SecretWitness` impl — blocked on the `LinkProof` program existing
@@ -91,7 +91,7 @@ txs):
 
 ## Tasm
 Four produce a `LinkProof`; `Fix` produces a `SingleProof`.
-- [ ] **Forge** `LinkWitness -> LinkTx`: inline `RemovalRecordsIntegrity`
+- [ ] **Forge** `LinkPrimitiveWitness -> LinkTx`: inline `RemovalRecordsIntegrity`
       (non-recursive) + recursively verify `collect_lock_scripts`,
       `collect_type_scripts`, and the lock/type-script proofs. Largest new
       program; RRI lives here.
@@ -161,8 +161,8 @@ the worst case, space is wasted, until transactions are evicted.
       before relay
 - [ ] Punish peers for relaying invalid `LinkTx`s
 
-## Reference-validator tests (`LinkWitness::validate`)
-`LinkWitness::validate` is the proof-free, tier-1 predicate (analog of
+## Reference-validator tests (`LinkPrimitiveWitness::validate`)
+`LinkPrimitiveWitness::validate` is the proof-free, tier-1 predicate (analog of
 `PrimitiveWitness::validate`): it *runs* the lock/type-script sub-VMs directly
 rather than recursively verifying their proofs, so it is the cheap workhorse for
 negative tests. The tasm `Forge` (§Mirror Tests → onto `Forge`) re-establishes
@@ -219,7 +219,7 @@ Deferred to `Forge` (sharper there than at the proof-free tier):
       cardinality here; the exact inflation-path test belongs on `Forge`
 
 ## Mirror Tests
-Two tiers: the proof-free `LinkWitness::validate` (above) and the tasm programs
+Two tiers: the proof-free `LinkPrimitiveWitness::validate` (above) and the tasm programs
 (below). The `validate`-tier tests already cover several §onto `Forge` items;
 when `Forge` exists, mirror those rather than reinventing them.
 
@@ -232,8 +232,8 @@ tested on the new dual pipeline as well.
 - `CollectLockScripts` / `CollectTypeScripts` do NOT survive as separate
   programs; `Forge` absorbs them. Their *net behavior* must be tested on `Forge`
   (below).
-- Reuse strategy: build the base `LinkWitness` via
-  `LinkWitness::from_primitive_witness(pw, k)` off the same legacy
+- Reuse strategy: build the base `LinkPrimitiveWitness` via
+  `LinkPrimitiveWitness::from_primitive_witness(pw, k)` off the same legacy
   `PrimitiveWitness::arbitrary_*` strategy the mirrored test uses, then poke one
   field (legacy negative-test idiom) — no per-test strategy duplication.
 
