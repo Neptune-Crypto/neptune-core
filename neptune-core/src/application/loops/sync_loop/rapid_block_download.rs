@@ -410,9 +410,9 @@ mod tests {
             block.set_header_height(BlockHeight::from(height));
             if let Err(e) = rapid_block_download.receive_block(&block).await {
                 panic!("Could not receive block {height}: {e}");
-            } else {
-                println!("received block {height} in good order.");
             }
+
+            println!("received block {height} in good order.");
         }
 
         // get ith

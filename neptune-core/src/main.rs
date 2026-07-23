@@ -56,9 +56,8 @@ pub fn main() -> Result<()> {
 
     if let Ok(exit_code) = run_result {
         process::exit(exit_code)
-    } else {
-        run_result.map(|_| ())
     }
+    run_result.map(|_| ())
 }
 
 /// Configure logger to use ISO-8601, of which rfc3339 is a subset. Install

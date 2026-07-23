@@ -65,14 +65,11 @@ impl AbsoluteIndexSet {
         let distances: [u32; NUM_TRIALS as usize] = absolute_indices
             .into_iter()
             .map(|x| x - minimum)
-            .map(|x| {
-                if x >= WINDOW_SIZE.into() {
-                    panic!(
-                        "indices must lie less than WINDOW_SIZE apart, but got a distance of {x}"
-                    );
-                } else {
-                    x
-                }
+            .inspect(|x| {
+                assert!(
+                    *x < WINDOW_SIZE.into(),
+                    "indices must lie less than WINDOW_SIZE apart, but got a distance of {x}"
+                );
             })
             .map(u32::try_from)
             .map(Result::<_, _>::unwrap)

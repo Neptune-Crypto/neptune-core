@@ -140,13 +140,12 @@ mod tests {
             // pub coinbase: Option<NativeCurrencyAmount>,
             if let Some(_static_length) = Option::<NativeCurrencyAmount>::static_length() {
                 unreachable!("coinbase should not have static length");
-            } else {
-                offset += 1;
-                let encoding = kernel.coinbase.encode();
-                let dynamic_length = encoding.len();
-                field_offsets_and_sizes.push((offset, dynamic_length));
-                offset += dynamic_length;
             }
+            offset += 1;
+            let encoding = kernel.coinbase.encode();
+            let dynamic_length = encoding.len();
+            field_offsets_and_sizes.push((offset, dynamic_length));
+            offset += dynamic_length;
 
             // pub fee: NativeCurrencyAmount,
             if let Some(static_length) = NativeCurrencyAmount::static_length() {
@@ -159,35 +158,32 @@ mod tests {
             // pub announcements: Vec<Announcement>,
             if let Some(_static_length) = Vec::<Announcement>::static_length() {
                 unreachable!("announcements should not have static length");
-            } else {
-                offset += 1;
-                let encoding = kernel.announcements.encode();
-                let dynamic_length = encoding.len();
-                field_offsets_and_sizes.push((offset, dynamic_length));
-                offset += dynamic_length;
             }
+            offset += 1;
+            let encoding = kernel.announcements.encode();
+            let dynamic_length = encoding.len();
+            field_offsets_and_sizes.push((offset, dynamic_length));
+            offset += dynamic_length;
 
             // pub outputs: Vec<AdditionRecord>,
             if let Some(_static_length) = Vec::<AdditionRecord>::static_length() {
                 unreachable!("outputs should not have static length");
-            } else {
-                offset += 1;
-                let encoding = kernel.outputs.encode();
-                let dynamic_length = encoding.len();
-                field_offsets_and_sizes.push((offset, dynamic_length));
-                offset += dynamic_length;
             }
+            offset += 1;
+            let encoding = kernel.outputs.encode();
+            let dynamic_length = encoding.len();
+            field_offsets_and_sizes.push((offset, dynamic_length));
+            offset += dynamic_length;
 
             // pub inputs: Vec<RemovalRecord>,
             if let Some(_static_length) = Vec::<RemovalRecord>::static_length() {
                 unreachable!("inputs should not have static length");
-            } else {
-                offset += 1;
-                let encoding = kernel.inputs.encode();
-                let dynamic_length = encoding.len();
-                field_offsets_and_sizes.push((offset, dynamic_length));
-                // offset += dynamic_length;
             }
+            offset += 1;
+            let encoding = kernel.inputs.encode();
+            let dynamic_length = encoding.len();
+            field_offsets_and_sizes.push((offset, dynamic_length));
+            // offset += dynamic_length;
 
             field_offsets_and_sizes.reverse();
             field_offsets_and_sizes.try_into().unwrap()

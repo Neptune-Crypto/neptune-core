@@ -1756,9 +1756,6 @@ pub trait RPC {
 
     /// Send coins to one or more recipients
     ///
-    /// note: sending is rate-limited to 2 sends per block until block
-    /// 25000 is reached.
-    ///
     /// `outputs` is a list of transaction outputs in any format supported by [OutputFormat].
     ///
     /// `change_policy` specifies how to handle change in the typical case that
@@ -1766,8 +1763,6 @@ pub trait RPC {
     ///
     /// `fee` represents the fee in native coins to pay the miner who mines
     /// the block that initially confirms the resulting transaction.
-    ///
-    /// a [Digest] of the resulting [Transaction](neptune_consensus::transaction::Transaction) is returned on success, else [None].
     ///
     /// A list of the encoded transaction notifications is also returned. The
     /// relevant notifications should be sent to the transaction receiver(s) in
